@@ -78,6 +78,8 @@ def add_include(path):
 add_include(os.path.join(component_dir, "include"))
 add_include(os.path.join(component_dir, "include", "linux"))
 add_include(os.path.join(component_dir, "include", "sys"))
+add_include(os.path.join(component_dir, "src"))
+add_include(os.path.join(component_dir, "src", "device"))
 add_include(os.path.join(component_dir, "private_include"))
 
 # ===============================================================
