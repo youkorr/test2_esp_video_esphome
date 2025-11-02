@@ -1,8 +1,8 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
 
-Ce composant wrappe le framework ESP-Video complet pour ESPHome,
-permettant l'utilisation de l'API V4L2-like sur ESP32-P4.
+Ce composant intègre le framework ESP-Video (V4L2-like) pour ESPHome
+et permet la gestion de caméras MIPI-CSI sur ESP32-P4.
 
 Repository: https://github.com/youkorr/test_esp_video_esphome
 Author: @youkorr
@@ -29,101 +29,97 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     """
     Configure la compilation d'ESP-Video dans ESPHome.
-    
-    Cette fonction:
-    1. Détecte automatiquement le chemin du composant (fonctionne depuis GitHub)
-    2. Configure tous les chemins d'include
-    3. Active les build flags nécessaires
-    4. Ajoute automatiquement le script de build PlatformIO
+
+    Cette fonction :
+    - détecte le chemin du composant (local ou GitHub)
+    - ajoute les includes nécessaires
+    - configure les build flags ESP-IDF
+    - enregistre le script de build PlatformIO
     """
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
-    # Vérifier que ESP-IDF est utilisé
+
+    # ========================================================================
+    # Vérification du framework
+    # ========================================================================
     if CORE.using_arduino:
         raise cv.Invalid(
             "esp_video nécessite 'framework: type: esp-idf' (pas Arduino)\n"
-            "Ajoutez dans votre YAML:\n"
+            "Ajoutez dans votre YAML :\n"
             "esp32:\n"
             "  framework:\n"
             "    type: esp-idf\n"
             "    version: 5.4.2"
         )
-    
+
     # ========================================================================
-    # AUTO-DÉTECTION DU CHEMIN (fonctionne depuis GitHub ou local)
+    # Détection automatique du chemin du composant
     # ========================================================================
-    
-    # Trouver où ce fichier __init__.py est situé
     component_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    # Calculer le chemin relatif depuis le répertoire du projet ESPHome
     try:
         rel_path = os.path.relpath(component_dir, CORE.config_dir)
     except ValueError:
-        # Sur Windows, si sur des lecteurs différents
         rel_path = component_dir
-    
-    # Log pour debug
-    cg.add(cg.RawExpression(f'// ESP-Video component at: {rel_path}'))
-    
+
+    cg.add(cg.RawExpression(f'// [ESP-Video] Component path: {rel_path}'))
+
     # ========================================================================
-    # CHEMINS D'INCLUDE
+    # Includes - headers publics et privés
     # ========================================================================
-    
-    # Headers publics ESP-Video
-    cg.add_build_flag(f"-I{rel_path}/include")
-    cg.add_build_flag(f"-I{rel_path}/include/linux")
-    cg.add_build_flag(f"-I{rel_path}/include/sys")
-    cg.add_build_flag(f"-I{rel_path}/src")
-    cg.add_build_flag(f"-I{rel_path}/src/device")
-    
-    # Headers privés
-    cg.add_build_flag(f"-I{rel_path}/private_include")
-    
+    include_dirs = [
+        "include",
+        "include/linux",
+        "include/sys",
+        "src",
+        "src/device",
+        "private_include",
+    ]
+    for subdir in include_dirs:
+        abs_path = os.path.join(component_dir, subdir)
+        cg.add_build_flag(f"-I{abs_path}")
+
+    # Ajout prioritaire de deps/include si présent
+    deps_include = os.path.join(component_dir, "deps", "include")
+    if os.path.exists(deps_include):
+        cg.add_build_flag(f"-I{deps_include}")
+        cg.add(cg.RawExpression(f'// [ESP-Video] deps/include detected'))
+
     # ========================================================================
-    # BUILD FLAGS - Configuration ESP-Video
+    # Flags de build ESP-Video
     # ========================================================================
-    
-    # Device CSI (MIPI-CSI camera interface)
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1")
-    
-    # Device ISP (Image Signal Processor)
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_ENABLE_ISP=1")
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1")
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1")
-    
-    # Utiliser le heap allocator (recommandé pour ESPHome)
-    cg.add_build_flag("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
-    
-    # Target ESP32-P4
-    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
-    
+    flags = [
+        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+        "-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1",
+        "-DCONFIG_IDF_TARGET_ESP32P4=1",
+    ]
+    for flag in flags:
+        cg.add_build_flag(flag)
+
     # ========================================================================
-    # BUILD SCRIPT - Compilation des sources .c
+    # Ajout du script de build PlatformIO
     # ========================================================================
-    
-    # Le script de build qui compile tous les fichiers .c d'ESP-Video
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
-    
     if not os.path.exists(build_script_path):
         raise cv.Invalid(
-            f"Le script de build ESP-Video est introuvable: {build_script_path}\n"
-            f"Assurez-vous que esp_video_build.py existe dans le composant esp_video."
+            f"[ESP-Video] Le script de build est introuvable : {build_script_path}\n"
+            f"Assurez-vous que 'esp_video_build.py' est présent dans le composant."
         )
-    
-    # Ajouter le script aux extra_scripts de PlatformIO
-    # ESPHome va automatiquement l'exécuter pendant le build
-    cg.add_platformio_option("extra_scripts", [f"post:{rel_path}/esp_video_build.py"])
-    
-    # Message de confirmation
-    cg.add(cg.RawExpression(f'// ESP-Video build script: {rel_path}/esp_video_build.py'))
-    
+
+    # Utilisation du chemin absolu au lieu du relatif pour éviter les erreurs
+    cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+    cg.add(cg.RawExpression(f'// [ESP-Video] build script added: {build_script_path}'))
+
     # ========================================================================
-    # DÉFINIR LA VERSION
+    # Définir la version
     # ========================================================================
-    
     cg.add_define("ESP_VIDEO_VERSION", '"1.3.1"')
     cg.add_define("ESP_VIDEO_ESPHOME_WRAPPER", '"1.0.0"')
+
+    # Message de confirmation
+    cg.add(cg.RawExpression('// [ESP-Video] Configuration complete'))
+
 
 
