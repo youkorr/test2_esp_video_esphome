@@ -1,9 +1,6 @@
 """
-esp_video_build.py — build script pour ESPHome (ESP-IDF)
-Gère automatiquement :
- - les includes de esp_video et deps/include
- - la priorité deps/include
- - la détection de tab5_camera dans n’importe quel external_components/
+esp_video_build.py — version universelle (ESPHome multi-external)
+Corrige l’erreur "missing SConscript file" dans les chemins /data/data/external_components
 """
 
 import os
@@ -15,34 +12,36 @@ Import("env")
 print("\n[ESP-Video] ⚙ Initialisation du build script")
 
 # ===============================================================
-# Vérification du framework
+# Vérification framework
 # ===============================================================
 framework = env.get("PIOFRAMEWORK", [])
 if "espidf" not in framework:
-    print("[ESP-Video] ❌ ESP-IDF requis (Arduino non supporté)")
+    print("[ESP-Video] ❌ Ce composant nécessite ESP-IDF (pas Arduino)")
     sys.exit(1)
 
 # ===============================================================
-# Localiser le composant esp_video
+# Recherche du dossier esp_video même si le script est dupliqué
 # ===============================================================
-def find_component_root():
-    try:
-        return os.path.dirname(os.path.abspath(__file__))
-    except NameError:
-        pass
+def locate_component_dir():
+    """Retrouve le vrai dossier du composant même depuis /data/data/."""
+    this_file = os.path.abspath(__file__)
+    path = os.path.dirname(this_file)
 
-    for root, dirs, _ in os.walk("/data/external_components"):
-        if "esp_video" in dirs:
-            path = os.path.join(root, "esp_video")
-            if os.path.exists(os.path.join(path, "include")):
-                return path
-    return os.getcwd()
+    # Si on est dans /data/data, il faut remonter dans /data/external_components
+    if "/data/data/external_components" in path:
+        probable = path.replace("/data/data", "/data")
+        if os.path.exists(probable):
+            print(f"[ESP-Video] 🔁 Chemin corrigé : {probable}")
+            return probable
 
-component_dir = find_component_root()
+    # Sinon on garde le chemin courant
+    return path
+
+component_dir = locate_component_dir()
 print(f"[ESP-Video] 📂 Composant détecté : {component_dir}")
 
 # ===============================================================
-# Vérifier deps/include et les stubs requis
+# Vérification deps/include
 # ===============================================================
 deps_dir = os.path.join(component_dir, "deps", "include")
 os.makedirs(deps_dir, exist_ok=True)
@@ -67,18 +66,15 @@ for stub in required_stubs:
         missing.append(stub)
 
 if missing:
-    print(f"[ESP-Video] ⚠️ Erreur : stubs manquants ({', '.join(missing)})")
+    print(f"[ESP-Video] ⚠️ Erreur : fichiers manquants ({', '.join(missing)})")
     sys.exit(1)
 
 # ===============================================================
-# Ajouter deps/include en priorité
+# Ajout includes
 # ===============================================================
 env.Prepend(CPPPATH=[deps_dir])
 print(f"[ESP-Video] ➕ Include deps ajouté EN PRIORITÉ : {deps_dir}")
 
-# ===============================================================
-# Ajouter includes du composant esp_video
-# ===============================================================
 def add_include(path):
     if os.path.exists(path):
         env.Append(CPPPATH=[path])
@@ -92,38 +88,25 @@ include_paths = [
     os.path.join(component_dir, "src"),
     os.path.join(component_dir, "src", "device"),
 ]
-
 for p in include_paths:
     add_include(p)
 
 # ===============================================================
-# Recherche automatique de tab5_camera dans external_components
+# Détection tab5_camera dans tous les externals
 # ===============================================================
 def find_tab5_camera_dir():
-    # 1️⃣ chemin standard du projet
-    project_dir = env.subst("$PROJECT_DIR")
-    default_path = os.path.join(project_dir, "src/esphome/components/tab5_camera")
-    if os.path.exists(default_path):
-        return default_path
-
-    # 2️⃣ scanner tous les external_components
-    for root, dirs, _ in os.walk("/data/external_components"):
-        if "tab5_camera" in dirs:
-            return os.path.join(root, "tab5_camera")
-
-    # 3️⃣ fallback build dir (rare)
-    build_path = "/data/build/tab5/src/esphome/components/tab5_camera"
-    if os.path.exists(build_path):
-        return build_path
-
+    for base in ["/data/external_components", "/data/data/external_components"]:
+        for root, dirs, _ in os.walk(base):
+            if "tab5_camera" in dirs:
+                return os.path.join(root, "tab5_camera")
     return None
 
-tab5_camera_dir = find_tab5_camera_dir()
-if tab5_camera_dir:
-    env.Append(CPPPATH=[tab5_camera_dir])
-    print(f"[ESP-Video] 🎯 tab5_camera trouvé : {tab5_camera_dir}")
+tab5_dir = find_tab5_camera_dir()
+if tab5_dir:
+    env.Append(CPPPATH=[tab5_dir])
+    print(f"[ESP-Video] 🎯 tab5_camera trouvé : {tab5_dir}")
 else:
-    print("[ESP-Video] ⚠️ Aucun dossier tab5_camera trouvé dans les externals")
+    print("[ESP-Video] ⚠️ Aucun tab5_camera trouvé")
 
 # ===============================================================
 # Flags de compilation
@@ -138,10 +121,10 @@ flags = [
 env.Append(CPPDEFINES=flags)
 
 # ===============================================================
-# Fin du script
+# Fin
 # ===============================================================
 print("[ESP-Video] ✅ Configuration terminée")
-print(f"[ESP-Video] 📋 Priorité CPPPATH : {env['CPPPATH'][:3]}\n")
+print(f"[ESP-Video] 📋 CPPPATH (top3): {env['CPPPATH'][:3]}\n")
 
 
 
