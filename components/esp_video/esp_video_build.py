@@ -1,6 +1,7 @@
 """
-esp_video_build.py — version stable (corrige __file__ non défini)
-Compatible avec PlatformIO + ESPHome sur Docker/SCons 4.8+
+esp_video_build.py — version multi-external stable
+Gère l’exécution depuis /data/build/... et détecte automatiquement
+le vrai composant esp_video dans /data/external_components.
 """
 
 import os
@@ -12,7 +13,7 @@ Import("env")
 print("\n[ESP-Video] ⚙ Initialisation du build script")
 
 # ===============================================================
-# Vérification du framework
+# Vérification framework
 # ===============================================================
 framework = env.get("PIOFRAMEWORK", [])
 if "espidf" not in framework:
@@ -20,39 +21,32 @@ if "espidf" not in framework:
     sys.exit(1)
 
 # ===============================================================
-# Détection robuste du dossier du composant
+# Recherche robuste du vrai dossier du composant esp_video
 # ===============================================================
-def locate_component_dir():
-    """
-    Retrouve le dossier du composant même si __file__ est manquant.
-    Fallback : utilise le répertoire courant d'exécution.
-    """
-    try:
-        this_file = os.path.abspath(__file__)
-        base_dir = os.path.dirname(this_file)
-    except NameError:
-        base_dir = os.getcwd()
-        print(f"[ESP-Video] ⚠ __file__ non défini, fallback sur: {base_dir}")
+def find_esp_video_dir():
+    search_roots = [
+        os.getcwd(),
+        "/data/external_components",
+        "/data/data/external_components",
+    ]
+    for base in search_roots:
+        for root, dirs, _ in os.walk(base):
+            if "esp_video" in dirs:
+                candidate = os.path.join(root, "esp_video")
+                if os.path.exists(os.path.join(candidate, "deps", "include")):
+                    print(f"[ESP-Video] 🔍 Composant trouvé : {candidate}")
+                    return candidate
+    print("[ESP-Video] ❌ Composant esp_video introuvable !")
+    sys.exit(1)
 
-    # Si le chemin est dans /data/data, corrige vers /data
-    if "/data/data/external_components" in base_dir:
-        probable = base_dir.replace("/data/data", "/data")
-        if os.path.exists(probable):
-            print(f"[ESP-Video] 🔁 Chemin corrigé : {probable}")
-            return probable
-
-    return base_dir
-
-component_dir = locate_component_dir()
-print(f"[ESP-Video] 📂 Composant détecté : {component_dir}")
+component_dir = find_esp_video_dir()
 
 # ===============================================================
 # Vérification deps/include
 # ===============================================================
 deps_dir = os.path.join(component_dir, "deps", "include")
-os.makedirs(deps_dir, exist_ok=True)
-
 print(f"[ESP-Video] 🔧 Vérification des stubs dans : {deps_dir}")
+os.makedirs(deps_dir, exist_ok=True)
 
 required_stubs = [
     "esp_cam_sensor.h",
@@ -76,7 +70,7 @@ if missing:
     sys.exit(1)
 
 # ===============================================================
-# Ajout includes
+# Ajout des includes
 # ===============================================================
 env.Prepend(CPPPATH=[deps_dir])
 print(f"[ESP-Video] ➕ Include deps ajouté EN PRIORITÉ : {deps_dir}")
@@ -98,7 +92,7 @@ for p in include_paths:
     add_include(p)
 
 # ===============================================================
-# Détection tab5_camera (multi-external)
+# Recherche du composant tab5_camera
 # ===============================================================
 def find_tab5_camera_dir():
     for base in ["/data/external_components", "/data/data/external_components"]:
@@ -131,6 +125,7 @@ env.Append(CPPDEFINES=flags)
 # ===============================================================
 print("[ESP-Video] ✅ Configuration terminée")
 print(f"[ESP-Video] 📋 CPPPATH (top3): {env['CPPPATH'][:3]}\n")
+
 
 
 
