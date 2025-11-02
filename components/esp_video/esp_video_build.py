@@ -1,6 +1,6 @@
 """
-esp_video_build.py — version universelle (ESPHome multi-external)
-Corrige l’erreur "missing SConscript file" dans les chemins /data/data/external_components
+esp_video_build.py — version stable (corrige __file__ non défini)
+Compatible avec PlatformIO + ESPHome sur Docker/SCons 4.8+
 """
 
 import os
@@ -12,7 +12,7 @@ Import("env")
 print("\n[ESP-Video] ⚙ Initialisation du build script")
 
 # ===============================================================
-# Vérification framework
+# Vérification du framework
 # ===============================================================
 framework = env.get("PIOFRAMEWORK", [])
 if "espidf" not in framework:
@@ -20,22 +20,28 @@ if "espidf" not in framework:
     sys.exit(1)
 
 # ===============================================================
-# Recherche du dossier esp_video même si le script est dupliqué
+# Détection robuste du dossier du composant
 # ===============================================================
 def locate_component_dir():
-    """Retrouve le vrai dossier du composant même depuis /data/data/."""
-    this_file = os.path.abspath(__file__)
-    path = os.path.dirname(this_file)
+    """
+    Retrouve le dossier du composant même si __file__ est manquant.
+    Fallback : utilise le répertoire courant d'exécution.
+    """
+    try:
+        this_file = os.path.abspath(__file__)
+        base_dir = os.path.dirname(this_file)
+    except NameError:
+        base_dir = os.getcwd()
+        print(f"[ESP-Video] ⚠ __file__ non défini, fallback sur: {base_dir}")
 
-    # Si on est dans /data/data, il faut remonter dans /data/external_components
-    if "/data/data/external_components" in path:
-        probable = path.replace("/data/data", "/data")
+    # Si le chemin est dans /data/data, corrige vers /data
+    if "/data/data/external_components" in base_dir:
+        probable = base_dir.replace("/data/data", "/data")
         if os.path.exists(probable):
             print(f"[ESP-Video] 🔁 Chemin corrigé : {probable}")
             return probable
 
-    # Sinon on garde le chemin courant
-    return path
+    return base_dir
 
 component_dir = locate_component_dir()
 print(f"[ESP-Video] 📂 Composant détecté : {component_dir}")
@@ -92,7 +98,7 @@ for p in include_paths:
     add_include(p)
 
 # ===============================================================
-# Détection tab5_camera dans tous les externals
+# Détection tab5_camera (multi-external)
 # ===============================================================
 def find_tab5_camera_dir():
     for base in ["/data/external_components", "/data/data/external_components"]:
@@ -125,6 +131,7 @@ env.Append(CPPDEFINES=flags)
 # ===============================================================
 print("[ESP-Video] ✅ Configuration terminée")
 print(f"[ESP-Video] 📋 CPPPATH (top3): {env['CPPPATH'][:3]}\n")
+
 
 
 
