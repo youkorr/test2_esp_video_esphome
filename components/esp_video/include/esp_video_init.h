@@ -16,7 +16,7 @@
 #if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
 #include "driver/jpeg_encode.h"
 #endif
-#include "esp_cam_sensor_xclk.h"
+//#include "esp_cam_sensor_xclk.h"
 
 #ifdef __cplusplus
 extern "C" {
