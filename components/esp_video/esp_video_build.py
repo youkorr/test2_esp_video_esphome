@@ -45,9 +45,9 @@ os.makedirs(deps_dir, exist_ok=True)
 required_stubs = [
     "esp_cam_sensor.h",
     "esp_cam_sensor_xclk.h", 
-    "esp_sccb_i2c.h"
-    "esp_cam_motor_types.h"
-    "esp_cam_sensor_types.h"
+    "esp_sccb_i2c.h",
+    "esp_cam_motor_types.h",
+    "esp_cam_sensor_types.h",
 ]
 
 all_present = True
