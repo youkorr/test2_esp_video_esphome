@@ -16,90 +16,84 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Intervalle pour 30 FPS
-  this->update_interval_ = 33;  // ms
+  // Intervalle cible (désactivé en pratique, utilisé seulement pour logs)
+  this->update_interval_ = 33;  // ≈30 FPS
+  this->last_update_ = 0;
+  this->frame_count_ = 0;
+  this->first_update_ = true;
+  this->lv_buffer_ = nullptr;
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
-  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS)", 
+  ESP_LOGI(TAG, "   Intervalle théorique: %u ms (~%d FPS)",
            this->update_interval_, 1000 / this->update_interval_);
 }
 
 void LVGLCameraDisplay::loop() {
-  uint32_t now = millis();
-
-  // Vérifier si c'est le moment de mettre à jour
-  if (now - this->last_update_ < this->update_interval_) {
+  if (!this->camera_->is_streaming())
     return;
-  }
 
-  this->last_update_ = now;
+  // Vérifie si une nouvelle frame est disponible
+  if (this->camera_->capture_frame()) {
+    this->update_canvas_();
+    this->frame_count_++;
 
-  // Si la caméra est en streaming, capturer ET mettre à jour le canvas
-  if (this->camera_->is_streaming()) {
-    bool frame_captured = this->camera_->capture_frame();
-
-    if (frame_captured) {
-      this->update_canvas_();
-      this->frame_count_++;
-
-      // Logger FPS réel toutes les 100 frames
-      if (this->frame_count_ % 100 == 0) {
-        static uint32_t last_time = 0;
-        uint32_t now_time = millis();
-
-        if (last_time > 0) {
-          float elapsed = (now_time - last_time) / 1000.0f;  // secondes
-          float fps = 100.0f / elapsed;
-          ESP_LOGI(TAG, "🎞️ %u frames affichées - FPS moyen: %.2f", this->frame_count_, fps);
-        }
-        last_time = now_time;
-      }
+    // Calcul FPS réel toutes les 3 secondes
+    uint32_t now = millis();
+    if (now - this->last_update_ >= 3000) {
+      float fps = (float)this->frame_count_ / ((now - this->last_update_) / 1000.0f);
+      ESP_LOGI(TAG, "🎞️ %u frames affichées - FPS moyen: %.2f", this->frame_count_, fps);
+      this->frame_count_ = 0;
+      this->last_update_ = now;
     }
   }
 }
 
 void LVGLCameraDisplay::dump_config() {
   ESP_LOGCONFIG(TAG, "LVGL Camera Display:");
-  ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
-  ESP_LOGCONFIG(TAG, "  FPS cible: ~%d", 1000 / this->update_interval_);
+  ESP_LOGCONFIG(TAG, "  Intervalle cible: %u ms (~%d FPS)", this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGCONFIG(TAG, "  Canvas configuré: %s", this->canvas_obj_ ? "OUI" : "NON");
 }
 
 void LVGLCameraDisplay::update_canvas_() {
-  if (this->camera_ == nullptr) {
+  if (this->camera_ == nullptr || this->canvas_obj_ == nullptr)
     return;
-  }
 
-  if (this->canvas_obj_ == nullptr) {
-    if (!this->canvas_warning_shown_) {
-      ESP_LOGW(TAG, "❌ Canvas null - pas encore configuré?");
-      this->canvas_warning_shown_ = true;
-    }
-    return;
-  }
-
-  uint8_t* img_data = this->camera_->get_image_data();
+  uint8_t *img_data = this->camera_->get_image_data();
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
 
-  if (img_data == nullptr) {
+  if (img_data == nullptr)
     return;
-  }
 
+  // Premier affichage → infos de debug
   if (this->first_update_) {
-    ESP_LOGI(TAG, "🖼️  Premier update canvas:");
+    ESP_LOGI(TAG, "🖼️ Premier update canvas:");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
-    ESP_LOGI(TAG, "   Buffer: %p", img_data);
-    ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X", 
+    ESP_LOGI(TAG, "   Buffer caméra: %p", img_data);
+    ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  // Alloue un buffer interne LVGL une seule fois (RAM interne pour performance)
+  size_t buf_size = width * height * 2;
+  if (this->lv_buffer_ == nullptr) {
+    this->lv_buffer_ = (uint8_t *)heap_caps_malloc(buf_size, MALLOC_CAP_INTERNAL);
+    if (this->lv_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "❌ Impossible d'allouer le buffer LVGL (%u octets)", buf_size);
+      return;
+    }
+    lv_canvas_set_buffer(this->canvas_obj_, this->lv_buffer_, width, height, LV_IMG_CF_TRUE_COLOR);
+  }
+
+  // Copie rapide du frame caméra vers le buffer LVGL
+  memcpy(this->lv_buffer_, img_data, buf_size);
+
+  // Demande à LVGL de redessiner le canvas
   lv_obj_invalidate(this->canvas_obj_);
 }
 
-void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
+void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
   ESP_LOGI(TAG, "🎨 Canvas configuré: %p", canvas);
 
@@ -112,3 +106,4 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
