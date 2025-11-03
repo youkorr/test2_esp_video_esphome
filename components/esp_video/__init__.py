@@ -1,6 +1,7 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Avec support H264 + JPEG activé et auto-création des stubs + compilation automatique des sources
+Avec support H264 + JPEG activé, auto-création des stubs et compilation automatique des sources
+Compatible ESPHome stable (2025.10.x)
 """
 
 import esphome.codegen as cg
@@ -134,7 +135,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Ajout explicite des sources ESP-Video (compatible ESPHome stable)
+    # Ajout explicite des sources ESP-Video (un seul appel add_library)
     # -----------------------------------------------------------------------
     source_files = [
         "src/esp_video.c",
@@ -151,13 +152,20 @@ typedef struct { int dummy; } esp_cam_motor_t;
         "src/device/esp_video_h264_device.c",
     ]
 
+    existing_sources = []
     for src_file in source_files:
         full_path = os.path.join(component_dir, src_file)
         if os.path.exists(full_path):
-            cg.add_library("esp_video_srcs", [full_path])
+            existing_sources.append(full_path)
             cg.add(cg.RawExpression(f'// [ESP-Video] Ajouté au build : {src_file}'))
         else:
             print(f"[ESP-Video] ⚠️ Fichier source manquant : {src_file}")
+
+    if existing_sources:
+        cg.add_library("esp_video_srcs", existing_sources)
+        print(f"[ESP-Video] ✅ {len(existing_sources)} fichiers source ajoutés à la compilation.")
+    else:
+        print("[ESP-Video] ❌ Aucun fichier source trouvé pour ESP-Video.")
 
     # -----------------------------------------------------------------------
     # Build script post compilation (optionnel)
@@ -177,6 +185,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + sources + flags)'))
+
 
 
 
