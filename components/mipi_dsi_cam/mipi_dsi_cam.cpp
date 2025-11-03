@@ -4,12 +4,6 @@
 #include "mipi_dsi_cam_drivers_generated.h"
 
 #include "esp_video_init.h"   // 🔹 Framework esp_video global (CSI/DVP)
-#ifdef __has_include
-  #if __has_include("esp_video_device.h")
-    #include "esp_video_device.h"
-    #define ESP_VIDEO_HAS_VERSION 1
-  #endif
-#endif
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -30,13 +24,7 @@ void MipiDsiCam::setup() {
 
   esp_err_t ret = esp_video_init(&cam_config);
   if (ret == ESP_OK) {
-  #ifdef ESP_VIDEO_HAS_VERSION
-    const char *version = esp_video_get_version();
-    ESP_LOGI(TAG, "ESP-Video framework initialized ✅ (version: %s)",
-             version ? version : "unknown");
-  #else
     ESP_LOGI(TAG, "ESP-Video framework initialized ✅");
-  #endif
   } else if (ret == ESP_ERR_INVALID_STATE) {
     ESP_LOGW(TAG, "ESP-Video already initialized (skipped)");
   } else {
@@ -416,6 +404,7 @@ void MipiDsiCam::dump_config() {
 }  // namespace esphome
 
 #endif  // USE_ESP32_VARIANT_ESP32P4
+
 
 
 
