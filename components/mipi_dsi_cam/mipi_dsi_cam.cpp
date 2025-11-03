@@ -1,7 +1,7 @@
 #include "mipi_dsi_cam.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-
+#include "driver/gpio.h"
 #include "mipi_dsi_cam_drivers_generated.h"
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
