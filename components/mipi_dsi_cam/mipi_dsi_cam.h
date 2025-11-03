@@ -6,12 +6,22 @@
 #include <string>
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
+
+// Headers ESP-Video
 extern "C" {
-  #include "esp_cam_ctlr.h"
-  #include "esp_cam_ctlr_csi.h"
-  #include "driver/isp.h"
-  #include "esp_ldo_regulator.h"
+  #include "esp_video_init.h"
+  #include "esp_video_device.h"
+  #include "linux/videodev2.h"
+  #include "esp_cam_sensor.h"
+  #include "driver/ppa.h"  // NOUVEAU - PPA comme Tab5
+  #include "esp_heap_caps.h"
 }
+
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
 #endif
 
 namespace esphome {
@@ -21,8 +31,11 @@ enum PixelFormat {
   PIXEL_FORMAT_RGB565 = 0,
   PIXEL_FORMAT_YUV422 = 1,
   PIXEL_FORMAT_RAW8 = 2,
+  PIXEL_FORMAT_JPEG = 3,
+  PIXEL_FORMAT_H264 = 4,
 };
 
+// Interface driver capteur
 class ISensorDriver {
 public:
   virtual ~ISensorDriver() = default;
@@ -47,6 +60,12 @@ public:
   virtual esp_err_t read_register(uint16_t reg, uint8_t* value) = 0;
 };
 
+/**
+ * @brief Composant caméra MIPI avec ESP-Video (EXACTEMENT comme Tab5)
+ * 
+ * Architecture:
+ *   Sensor → CSI → ESP-Video → ISP → /dev/video0 → PPA → Display Buffer
+ */
 class MipiDsiCam : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
@@ -54,6 +73,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
 
+  // Configuration
   void set_name(const std::string &name) { this->name_ = name; }
   void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
   void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
@@ -67,18 +87,26 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void set_pixel_format(PixelFormat format) { this->pixel_format_ = format; }
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
+  
+  // Options PPA (comme Tab5)
+  void set_mirror_x(bool enable) { this->mirror_x_ = enable; }
+  void set_mirror_y(bool enable) { this->mirror_y_ = enable; }
+  void set_rotation(uint8_t angle) { this->rotation_angle_ = angle; }
 
+  // API publique
   bool capture_frame();
   bool start_streaming();
   bool stop_streaming();
   bool is_streaming() const { return this->streaming_; }
   
-  uint8_t* get_image_data() { return this->current_frame_buffer_; }
-  size_t get_image_size() const { return this->frame_buffer_size_; }
+  uint8_t* get_image_data() { return this->display_buffer_; }
+  size_t get_image_size() const { return this->display_buffer_size_; }
   uint16_t get_image_width() const { return this->width_; }
   uint16_t get_image_height() const { return this->height_; }
+  PixelFormat get_pixel_format() const { return this->pixel_format_; }
 
  protected:
+  std::string name_{"MIPI Camera"};
   uint8_t external_clock_pin_{36};
   uint32_t external_clock_frequency_{24000000};
   GPIOPin *reset_pin_{nullptr};
@@ -86,53 +114,62 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   std::string sensor_type_{""};
   uint8_t sensor_address_{0x36};
   uint8_t lane_count_{1};
-  uint8_t bayer_pattern_{3};
+  uint8_t bayer_pattern_{0};
   uint16_t lane_bitrate_mbps_{576};
   uint16_t width_{1280};
   uint16_t height_{720};
   
-  std::string name_{"MIPI Camera"};
   PixelFormat pixel_format_{PIXEL_FORMAT_RGB565};
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{30};
+  
+  // Options PPA (comme Tab5)
+  bool mirror_x_{true};   // Mirror horizontal par défaut
+  bool mirror_y_{false};
+  uint8_t rotation_angle_{0};  // 0, 90, 180, 270
 
   bool initialized_{false};
   bool streaming_{false};
-  bool frame_ready_{false};
   
-  uint32_t total_frames_received_{0};
-  uint32_t last_frame_log_time_{0};
-  
-  uint8_t *frame_buffers_[2]{nullptr, nullptr};
-  uint8_t *current_frame_buffer_{nullptr};
-  size_t frame_buffer_size_{0};
-  uint8_t buffer_index_{0};
+  uint32_t total_frames_captured_{0};
+  uint32_t last_fps_report_time_{0};
   
   ISensorDriver *sensor_driver_{nullptr};
   
 #ifdef USE_ESP32_VARIANT_ESP32P4
-  esp_cam_ctlr_handle_t csi_handle_{nullptr};
-  isp_proc_handle_t isp_handle_{nullptr};
-  esp_ldo_channel_handle_t ldo_handle_{nullptr};
   
+  // V4L2
+  int video_fd_{-1};
+  struct v4l2_buffer *v4l2_buffers_{nullptr};
+  uint32_t buffer_count_{2};  // 2 buffers comme Tab5
+  
+  struct BufferMapping {
+    void *start;
+    size_t length;
+  };
+  BufferMapping *buffer_mappings_{nullptr};
+  
+  // PPA (comme Tab5)
+  ppa_client_handle_t ppa_handle_{nullptr};
+  
+  // Buffers (comme Tab5)
+  uint8_t *display_buffer_{nullptr};      // Buffer final pour affichage
+  size_t display_buffer_size_{0};
+  
+  // Méthodes privées
   bool create_sensor_driver_();
   bool init_sensor_();
-  bool init_ldo_();
-  bool init_csi_();
-  bool init_isp_();
-  bool allocate_buffer_();
+  bool init_esp_video_();
+  bool open_video_device_();
+  bool configure_video_format_();
+  bool setup_video_buffers_();
+  bool init_ppa_();                      // NOUVEAU
+  bool allocate_display_buffer_();      // NOUVEAU
+  bool start_video_stream_();
   
-  static bool IRAM_ATTR on_csi_new_frame_(
-    esp_cam_ctlr_handle_t handle,
-    esp_cam_ctlr_trans_t *trans,
-    void *user_data
-  );
+  uint32_t get_v4l2_pixformat_() const;
+  ppa_srm_rotation_angle_t get_ppa_rotation_() const;  // NOUVEAU
   
-  static bool IRAM_ATTR on_csi_frame_done_(
-    esp_cam_ctlr_handle_t handle,
-    esp_cam_ctlr_trans_t *trans,
-    void *user_data
-  );
 #endif
 };
 
