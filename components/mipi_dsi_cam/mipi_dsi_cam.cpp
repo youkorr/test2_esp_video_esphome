@@ -12,7 +12,7 @@ namespace mipi_dsi_cam {
 static const char *const TAG = "mipi_dsi_cam";
 
 void MipiDsiCam::setup() {
-  ESP_LOGI(TAG, "Init MIPI Camera with IPA");
+  ESP_LOGI(TAG, "Init MIPI Camera");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
   
   if (this->reset_pin_ != nullptr) {
@@ -53,18 +53,6 @@ void MipiDsiCam::setup() {
     return;
   }
   
-  if (!this->init_isp_modules_()) {
-    ESP_LOGE(TAG, "ISP modules init failed");
-    this->mark_failed();
-    return;
-  }
-  
-  if (!this->init_ipa_()) {
-    ESP_LOGE(TAG, "IPA init failed");
-    this->mark_failed();
-    return;
-  }
-  
   if (!this->allocate_buffer_()) {
     ESP_LOGE(TAG, "Buffer alloc failed");
     this->mark_failed();
@@ -72,7 +60,7 @@ void MipiDsiCam::setup() {
   }
   
   this->initialized_ = true;
-  ESP_LOGI(TAG, "Camera ready (%ux%u) with IPA enabled", this->width_, this->height_);
+  ESP_LOGI(TAG, "Camera ready (%ux%u)", this->width_, this->height_);
 }
 
 bool MipiDsiCam::create_sensor_driver_() {
@@ -232,219 +220,6 @@ bool MipiDsiCam::init_isp_() {
   return true;
 }
 
-bool MipiDsiCam::init_isp_modules_() {
-  ESP_LOGI(TAG, "Init ISP modules for IPA");
-  esp_err_t ret;
-  
-  // AWB Controller
-  ret = esp_isp_new_awb_controller(this->isp_handle_, &this->awb_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AWB controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  isp_awb_config_t awb_config = {
-    .sample_point = ISP_AWB_SAMPLE_POINT_AFTER_CCM,
-  };
-  ret = esp_isp_awb_configure(this->awb_ctlr_, &awb_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AWB configure failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_awb_enable(this->awb_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AWB enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  AWB OK");
-  
-  // AE Controller
-  ret = esp_isp_new_ae_controller(this->isp_handle_, &this->ae_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AE controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  isp_ae_config_t ae_config = {
-    .sample_point = ISP_AE_SAMPLE_POINT_AFTER_DEMOSAIC,
-  };
-  ret = esp_isp_ae_configure(this->ae_ctlr_, &ae_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AE configure failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_ae_enable(this->ae_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "AE enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  AE OK");
-  
-  // Histogram Controller
-  ret = esp_isp_new_hist_controller(this->isp_handle_, &this->hist_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Histogram controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  isp_hist_config_t hist_config = {
-    .sample_point = ISP_HIST_SAMPLE_POINT_AFTER_CCM,
-    .mode = ISP_HIST_SAMPLING_RGB,
-    .rgb_coefficient.coeff_r = 0,
-    .rgb_coefficient.coeff_g = 0,
-    .rgb_coefficient.coeff_b = 0,
-  };
-  ret = esp_isp_hist_configure(this->hist_ctlr_, &hist_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Histogram configure failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_hist_enable(this->hist_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Histogram enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  Histogram OK");
-  
-  // Sharpen Controller
-  ret = esp_isp_new_sharpen_controller(this->isp_handle_, &this->sharpen_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Sharpen controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_sharpen_enable(this->sharpen_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Sharpen enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  Sharpen OK");
-  
-  // BF (Bayer Filter / Denoise) Controller
-  ret = esp_isp_new_bf_controller(this->isp_handle_, &this->bf_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "BF controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_bf_enable(this->bf_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "BF enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  BF (Denoise) OK");
-  
-  // CCM (Color Correction Matrix) Controller
-  ret = esp_isp_new_ccm_controller(this->isp_handle_, &this->ccm_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "CCM controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_ccm_enable(this->ccm_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "CCM enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  CCM OK");
-  
-  // Gamma Controller
-  ret = esp_isp_new_gamma_controller(this->isp_handle_, &this->gamma_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Gamma controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_gamma_enable(this->gamma_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Gamma enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  Gamma OK");
-  
-  // Demosaic Controller
-  ret = esp_isp_new_demosaic_controller(this->isp_handle_, &this->demosaic_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Demosaic controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_demosaic_enable(this->demosaic_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Demosaic enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  Demosaic OK");
-  
-  // Color Controller (brightness, contrast, saturation, hue)
-  ret = esp_isp_new_color_controller(this->isp_handle_, &this->color_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Color controller creation failed: 0x%x", ret);
-    return false;
-  }
-  
-  ret = esp_isp_color_enable(this->color_ctlr_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Color enable failed: 0x%x", ret);
-    return false;
-  }
-  ESP_LOGI(TAG, "  Color OK");
-  
-  ESP_LOGI(TAG, "All ISP modules initialized");
-  return true;
-}
-
-bool MipiDsiCam::init_ipa_() {
-  ESP_LOGI(TAG, "Init IPA (Image Processing Algorithm)");
-  
-  // Préparer les informations du capteur pour l'IPA
-  this->ipa_sensor_info_.width = this->width_;
-  this->ipa_sensor_info_.height = this->height_;
-  
-  // Valeurs d'exposition typiques (à adapter selon le capteur)
-  this->ipa_sensor_info_.max_exposure = 100000;  // 100ms
-  this->ipa_sensor_info_.min_exposure = 100;     // 0.1ms
-  this->ipa_sensor_info_.cur_exposure = 10000;   // 10ms
-  this->ipa_sensor_info_.step_exposure = 100;    // 0.1ms step
-  
-  // Valeurs de gain typiques
-  this->ipa_sensor_info_.max_gain = 16.0f;
-  this->ipa_sensor_info_.min_gain = 1.0f;
-  this->ipa_sensor_info_.cur_gain = 2.0f;
-  this->ipa_sensor_info_.step_gain = 0.1f;
-  
-  // Initialiser l'IPA avec configuration par défaut
-  esp_err_t ret = this->ipa_.init(&this->ipa_sensor_info_, &this->ipa_metadata_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "IPA init failed: 0x%x", ret);
-    return false;
-  }
-  
-  // Appliquer les métadonnées initiales
-  if (!this->apply_ipa_metadata_(&this->ipa_metadata_)) {
-    ESP_LOGE(TAG, "Failed to apply initial IPA metadata");
-    return false;
-  }
-  
-  this->ipa_initialized_ = true;
-  
-  // Afficher la configuration IPA
-  IPAConfig &config = this->ipa_.get_config();
-  ESP_LOGI(TAG, "IPA Configuration:");
-  ESP_LOGI(TAG, "  AWB: %s", config.awb_enabled ? "ON" : "OFF");
-  ESP_LOGI(TAG, "  AE: %s", config.ae_enabled ? "ON" : "OFF");
-  ESP_LOGI(TAG, "  Sharpen: %s (strength: %u)", config.sharpen_enabled ? "ON" : "OFF", config.sharpen_strength);
-  ESP_LOGI(TAG, "  Denoise: %s (level: %u)", config.denoise_enabled ? "ON" : "OFF", config.denoise_level);
-  ESP_LOGI(TAG, "  CCM: %s", config.ccm_enabled ? "ON" : "OFF");
-  ESP_LOGI(TAG, "  Gamma: %s (%.2f)", config.gamma_enabled ? "ON" : "OFF", config.gamma_value);
-  
-  ESP_LOGI(TAG, "IPA initialized successfully");
-  return true;
-}
-
 bool MipiDsiCam::allocate_buffer_() {
   this->frame_buffer_size_ = this->width_ * this->height_ * 2;
   
@@ -494,238 +269,15 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   return false;
 }
 
-bool MipiDsiCam::get_isp_statistics_(esp_ipa_stats_t *stats) {
-  if (!stats || !this->ipa_initialized_) {
-    return false;
-  }
-  
-  memset(stats, 0, sizeof(esp_ipa_stats_t));
-  stats->seq = this->total_frames_received_;
-  stats->flags = 0;
-  
-  esp_err_t ret;
-  
-  // AWB Statistics
-  if (this->awb_ctlr_) {
-    isp_awb_stat_result_t awb_result;
-    ret = esp_isp_awb_get_statistics(this->awb_ctlr_, 0, &awb_result);
-    if (ret == ESP_OK) {
-      stats->awb_stats[0].counted = awb_result.white_patch_num;
-      stats->awb_stats[0].sum_r = awb_result.sum_r;
-      stats->awb_stats[0].sum_g = awb_result.sum_g;
-      stats->awb_stats[0].sum_b = awb_result.sum_b;
-      stats->flags |= IPA_STATS_FLAGS_AWB;
-    }
-  }
-  
-  // AE Statistics
-  if (this->ae_ctlr_) {
-    isp_ae_result_t ae_result;
-    ret = esp_isp_ae_get_statistics(this->ae_ctlr_, 0, &ae_result);
-    if (ret == ESP_OK) {
-      for (int i = 0; i < ISP_AE_REGIONS && i < ISP_AE_BLOCK_X_NUM * ISP_AE_BLOCK_Y_NUM; i++) {
-        stats->ae_stats[i].luminance = ae_result.luminance[i];
-      }
-      stats->flags |= IPA_STATS_FLAGS_AE;
-    }
-  }
-  
-  // Histogram Statistics
-  if (this->hist_ctlr_) {
-    isp_hist_result_t hist_result;
-    ret = esp_isp_hist_get_statistics(this->hist_ctlr_, 0, &hist_result);
-    if (ret == ESP_OK) {
-      for (int i = 0; i < ISP_HIST_SEGMENT_NUMS; i++) {
-        stats->hist_stats[i].value = hist_result.hist_value[i];
-      }
-      stats->flags |= IPA_STATS_FLAGS_HIST;
-    }
-  }
-  
-  // Sharpen Statistics
-  if (this->sharpen_ctlr_) {
-    isp_sharpen_hist_result_t sharpen_result;
-    ret = esp_isp_sharpen_get_histogram(this->sharpen_ctlr_, 0, &sharpen_result);
-    if (ret == ESP_OK) {
-      // Trouver la valeur max dans l'histogramme sharpen
-      uint8_t max_val = 0;
-      for (int i = 0; i < ISP_SHARPEN_HIST_INTERVAL_NUMS; i++) {
-        if (sharpen_result.hist_value[i] > max_val) {
-          max_val = (uint8_t)sharpen_result.hist_value[i];
-        }
-      }
-      stats->sharpen_stats.value = max_val;
-      stats->flags |= IPA_STATS_FLAGS_SHARPEN;
-    }
-  }
-  
-  return (stats->flags != 0);
-}
-
-bool MipiDsiCam::apply_ipa_metadata_(const esp_ipa_metadata_t *metadata) {
-  if (!metadata || !this->ipa_initialized_) {
-    return false;
-  }
-  
-  esp_err_t ret;
-  
-  // Appliquer AWB (Auto White Balance)
-  if ((metadata->flags & IPA_METADATA_FLAGS_RG) && (metadata->flags & IPA_METADATA_FLAGS_BG)) {
-    if (this->awb_ctlr_) {
-      isp_awb_gain_t gains = {
-        .gain_r = (uint32_t)(metadata->red_gain * 256),
-        .gain_gr = 256,
-        .gain_gb = 256,
-        .gain_b = (uint32_t)(metadata->blue_gain * 256),
-      };
-      ret = esp_isp_awb_set_gain(this->awb_ctlr_, &gains);
-      if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set AWB gains: 0x%x", ret);
-      }
-    }
-  }
-  
-  // Appliquer AE (Auto Exposure) - sur le capteur
-  if (this->sensor_driver_) {
-    if (metadata->flags & IPA_METADATA_FLAGS_ET) {
-      ret = this->sensor_driver_->set_exposure(metadata->exposure);
-      if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set exposure: 0x%x", ret);
-      }
-    }
-    
-    if (metadata->flags & IPA_METADATA_FLAGS_GN) {
-      // Convertir le gain en index pour le capteur
-      uint32_t gain_index = (uint32_t)(metadata->gain * 10.0f);
-      ret = this->sensor_driver_->set_gain(gain_index);
-      if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set gain: 0x%x", ret);
-      }
-    }
-  }
-  
-  // Appliquer BF (Bayer Filter / Denoise)
-  if ((metadata->flags & IPA_METADATA_FLAGS_BF) && this->bf_ctlr_) {
-    isp_bf_config_t bf_config;
-    bf_config.denoising_level = metadata->bf.level;
-    memcpy(bf_config.matrix, metadata->bf.matrix, sizeof(bf_config.matrix));
-    ret = esp_isp_bf_configure(this->bf_ctlr_, &bf_config);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to configure BF: 0x%x", ret);
-    }
-  }
-  
-  // Appliquer Demosaic
-  if ((metadata->flags & IPA_METADATA_FLAGS_DM) && this->demosaic_ctlr_) {
-    isp_demosaic_config_t demosaic_config;
-    demosaic_config.grad_ratio = metadata->demosaic.gradient_ratio;
-    ret = esp_isp_demosaic_configure(this->demosaic_ctlr_, &demosaic_config);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to configure demosaic: 0x%x", ret);
-    }
-  }
-  
-  // Appliquer Sharpen
-  if ((metadata->flags & IPA_METADATA_FLAGS_SH) && this->sharpen_ctlr_) {
-    isp_sharpen_config_t sharpen_config;
-    sharpen_config.h_thresh = metadata->sharpen.h_thresh;
-    sharpen_config.l_thresh = metadata->sharpen.l_thresh;
-    sharpen_config.h_coeff = metadata->sharpen.h_coeff;
-    sharpen_config.m_coeff = metadata->sharpen.m_coeff;
-    memcpy(sharpen_config.matrix, metadata->sharpen.matrix, sizeof(sharpen_config.matrix));
-    ret = esp_isp_sharpen_configure(this->sharpen_ctlr_, &sharpen_config);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to configure sharpen: 0x%x", ret);
-    }
-  }
-  
-  // Appliquer Gamma
-  if ((metadata->flags & IPA_METADATA_FLAGS_GAMMA) && this->gamma_ctlr_) {
-    isp_gamma_curve_points_t gamma_pts;
-    for (int i = 0; i < ISP_GAMMA_CURVE_POINTS_NUM; i++) {
-      gamma_pts.pts[i].x = metadata->gamma.x[i];
-      gamma_pts.pts[i].y = metadata->gamma.y[i];
-    }
-    ret = esp_isp_gamma_set_curve(this->gamma_ctlr_, &gamma_pts);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to set gamma curve: 0x%x", ret);
-    }
-  }
-  
-  // Appliquer CCM (Color Correction Matrix)
-  if ((metadata->flags & IPA_METADATA_FLAGS_CCM) && this->ccm_ctlr_) {
-    isp_ccm_config_t ccm_config;
-    memcpy(ccm_config.matrix, metadata->ccm.matrix, sizeof(ccm_config.matrix));
-    ccm_config.saturation = 1;
-    ret = esp_isp_ccm_configure(this->ccm_ctlr_, &ccm_config);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to configure CCM: 0x%x", ret);
-    }
-  }
-  
-  // Appliquer Color adjustments (brightness, contrast, saturation, hue)
-  if (this->color_ctlr_) {
-    isp_color_config_t color_config = {};
-    
-    if (metadata->flags & IPA_METADATA_FLAGS_BR) {
-      color_config.brightness = (int)(metadata->brightness - 50) * 2;  // -100 à +100
-    }
-    if (metadata->flags & IPA_METADATA_FLAGS_CN) {
-      color_config.contrast = (int)(metadata->contrast - 50) * 2;  // -100 à +100
-    }
-    if (metadata->flags & IPA_METADATA_FLAGS_ST) {
-      color_config.saturation = metadata->saturation * 2;  // 0 à 200
-    }
-    if (metadata->flags & IPA_METADATA_FLAGS_HUE) {
-      color_config.hue = metadata->hue;  // -180 à +180
-    }
-    
-    ret = esp_isp_color_configure(this->color_ctlr_, &color_config);
-    if (ret != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to configure color: 0x%x", ret);
-    }
-  }
-  
-  return true;
-}
-
-void MipiDsiCam::process_ipa_() {
-  if (!this->ipa_initialized_ || !this->streaming_) {
-    return;
-  }
-  
-  uint32_t now = millis();
-  if (now - this->last_ipa_process_time_ < this->ipa_process_interval_ms_) {
-    return;  // Pas encore le moment de traiter l'IPA
-  }
-  this->last_ipa_process_time_ = now;
-  
-  // Récupérer les statistiques ISP
-  esp_ipa_stats_t stats;
-  if (!this->get_isp_statistics_(&stats)) {
-    ESP_LOGW(TAG, "Failed to get ISP statistics");
-    return;
-  }
-  
-  // Traiter avec l'IPA
-  this->ipa_.process(&stats, &this->ipa_sensor_info_, &this->ipa_metadata_);
-  
-  // Appliquer les nouvelles métadonnées
-  if (!this->apply_ipa_metadata_(&this->ipa_metadata_)) {
-    ESP_LOGW(TAG, "Failed to apply IPA metadata");
-  }
-}
-
 bool MipiDsiCam::start_streaming() {
   if (!this->initialized_ || this->streaming_) {
     return false;
   }
   
-  ESP_LOGI(TAG, "Start streaming with IPA");
+  ESP_LOGI(TAG, "Start streaming");
   
   this->total_frames_received_ = 0;
   this->last_frame_log_time_ = millis();
-  this->last_ipa_process_time_ = millis();
   
   if (this->sensor_driver_) {
     esp_err_t ret = this->sensor_driver_->start_stream();
@@ -743,7 +295,7 @@ bool MipiDsiCam::start_streaming() {
   }
   
   this->streaming_ = true;
-  ESP_LOGI(TAG, "Streaming active with IPA");
+  ESP_LOGI(TAG, "Streaming active");
   return true;
 }
 
@@ -780,10 +332,6 @@ bool MipiDsiCam::capture_frame() {
 
 void MipiDsiCam::loop() {
   if (this->streaming_) {
-    // Traiter l'IPA périodiquement
-    this->process_ipa_();
-    
-    // Statistiques de streaming
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
     
@@ -794,18 +342,12 @@ void MipiDsiCam::loop() {
     }
     
     uint32_t now = millis();
-    if (now - this->last_frame_log_time_ >= 5000) {
-      float sensor_fps = this->total_frames_received_ / 5.0f;
+    if (now - this->last_frame_log_time_ >= 3000) {
+      float sensor_fps = this->total_frames_received_ / 3.0f;
       float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
       
-      // Afficher les stats IPA
-      const IPAHistory &hist = this->ipa_.get_history();
-      
-      ESP_LOGI(TAG, "Streaming: %.1f fps | ready: %.1f%%", sensor_fps, ready_rate);
-      ESP_LOGI(TAG, "  IPA AWB: R=%.2f B=%.2f CT=%uK", 
-               hist.prev_red_gain, hist.prev_blue_gain, hist.prev_color_temp);
-      ESP_LOGI(TAG, "  IPA AE: exp=%u gain=%.2f lum=%u", 
-               hist.prev_exposure, hist.prev_gain, hist.prev_avg_luminance);
+      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", 
+               sensor_fps, ready_rate);
       
       this->total_frames_received_ = 0;
       this->last_frame_log_time_ = now;
@@ -816,7 +358,7 @@ void MipiDsiCam::loop() {
 }
 
 void MipiDsiCam::dump_config() {
-  ESP_LOGCONFIG(TAG, "MIPI Camera with IPA:");
+  ESP_LOGCONFIG(TAG, "MIPI Camera:");
   if (this->sensor_driver_) {
     ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_driver_->get_name());
     ESP_LOGCONFIG(TAG, "  PID: 0x%04X", this->sensor_driver_->get_pid());
@@ -828,17 +370,6 @@ void MipiDsiCam::dump_config() {
   ESP_LOGCONFIG(TAG, "  Lanes: %u", this->lane_count_);
   ESP_LOGCONFIG(TAG, "  Bayer: %u", this->bayer_pattern_);
   ESP_LOGCONFIG(TAG, "  Streaming: %s", this->streaming_ ? "YES" : "NO");
-  
-  if (this->ipa_initialized_) {
-    IPAConfig &config = this->ipa_.get_config();
-    ESP_LOGCONFIG(TAG, "  IPA Status: ACTIVE");
-    ESP_LOGCONFIG(TAG, "    AWB: %s", config.awb_enabled ? "ON" : "OFF");
-    ESP_LOGCONFIG(TAG, "    AE: %s", config.ae_enabled ? "ON" : "OFF");
-    ESP_LOGCONFIG(TAG, "    Sharpen: %s (%u)", config.sharpen_enabled ? "ON" : "OFF", config.sharpen_strength);
-    ESP_LOGCONFIG(TAG, "    Denoise: %s (%u)", config.denoise_enabled ? "ON" : "OFF", config.denoise_level);
-  } else {
-    ESP_LOGCONFIG(TAG, "  IPA Status: DISABLED");
-  }
 }
 
 }  // namespace mipi_dsi_cam
