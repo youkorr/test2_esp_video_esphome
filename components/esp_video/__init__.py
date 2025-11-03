@@ -1,170 +1,137 @@
 """
-esp_video_build.py — Compile VRAIMENT les sources ESP-Video
+Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
+Avec support H264 + JPEG activé
 """
+
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.const import CONF_ID
+from esphome.core import CORE
 import os
-import sys
-from SCons.Script import Import
 
-Import("env")
+CODEOWNERS = ["@youkorr"]
+DEPENDENCIES = ["esp32"]
 
-print("\n[ESP-Video] ⚙ Build script avec compilation des sources")
+esp_video_ns = cg.esphome_ns.namespace("esp_video")
+ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
 
-framework = env.get("PIOFRAMEWORK", [])
-if "espidf" not in framework:
-    print("[ESP-Video] ❌ ESP-IDF requis")
-    sys.exit(1)
+CONFIG_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.declare_id(ESPVideoComponent),
+}).extend(cv.COMPONENT_SCHEMA)
 
-# ===============================================================
-# Trouver esp_video
-# ===============================================================
-def find_esp_video_dir():
-    for base in ["/data/external_components", "/data/data/external_components"]:
-        for root, dirs, _ in os.walk(base):
-            if "esp_video" in dirs:
-                candidate = os.path.join(root, "esp_video")
-                if os.path.exists(os.path.join(candidate, "src")):
-                    return candidate
-    print("[ESP-Video] ❌ Composant introuvable")
-    sys.exit(1)
 
-component_dir = find_esp_video_dir()
-print(f"[ESP-Video] 📂 Composant: {component_dir}")
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
 
-# ===============================================================
-# Vérifier deps/include
-# ===============================================================
-deps_dir = os.path.join(component_dir, "deps", "include")
-print(f"[ESP-Video] 🔧 Deps: {deps_dir}")
+    # Vérification du framework
+    if CORE.using_arduino:
+        raise cv.Invalid(
+            "esp_video nécessite 'framework: type: esp-idf'"
+        )
 
-if not os.path.exists(deps_dir):
-    print("[ESP-Video] ❌ deps/include manquant")
-    sys.exit(1)
+    # Détection chemin composant
+    component_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    cg.add(cg.RawExpression(f'// [ESP-Video] Component: {component_dir}'))
 
-required_stubs = [
-    "esp_cam_sensor.h",
-    "esp_cam_sensor_xclk.h",
-    "esp_sccb_i2c.h",
-    "esp_cam_sensor_types.h",
-]
+    # ========================================================================
+    # Vérification CMakeLists.txt (CRITIQUE)
+    # ========================================================================
+    cmake_file = os.path.join(component_dir, "CMakeLists.txt")
+    if not os.path.exists(cmake_file):
+        raise cv.Invalid(
+            f"[ESP-Video] CMakeLists.txt manquant dans {component_dir}\n"
+            "ESP-IDF a besoin de CMakeLists.txt pour compiler ESP-Video.\n"
+            "Ajoutez le fichier CMakeLists.txt dans components/esp_video/"
+        )
+    
+    cg.add(cg.RawExpression('// [ESP-Video] CMakeLists.txt trouvé'))
 
-for stub in required_stubs:
-    path = os.path.join(deps_dir, stub)
-    if os.path.exists(path):
-        print(f"[ESP-Video]   ✓ {stub}")
-    else:
-        print(f"[ESP-Video]   ❌ {stub} MANQUANT")
-        sys.exit(1)
+    # ========================================================================
+    # Vérification stubs
+    # ========================================================================
+    deps_include = os.path.join(component_dir, "deps", "include")
+    if not os.path.exists(deps_include):
+        raise cv.Invalid(
+            f"[ESP-Video] deps/include/ manquant dans {component_dir}\n"
+            "Créez le dossier deps/include/ et ajoutez les 4 stubs requis."
+        )
+    
+    required_stubs = [
+        "esp_cam_sensor.h",
+        "esp_cam_sensor_xclk.h",
+        "esp_sccb_i2c.h",
+        "esp_cam_sensor_types.h",
+    ]
+    
+    for stub in required_stubs:
+        stub_path = os.path.join(deps_include, stub)
+        if not os.path.exists(stub_path):
+            raise cv.Invalid(
+                f"[ESP-Video] Stub manquant: {stub}\n"
+                f"Ajoutez {stub} dans {deps_include}"
+            )
+    
+    cg.add(cg.RawExpression('// [ESP-Video] 4 stubs vérifiés'))
 
-# ===============================================================
-# Includes
-# ===============================================================
-env.Prepend(CPPPATH=[deps_dir])
-print(f"[ESP-Video] ➕ Include deps (priorité)")
+    # ========================================================================
+    # Includes
+    # ========================================================================
+    include_dirs = [
+        "deps/include",     # Stubs en priorité
+        "include",
+        "include/linux",
+        "include/sys",
+        "src",
+        "src/device",
+        "private_include",
+    ]
+    
+    for subdir in include_dirs:
+        abs_path = os.path.join(component_dir, subdir)
+        if os.path.exists(abs_path):
+            cg.add_build_flag(f"-I{abs_path}")
 
-include_paths = [
-    os.path.join(component_dir, "include"),
-    os.path.join(component_dir, "include", "linux"),
-    os.path.join(component_dir, "include", "sys"),
-    os.path.join(component_dir, "private_include"),
-    os.path.join(component_dir, "src"),
-    os.path.join(component_dir, "src", "device"),
-]
+    # ========================================================================
+    # FLAGS ESP-Video COMPLETS (avec H264 + JPEG)
+    # ========================================================================
+    flags = [
+        # Core ESP-Video
+        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+        "-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1",
+        
+        # H264 + JPEG (comme Tab5)
+        "-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",
+        "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",
+        
+        # Target
+        "-DCONFIG_IDF_TARGET_ESP32P4=1",
+    ]
+    
+    for flag in flags:
+        cg.add_build_flag(flag)
 
-for p in include_paths:
-    if os.path.exists(p):
-        env.Append(CPPPATH=[p])
-        print(f"[ESP-Video] ➕ {os.path.basename(p)}")
+    # ========================================================================
+    # Build script (optionnel - juste pour logs)
+    # ========================================================================
+    build_script_path = os.path.join(component_dir, "esp_video_build.py")
+    if os.path.exists(build_script_path):
+        # Ajouter comme extra_script PlatformIO (pas importé par Python)
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+        cg.add(cg.RawExpression('// [ESP-Video] build script ajouté'))
 
-# ===============================================================
-# COMPILER LES SOURCES ESP-VIDEO
-# ===============================================================
-print("[ESP-Video] 🔨 Compilation des sources...")
+    # ========================================================================
+    # Versions
+    # ========================================================================
+    cg.add_define("ESP_VIDEO_VERSION", '"1.3.1"')
+    cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
+    cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
-src_dir = os.path.join(component_dir, "src")
-
-# Liste complète des sources ESP-Video
-base_sources = [
-    "esp_video.c",
-    "esp_video_buffer.c",
-    "esp_video_init.c",
-    "esp_video_ioctl.c",
-    "esp_video_mman.c",
-    "esp_video_vfs.c",
-    "esp_video_cam.c",
-    "esp_video_isp_pipeline.c",
-]
-
-device_sources = [
-    "device/esp_video_csi_device.c",
-    "device/esp_video_isp_device.c",
-]
-
-# Sources conditionnelles (si H264/JPEG activés)
-optional_sources = [
-    "device/esp_video_jpeg_device.c",   # Si JPEG
-    "device/esp_video_h264_device.c",   # Si H264
-]
-
-all_sources = []
-
-# Ajouter sources de base
-for src in base_sources:
-    src_path = os.path.join(src_dir, src)
-    if os.path.exists(src_path):
-        all_sources.append(src_path)
-        print(f"[ESP-Video]   + {src}")
-
-# Ajouter sources device
-for src in device_sources:
-    src_path = os.path.join(src_dir, src)
-    if os.path.exists(src_path):
-        all_sources.append(src_path)
-        print(f"[ESP-Video]   + {src}")
-
-# Ajouter sources optionnelles si présentes
-for src in optional_sources:
-    src_path = os.path.join(src_dir, src)
-    if os.path.exists(src_path):
-        all_sources.append(src_path)
-        print(f"[ESP-Video]   + {src}")
-
-if not all_sources:
-    print("[ESP-Video] ❌ Aucune source trouvée!")
-    sys.exit(1)
-
-# Compiler les sources en bibliothèque
-print(f"[ESP-Video] 🔨 Compilation de {len(all_sources)} fichiers...")
-
-esp_video_lib = env.Library(
-    target=os.path.join("$BUILD_DIR", "libesp_video"),
-    source=all_sources
-)
-
-# Ajouter la lib au link
-env.Append(LIBS=[esp_video_lib])
-
-print(f"[ESP-Video] ✅ Bibliothèque créée: libesp_video.a")
-
-# ===============================================================
-# Flags
-# ===============================================================
-flags = [
-    "CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
-    "CONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1",
-    "CONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",
-    "CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",
-]
-
-env.Append(CPPDEFINES=flags)
-
-# ===============================================================
-# Fin
-# ===============================================================
-print("[ESP-Video] ✅ Configuration terminée")
-print(f"[ESP-Video] 📦 Flash devrait augmenter de ~25-30%\n")
+    cg.add(cg.RawExpression('// [ESP-Video] Configuration complete (H264+JPEG+CMake)'))
 
 
 
