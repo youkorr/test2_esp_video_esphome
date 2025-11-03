@@ -134,7 +134,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Ajout explicite des sources ESP-Video à la compilation
+    # Ajout explicite des sources ESP-Video (compatible ESPHome stable)
     # -----------------------------------------------------------------------
     source_files = [
         "src/esp_video.c",
@@ -154,7 +154,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     for src_file in source_files:
         full_path = os.path.join(component_dir, src_file)
         if os.path.exists(full_path):
-            cg.add_source_files(full_path)
+            cg.add_library("esp_video_srcs", [full_path])
             cg.add(cg.RawExpression(f'// [ESP-Video] Ajouté au build : {src_file}'))
         else:
             print(f"[ESP-Video] ⚠️ Fichier source manquant : {src_file}")
@@ -177,6 +177,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + sources + flags)'))
+
 
 
 
