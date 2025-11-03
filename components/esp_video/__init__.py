@@ -1,7 +1,7 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Avec support H264 + JPEG activé, auto-création des stubs
-et compilation automatique des sources (compatible ESPHome 2025.10.x)
+Support H264 + JPEG, auto-stubs et intégration directe au build ESP-IDF.
+Compatible ESPHome 2025.10.x (sans add_source_files / add_library).
 """
 
 import esphome.codegen as cg
@@ -32,14 +32,11 @@ async def to_code(config):
     if CORE.using_arduino:
         raise cv.Invalid("esp_video nécessite 'framework: type: esp-idf'")
 
-    # -----------------------------------------------------------------------
-    # Détection du chemin du composant
-    # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
     cg.add(cg.RawExpression(f'// [ESP-Video] Component: {component_dir}'))
 
     # -----------------------------------------------------------------------
-    # Vérification ou création du dossier deps/include
+    # Création automatique des stubs manquants
     # -----------------------------------------------------------------------
     deps_include = os.path.join(component_dir, "deps", "include")
     os.makedirs(deps_include, exist_ok=True)
@@ -52,7 +49,6 @@ async def to_code(config):
         "esp_cam_motor_types.h",
     ]
 
-    # Templates de stubs minimalistes
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -90,18 +86,17 @@ typedef struct { int dummy; } esp_cam_motor_t;
 """,
     }
 
-    # Génération automatique des stubs manquants
     for stub in required_stubs:
-        stub_path = os.path.join(deps_include, stub)
-        if not os.path.exists(stub_path):
-            with open(stub_path, "w", encoding="utf-8") as f:
+        path = os.path.join(deps_include, stub)
+        if not os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(stub_templates[stub])
             print(f"[ESP-Video] 🧩 Création automatique du stub manquant : {stub}")
         else:
             print(f"[ESP-Video] ✅ Stub trouvé : {stub}")
 
     # -----------------------------------------------------------------------
-    # Ajout des includes (ordre important)
+    # Ajout des includes
     # -----------------------------------------------------------------------
     include_dirs = [
         "deps/include",
@@ -112,14 +107,13 @@ typedef struct { int dummy; } esp_cam_motor_t;
         "src/device",
         "private_include",
     ]
-
     for subdir in include_dirs:
         abs_path = os.path.join(component_dir, subdir)
         if os.path.exists(abs_path):
             cg.add_build_flag(f"-I{abs_path}")
 
     # -----------------------------------------------------------------------
-    # FLAGS ESP-Video COMPLETS (H264 + JPEG)
+    # FLAGS ESP-Video (H264 + JPEG)
     # -----------------------------------------------------------------------
     flags = [
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
@@ -131,12 +125,11 @@ typedef struct { int dummy; } esp_cam_motor_t;
         "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",
         "-DCONFIG_IDF_TARGET_ESP32P4=1",
     ]
-
     for flag in flags:
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Ajout explicite des sources ESP-Video (via add_source_files)
+    # Ajout manuel des fichiers source via build_flags
     # -----------------------------------------------------------------------
     source_files = [
         "src/esp_video.c",
@@ -154,29 +147,23 @@ typedef struct { int dummy; } esp_cam_motor_t;
     ]
 
     existing_sources = []
-    for src_file in source_files:
-        full_path = os.path.join(component_dir, src_file)
-        if os.path.exists(full_path):
-            existing_sources.append(full_path)
-            cg.add(cg.RawExpression(f'// [ESP-Video] Ajouté au build : {src_file}'))
+    for src in source_files:
+        abs_src = os.path.join(component_dir, src)
+        if os.path.exists(abs_src):
+            cg.add_build_flag(f'"{abs_src}"')
+            existing_sources.append(src)
         else:
-            print(f"[ESP-Video] ⚠️ Fichier source manquant : {src_file}")
+            print(f"[ESP-Video] ⚠️ Fichier source manquant : {src}")
 
-    if existing_sources:
-        cg.add_source_files(existing_sources)
-        print(f"[ESP-Video] ✅ {len(existing_sources)} fichiers source ajoutés à la compilation (via add_source_files).")
-    else:
-        print("[ESP-Video] ❌ Aucun fichier source trouvé pour ESP-Video.")
+    print(f"[ESP-Video] ✅ {len(existing_sources)} fichiers source ajoutés à la compilation via build_flags.")
 
     # -----------------------------------------------------------------------
-    # Script post-build (optionnel)
+    # Script post-compilation optionnel
     # -----------------------------------------------------------------------
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-        cg.add(cg.RawExpression('// [ESP-Video] build script ajouté'))
-    else:
-        print(f"[ESP-Video] ⚠️ Aucun esp_video_build.py trouvé dans {component_dir}")
+        print(f"[ESP-Video] 🧩 Script post-build détecté : {build_script_path}")
 
     # -----------------------------------------------------------------------
     # Définitions globales
@@ -186,6 +173,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + sources + flags)'))
+
 
 
 
