@@ -6,7 +6,7 @@
 #include "mipi_dsi_cam_isp_config.h"
 
 extern "C" {
-  #include "esp_ipa_types.h"
+  //#include "esp_ipa_types.h"
   #include "driver/isp.h"
   #include <math.h>
   #include <string.h>
