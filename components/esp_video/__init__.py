@@ -1,6 +1,6 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Compatible ESPHome 2025.10.3 — injection automatique des sources C
+Compatible ESPHome 2025.10.3 — auto-stubs + intégration H264/JPEG + build_src_filter
 """
 
 import esphome.codegen as cg
@@ -31,14 +31,14 @@ async def to_code(config):
         raise cv.Invalid("esp_video nécessite 'framework: type: esp-idf'")
 
     # -----------------------------------------------------------------------
-    # Chemins
+    # Chemins du composant
     # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
     print(f"[ESP-Video] 🧠 Initialisation du composant ESP-Video (injection sources & includes)")
     cg.add(cg.RawExpression(f'// [ESP-Video] Component: {component_dir}'))
 
     # -----------------------------------------------------------------------
-    # Création automatique des stubs
+    # Vérification / création du dossier deps/include
     # -----------------------------------------------------------------------
     deps_include = os.path.join(component_dir, "deps", "include")
     os.makedirs(deps_include, exist_ok=True)
@@ -49,8 +49,13 @@ async def to_code(config):
         "esp_sccb_i2c.h",
         "esp_cam_sensor_types.h",
         "esp_cam_motor_types.h",
+        "esp_cam_motor.h",
+        "esp_h264_enc_single_hw.h",
     ]
 
+    # -----------------------------------------------------------------------
+    # Templates de stubs automatiques
+    # -----------------------------------------------------------------------
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -58,6 +63,7 @@ typedef struct { int dummy; } esp_cam_sensor_device_t;
 esp_err_t esp_cam_sensor_init(esp_cam_sensor_device_t **dev);
 esp_err_t esp_cam_sensor_deinit(esp_cam_sensor_device_t *dev);
 """,
+
         "esp_cam_sensor_xclk.h": """#pragma once
 #include "esp_err.h"
 #ifdef __cplusplus
@@ -69,12 +75,14 @@ esp_err_t esp_cam_sensor_stop_xclk(void);
 }
 #endif
 """,
+
         "esp_sccb_i2c.h": """#pragma once
 #include "esp_err.h"
 #include <stdint.h>
 esp_err_t esp_sccb_write(uint8_t addr, uint16_t reg, uint8_t data);
 esp_err_t esp_sccb_read(uint8_t addr, uint16_t reg, uint8_t *data);
 """,
+
         "esp_cam_sensor_types.h": """#pragma once
 typedef enum {
     ESP_CAM_SENSOR_TYPE_UNKNOWN = 0,
@@ -83,15 +91,30 @@ typedef enum {
     ESP_CAM_SENSOR_TYPE_OV5647
 } esp_cam_sensor_type_t;
 """,
+
         "esp_cam_motor_types.h": """#pragma once
 typedef struct { int dummy; } esp_cam_motor_t;
+""",
+
+        "esp_cam_motor.h": """#pragma once
+#include "esp_cam_motor_types.h"
+#include "esp_err.h"
+static inline esp_err_t esp_cam_motor_init(void) { return 0; }
+static inline void esp_cam_motor_deinit(void) {}
+""",
+
+        "esp_h264_enc_single_hw.h": """#pragma once
+#include "esp_err.h"
+typedef struct { int dummy; } esp_h264_enc_t;
+static inline esp_err_t esp_h264_enc_init(esp_h264_enc_t **enc) { return ESP_OK; }
+static inline esp_err_t esp_h264_enc_deinit(esp_h264_enc_t *enc) { return ESP_OK; }
 """,
     }
 
     for stub in required_stubs:
-        path = os.path.join(deps_include, stub)
-        if not os.path.exists(path):
-            with open(path, "w", encoding="utf-8") as f:
+        stub_path = os.path.join(deps_include, stub)
+        if not os.path.exists(stub_path):
+            with open(stub_path, "w", encoding="utf-8") as f:
                 f.write(stub_templates[stub])
             print(f"[ESP-Video] 🧩 Création automatique du stub manquant : {stub}")
         else:
@@ -115,7 +138,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
             cg.add_build_flag(f"-I{abs_path}")
 
     # -----------------------------------------------------------------------
-    # Flags de build
+    # Flags de compilation
     # -----------------------------------------------------------------------
     flags = [
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
@@ -131,7 +154,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Ajout des sources C via PlatformIO build_src_filter
+    # Ajout des sources C via build_src_filter (compatibilité ESPHome 2025.10.3)
     # -----------------------------------------------------------------------
     esp_video_srcs = [
         "src/esp_video.c",
@@ -158,7 +181,8 @@ typedef struct { int dummy; } esp_cam_motor_t;
             print(f"[ESP-Video] ⚠️ Fichier manquant: {src}")
 
     # Injection PlatformIO
-    cg.add_platformio_option("build_src_filter", " ".join(build_srcs))
+    if build_srcs:
+        cg.add_platformio_option("build_src_filter", " ".join(build_srcs))
 
     # -----------------------------------------------------------------------
     # Définitions globales
@@ -168,6 +192,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète'))
+
 
 
 
