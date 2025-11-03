@@ -1,8 +1,10 @@
 #include "mipi_dsi_cam.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-
 #include "mipi_dsi_cam_drivers_generated.h"
+
+#include "esp_video_init.h"   // 🔹 Framework esp_video (global CSI/DVP init)
+#include "esp_video_device.h" // 🔹 Pour esp_video_get_version()
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -14,7 +16,25 @@ static const char *const TAG = "mipi_dsi_cam";
 void MipiDsiCam::setup() {
   ESP_LOGI(TAG, "Init MIPI Camera");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
-  
+
+  // === 1️⃣ Initialisation du framework global ESP-VIDEO ===
+  esp_video_init_config_t cam_config = {
+      .csi  = nullptr,
+      .dvp  = nullptr,
+      .jpeg = nullptr,
+  };
+
+  esp_err_t ret = esp_video_init(&cam_config);
+  if (ret == ESP_OK) {
+    const char *version = esp_video_get_version();
+    ESP_LOGI(TAG, "ESP-Video framework initialized ✅ (version: %s)", version ? version : "unknown");
+  } else if (ret == ESP_ERR_INVALID_STATE) {
+    ESP_LOGW(TAG, "ESP-Video already initialized (skipped)");
+  } else {
+    ESP_LOGE(TAG, "ESP-Video init failed: 0x%x", ret);
+  }
+  // ========================================================
+
   if (this->reset_pin_ != nullptr) {
     this->reset_pin_->setup();
     this->reset_pin_->digital_write(false);
@@ -22,50 +42,49 @@ void MipiDsiCam::setup() {
     this->reset_pin_->digital_write(true);
     delay(20);
   }
-  
+
   if (!this->create_sensor_driver_()) {
     ESP_LOGE(TAG, "Driver creation failed");
     this->mark_failed();
     return;
   }
-  
+
   if (!this->init_sensor_()) {
     ESP_LOGE(TAG, "Sensor init failed");
     this->mark_failed();
     return;
   }
-  
+
   if (!this->init_ldo_()) {
     ESP_LOGE(TAG, "LDO init failed");
     this->mark_failed();
     return;
   }
-  
+
   if (!this->init_csi_()) {
     ESP_LOGE(TAG, "CSI init failed");
     this->mark_failed();
     return;
   }
-  
+
   if (!this->init_isp_()) {
     ESP_LOGE(TAG, "ISP init failed");
     this->mark_failed();
     return;
   }
-  
+
   if (!this->allocate_buffer_()) {
     ESP_LOGE(TAG, "Buffer alloc failed");
     this->mark_failed();
     return;
   }
-  
+
   this->initialized_ = true;
   ESP_LOGI(TAG, "Camera ready (%ux%u)", this->width_, this->height_);
 }
 
 bool MipiDsiCam::create_sensor_driver_() {
   ESP_LOGI(TAG, "Creating driver for: %s", this->sensor_type_.c_str());
-  
   this->sensor_driver_ = create_sensor_driver(this->sensor_type_, this);
   
   if (this->sensor_driver_ == nullptr) {
@@ -82,70 +101,66 @@ bool MipiDsiCam::init_sensor_() {
     ESP_LOGE(TAG, "No sensor driver");
     return false;
   }
-  
+
   ESP_LOGI(TAG, "Init sensor: %s", this->sensor_driver_->get_name());
-  
   this->width_ = this->sensor_driver_->get_width();
   this->height_ = this->sensor_driver_->get_height();
   this->lane_count_ = this->sensor_driver_->get_lane_count();
   this->bayer_pattern_ = this->sensor_driver_->get_bayer_pattern();
   this->lane_bitrate_mbps_ = this->sensor_driver_->get_lane_bitrate_mbps();
-  
+
   ESP_LOGI(TAG, "  Resolution: %ux%u", this->width_, this->height_);
   ESP_LOGI(TAG, "  Lanes: %u", this->lane_count_);
   ESP_LOGI(TAG, "  Bayer: %u", this->bayer_pattern_);
   ESP_LOGI(TAG, "  Bitrate: %u Mbps", this->lane_bitrate_mbps_);
-  
+
   uint16_t pid = 0;
   esp_err_t ret = this->sensor_driver_->read_id(&pid);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to read sensor ID");
     return false;
   }
-  
+
   if (pid != this->sensor_driver_->get_pid()) {
-    ESP_LOGE(TAG, "Wrong PID: 0x%04X (expected 0x%04X)", 
-             pid, this->sensor_driver_->get_pid());
+    ESP_LOGE(TAG, "Wrong PID: 0x%04X (expected 0x%04X)", pid, this->sensor_driver_->get_pid());
     return false;
   }
-  
+
   ESP_LOGI(TAG, "Sensor ID: 0x%04X", pid);
-  
+
   ret = this->sensor_driver_->init();
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Sensor init failed: %d", ret);
     return false;
   }
-  
+
   ESP_LOGI(TAG, "Sensor initialized");
-  
   delay(200);
   ESP_LOGI(TAG, "Sensor stabilized");
-  
   return true;
 }
 
 bool MipiDsiCam::init_ldo_() {
   ESP_LOGI(TAG, "Init LDO MIPI");
-  
+
   esp_ldo_channel_config_t ldo_config = {
-    .chan_id = 3,
-    .voltage_mv = 2500,
+      .chan_id = 3,
+      .voltage_mv = 2500,
   };
-  
+
   esp_err_t ret = esp_ldo_acquire_channel(&ldo_config, &this->ldo_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "LDO failed: %d", ret);
     return false;
   }
-  
+
   ESP_LOGI(TAG, "LDO OK (2.5V)");
   return true;
 }
 
 bool MipiDsiCam::init_csi_() {
   ESP_LOGI(TAG, "Init MIPI-CSI");
-  
+
   esp_cam_ctlr_csi_config_t csi_config = {};
   csi_config.ctlr_id = 0;
   csi_config.clk_src = MIPI_CSI_PHY_CLK_SRC_DEFAULT;
@@ -157,39 +172,39 @@ bool MipiDsiCam::init_csi_() {
   csi_config.data_lane_num = this->lane_count_;
   csi_config.byte_swap_en = false;
   csi_config.queue_items = 10;
-  
+
   esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->csi_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "CSI failed: %d", ret);
     return false;
   }
-  
+
   esp_cam_ctlr_evt_cbs_t callbacks = {
-    .on_get_new_trans = MipiDsiCam::on_csi_new_frame_,
-    .on_trans_finished = MipiDsiCam::on_csi_frame_done_,
+      .on_get_new_trans = MipiDsiCam::on_csi_new_frame_,
+      .on_trans_finished = MipiDsiCam::on_csi_frame_done_,
   };
-  
+
   ret = esp_cam_ctlr_register_event_callbacks(this->csi_handle_, &callbacks, this);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Callbacks failed: %d", ret);
     return false;
   }
-  
+
   ret = esp_cam_ctlr_enable(this->csi_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Enable CSI failed: %d", ret);
     return false;
   }
-  
+
   ESP_LOGI(TAG, "CSI OK");
   return true;
 }
 
 bool MipiDsiCam::init_isp_() {
   ESP_LOGI(TAG, "Init ISP");
-  
+
   uint32_t isp_clock_hz = 120000000;
-  
+
   esp_isp_processor_cfg_t isp_config = {};
   isp_config.clk_src = ISP_CLK_SRC_DEFAULT;
   isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
@@ -201,13 +216,13 @@ bool MipiDsiCam::init_isp_() {
   isp_config.has_line_end_packet = false;
   isp_config.clk_hz = isp_clock_hz;
   isp_config.bayer_order = (color_raw_element_order_t)this->bayer_pattern_;
-  
+
   esp_err_t ret = esp_isp_new_processor(&isp_config, &this->isp_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "ISP creation failed: 0x%x", ret);
     return false;
   }
-  
+
   ret = esp_isp_enable(this->isp_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "ISP enable failed: 0x%x", ret);
@@ -215,29 +230,24 @@ bool MipiDsiCam::init_isp_() {
     this->isp_handle_ = nullptr;
     return false;
   }
-  
+
   ESP_LOGI(TAG, "ISP OK");
+  ESP_LOGI(TAG, "ESP-Video framework active ✅");
   return true;
 }
 
 bool MipiDsiCam::allocate_buffer_() {
   this->frame_buffer_size_ = this->width_ * this->height_ * 2;
   
-  this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(
-    64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
-  );
-  
-  this->frame_buffers_[1] = (uint8_t*)heap_caps_aligned_alloc(
-    64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
-  );
+  this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
+  this->frame_buffers_[1] = (uint8_t*)heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
   
   if (!this->frame_buffers_[0] || !this->frame_buffers_[1]) {
     ESP_LOGE(TAG, "Buffer alloc failed");
     return false;
   }
-  
+
   this->current_frame_buffer_ = this->frame_buffers_[0];
-  
   ESP_LOGI(TAG, "Buffers: 2x%u bytes", this->frame_buffer_size_);
   return true;
 }
@@ -265,7 +275,7 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
     cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
     cam->total_frames_received_++;
   }
-  
+
   return false;
 }
 
@@ -273,12 +283,11 @@ bool MipiDsiCam::start_streaming() {
   if (!this->initialized_ || this->streaming_) {
     return false;
   }
-  
+
   ESP_LOGI(TAG, "Start streaming");
-  
   this->total_frames_received_ = 0;
   this->last_frame_log_time_ = millis();
-  
+
   if (this->sensor_driver_) {
     esp_err_t ret = this->sensor_driver_->start_stream();
     if (ret != ESP_OK) {
@@ -287,13 +296,13 @@ bool MipiDsiCam::start_streaming() {
     }
     delay(100);
   }
-  
+
   esp_err_t ret = esp_cam_ctlr_start(this->csi_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "CSI start failed: %d", ret);
     return false;
   }
-  
+
   this->streaming_ = true;
   ESP_LOGI(TAG, "Streaming active");
   return true;
@@ -303,13 +312,13 @@ bool MipiDsiCam::stop_streaming() {
   if (!this->streaming_) {
     return true;
   }
-  
+
   esp_cam_ctlr_stop(this->csi_handle_);
-  
+
   if (this->sensor_driver_) {
     this->sensor_driver_->stop_stream();
   }
-  
+
   this->streaming_ = false;
   ESP_LOGI(TAG, "Streaming stopped");
   return true;
@@ -319,14 +328,14 @@ bool MipiDsiCam::capture_frame() {
   if (!this->streaming_) {
     return false;
   }
-  
+
   bool was_ready = this->frame_ready_;
   if (was_ready) {
     this->frame_ready_ = false;
     uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
     this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
   }
-  
+
   return was_ready;
 }
 
@@ -334,21 +343,17 @@ void MipiDsiCam::loop() {
   if (this->streaming_) {
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
-    
-    if (this->frame_ready_) {
-      ready_count++;
-    } else {
-      not_ready_count++;
-    }
-    
+
+    if (this->frame_ready_) ready_count++;
+    else not_ready_count++;
+
     uint32_t now = millis();
     if (now - this->last_frame_log_time_ >= 3000) {
       float sensor_fps = this->total_frames_received_ / 3.0f;
       float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
-      
-      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", 
-               sensor_fps, ready_rate);
-      
+
+      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", sensor_fps, ready_rate);
+
       this->total_frames_received_ = 0;
       this->last_frame_log_time_ = now;
       ready_count = 0;
@@ -376,3 +381,5 @@ void MipiDsiCam::dump_config() {
 }  // namespace esphome
 
 #endif  // USE_ESP32_VARIANT_ESP32P4
+
+
