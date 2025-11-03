@@ -3,8 +3,13 @@
 #include "esphome/core/application.h"
 #include "mipi_dsi_cam_drivers_generated.h"
 
-#include "esp_video_init.h"   // 🔹 Framework esp_video (global CSI/DVP init)
-#include "esp_video_device.h" // 🔹 Pour esp_video_get_version()
+#include "esp_video_init.h"   // 🔹 Framework esp_video global (CSI/DVP)
+#ifdef __has_include
+  #if __has_include("esp_video_device.h")
+    #include "esp_video_device.h"
+    #define ESP_VIDEO_HAS_VERSION 1
+  #endif
+#endif
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -20,14 +25,18 @@ void MipiDsiCam::setup() {
   // === 1️⃣ Initialisation du framework global ESP-VIDEO ===
   esp_video_init_config_t cam_config = {
       .csi  = nullptr,
-      .dvp  = nullptr,
       .jpeg = nullptr,
   };
 
   esp_err_t ret = esp_video_init(&cam_config);
   if (ret == ESP_OK) {
+  #ifdef ESP_VIDEO_HAS_VERSION
     const char *version = esp_video_get_version();
-    ESP_LOGI(TAG, "ESP-Video framework initialized ✅ (version: %s)", version ? version : "unknown");
+    ESP_LOGI(TAG, "ESP-Video framework initialized ✅ (version: %s)",
+             version ? version : "unknown");
+  #else
+    ESP_LOGI(TAG, "ESP-Video framework initialized ✅");
+  #endif
   } else if (ret == ESP_ERR_INVALID_STATE) {
     ESP_LOGW(TAG, "ESP-Video already initialized (skipped)");
   } else {
@@ -83,15 +92,19 @@ void MipiDsiCam::setup() {
   ESP_LOGI(TAG, "Camera ready (%ux%u)", this->width_, this->height_);
 }
 
+// -----------------------------------------------------------
+//           CONFIGURATION DU DRIVER ET INITIALISATIONS
+// -----------------------------------------------------------
+
 bool MipiDsiCam::create_sensor_driver_() {
   ESP_LOGI(TAG, "Creating driver for: %s", this->sensor_type_.c_str());
   this->sensor_driver_ = create_sensor_driver(this->sensor_type_, this);
-  
+
   if (this->sensor_driver_ == nullptr) {
     ESP_LOGE(TAG, "Unknown or unavailable sensor: %s", this->sensor_type_.c_str());
     return false;
   }
-  
+
   ESP_LOGI(TAG, "Driver created for: %s", this->sensor_driver_->get_name());
   return true;
 }
@@ -122,7 +135,8 @@ bool MipiDsiCam::init_sensor_() {
   }
 
   if (pid != this->sensor_driver_->get_pid()) {
-    ESP_LOGE(TAG, "Wrong PID: 0x%04X (expected 0x%04X)", pid, this->sensor_driver_->get_pid());
+    ESP_LOGE(TAG, "Wrong PID: 0x%04X (expected 0x%04X)", pid,
+             this->sensor_driver_->get_pid());
     return false;
   }
 
@@ -236,12 +250,18 @@ bool MipiDsiCam::init_isp_() {
   return true;
 }
 
+// -----------------------------------------------------------
+//                   GESTION DES FRAMES
+// -----------------------------------------------------------
+
 bool MipiDsiCam::allocate_buffer_() {
   this->frame_buffer_size_ = this->width_ * this->height_ * 2;
-  
-  this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
-  this->frame_buffers_[1] = (uint8_t*)heap_caps_aligned_alloc(64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
-  
+
+  this->frame_buffers_[0] = (uint8_t *)heap_caps_aligned_alloc(
+      64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
+  this->frame_buffers_[1] = (uint8_t *)heap_caps_aligned_alloc(
+      64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM);
+
   if (!this->frame_buffers_[0] || !this->frame_buffers_[1]) {
     ESP_LOGE(TAG, "Buffer alloc failed");
     return false;
@@ -253,23 +273,21 @@ bool MipiDsiCam::allocate_buffer_() {
 }
 
 bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
-  esp_cam_ctlr_handle_t handle,
-  esp_cam_ctlr_trans_t *trans,
-  void *user_data
-) {
-  MipiDsiCam *cam = (MipiDsiCam*)user_data;
+    esp_cam_ctlr_handle_t handle,
+    esp_cam_ctlr_trans_t *trans,
+    void *user_data) {
+  MipiDsiCam *cam = (MipiDsiCam *)user_data;
   trans->buffer = cam->frame_buffers_[cam->buffer_index_];
   trans->buflen = cam->frame_buffer_size_;
   return false;
 }
 
 bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
-  esp_cam_ctlr_handle_t handle,
-  esp_cam_ctlr_trans_t *trans,
-  void *user_data
-) {
-  MipiDsiCam *cam = (MipiDsiCam*)user_data;
-  
+    esp_cam_ctlr_handle_t handle,
+    esp_cam_ctlr_trans_t *trans,
+    void *user_data) {
+  MipiDsiCam *cam = (MipiDsiCam *)user_data;
+
   if (trans->received_size > 0) {
     cam->frame_ready_ = true;
     cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
@@ -278,6 +296,10 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
 
   return false;
 }
+
+// -----------------------------------------------------------
+//                   STREAMING (CAPTURE EN DIRECT)
+// -----------------------------------------------------------
 
 bool MipiDsiCam::start_streaming() {
   if (!this->initialized_ || this->streaming_) {
@@ -304,7 +326,7 @@ bool MipiDsiCam::start_streaming() {
   }
 
   this->streaming_ = true;
-  ESP_LOGI(TAG, "Streaming active");
+  ESP_LOGI(TAG, "Streaming active (DMA CSI démarré ✅)");
   return true;
 }
 
@@ -339,20 +361,28 @@ bool MipiDsiCam::capture_frame() {
   return was_ready;
 }
 
+// -----------------------------------------------------------
+//                         LOOP
+// -----------------------------------------------------------
+
 void MipiDsiCam::loop() {
   if (this->streaming_) {
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
 
-    if (this->frame_ready_) ready_count++;
-    else not_ready_count++;
+    if (this->frame_ready_)
+      ready_count++;
+    else
+      not_ready_count++;
 
     uint32_t now = millis();
     if (now - this->last_frame_log_time_ >= 3000) {
       float sensor_fps = this->total_frames_received_ / 3.0f;
-      float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
+      float ready_rate =
+          (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
 
-      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", sensor_fps, ready_rate);
+      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", sensor_fps,
+               ready_rate);
 
       this->total_frames_received_ = 0;
       this->last_frame_log_time_ = now;
@@ -362,13 +392,18 @@ void MipiDsiCam::loop() {
   }
 }
 
+// -----------------------------------------------------------
+//                     CONFIGURATION DUMP
+// -----------------------------------------------------------
+
 void MipiDsiCam::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI Camera:");
   if (this->sensor_driver_) {
     ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_driver_->get_name());
     ESP_LOGCONFIG(TAG, "  PID: 0x%04X", this->sensor_driver_->get_pid());
   } else {
-    ESP_LOGCONFIG(TAG, "  Sensor: %s (driver not loaded)", this->sensor_type_.c_str());
+    ESP_LOGCONFIG(TAG, "  Sensor: %s (driver not loaded)",
+                  this->sensor_type_.c_str());
   }
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
   ESP_LOGCONFIG(TAG, "  Format: RGB565");
@@ -381,5 +416,7 @@ void MipiDsiCam::dump_config() {
 }  // namespace esphome
 
 #endif  // USE_ESP32_VARIANT_ESP32P4
+
+
 
 
