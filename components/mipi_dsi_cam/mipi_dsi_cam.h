@@ -11,18 +11,7 @@ extern "C" {
   #include "esp_cam_ctlr_csi.h"
   #include "driver/isp.h"
   #include "esp_ldo_regulator.h"
-  #include "esp_video_init.h"
-  #include "esp_video_device.h"
-  #include "linux/videodev2.h"
-  #include "esp_cam_sensor.h"
-  #include "driver/ppa.h"  // NOUVEAU - PPA comme Tab5
-  #include "esp_heap_caps.h"
-
 }
-  #include <fcntl.h>
-  #include <sys/ioctl.h>
-  #include <sys/mman.h>
-  #include <unistd.h>
 #endif
 
 namespace esphome {
@@ -32,8 +21,6 @@ enum PixelFormat {
   PIXEL_FORMAT_RGB565 = 0,
   PIXEL_FORMAT_YUV422 = 1,
   PIXEL_FORMAT_RAW8 = 2,
-  PIXEL_FORMAT_JPEG = 3,
-  PIXEL_FORMAT_H264 = 4,
 };
 
 class ISensorDriver {
@@ -151,6 +138,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
 
 
 
