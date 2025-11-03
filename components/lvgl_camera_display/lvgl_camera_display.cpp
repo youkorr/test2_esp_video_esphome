@@ -87,7 +87,7 @@ void LVGLCameraDisplay::camera_task_() {
       last_log_time = now;
     }
 
-    // Respiration CPU (~500Hz)
+    // Respiration CPU (~500 Hz)
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 
@@ -114,18 +114,9 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-#if defined(USE_LVGL)
-  if (lvgl_lock()) {
-#endif
-
-  // ⚡ Directement : zéro copie du buffer caméra
+  // ⚡ Directement : zéro copie du buffer caméra vers LVGL
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
-
-#if defined(USE_LVGL)
-    lvgl_unlock();
-  }
-#endif
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
