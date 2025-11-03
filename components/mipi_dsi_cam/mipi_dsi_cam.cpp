@@ -163,54 +163,48 @@ bool MipiDsiCam::init_sensor_() {
 // ============================================================================
 
 bool MipiDsiCam::init_esp_video_() {
-  ESP_LOGI(TAG, "Init ESP-Video (CSI + DVP + JPEG) ...");
+  ESP_LOGI(TAG, "Init ESP-Video (CSI + JPEG) ...");
 
-  // ---- CSI (MIPI-CSI) ------------------------------------------------------
-  // SCCB/I2C géré par ESPHome → on n'initialise pas l’I2C ici
+  // --- SCCB (I²C du capteur) ---
   esp_video_init_sccb_config_t sccb_cfg = {};
-  sccb_cfg.init_sccb  = false;
+  sccb_cfg.init_sccb  = false;      // on laisse ESPHome gérer l'I²C
   sccb_cfg.i2c_handle = nullptr;
 
+  // --- MIPI-CSI (interface capteur) ---
   esp_video_init_csi_config_t csi_cfg = {};
   csi_cfg.sccb_config = sccb_cfg;
-  csi_cfg.reset_pin   = GPIO_NUM_NC;  // pas de RESET géré ici
-  csi_cfg.pwdn_pin    = GPIO_NUM_NC;  // pas de PWDN géré ici
+  csi_cfg.reset_pin   = GPIO_NUM_NC;  // pas de pin reset câblé
+  csi_cfg.pwdn_pin    = GPIO_NUM_NC;  // pas de pin power-down câblé
 
-  // ---- DVP (par ex. chemin ISP DVP) ---------------------------------------
-  esp_video_init_dvp_config_t dvp_cfg = {};
-  dvp_cfg.reset_pin = GPIO_NUM_NC;
-  dvp_cfg.pwdn_pin  = GPIO_NUM_NC;
-
-  // ---- JPEG (accélérateur matériel) ---------------------------------------
+  // --- JPEG encoder matériel ---
   esp_video_init_jpeg_config_t jpeg_cfg = {};
-  // (laisser par défaut, l’init interne d’ESP-Video fait le reste)
+  // Optionnel : qualité de compression JPEG
+  // jpeg_cfg.quality = 80;
 
-  // ---- Config globale ------------------------------------------------------
+  // --- Configuration globale ESP-Video ---
   esp_video_init_config_t init_cfg = {};
-#if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
   init_cfg.csi  = &csi_cfg;
-#else
-  init_cfg.csi  = nullptr;
-#endif
+  init_cfg.jpeg = &jpeg_cfg;   // possible même si non utilisé directement
 
-#if (CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE || CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE)
-  init_cfg.dvp  = &dvp_cfg;
-#else
-  init_cfg.dvp  = nullptr;
-#endif
-
-#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
-  init_cfg.jpeg = &jpeg_cfg;
-#else
-  init_cfg.jpeg = nullptr;
-#endif
-
-  // ---- Appel unique d'initialisation --------------------------------------
+  // --- Initialisation ESP-Video ---
   esp_err_t err = esp_video_init(&init_cfg);
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "esp_video_init() a échoué: %s", esp_err_to_name(err));
+    ESP_LOGE(TAG, "esp_video_init() a échoué : %s", esp_err_to_name(err));
     return false;
   }
+
+  // --- Logs récapitulatifs ---
+  ESP_LOGI(TAG, "ESP-Video initialisé avec succès ✓");
+  ESP_LOGI(TAG, "  CSI  : %s (id=%d)", ESP_VIDEO_MIPI_CSI_DEVICE_NAME, ESP_VIDEO_MIPI_CSI_DEVICE_ID);
+#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
+  ESP_LOGI(TAG, "  JPEG : %s (id=%d)", ESP_VIDEO_JPEG_DEVICE_NAME, ESP_VIDEO_JPEG_DEVICE_ID);
+#else
+  ESP_LOGI(TAG, "  JPEG : OFF (non activé)");
+#endif
+
+  return true;
+}
+
 
   // ---- Logs utiles ---------------------------------------------------------
   ESP_LOGI(TAG, "ESP-Video OK");
