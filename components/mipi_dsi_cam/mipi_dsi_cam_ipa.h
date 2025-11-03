@@ -2,11 +2,14 @@
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
+// Include configuration des constantes ISP (si nécessaire)
+#include "mipi_dsi_cam_isp_config.h"
+
 extern "C" {
   #include "esp_ipa_types.h"
-
   #include "driver/isp.h"
   #include <math.h>
+  #include <string.h>
 }
 
 #include <vector>
@@ -18,68 +21,93 @@ namespace mipi_dsi_cam {
 // Configuration des algorithmes IPA
 struct IPAConfig {
   // Auto White Balance
-  bool awb_enabled = true;
-  float awb_speed = 0.1f;  // Vitesse d'adaptation (0.0-1.0)
+  bool awb_enabled;
+  float awb_speed;  // Vitesse d'adaptation (0.0-1.0)
   
   // Auto Exposure
-  bool ae_enabled = true;
-  uint32_t ae_target_luminance = 128;  // Cible 0-255
-  uint32_t ae_tolerance = 20;
-  float ae_speed = 0.15f;
+  bool ae_enabled;
+  uint32_t ae_target_luminance;  // Cible 0-255
+  uint32_t ae_tolerance;
+  float ae_speed;
   
   // Auto Focus (si supporté)
-  bool af_enabled = false;
+  bool af_enabled;
   
   // Histogram
-  bool hist_enabled = true;
+  bool hist_enabled;
   
   // Sharpen
-  bool sharpen_enabled = true;
-  uint8_t sharpen_strength = 3;  // 0-10
+  bool sharpen_enabled;
+  uint8_t sharpen_strength;  // 0-10
   
   // Denoise (Bayer Filter)
-  bool denoise_enabled = true;
-  uint8_t denoise_level = 2;  // 0-10
+  bool denoise_enabled;
+  uint8_t denoise_level;  // 0-10
   
   // Demosaic
-  bool demosaic_enabled = true;
-  float demosaic_gradient_ratio = 0.5f;
+  bool demosaic_enabled;
+  float demosaic_gradient_ratio;
   
   // Color Correction Matrix
-  bool ccm_enabled = true;
+  bool ccm_enabled;
   
   // Gamma
-  bool gamma_enabled = true;
-  float gamma_value = 2.2f;
+  bool gamma_enabled;
+  float gamma_value;
   
   // Color adjustments
-  uint32_t brightness = 50;  // 0-100
-  uint32_t contrast = 50;    // 0-100
-  uint32_t saturation = 50;  // 0-100
-  int32_t hue = 0;           // -180 to +180
+  uint32_t brightness;  // 0-100
+  uint32_t contrast;    // 0-100
+  uint32_t saturation;  // 0-100
+  int32_t hue;          // -180 to +180
+
+  // Constructeur pour initialisation par défaut
+  IPAConfig() : 
+    awb_enabled(true), awb_speed(0.1f),
+    ae_enabled(true), ae_target_luminance(128), ae_tolerance(20), ae_speed(0.15f),
+    af_enabled(false),
+    hist_enabled(true),
+    sharpen_enabled(true), sharpen_strength(3),
+    denoise_enabled(true), denoise_level(2),
+    demosaic_enabled(true), demosaic_gradient_ratio(0.5f),
+    ccm_enabled(true),
+    gamma_enabled(true), gamma_value(2.2f),
+    brightness(50), contrast(50), saturation(50), hue(0)
+  {}
 };
 
 // Statistiques historiques pour les algorithmes adaptatifs
 struct IPAHistory {
   // AWB history
-  float prev_red_gain = 1.0f;
-  float prev_blue_gain = 1.0f;
-  uint32_t prev_color_temp = 5000;
+  float prev_red_gain;
+  float prev_blue_gain;
+  uint32_t prev_color_temp;
   
   // AE history
-  uint32_t prev_exposure = 10000;
-  float prev_gain = 1.0f;
-  uint32_t prev_avg_luminance = 128;
+  uint32_t prev_exposure;
+  float prev_gain;
+  uint32_t prev_avg_luminance;
   
   // Counters
-  uint32_t frame_count = 0;
-  uint32_t ae_stable_frames = 0;
-  uint32_t awb_stable_frames = 0;
+  uint32_t frame_count;
+  uint32_t ae_stable_frames;
+  uint32_t awb_stable_frames;
+
+  // Constructeur
+  IPAHistory() :
+    prev_red_gain(1.0f), prev_blue_gain(1.0f), prev_color_temp(5000),
+    prev_exposure(10000), prev_gain(1.0f), prev_avg_luminance(128),
+    frame_count(0), ae_stable_frames(0), awb_stable_frames(0)
+  {}
 };
 
 class CompleteIPA {
 public:
-  CompleteIPA() : config_(), history_() {}
+  CompleteIPA() {
+    config_ = IPAConfig();
+    history_ = IPAHistory();
+    memset(&sensor_info_, 0, sizeof(sensor_info_));
+  }
   
   // Configuration
   void set_config(const IPAConfig &config) { config_ = config; }
