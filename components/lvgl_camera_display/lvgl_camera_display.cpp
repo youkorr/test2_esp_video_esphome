@@ -3,7 +3,7 @@
 #include "esphome/core/application.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esphome/components/lvgl/lvgl_esphome.h"  // Pour lv_async_call()
+#include "esphome/components/lvgl/lvgl_esphome.h"  // pour lv_async_call()
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -24,15 +24,15 @@ void LVGLCameraDisplay::setup() {
   this->first_update_ = true;
   this->stop_task_flag_ = false;
 
-  ESP_LOGI(TAG, "✅ Démarrage de la tâche caméra LVGL...");
+  ESP_LOGI(TAG, "✅ Démarrage de la tâche caméra LVGL (core 0)...");
   BaseType_t res = xTaskCreatePinnedToCore(
       LVGLCameraDisplay::camera_task_trampoline_,
       "lvgl_cam_task",
       8192,  // stack size
       this,
-      5,     // priorité moyenne
+      4,     // priorité moyenne
       &this->camera_task_handle_,
-      1      // core 1 : laisse core 0 pour Wi-Fi et ESPHome
+      0      // ⚙️ core 0 = même cœur que LVGL → pas de watchdog
   );
 
   if (res != pdPASS) {
@@ -75,7 +75,7 @@ void LVGLCameraDisplay::camera_task_() {
 
     // Si une nouvelle frame est prête → planifier affichage
     if (this->camera_->capture_frame()) {
-      // on planifie la mise à jour du canvas dans le thread LVGL
+      // ⚡ Planifie la mise à jour du canvas dans le thread LVGL (thread-safe)
       lv_async_call([](void *user) {
         auto *self = static_cast<LVGLCameraDisplay *>(user);
         self->update_canvas_();
@@ -93,8 +93,8 @@ void LVGLCameraDisplay::camera_task_() {
       last_log_time = now;
     }
 
-    // Respiration CPU (~500 Hz)
-    vTaskDelay(pdMS_TO_TICKS(2));
+    // Respiration CPU (~100 FPS max, évite le watchdog)
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 
   ESP_LOGW(TAG, "🛑 Tâche caméra LVGL arrêtée");
@@ -120,7 +120,7 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // ⚡ Exécuté dans le contexte LVGL (thread principal)
+  // ⚙️ Exécuté dans le contexte LVGL → thread principal, sans verrou
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 }
