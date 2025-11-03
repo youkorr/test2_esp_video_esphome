@@ -31,7 +31,7 @@ void LVGLCameraDisplay::setup() {
       this,
       5,     // priorité moyenne
       &this->camera_task_handle_,
-      1      // core 1 : laisse core 0 pour Wi-Fi et ESPHome
+      1      // core 1 : laisse core 0 au Wi-Fi et ESPHome
   );
 
   if (res != pdPASS) {
@@ -44,7 +44,7 @@ void LVGLCameraDisplay::setup() {
 }
 
 void LVGLCameraDisplay::loop() {
-  // Rien ici : tout se fait dans la tâche FreeRTOS
+  // Rien ici — tout se fait dans la tâche FreeRTOS
 }
 
 void LVGLCameraDisplay::dump_config() {
@@ -78,7 +78,7 @@ void LVGLCameraDisplay::camera_task_() {
       this->frame_count_++;
     }
 
-    // Affiche les FPS toutes les 3 secondes
+    // Log des FPS toutes les 3 secondes
     uint32_t now = millis();
     if (now - last_log_time >= 3000) {
       float fps = (float)this->frame_count_ / ((now - last_log_time) / 1000.0f);
@@ -87,7 +87,7 @@ void LVGLCameraDisplay::camera_task_() {
       last_log_time = now;
     }
 
-    // Laisser respirer le CPU (≈500 Hz)
+    // Respiration CPU (~500Hz)
     vTaskDelay(pdMS_TO_TICKS(2));
   }
 
@@ -106,7 +106,7 @@ void LVGLCameraDisplay::update_canvas_() {
   if (img_data == nullptr)
     return;
 
-  // Premier affichage → debug
+  // Premier affichage → debug info
   if (this->first_update_) {
     ESP_LOGI(TAG, "🖼️ Premier update canvas (FreeRTOS mode, direct buffer):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
@@ -115,15 +115,16 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
 #if defined(USE_LVGL)
-  lvgl_acquire();
+  if (lvgl_lock()) {
 #endif
 
-  // ⚡ Utilise directement le buffer caméra (zéro copie)
+  // ⚡ Directement : zéro copie du buffer caméra
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
 #if defined(USE_LVGL)
-  lvgl_release();
+    lvgl_unlock();
+  }
 #endif
 }
 
@@ -145,6 +146,7 @@ void LVGLCameraDisplay::stop_task() {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
 
 
 
