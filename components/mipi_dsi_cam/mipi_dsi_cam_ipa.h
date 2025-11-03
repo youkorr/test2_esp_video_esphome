@@ -3,7 +3,8 @@
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
 extern "C" {
-  #include "ipa_types.h"
+  #include "esp_ipa_types.h"
+
   #include "driver/isp.h"
   #include <math.h>
 }
