@@ -1,10 +1,3 @@
-// ============================================
-// CORRECTIONS PRINCIPALES :
-// 1. Logs réduits (30s au lieu de 3s, LOGD au lieu de LOGI)
-// 2. Pas de démarrage automatique du streaming
-// 3. Méthodes publiques pour contrôle manuel
-// ============================================
-
 #include "mipi_dsi_cam.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
@@ -12,8 +5,6 @@
 #include "mipi_dsi_cam_drivers_generated.h"
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
-
-#include "driver/ledc.h"
 
 namespace esphome {
 namespace mipi_dsi_cam {
@@ -44,16 +35,6 @@ void MipiDsiCam::setup() {
     return;
   }
   
-  if (this->has_external_clock()) {
-    if (!this->init_external_clock_()) {
-      ESP_LOGE(TAG, "External clock init failed");
-      this->mark_failed();
-      return;
-    }
-  } else {
-    ESP_LOGI(TAG, "No external clock configured - sensor must use internal clock");
-  }
-  
   if (!this->init_ldo_()) {
     ESP_LOGE(TAG, "LDO init failed");
     this->mark_failed();
@@ -79,24 +60,8 @@ void MipiDsiCam::setup() {
   }
   
   this->initialized_ = true;
-  
-  // ✅ CORRECTION : Activer V4L2 mais NE PAS démarrer le streaming automatiquement
-  if (this->enable_v4l2_on_setup_) {
-    ESP_LOGI(TAG, "Auto-enabling V4L2 adapter (streaming will be manual)");
-    this->enable_v4l2_adapter();
-  }
-  
-  // Initialiser ISP Pipeline si demandé
-  if (this->enable_isp_on_setup_) {
-    ESP_LOGI(TAG, "Auto-enabling ISP pipeline");
-    this->enable_isp_pipeline();
-  }
-  
-  ESP_LOGI(TAG, "✅ Camera ready (%ux%u) - streaming stopped, use start_streaming() to begin", 
-           this->width_, this->height_);
+  ESP_LOGI(TAG, "Camera ready (%ux%u)", this->width_, this->height_);
 }
-
-// ... (garder toutes les autres méthodes init identiques) ...
 
 bool MipiDsiCam::create_sensor_driver_() {
   ESP_LOGI(TAG, "Creating driver for: %s", this->sensor_type_.c_str());
@@ -157,42 +122,6 @@ bool MipiDsiCam::init_sensor_() {
   delay(200);
   ESP_LOGI(TAG, "Sensor stabilized");
   
-  return true;
-}
-
-bool MipiDsiCam::init_external_clock_() {
-  ESP_LOGI(TAG, "Init external clock on GPIO%d @ %u Hz", 
-           this->external_clock_pin_, this->external_clock_frequency_);
-  
-  ledc_timer_config_t ledc_timer = {};
-  ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
-  ledc_timer.duty_resolution = LEDC_TIMER_1_BIT;
-  ledc_timer.timer_num = LEDC_TIMER_0;
-  ledc_timer.freq_hz = this->external_clock_frequency_;
-  ledc_timer.clk_cfg = LEDC_AUTO_CLK;
-  
-  esp_err_t ret = ledc_timer_config(&ledc_timer);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "LEDC timer config failed: %d", ret);
-    return false;
-  }
-  
-  ledc_channel_config_t ledc_channel = {};
-  ledc_channel.gpio_num = this->external_clock_pin_;
-  ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
-  ledc_channel.channel = LEDC_CHANNEL_0;
-  ledc_channel.intr_type = LEDC_INTR_DISABLE;
-  ledc_channel.timer_sel = LEDC_TIMER_0;
-  ledc_channel.duty = 1;
-  ledc_channel.hpoint = 0;
-  
-  ret = ledc_channel_config(&ledc_channel);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "LEDC channel config failed: %d", ret);
-    return false;
-  }
-  
-  ESP_LOGI(TAG, "External clock initialized");
   return true;
 }
 
@@ -287,41 +216,8 @@ bool MipiDsiCam::init_isp_() {
     return false;
   }
   
-  // Configure AWB si supporté par le capteur
-  this->configure_white_balance_();
-  
   ESP_LOGI(TAG, "ISP OK");
   return true;
-}
-
-void MipiDsiCam::configure_white_balance_() {
-  if (!this->isp_handle_) return;
-  
-  // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
-  if (this->sensor_type_ == "ov5647" || this->sensor_type_ == "sc202cs") {
-    ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé (correction logicielle uniquement)", 
-             this->sensor_type_.c_str());
-    return;
-  }
-  
-  // Tentative de configuration AWB pour les autres capteurs
-  esp_isp_awb_config_t awb_config = {};
-  awb_config.sample_point = ISP_AWB_SAMPLE_POINT_AFTER_CCM;
-  
-  // Configuration de la window (noms corrects pour ESP32-P4)
-  awb_config.window.top_left.x = this->width_ / 4;
-  awb_config.window.top_left.y = this->height_ / 4;
-  awb_config.window.btm_right.x = (this->width_ * 3) / 4;
-  awb_config.window.btm_right.y = (this->height_ * 3) / 4;
-  
-  esp_err_t ret = esp_isp_new_awb_controller(this->isp_handle_, &awb_config, &this->awb_ctlr_);
-  
-  if (ret == ESP_OK && this->awb_ctlr_ != nullptr) {
-    esp_isp_awb_controller_enable(this->awb_ctlr_);
-    ESP_LOGI(TAG, "✅ AWB matériel activé (auto-correction couleurs)");
-  } else {
-    ESP_LOGW(TAG, "AWB matériel non disponible (0x%x), utilisation ISP par défaut", ret);
-  }
 }
 
 bool MipiDsiCam::allocate_buffer_() {
@@ -366,7 +262,6 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   
   if (trans->received_size > 0) {
     cam->frame_ready_ = true;
-    cam->frame_sequence_++;
     cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
     cam->total_frames_received_++;
   }
@@ -376,11 +271,10 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
 
 bool MipiDsiCam::start_streaming() {
   if (!this->initialized_ || this->streaming_) {
-    ESP_LOGW(TAG, "Cannot start: initialized=%d streaming=%d", this->initialized_, this->streaming_);
     return false;
   }
   
-  ESP_LOGI(TAG, "🎬 Starting streaming...");
+  ESP_LOGI(TAG, "Start streaming");
   
   this->total_frames_received_ = 0;
   this->last_frame_log_time_ = millis();
@@ -401,17 +295,14 @@ bool MipiDsiCam::start_streaming() {
   }
   
   this->streaming_ = true;
-  ESP_LOGI(TAG, "✅ Streaming started successfully");
+  ESP_LOGI(TAG, "Streaming active");
   return true;
 }
 
 bool MipiDsiCam::stop_streaming() {
   if (!this->streaming_) {
-    ESP_LOGW(TAG, "Already stopped");
     return true;
   }
-  
-  ESP_LOGI(TAG, "⏸️  Stopping streaming...");
   
   esp_cam_ctlr_stop(this->csi_handle_);
   
@@ -420,7 +311,7 @@ bool MipiDsiCam::stop_streaming() {
   }
   
   this->streaming_ = false;
-  ESP_LOGI(TAG, "✅ Streaming stopped");
+  ESP_LOGI(TAG, "Streaming stopped");
   return true;
 }
 
@@ -439,277 +330,8 @@ bool MipiDsiCam::capture_frame() {
   return was_ready;
 }
 
-bool MipiDsiCam::acquire_frame(uint32_t last_served_sequence) {
-  if (!this->streaming_) {
-    return false;
-  }
-  
-  if (!this->frame_ready_) {
-    return false;
-  }
-  
-  if (this->frame_sequence_ <= last_served_sequence) {
-    // ✅ CORRECTION : Utiliser LOGV au lieu de LOGV pour réduire les logs
-    ESP_LOGV(TAG, "Same sequence: current=%u, last_served=%u", 
-             this->frame_sequence_, last_served_sequence);
-    return false;
-  }
-  
-  if (this->frame_locked_) {
-    ESP_LOGW(TAG, "Frame already locked (seq=%u)", this->locked_sequence_);
-    return false;
-  }
-  
-  this->frame_ready_ = false;
-  this->frame_locked_ = true;
-  this->locked_sequence_ = this->frame_sequence_;
-  
-  uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
-  this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
-  
-  // ✅ CORRECTION : LOGV au lieu de LOGD
-  ESP_LOGV(TAG, "Frame acquired: seq=%u (was: %u)", 
-           this->locked_sequence_, last_served_sequence);
-  
-  return true;
-}
-
-void MipiDsiCam::release_frame() {
-  if (this->frame_locked_) {
-    this->frame_locked_ = false;
-    // ✅ CORRECTION : LOGV au lieu de LOGD
-    ESP_LOGV(TAG, "Frame released: seq=%u", this->locked_sequence_);
-  }
-}
-
-size_t MipiDsiCam::copy_frame_rgb565(uint8_t *dest, size_t max_size, bool apply_white_balance) {
-  if (dest == nullptr || this->current_frame_buffer_ == nullptr) {
-    return 0;
-  }
-
-  size_t copy_size = std::min(max_size, this->frame_buffer_size_);
-  copy_size &= ~static_cast<size_t>(1);
-  if (copy_size == 0) {
-    return 0;
-  }
-
-  const uint8_t *src = this->current_frame_buffer_;
-
-  if (!apply_white_balance) {
-    std::memcpy(dest, src, copy_size);
-    return copy_size;
-  }
-
-  const uint16_t red_gain = this->wb_red_gain_fixed_;
-  const uint16_t green_gain = this->wb_green_gain_fixed_;
-  const uint16_t blue_gain = this->wb_blue_gain_fixed_;
-
-  if (red_gain == 256 && green_gain == 256 && blue_gain == 256) {
-    std::memcpy(dest, src, copy_size);
-    return copy_size;
-  }
-
-  auto apply_gain = [](uint16_t value, uint16_t gain) -> uint16_t {
-    uint32_t scaled = (static_cast<uint32_t>(value) * gain + 128) >> 8;
-    if (scaled > 255) {
-      scaled = 255;
-    }
-    return static_cast<uint16_t>(scaled);
-  };
-
-  for (size_t offset = 0; offset < copy_size; offset += 2) {
-    uint16_t pixel = static_cast<uint16_t>(src[offset]) |
-                     (static_cast<uint16_t>(src[offset + 1]) << 8);
-
-    uint8_t r5 = (pixel >> 11) & 0x1F;
-    uint8_t g6 = (pixel >> 5) & 0x3F;
-    uint8_t b5 = pixel & 0x1F;
-
-    uint16_t r8 = (static_cast<uint16_t>(r5) << 3) | (r5 >> 2);
-    uint16_t g8 = (static_cast<uint16_t>(g6) << 2) | (g6 >> 4);
-    uint16_t b8 = (static_cast<uint16_t>(b5) << 3) | (b5 >> 2);
-
-    r8 = apply_gain(r8, red_gain);
-    g8 = apply_gain(g8, green_gain);
-    b8 = apply_gain(b8, blue_gain);
-
-    uint16_t corrected = (static_cast<uint16_t>(r8 >> 3) << 11) |
-                         (static_cast<uint16_t>(g8 >> 2) << 5) |
-                         static_cast<uint16_t>(b8 >> 3);
-
-    dest[offset] = static_cast<uint8_t>(corrected & 0xFF);
-    dest[offset + 1] = static_cast<uint8_t>(corrected >> 8);
-  }
-
-  return copy_size;
-}
-
-void MipiDsiCam::set_auto_white_balance(bool enable) {
-  this->auto_white_balance_enabled_ = enable;
-  this->last_awb_update_ = millis();
-  ESP_LOGI(TAG, "Software auto white balance: %s", enable ? "ENABLED" : "DISABLED");
-}
-
-void MipiDsiCam::update_auto_white_balance_() {
-  if (!this->auto_white_balance_enabled_ || this->current_frame_buffer_ == nullptr) {
-    return;
-  }
-
-  uint32_t now = millis();
-  if (now - this->last_awb_update_ < 400) {
-    return;
-  }
-  this->last_awb_update_ = now;
-
-  if (this->width_ == 0 || this->height_ == 0) {
-    return;
-  }
-
-  const size_t step_x = std::max<uint16_t>(4, this->width_ / 16);
-  const size_t step_y = std::max<uint16_t>(4, this->height_ / 16);
-  const uint8_t *buffer = this->current_frame_buffer_;
-
-  uint32_t sum_r = 0;
-  uint32_t sum_g = 0;
-  uint32_t sum_b = 0;
-  uint32_t samples = 0;
-
-  for (size_t y = step_y; y < this->height_ - step_y; y += step_y) {
-    for (size_t x = step_x; x < this->width_ - step_x; x += step_x) {
-      size_t index = (y * this->width_ + x) * 2;
-      if (index + 1 >= this->frame_buffer_size_) {
-        continue;
-      }
-
-      uint16_t pixel = static_cast<uint16_t>(buffer[index]) |
-                       (static_cast<uint16_t>(buffer[index + 1]) << 8);
-
-      uint8_t r5 = (pixel >> 11) & 0x1F;
-      uint8_t g6 = (pixel >> 5) & 0x3F;
-      uint8_t b5 = pixel & 0x1F;
-
-      sum_r += (static_cast<uint16_t>(r5) << 3) | (r5 >> 2);
-      sum_g += (static_cast<uint16_t>(g6) << 2) | (g6 >> 4);
-      sum_b += (static_cast<uint16_t>(b5) << 3) | (b5 >> 2);
-      samples++;
-    }
-  }
-
-  if (samples == 0) {
-    return;
-  }
-
-  float avg_r = static_cast<float>(sum_r) / static_cast<float>(samples);
-  float avg_g = static_cast<float>(sum_g) / static_cast<float>(samples);
-  float avg_b = static_cast<float>(sum_b) / static_cast<float>(samples);
-
-  float target = (avg_r + avg_g + avg_b) / 3.0f;
-  if (target < 1.0f) {
-    return;
-  }
-
-  auto adjust_gain = [](float current, float channel_avg, float reference) -> float {
-    if (channel_avg < 1.0f) {
-      channel_avg = 1.0f;
-    }
-    float desired = current * (reference / channel_avg);
-    desired = std::clamp(desired, 0.5f, 3.0f);
-    constexpr float smoothing = 0.12f;
-    return current * (1.0f - smoothing) + desired * smoothing;
-  };
-
-  float new_red = adjust_gain(this->wb_red_gain_, avg_r, target);
-  float new_green = adjust_gain(this->wb_green_gain_, avg_g, target);
-  float new_blue = adjust_gain(this->wb_blue_gain_, avg_b, target);
-
-  if (std::fabs(new_red - this->wb_red_gain_) < 0.01f &&
-      std::fabs(new_green - this->wb_green_gain_) < 0.01f &&
-      std::fabs(new_blue - this->wb_blue_gain_) < 0.01f) {
-    return;
-  }
-
-  this->set_white_balance_gains(new_red, new_green, new_blue, true);
-}
-
-void MipiDsiCam::update_auto_exposure_() {
-  if (!this->auto_exposure_enabled_ || !this->sensor_driver_) {
-    return;
-  }
-  
-  uint32_t now = millis();
-  if (now - this->last_ae_update_ < 100) {
-    return;
-  }
-  this->last_ae_update_ = now;
-  
-  uint32_t avg_brightness = this->calculate_brightness_();
-  
-  int32_t brightness_error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
-  
-  if (abs(brightness_error) > 10) {
-    
-    if (brightness_error > 0) {
-      // Image trop sombre
-      if (this->current_exposure_ < 0xF00) {
-        this->current_exposure_ += 0x40;
-      } else if (this->current_gain_index_ < 120) {
-        this->current_gain_index_ += 2;
-      }
-    } else {
-      // Image trop lumineuse
-      if (this->current_exposure_ > 0x200) {
-        this->current_exposure_ -= 0x40;
-      } else if (this->current_gain_index_ > 0) {
-        this->current_gain_index_ -= 2;
-      }
-    }
-    
-    this->sensor_driver_->set_exposure(this->current_exposure_);
-    this->sensor_driver_->set_gain(this->current_gain_index_);
-    
-    // ✅ CORRECTION : LOGV au lieu de LOGV
-    ESP_LOGV(TAG, "🔆 AE: brightness=%u target=%u → exp=0x%04X gain=%u",
-             avg_brightness, this->ae_target_brightness_,
-             this->current_exposure_, this->current_gain_index_);
-  }
-}
-
-uint32_t MipiDsiCam::calculate_brightness_() {
-  if (!this->current_frame_buffer_) {
-    return 128;
-  }
-  
-  uint32_t sum = 0;
-  uint32_t sample_count = 0;
-  
-  uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
-  
-  for (int i = 0; i < 100; i++) {
-    uint32_t offset = center_offset + (i * 200);
-    if (offset + 1 < this->frame_buffer_size_) {
-      uint16_t pixel = (this->current_frame_buffer_[offset + 1] << 8) | 
-                       this->current_frame_buffer_[offset];
-      
-      uint8_t r = (pixel >> 11) & 0x1F;
-      uint8_t g = (pixel >> 5) & 0x3F;
-      uint8_t b = pixel & 0x1F;
-      
-      uint32_t brightness = (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
-      
-      sum += brightness;
-      sample_count++;
-    }
-  }
-  
-  return sample_count > 0 ? (sum / sample_count) : 128;
-}
-
-// ✅ CORRECTION MAJEURE : Logs réduits drastiquement
 void MipiDsiCam::loop() {
   if (this->streaming_) {
-    // Mise à jour Auto Exposure
-    this->update_auto_exposure_();
-    
     static uint32_t ready_count = 0;
     static uint32_t not_ready_count = 0;
     
@@ -720,14 +342,12 @@ void MipiDsiCam::loop() {
     }
     
     uint32_t now = millis();
-    // ✅ Log seulement toutes les 30 secondes au lieu de 3s
-    if (now - this->last_frame_log_time_ >= 30000) {
-      float sensor_fps = this->total_frames_received_ / 30.0f;
+    if (now - this->last_frame_log_time_ >= 3000) {
+      float sensor_fps = this->total_frames_received_ / 3.0f;
       float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
       
-      // ✅ Utiliser LOGD (debug) au lieu de LOGI
-      ESP_LOGD(TAG, "📸 FPS: %.1f | frame_ready: %.1f%% | exp:0x%04X gain:%u", 
-               sensor_fps, ready_rate, this->current_exposure_, this->current_gain_index_);
+      ESP_LOGI(TAG, "Sensor: %.1f fps | frame_ready: %.1f%%", 
+               sensor_fps, ready_rate);
       
       this->total_frames_received_ = 0;
       this->last_frame_log_time_ = now;
@@ -749,149 +369,7 @@ void MipiDsiCam::dump_config() {
   ESP_LOGCONFIG(TAG, "  Format: RGB565");
   ESP_LOGCONFIG(TAG, "  Lanes: %u", this->lane_count_);
   ESP_LOGCONFIG(TAG, "  Bayer: %u", this->bayer_pattern_);
-  
-  if (this->has_external_clock()) {
-    ESP_LOGCONFIG(TAG, "  External Clock: GPIO%d @ %u Hz", 
-                  this->external_clock_pin_, this->external_clock_frequency_);
-  } else {
-    ESP_LOGCONFIG(TAG, "  External Clock: None (using internal clock)");
-  }
-  
-  ESP_LOGCONFIG(TAG, "  Auto Exposure: %s", this->auto_exposure_enabled_ ? "ON" : "OFF");
-  ESP_LOGCONFIG(TAG, "  AE Target: %u", this->ae_target_brightness_);
   ESP_LOGCONFIG(TAG, "  Streaming: %s", this->streaming_ ? "YES" : "NO");
-}
-
-// Méthodes publiques pour contrôle
-void MipiDsiCam::set_auto_exposure(bool enabled) {
-  this->auto_exposure_enabled_ = enabled;
-  ESP_LOGI(TAG, "Auto Exposure: %s", enabled ? "ENABLED" : "DISABLED");
-}
-
-void MipiDsiCam::set_ae_target_brightness(uint8_t target) {
-  this->ae_target_brightness_ = target;
-  ESP_LOGI(TAG, "AE target brightness: %u", target);
-}
-
-void MipiDsiCam::set_manual_exposure(uint16_t exposure) {
-  this->current_exposure_ = exposure;
-  if (this->sensor_driver_) {
-    this->sensor_driver_->set_exposure(exposure);
-    ESP_LOGI(TAG, "Manual exposure: 0x%04X", exposure);
-  }
-}
-
-void MipiDsiCam::set_manual_gain(uint8_t gain_index) {
-  this->current_gain_index_ = gain_index;
-  if (this->sensor_driver_) {
-    this->sensor_driver_->set_gain(gain_index);
-    ESP_LOGI(TAG, "Manual gain: %u", gain_index);
-  }
-}
-
-void MipiDsiCam::set_white_balance_gains(float red, float green, float blue, bool update_fixed) {
-  this->wb_red_gain_ = red;
-  this->wb_green_gain_ = green;
-  this->wb_blue_gain_ = blue;
-  
-  if (update_fixed) {
-    this->wb_red_gain_fixed_ = static_cast<uint16_t>(red * 256.0f);
-    this->wb_green_gain_fixed_ = static_cast<uint16_t>(green * 256.0f);
-    this->wb_blue_gain_fixed_ = static_cast<uint16_t>(blue * 256.0f);
-  }
-  
-  // Pour les capteurs supportant la balance des blancs au niveau registre
-  if (this->sensor_driver_ && (this->sensor_type_ == "sc202cs" || this->sensor_type_ == "sc2336")) {
-    ESP_LOGI(TAG, "WB gains: R=%.2f G=%.2f B=%.2f (logiciel uniquement)", red, green, blue);
-  } else {
-    ESP_LOGI(TAG, "WB gains: R=%.2f G=%.2f B=%.2f", red, green, blue);
-  }
-}
-
-void MipiDsiCam::adjust_exposure(uint16_t exposure_value) {
-  if (!this->sensor_driver_) {
-    ESP_LOGE(TAG, "No sensor driver");
-    return;
-  }
-  
-  ESP_LOGI(TAG, "Adjusting exposure to: 0x%04X", exposure_value);
-  esp_err_t ret = this->sensor_driver_->set_exposure(exposure_value);
-  
-  if (ret == ESP_OK) {
-    this->current_exposure_ = exposure_value;
-    ESP_LOGI(TAG, "✅ Exposure adjusted successfully");
-  } else {
-    ESP_LOGE(TAG, "❌ Failed to adjust exposure");
-  }
-}
-
-void MipiDsiCam::adjust_gain(uint8_t gain_index) {
-  if (!this->sensor_driver_) {
-    ESP_LOGE(TAG, "No sensor driver");
-    return;
-  }
-  
-  ESP_LOGI(TAG, "Adjusting gain to index: %u", gain_index);
-  esp_err_t ret = this->sensor_driver_->set_gain(gain_index);
-  
-  if (ret == ESP_OK) {
-    this->current_gain_index_ = gain_index;
-    ESP_LOGI(TAG, "✅ Gain adjusted successfully");
-  } else {
-    ESP_LOGE(TAG, "❌ Failed to adjust gain");
-  }
-}
-
-void MipiDsiCam::set_brightness_level(uint8_t level) {
-  if (level > 10) level = 10;
-  
-  uint16_t exposure = 0x400 + (level * 0x0B0);
-  uint8_t gain = level * 6;
-  
-  ESP_LOGI(TAG, "🔆 Setting brightness level %u: exposure=0x%04X, gain=%u", 
-           level, exposure, gain);
-  
-  adjust_exposure(exposure);
-  delay(50);
-  adjust_gain(gain);
-}
-
-void MipiDsiCam::enable_v4l2_adapter() {
-  if (this->v4l2_adapter_ != nullptr) {
-    ESP_LOGW(TAG, "V4L2 adapter already enabled");
-    return;
-  }
-  
-  ESP_LOGI(TAG, "Enabling V4L2 adapter...");
-  this->v4l2_adapter_ = new MipiDsiCamV4L2Adapter(this);
-  
-  esp_err_t ret = this->v4l2_adapter_->init();
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize V4L2 adapter: 0x%x", ret);
-    delete this->v4l2_adapter_;
-    this->v4l2_adapter_ = nullptr;
-  } else {
-    ESP_LOGI(TAG, "✅ V4L2 adapter enabled (use start_streaming() to begin)");
-  }
-}
-
-void MipiDsiCam::enable_isp_pipeline() {
-  if (this->isp_pipeline_ != nullptr) {
-    ESP_LOGW(TAG, "ISP pipeline already enabled");
-    return;
-  }
-  
-  ESP_LOGI(TAG, "Enabling ISP pipeline...");
-  this->isp_pipeline_ = new MipiDsiCamISPPipeline(this);
-  
-  esp_err_t ret = this->isp_pipeline_->init();
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize ISP pipeline: 0x%x", ret);
-    delete this->isp_pipeline_;
-    this->isp_pipeline_ = nullptr;
-  } else {
-    ESP_LOGI(TAG, "✅ ISP pipeline enabled");
-  }
 }
 
 }  // namespace mipi_dsi_cam
