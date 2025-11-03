@@ -3,7 +3,7 @@
 #include "esphome/core/application.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esphome/components/lvgl/lvgl_esphome.h"  // pour lvgl::acquire() / release()
+#include "esphome/components/lvgl/lvgl_esphome.h"  // Pour lv_async_call()
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -73,9 +73,14 @@ void LVGLCameraDisplay::camera_task_() {
       continue;
     }
 
-    // Si une nouvelle frame est prête → afficher
+    // Si une nouvelle frame est prête → planifier affichage
     if (this->camera_->capture_frame()) {
-      this->update_canvas_();
+      // on planifie la mise à jour du canvas dans le thread LVGL
+      lv_async_call([](void *user) {
+        auto *self = static_cast<LVGLCameraDisplay *>(user);
+        self->update_canvas_();
+      }, this);
+
       this->frame_count_++;
     }
 
@@ -109,17 +114,15 @@ void LVGLCameraDisplay::update_canvas_() {
 
   // Premier affichage → debug info
   if (this->first_update_) {
-    ESP_LOGI(TAG, "🖼️ Premier update canvas (FreeRTOS mode, direct buffer):");
+    ESP_LOGI(TAG, "🖼️ Premier update canvas (via lv_async_call, zéro copie):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer caméra: %p", img_data);
     this->first_update_ = false;
   }
 
-  // ✅ Verrouillage LVGL standard
-  lvgl::acquire();
+  // ⚡ Exécuté dans le contexte LVGL (thread principal)
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
-  lvgl::release();
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
@@ -140,6 +143,7 @@ void LVGLCameraDisplay::stop_task() {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
 
 
 
