@@ -1,7 +1,6 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Support H264 + JPEG, auto-stubs et intégration complète avec ESP-IDF.
-Compatible ESPHome 2025.10.x
+Avec support H264 + JPEG activé et injection complète des sources C
 """
 
 import esphome.codegen as cg
@@ -22,7 +21,6 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
-    print("[ESP-Video] 🧠 Initialisation du composant ESP-Video (intégration ESP-IDF)")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
@@ -36,7 +34,8 @@ async def to_code(config):
     # Détection du chemin du composant
     # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
-    cg.add(cg.RawExpression(f'// [ESP-Video] Component path: {component_dir}'))
+    cg.add(cg.RawExpression(f'// [ESP-Video] Component: {component_dir}'))
+    print(f"[ESP-Video] 🧠 Initialisation du composant ESP-Video (injection sources & includes)")
 
     # -----------------------------------------------------------------------
     # Vérification ou création du dossier deps/include
@@ -52,7 +51,6 @@ async def to_code(config):
         "esp_cam_motor_types.h",
     ]
 
-    # Templates minimalistes des stubs
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -100,16 +98,16 @@ typedef struct { int dummy; } esp_cam_motor_t;
             print(f"[ESP-Video] ✅ Stub trouvé : {stub}")
 
     # -----------------------------------------------------------------------
-    # Ajout des répertoires d'includes (dans le bon ordre)
+    # Ajout des includes
     # -----------------------------------------------------------------------
     include_dirs = [
         "deps/include",
         "include",
         "include/linux",
         "include/sys",
+        "private_include",
         "src",
         "src/device",
-        "private_include",
     ]
 
     for subdir in include_dirs:
@@ -118,7 +116,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
             cg.add_build_flag(f"-I{abs_path}")
 
     # -----------------------------------------------------------------------
-    # Ajout des flags de compilation ESP-Video
+    # FLAGS ESP-Video
     # -----------------------------------------------------------------------
     flags = [
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
@@ -134,18 +132,30 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Déclaration du dossier comme composant ESP-IDF
+    # Ajout explicite des sources C (esp_video_xxx.c)
     # -----------------------------------------------------------------------
-    cg.add_platformio_option("extra_component_dirs", [component_dir])
-    print(f"[ESP-Video] ✅ Composant ajouté à extra_component_dirs : {component_dir}")
+    esp_video_srcs = [
+        "src/esp_video.c",
+        "src/esp_video_buffer.c",
+        "src/esp_video_init.c",
+        "src/esp_video_ioctl.c",
+        "src/esp_video_mman.c",
+        "src/esp_video_vfs.c",
+        "src/esp_video_cam.c",
+        "src/esp_video_isp_pipeline.c",
+        "src/device/esp_video_csi_device.c",
+        "src/device/esp_video_isp_device.c",
+        "src/device/esp_video_jpeg_device.c",
+        "src/device/esp_video_h264_device.c",
+    ]
 
-    # -----------------------------------------------------------------------
-    # Script post-build (optionnel)
-    # -----------------------------------------------------------------------
-    build_script_path = os.path.join(component_dir, "esp_video_build.py")
-    if os.path.exists(build_script_path):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-        print(f"[ESP-Video] 🧩 Script post-build détecté : {build_script_path}")
+    for src in esp_video_srcs:
+        full_path = os.path.join(component_dir, src)
+        if os.path.exists(full_path):
+            cg.add_build_source(full_path)
+            print(f"[ESP-Video] 🔗 Source incluse: {src}")
+        else:
+            print(f"[ESP-Video] ⚠️ Fichier manquant: {src}")
 
     # -----------------------------------------------------------------------
     # Définitions globales
@@ -154,7 +164,8 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
-    cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + composant IDF)'))
+    cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + H264 + JPEG)'))
+
 
 
 
