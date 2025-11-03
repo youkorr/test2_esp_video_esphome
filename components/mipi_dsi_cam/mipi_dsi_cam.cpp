@@ -1,7 +1,7 @@
 #include "mipi_dsi_cam.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include "driver/gpio.h"
+
 #include "mipi_dsi_cam_drivers_generated.h"
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
@@ -163,75 +163,32 @@ bool MipiDsiCam::init_sensor_() {
 // ============================================================================
 
 bool MipiDsiCam::init_esp_video_() {
-  ESP_LOGI(TAG, "Init ESP-Video (CSI + JPEG) ...");
-
-  // --- SCCB (I²C du capteur) ---
-  esp_video_init_sccb_config_t sccb_cfg = {};
-  sccb_cfg.init_sccb  = false;      // on laisse ESPHome gérer l'I²C
-  sccb_cfg.i2c_handle = nullptr;
-
-  // --- MIPI-CSI (interface capteur) ---
-  esp_video_init_csi_config_t csi_cfg = {};
-  csi_cfg.sccb_config = sccb_cfg;
-  csi_cfg.reset_pin   = GPIO_NUM_NC;  // pas de pin reset câblé
-  csi_cfg.pwdn_pin    = GPIO_NUM_NC;  // pas de pin power-down câblé
-
-  // --- JPEG encoder matériel ---
-  esp_video_init_jpeg_config_t jpeg_cfg = {};
-  // Optionnel : qualité de compression JPEG
-  // jpeg_cfg.quality = 80;
-
-  // --- Configuration globale ESP-Video ---
-  esp_video_init_config_t init_cfg = {};
-  init_cfg.csi  = &csi_cfg;
-  init_cfg.jpeg = &jpeg_cfg;   // possible même si non utilisé directement
-
-  // --- Initialisation ESP-Video ---
-  esp_err_t err = esp_video_init(&init_cfg);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "esp_video_init() a échoué : %s", esp_err_to_name(err));
+  ESP_LOGI(TAG, "Init ESP-Video...");
+  
+  // Config CSI (comme Tab5 - SANS I2C handle car géré par ESPHome)
+  esp_video_init_sccb_config_t sccb_config = {};
+  sccb_config.init_sccb = false;
+  sccb_config.i2c_handle = nullptr;  // ESPHome gère l'I2C
+  
+  esp_video_init_csi_config_t csi_config = {};
+  csi_config.sccb_config = sccb_config;
+  csi_config.reset_pin = -1;
+  csi_config.pwdn_pin = -1;
+  
+  esp_video_init_config_t cam_config = {};
+  cam_config.csi = &csi_config;
+  cam_config.dvp = nullptr;
+  cam_config.jpeg = nullptr;
+  
+  esp_err_t ret = esp_video_init(&cam_config);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "esp_video_init failed: %s", esp_err_to_name(ret));
     return false;
   }
-
-  // --- Logs récapitulatifs ---
-  ESP_LOGI(TAG, "ESP-Video initialisé avec succès ✓");
-  ESP_LOGI(TAG, "  CSI  : %s (id=%d)", ESP_VIDEO_MIPI_CSI_DEVICE_NAME, ESP_VIDEO_MIPI_CSI_DEVICE_ID);
-#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
-  ESP_LOGI(TAG, "  JPEG : %s (id=%d)", ESP_VIDEO_JPEG_DEVICE_NAME, ESP_VIDEO_JPEG_DEVICE_ID);
-#else
-  ESP_LOGI(TAG, "  JPEG : OFF (non activé)");
-#endif
-
+  
+  ESP_LOGI(TAG, "ESP-Video initialized ✓");
   return true;
 }
-
-
-  // ---- Logs utiles ---------------------------------------------------------
-  ESP_LOGI(TAG, "ESP-Video OK");
-#if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
-  ESP_LOGI(TAG, "  CSI  : ON  (%s / id=%d)", ESP_VIDEO_MIPI_CSI_DEVICE_NAME,  ESP_VIDEO_MIPI_CSI_DEVICE_ID);
-#else
-  ESP_LOGI(TAG, "  CSI  : OFF");
-#endif
-
-#if (CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE)
-  ESP_LOGI(TAG, "  DVP  : ON  (%s / id=%d)", ESP_VIDEO_DVP_DEVICE_NAME,       ESP_VIDEO_DVP_DEVICE_ID);
-#elif (CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE)
-  ESP_LOGI(TAG, "  ISP  : ON  (%s / id=%d)", ESP_VIDEO_ISP_DVP_DEVICE_NAME,   ESP_VIDEO_ISP_DVP_DEVICE_ID);
-#else
-  ESP_LOGI(TAG, "  DVP/ISP : OFF");
-#endif
-
-#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
-  ESP_LOGI(TAG, "  JPEG : ON  (%s / id=%d)", ESP_VIDEO_JPEG_DEVICE_NAME,      ESP_VIDEO_JPEG_DEVICE_ID);
-#else
-  ESP_LOGI(TAG, "  JPEG : OFF");
-#endif
-
-  return true;
-}
-
-
 
 // ============================================================================
 // Open /dev/video0
