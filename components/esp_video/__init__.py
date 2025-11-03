@@ -1,7 +1,7 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Avec support H264 + JPEG activé, auto-création des stubs et compilation automatique des sources
-Compatible ESPHome stable (2025.10.x)
+Avec support H264 + JPEG activé, auto-création des stubs
+et compilation automatique des sources (compatible ESPHome 2025.10.x)
 """
 
 import esphome.codegen as cg
@@ -52,6 +52,7 @@ async def to_code(config):
         "esp_cam_motor_types.h",
     ]
 
+    # Templates de stubs minimalistes
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -100,7 +101,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
             print(f"[ESP-Video] ✅ Stub trouvé : {stub}")
 
     # -----------------------------------------------------------------------
-    # Ajout des includes
+    # Ajout des includes (ordre important)
     # -----------------------------------------------------------------------
     include_dirs = [
         "deps/include",
@@ -135,7 +136,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Ajout explicite des sources ESP-Video (un seul appel add_library)
+    # Ajout explicite des sources ESP-Video (via add_source_files)
     # -----------------------------------------------------------------------
     source_files = [
         "src/esp_video.c",
@@ -162,13 +163,13 @@ typedef struct { int dummy; } esp_cam_motor_t;
             print(f"[ESP-Video] ⚠️ Fichier source manquant : {src_file}")
 
     if existing_sources:
-        cg.add_library("esp_video_srcs", existing_sources)
-        print(f"[ESP-Video] ✅ {len(existing_sources)} fichiers source ajoutés à la compilation.")
+        cg.add_source_files(existing_sources)
+        print(f"[ESP-Video] ✅ {len(existing_sources)} fichiers source ajoutés à la compilation (via add_source_files).")
     else:
         print("[ESP-Video] ❌ Aucun fichier source trouvé pour ESP-Video.")
 
     # -----------------------------------------------------------------------
-    # Build script post compilation (optionnel)
+    # Script post-build (optionnel)
     # -----------------------------------------------------------------------
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
@@ -185,6 +186,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + sources + flags)'))
+
 
 
 
