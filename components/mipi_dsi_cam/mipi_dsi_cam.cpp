@@ -163,43 +163,80 @@ bool MipiDsiCam::init_sensor_() {
 // ============================================================================
 
 bool MipiDsiCam::init_esp_video_() {
-  ESP_LOGI(TAG, "Init ESP-Video...");
+  ESP_LOGI(TAG, "Init ESP-Video (CSI + DVP + JPEG) ...");
 
-  // --- SCCB config (I2C du capteur, géré par ESPHome) ---
-  esp_video_init_sccb_config_t sccb_config = {};
-  sccb_config.init_sccb = false;
-  sccb_config.i2c_handle = nullptr;  // Géré par ESPHome
+  // ---- CSI (MIPI-CSI) ------------------------------------------------------
+  // SCCB/I2C géré par ESPHome → on n'initialise pas l’I2C ici
+  esp_video_init_sccb_config_t sccb_cfg = {};
+  sccb_cfg.init_sccb  = false;
+  sccb_cfg.i2c_handle = nullptr;
 
-  // --- MIPI-CSI config ---
-  esp_video_init_mipi_csi_config_t csi_config = {};
-  csi_config.sccb_config = sccb_config;
+  esp_video_init_csi_config_t csi_cfg = {};
+  csi_cfg.sccb_config = sccb_cfg;
+  csi_cfg.reset_pin   = GPIO_NUM_NC;  // pas de RESET géré ici
+  csi_cfg.pwdn_pin    = GPIO_NUM_NC;  // pas de PWDN géré ici
 
-  // Remplace les -1 par GPIO_NUM_NC (non connectés)
-  csi_config.reset_pin = GPIO_NUM_NC;
-  csi_config.pwdn_pin  = GPIO_NUM_NC;
+  // ---- DVP (par ex. chemin ISP DVP) ---------------------------------------
+  esp_video_init_dvp_config_t dvp_cfg = {};
+  dvp_cfg.reset_pin = GPIO_NUM_NC;
+  dvp_cfg.pwdn_pin  = GPIO_NUM_NC;
 
-  // --- Config globale ---
-  esp_video_init_config_t cam_config = {};
-#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
-  cam_config.mipi_csi = &csi_config;  // Champ correct depuis ESP-Video 1.3+
+  // ---- JPEG (accélérateur matériel) ---------------------------------------
+  esp_video_init_jpeg_config_t jpeg_cfg = {};
+  // (laisser par défaut, l’init interne d’ESP-Video fait le reste)
+
+  // ---- Config globale ------------------------------------------------------
+  esp_video_init_config_t init_cfg = {};
+#if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
+  init_cfg.csi  = &csi_cfg;
 #else
-  cam_config.csi = &csi_config;
+  init_cfg.csi  = nullptr;
 #endif
 
-  // Ces champs n’existent plus dans ESP-Video >=1.3
-  // cam_config.dvp = nullptr;
-  // cam_config.jpeg = nullptr;
+#if (CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE || CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE)
+  init_cfg.dvp  = &dvp_cfg;
+#else
+  init_cfg.dvp  = nullptr;
+#endif
 
-  // --- Initialisation du device ---
-  esp_err_t ret = esp_video_init(ESP_VIDEO_MIPI_CSI_DEVICE_ID, &cam_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "esp_video_init failed: %s", esp_err_to_name(ret));
+#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
+  init_cfg.jpeg = &jpeg_cfg;
+#else
+  init_cfg.jpeg = nullptr;
+#endif
+
+  // ---- Appel unique d'initialisation --------------------------------------
+  esp_err_t err = esp_video_init(&init_cfg);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "esp_video_init() a échoué: %s", esp_err_to_name(err));
     return false;
   }
 
-  ESP_LOGI(TAG, "ESP-Video initialized ✓");
+  // ---- Logs utiles ---------------------------------------------------------
+  ESP_LOGI(TAG, "ESP-Video OK");
+#if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
+  ESP_LOGI(TAG, "  CSI  : ON  (%s / id=%d)", ESP_VIDEO_MIPI_CSI_DEVICE_NAME,  ESP_VIDEO_MIPI_CSI_DEVICE_ID);
+#else
+  ESP_LOGI(TAG, "  CSI  : OFF");
+#endif
+
+#if (CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE)
+  ESP_LOGI(TAG, "  DVP  : ON  (%s / id=%d)", ESP_VIDEO_DVP_DEVICE_NAME,       ESP_VIDEO_DVP_DEVICE_ID);
+#elif (CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE)
+  ESP_LOGI(TAG, "  ISP  : ON  (%s / id=%d)", ESP_VIDEO_ISP_DVP_DEVICE_NAME,   ESP_VIDEO_ISP_DVP_DEVICE_ID);
+#else
+  ESP_LOGI(TAG, "  DVP/ISP : OFF");
+#endif
+
+#if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
+  ESP_LOGI(TAG, "  JPEG : ON  (%s / id=%d)", ESP_VIDEO_JPEG_DEVICE_NAME,      ESP_VIDEO_JPEG_DEVICE_ID);
+#else
+  ESP_LOGI(TAG, "  JPEG : OFF");
+#endif
+
   return true;
 }
+
 
 
 // ============================================================================
