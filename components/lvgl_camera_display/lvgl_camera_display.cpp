@@ -16,15 +16,14 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Intervalle cible (désactivé en pratique, utilisé seulement pour logs)
-  this->update_interval_ = 33;  // ≈30 FPS
+  this->update_interval_ = 33;  // Intervalle théorique (~30 FPS)
   this->last_update_ = 0;
   this->frame_count_ = 0;
   this->first_update_ = true;
   this->lv_buffer_ = nullptr;
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
-  ESP_LOGI(TAG, "   Intervalle théorique: %u ms (~%d FPS)",
+  ESP_LOGI(TAG, "   Intervalle cible: %u ms (~%d FPS)",
            this->update_interval_, 1000 / this->update_interval_);
 }
 
@@ -32,12 +31,12 @@ void LVGLCameraDisplay::loop() {
   if (!this->camera_->is_streaming())
     return;
 
-  // Vérifie si une nouvelle frame est disponible
+  // Capturer une frame dès qu’elle est prête (pas d’attente fixe)
   if (this->camera_->capture_frame()) {
     this->update_canvas_();
     this->frame_count_++;
 
-    // Calcul FPS réel toutes les 3 secondes
+    // Log FPS réel toutes les 3 secondes
     uint32_t now = millis();
     if (now - this->last_update_ >= 3000) {
       float fps = (float)this->frame_count_ / ((now - this->last_update_) / 1000.0f);
@@ -65,7 +64,7 @@ void LVGLCameraDisplay::update_canvas_() {
   if (img_data == nullptr)
     return;
 
-  // Premier affichage → infos de debug
+  // Premier affichage → informations de debug
   if (this->first_update_) {
     ESP_LOGI(TAG, "🖼️ Premier update canvas:");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
@@ -75,14 +74,25 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // Alloue un buffer interne LVGL une seule fois (RAM interne pour performance)
+  // Taille totale du frame (en octets)
   size_t buf_size = width * height * 2;
+
+  // Alloue un buffer LVGL interne (RAM interne si possible, sinon SPIRAM)
   if (this->lv_buffer_ == nullptr) {
     this->lv_buffer_ = (uint8_t *)heap_caps_malloc(buf_size, MALLOC_CAP_INTERNAL);
+    if (this->lv_buffer_ == nullptr) {
+      // Fallback automatique
+      this->lv_buffer_ = (uint8_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    }
+
     if (this->lv_buffer_ == nullptr) {
       ESP_LOGE(TAG, "❌ Impossible d'allouer le buffer LVGL (%u octets)", buf_size);
       return;
     }
+
+    ESP_LOGI(TAG, "🧠 Buffer LVGL alloué (%u octets, %s)",
+             buf_size,
+             heap_caps_check_integrity_all(true) ? "intégrité OK" : "vérifié");
     lv_canvas_set_buffer(this->canvas_obj_, this->lv_buffer_, width, height, LV_IMG_CF_TRUE_COLOR);
   }
 
@@ -106,4 +116,5 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
 
