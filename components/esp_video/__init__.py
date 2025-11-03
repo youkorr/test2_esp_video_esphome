@@ -1,6 +1,6 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Avec support H264 + JPEG activé et auto-création des stubs
+Avec support H264 + JPEG activé, auto-création des stubs et injection du composant officiel esp_h264
 """
 
 import esphome.codegen as cg
@@ -50,7 +50,6 @@ async def to_code(config):
         "esp_cam_motor_types.h",
     ]
 
-    # Génération automatique de stubs manquants
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -58,7 +57,6 @@ typedef struct { int dummy; } esp_cam_sensor_device_t;
 esp_err_t esp_cam_sensor_init(esp_cam_sensor_device_t **dev);
 esp_err_t esp_cam_sensor_deinit(esp_cam_sensor_device_t *dev);
 """,
-
         "esp_cam_sensor_xclk.h": """#pragma once
 #include "esp_err.h"
 #ifdef __cplusplus
@@ -70,14 +68,12 @@ esp_err_t esp_cam_sensor_stop_xclk(void);
 }
 #endif
 """,
-
         "esp_sccb_i2c.h": """#pragma once
 #include "esp_err.h"
 #include <stdint.h>
 esp_err_t esp_sccb_write(uint8_t addr, uint16_t reg, uint8_t data);
 esp_err_t esp_sccb_read(uint8_t addr, uint16_t reg, uint8_t *data);
 """,
-
         "esp_cam_sensor_types.h": """#pragma once
 typedef enum {
     ESP_CAM_SENSOR_TYPE_UNKNOWN = 0,
@@ -86,12 +82,12 @@ typedef enum {
     ESP_CAM_SENSOR_TYPE_OV5647
 } esp_cam_sensor_type_t;
 """,
-
         "esp_cam_motor_types.h": """#pragma once
 typedef struct { int dummy; } esp_cam_motor_t;
 """,
     }
 
+    # Création automatique des stubs manquants
     for stub in required_stubs:
         stub_path = os.path.join(deps_include, stub)
         if not os.path.exists(stub_path):
@@ -105,7 +101,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
     # Ajout des includes (ordre prioritaire)
     # -----------------------------------------------------------------------
     include_dirs = [
-        "deps/include",     # Stubs d’abord
+        "deps/include",
         "include",
         "include/linux",
         "include/sys",
@@ -120,7 +116,23 @@ typedef struct { int dummy; } esp_cam_motor_t;
             cg.add_build_flag(f"-I{abs_path}")
 
     # -----------------------------------------------------------------------
-    # FLAGS ESP-Video COMPLETS (H264 + JPEG)
+    # Injection du composant officiel esp_h264
+    # -----------------------------------------------------------------------
+    cg.add_build_flag("-DESP_H264_ENABLE=1")
+    cg.add_build_flag("-DCOMPONENT_REQUIRES+=esp_h264")
+    cg.add_build_flag("-DIDF_COMPONENTS+=esp_h264")
+    cg.add_build_flag("-DCOMPONENTS+=esp_h264")
+
+    # Si le composant est présent localement (PlatformIO l’installera via idf_component.yml)
+    esp_h264_path = os.path.join(component_dir, "deps", "esp_h264")
+    if os.path.exists(esp_h264_path):
+        cg.add_build_flag(f"-I{esp_h264_path}/include")
+        print("[ESP-Video] 📦 Inclusion locale du composant esp_h264")
+    else:
+        print("[ESP-Video] 🌐 esp_h264 sera téléchargé automatiquement via idf_component.yml")
+
+    # -----------------------------------------------------------------------
+    # FLAGS ESP-Video COMPLETS
     # -----------------------------------------------------------------------
     flags = [
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
@@ -137,7 +149,7 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Build script post compilation
+    # Script post build
     # -----------------------------------------------------------------------
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
@@ -153,7 +165,8 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
-    cg.add(cg.RawExpression('// [ESP-Video] Configuration complete (auto-stubs + H264 + JPEG)'))
+    cg.add(cg.RawExpression('// [ESP-Video] Configuration complete (auto-stubs + H264 + JPEG + esp_h264)'))
+
 
 
 
