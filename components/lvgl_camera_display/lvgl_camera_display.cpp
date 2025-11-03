@@ -3,6 +3,7 @@
 #include "esphome/core/application.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esphome/components/lvgl/lvgl_esphome.h"  // pour lv_port_sem_take/give()
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -114,11 +115,13 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // ✅ Mise à jour du canvas dans un contexte LVGL sûr
-  App.safe_lvgl([&]() {
-    lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
-    lv_obj_invalidate(this->canvas_obj_);
-  });
+  // ✅ Verrouillage LVGL natif (mutex global)
+  lv_port_sem_take();
+
+  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  lv_obj_invalidate(this->canvas_obj_);
+
+  lv_port_sem_give();
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
@@ -139,6 +142,7 @@ void LVGLCameraDisplay::stop_task() {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
 
 
 
