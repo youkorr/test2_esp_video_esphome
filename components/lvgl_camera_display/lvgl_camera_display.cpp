@@ -3,7 +3,6 @@
 #include "esphome/core/application.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -28,11 +27,11 @@ void LVGLCameraDisplay::setup() {
   BaseType_t res = xTaskCreatePinnedToCore(
       LVGLCameraDisplay::camera_task_trampoline_,
       "lvgl_cam_task",
-      8192,  // stack
+      8192,  // stack size
       this,
-      5,     // priorité
+      5,     // priorité moyenne
       &this->camera_task_handle_,
-      1      // cœur 1 pour libérer le cœur 0 (Wi-Fi / ESPHome)
+      1      // core 1 : laisse core 0 pour Wi-Fi et ESPHome
   );
 
   if (res != pdPASS) {
@@ -45,7 +44,7 @@ void LVGLCameraDisplay::setup() {
 }
 
 void LVGLCameraDisplay::loop() {
-  // Rien à faire ici — le travail est effectué dans la tâche dédiée.
+  // Rien ici : tout se fait dans la tâche FreeRTOS
 }
 
 void LVGLCameraDisplay::dump_config() {
@@ -88,8 +87,8 @@ void LVGLCameraDisplay::camera_task_() {
       last_log_time = now;
     }
 
-    // Petit délai pour laisser respirer le CPU
-    vTaskDelay(pdMS_TO_TICKS(2));  // ≈500 Hz
+    // Laisser respirer le CPU (≈500 Hz)
+    vTaskDelay(pdMS_TO_TICKS(2));
   }
 
   ESP_LOGW(TAG, "🛑 Tâche caméra LVGL arrêtée");
@@ -115,12 +114,17 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // Verrou LVGL pour éviter conflits avec le moteur de rendu
-  lvgl::core::LvglLock lock;  // version ESPHome → utilise Mutex LVGL
+#if defined(USE_LVGL)
+  lvgl_acquire();
+#endif
 
-  // Utilise le buffer caméra directement (pas de copie)
+  // ⚡ Utilise directement le buffer caméra (zéro copie)
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
+
+#if defined(USE_LVGL)
+  lvgl_release();
+#endif
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
@@ -141,6 +145,7 @@ void LVGLCameraDisplay::stop_task() {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
+
 
 
 
