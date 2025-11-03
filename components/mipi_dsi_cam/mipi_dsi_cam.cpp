@@ -1,8 +1,8 @@
 #include "mipi_dsi_cam.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-
 #include "mipi_dsi_cam_drivers_generated.h"
+#include "esp_video_init.h"  // ✅ pour esp_video_init()
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -12,6 +12,32 @@ namespace mipi_dsi_cam {
 static const char *const TAG = "mipi_dsi_cam";
 
 void MipiDsiCam::setup() {
+  // ==========================================================
+  // Vérification et initialisation du moteur ESP-Video
+  // ==========================================================
+  ESP_LOGI(TAG, "=== Initialisation ESP-Video ===");
+
+  esp_video_init_config_t video_cfg = {
+      .use_dma = true,
+      .use_psram = true,
+  };
+
+  esp_err_t ret = esp_video_init(&video_cfg);
+  if (ret == ESP_OK) {
+    ESP_LOGI(TAG, "✅ esp_video_init() exécuté avec succès !");
+  } else {
+    ESP_LOGE(TAG, "❌ esp_video_init() a échoué (code: 0x%x)", ret);
+  }
+
+#ifdef ESP_VIDEO_VERSION
+  ESP_LOGI(TAG, "ESP-Video version: %s", ESP_VIDEO_VERSION);
+#else
+  ESP_LOGI(TAG, "ESP-Video version: (non définie)");
+#endif
+
+  // ==========================================================
+  // Initialisation caméra MIPI
+  // ==========================================================
   ESP_LOGI(TAG, "Init MIPI Camera");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
   
@@ -376,6 +402,7 @@ void MipiDsiCam::dump_config() {
 }  // namespace esphome
 
 #endif  // USE_ESP32_VARIANT_ESP32P4
+
 
 
 
