@@ -164,31 +164,43 @@ bool MipiDsiCam::init_sensor_() {
 
 bool MipiDsiCam::init_esp_video_() {
   ESP_LOGI(TAG, "Init ESP-Video...");
-  
-  // Config CSI (comme Tab5 - SANS I2C handle car géré par ESPHome)
+
+  // --- SCCB config (I2C du capteur, géré par ESPHome) ---
   esp_video_init_sccb_config_t sccb_config = {};
   sccb_config.init_sccb = false;
-  sccb_config.i2c_handle = nullptr;  // ESPHome gère l'I2C
-  
-  esp_video_init_csi_config_t csi_config = {};
+  sccb_config.i2c_handle = nullptr;  // Géré par ESPHome
+
+  // --- MIPI-CSI config ---
+  esp_video_init_mipi_csi_config_t csi_config = {};
   csi_config.sccb_config = sccb_config;
-  csi_config.reset_pin = -1;
-  csi_config.pwdn_pin = -1;
-  
+
+  // Remplace les -1 par GPIO_NUM_NC (non connectés)
+  csi_config.reset_pin = GPIO_NUM_NC;
+  csi_config.pwdn_pin  = GPIO_NUM_NC;
+
+  // --- Config globale ---
   esp_video_init_config_t cam_config = {};
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 3, 0)
+  cam_config.mipi_csi = &csi_config;  // Champ correct depuis ESP-Video 1.3+
+#else
   cam_config.csi = &csi_config;
-  cam_config.dvp = nullptr;
-  cam_config.jpeg = nullptr;
-  
-  esp_err_t ret = esp_video_init(&cam_config);
+#endif
+
+  // Ces champs n’existent plus dans ESP-Video >=1.3
+  // cam_config.dvp = nullptr;
+  // cam_config.jpeg = nullptr;
+
+  // --- Initialisation du device ---
+  esp_err_t ret = esp_video_init(ESP_VIDEO_MIPI_CSI_DEVICE_ID, &cam_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "esp_video_init failed: %s", esp_err_to_name(ret));
     return false;
   }
-  
+
   ESP_LOGI(TAG, "ESP-Video initialized ✓");
   return true;
 }
+
 
 // ============================================================================
 // Open /dev/video0
