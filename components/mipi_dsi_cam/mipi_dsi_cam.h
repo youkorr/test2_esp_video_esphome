@@ -12,7 +12,6 @@ extern "C" {
   #include "driver/isp.h"
   #include "esp_ldo_regulator.h"
 }
-#include "mipi_dsi_cam_ipa.h"
 #endif
 
 namespace esphome {
@@ -79,24 +78,6 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   uint16_t get_image_width() const { return this->width_; }
   uint16_t get_image_height() const { return this->height_; }
 
-#ifdef USE_ESP32_VARIANT_ESP32P4
-  // Accès à l'IPA pour configuration
-  CompleteIPA* get_ipa() { return &this->ipa_; }
-  IPAConfig& get_ipa_config() { return this->ipa_.get_config(); }
-  
-  // Configuration rapide de l'IPA
-  void set_ipa_awb_enabled(bool enabled) { this->ipa_.get_config().awb_enabled = enabled; }
-  void set_ipa_ae_enabled(bool enabled) { this->ipa_.get_config().ae_enabled = enabled; }
-  void set_ipa_sharpen_enabled(bool enabled) { this->ipa_.get_config().sharpen_enabled = enabled; }
-  void set_ipa_denoise_enabled(bool enabled) { this->ipa_.get_config().denoise_enabled = enabled; }
-  void set_ipa_sharpen_strength(uint8_t strength) { this->ipa_.get_config().sharpen_strength = strength; }
-  void set_ipa_denoise_level(uint8_t level) { this->ipa_.get_config().denoise_level = level; }
-  void set_ipa_brightness(uint32_t brightness) { this->ipa_.get_config().brightness = brightness; }
-  void set_ipa_contrast(uint32_t contrast) { this->ipa_.get_config().contrast = contrast; }
-  void set_ipa_saturation(uint32_t saturation) { this->ipa_.get_config().saturation = saturation; }
-  void set_ipa_hue(int32_t hue) { this->ipa_.get_config().hue = hue; }
-#endif
-
  protected:
   uint8_t external_clock_pin_{36};
   uint32_t external_clock_frequency_{24000000};
@@ -134,37 +115,12 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   isp_proc_handle_t isp_handle_{nullptr};
   esp_ldo_channel_handle_t ldo_handle_{nullptr};
   
-  // IPA (Image Processing Algorithm)
-  CompleteIPA ipa_;
-  esp_ipa_sensor_t ipa_sensor_info_;
-  esp_ipa_metadata_t ipa_metadata_;
-  bool ipa_initialized_{false};
-  uint32_t ipa_process_interval_ms_{100};  // Traiter l'IPA toutes les 100ms
-  uint32_t last_ipa_process_time_{0};
-  
-  // ISP statistics handles
-  isp_awb_ctlr_handle_t awb_ctlr_{nullptr};
-  isp_ae_ctlr_handle_t ae_ctlr_{nullptr};
-  isp_hist_ctlr_handle_t hist_ctlr_{nullptr};
-  isp_sharpen_ctlr_handle_t sharpen_ctlr_{nullptr};
-  isp_bf_ctlr_handle_t bf_ctlr_{nullptr};
-  isp_ccm_ctlr_handle_t ccm_ctlr_{nullptr};
-  isp_gamma_ctlr_handle_t gamma_ctlr_{nullptr};
-  isp_demosaic_ctlr_handle_t demosaic_ctlr_{nullptr};
-  isp_color_ctlr_handle_t color_ctlr_{nullptr};
-  
   bool create_sensor_driver_();
   bool init_sensor_();
   bool init_ldo_();
   bool init_csi_();
   bool init_isp_();
-  bool init_isp_modules_();
-  bool init_ipa_();
   bool allocate_buffer_();
-  
-  void process_ipa_();
-  bool get_isp_statistics_(esp_ipa_stats_t *stats);
-  bool apply_ipa_metadata_(const esp_ipa_metadata_t *metadata);
   
   static bool IRAM_ATTR on_csi_new_frame_(
     esp_cam_ctlr_handle_t handle,
@@ -182,6 +138,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
 
 
 
