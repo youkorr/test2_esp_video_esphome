@@ -1,6 +1,7 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Compatible ESPHome 2025.10.3 — auto-stubs + intégration H264/JPEG + build_src_filter
+Corrigé avec stubs additionnels pour compilation complète.
+Compatible ESPHome 2025.10.3 (ESP-IDF 5.4.x)
 """
 
 import esphome.codegen as cg
@@ -24,22 +25,12 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # -----------------------------------------------------------------------
-    # Vérification du framework
-    # -----------------------------------------------------------------------
     if CORE.using_arduino:
         raise cv.Invalid("esp_video nécessite 'framework: type: esp-idf'")
 
-    # -----------------------------------------------------------------------
-    # Chemins du composant
-    # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
     print(f"[ESP-Video] 🧠 Initialisation du composant ESP-Video (injection sources & includes)")
-    cg.add(cg.RawExpression(f'// [ESP-Video] Component: {component_dir}'))
 
-    # -----------------------------------------------------------------------
-    # Vérification / création du dossier deps/include
-    # -----------------------------------------------------------------------
     deps_include = os.path.join(component_dir, "deps", "include")
     os.makedirs(deps_include, exist_ok=True)
 
@@ -50,37 +41,22 @@ async def to_code(config):
         "esp_cam_sensor_types.h",
         "esp_cam_motor_types.h",
         "esp_cam_motor.h",
+        "esp_cam_ctlr_spi.h",
         "esp_h264_enc_single_hw.h",
+        "esp_h264_enc_single_sw.h",
+        "esp_cam_sensor_format.h",
+        "esp_cam_motor_format.h",
+        "esp_cam_motor_device.h",
+        "linux/kernel.h",
     ]
 
-    # -----------------------------------------------------------------------
-    # Templates de stubs automatiques
-    # -----------------------------------------------------------------------
     stub_templates = {
+        # --- capteurs caméra ---
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
 typedef struct { int dummy; } esp_cam_sensor_device_t;
 esp_err_t esp_cam_sensor_init(esp_cam_sensor_device_t **dev);
 esp_err_t esp_cam_sensor_deinit(esp_cam_sensor_device_t *dev);
-""",
-
-        "esp_cam_sensor_xclk.h": """#pragma once
-#include "esp_err.h"
-#ifdef __cplusplus
-extern "C" {
-#endif
-esp_err_t esp_cam_sensor_start_xclk(void);
-esp_err_t esp_cam_sensor_stop_xclk(void);
-#ifdef __cplusplus
-}
-#endif
-""",
-
-        "esp_sccb_i2c.h": """#pragma once
-#include "esp_err.h"
-#include <stdint.h>
-esp_err_t esp_sccb_write(uint8_t addr, uint16_t reg, uint8_t data);
-esp_err_t esp_sccb_read(uint8_t addr, uint16_t reg, uint8_t *data);
 """,
 
         "esp_cam_sensor_types.h": """#pragma once
@@ -92,6 +68,21 @@ typedef enum {
 } esp_cam_sensor_type_t;
 """,
 
+        "esp_cam_sensor_xclk.h": """#pragma once
+#include "esp_err.h"
+esp_err_t esp_cam_sensor_start_xclk(void);
+esp_err_t esp_cam_sensor_stop_xclk(void);
+""",
+
+        "esp_cam_sensor_format.h": """#pragma once
+typedef struct {
+    int width;
+    int height;
+    int pixel_format;
+} esp_cam_sensor_format_t;
+""",
+
+        # --- moteur caméra ---
         "esp_cam_motor_types.h": """#pragma once
 typedef struct { int dummy; } esp_cam_motor_t;
 """,
@@ -103,16 +94,60 @@ static inline esp_err_t esp_cam_motor_init(void) { return 0; }
 static inline void esp_cam_motor_deinit(void) {}
 """,
 
+        "esp_cam_motor_format.h": """#pragma once
+typedef struct {
+    int speed;
+    int position;
+} esp_cam_motor_format_t;
+""",
+
+        "esp_cam_motor_device.h": """#pragma once
+typedef struct {
+    int id;
+    int dummy;
+} esp_cam_motor_device_t;
+""",
+
+        # --- SCCB / SPI ---
+        "esp_sccb_i2c.h": """#pragma once
+#include "esp_err.h"
+#include <stdint.h>
+esp_err_t esp_sccb_write(uint8_t addr, uint16_t reg, uint8_t data);
+esp_err_t esp_sccb_read(uint8_t addr, uint16_t reg, uint8_t *data);
+""",
+
+        "esp_cam_ctlr_spi.h": """#pragma once
+#include "esp_err.h"
+typedef struct { int dummy; } esp_cam_ctlr_spi_t;
+static inline esp_err_t esp_cam_new_spi_ctlr(const void *cfg, void **out) { return ESP_OK; }
+""",
+
+        # --- encodeurs H264 ---
         "esp_h264_enc_single_hw.h": """#pragma once
 #include "esp_err.h"
 typedef struct { int dummy; } esp_h264_enc_t;
 static inline esp_err_t esp_h264_enc_init(esp_h264_enc_t **enc) { return ESP_OK; }
 static inline esp_err_t esp_h264_enc_deinit(esp_h264_enc_t *enc) { return ESP_OK; }
 """,
+
+        "esp_h264_enc_single_sw.h": """#pragma once
+#include "esp_err.h"
+typedef struct { int dummy; } esp_h264_sw_enc_t;
+static inline esp_err_t esp_h264_sw_enc_init(esp_h264_sw_enc_t **enc) { return ESP_OK; }
+static inline esp_err_t esp_h264_sw_enc_deinit(esp_h264_sw_enc_t *enc) { return ESP_OK; }
+""",
+
+        # --- kernel / macros utilitaires ---
+        "linux/kernel.h": """#pragma once
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
+#endif
+""",
     }
 
     for stub in required_stubs:
         stub_path = os.path.join(deps_include, stub)
+        os.makedirs(os.path.dirname(stub_path), exist_ok=True)
         if not os.path.exists(stub_path):
             with open(stub_path, "w", encoding="utf-8") as f:
                 f.write(stub_templates[stub])
@@ -120,26 +155,14 @@ static inline esp_err_t esp_h264_enc_deinit(esp_h264_enc_t *enc) { return ESP_OK
         else:
             print(f"[ESP-Video] ✅ Stub trouvé : {stub}")
 
-    # -----------------------------------------------------------------------
     # Include paths
-    # -----------------------------------------------------------------------
-    include_dirs = [
-        "deps/include",
-        "include",
-        "include/linux",
-        "include/sys",
-        "private_include",
-        "src",
-        "src/device",
-    ]
-    for subdir in include_dirs:
-        abs_path = os.path.join(component_dir, subdir)
-        if os.path.exists(abs_path):
-            cg.add_build_flag(f"-I{abs_path}")
+    for sub in ["deps/include", "include", "include/linux", "include/sys",
+                "private_include", "src", "src/device"]:
+        full = os.path.join(component_dir, sub)
+        if os.path.exists(full):
+            cg.add_build_flag(f"-I{full}")
 
-    # -----------------------------------------------------------------------
-    # Flags de compilation
-    # -----------------------------------------------------------------------
+    # Flags
     flags = [
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
         "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
@@ -153,9 +176,7 @@ static inline esp_err_t esp_h264_enc_deinit(esp_h264_enc_t *enc) { return ESP_OK
     for flag in flags:
         cg.add_build_flag(flag)
 
-    # -----------------------------------------------------------------------
-    # Ajout des sources C via build_src_filter (compatibilité ESPHome 2025.10.3)
-    # -----------------------------------------------------------------------
+    # Sources
     esp_video_srcs = [
         "src/esp_video.c",
         "src/esp_video_buffer.c",
@@ -171,27 +192,24 @@ static inline esp_err_t esp_h264_enc_deinit(esp_h264_enc_t *enc) { return ESP_OK
         "src/device/esp_video_h264_device.c",
     ]
 
-    build_srcs = []
+    src_filter = []
     for src in esp_video_srcs:
-        full_path = os.path.join(component_dir, src)
-        if os.path.exists(full_path):
-            build_srcs.append(f"+<{full_path}>")
+        path = os.path.join(component_dir, src)
+        if os.path.exists(path):
+            src_filter.append(f"+<{path}>")
             print(f"[ESP-Video] 🔗 Source incluse: {src}")
         else:
             print(f"[ESP-Video] ⚠️ Fichier manquant: {src}")
+    if src_filter:
+        cg.add_platformio_option("build_src_filter", " ".join(src_filter))
 
-    # Injection PlatformIO
-    if build_srcs:
-        cg.add_platformio_option("build_src_filter", " ".join(build_srcs))
-
-    # -----------------------------------------------------------------------
     # Définitions globales
-    # -----------------------------------------------------------------------
     cg.add_define("ESP_VIDEO_VERSION", '"1.3.1"')
     cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     cg.add(cg.RawExpression('// [ESP-Video] Configuration complète'))
+
 
 
 
