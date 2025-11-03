@@ -26,18 +26,26 @@ CONF_PIXEL_FORMAT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
 
+# NOUVEAU - Options PPA (comme Tab5)
+CONF_MIRROR_X = "mirror_x"
+CONF_MIRROR_Y = "mirror_y"
+CONF_ROTATION = "rotation"
+
 PixelFormat = mipi_dsi_cam_ns.enum("PixelFormat")
 PIXEL_FORMAT_RGB565 = PixelFormat.PIXEL_FORMAT_RGB565
 PIXEL_FORMAT_YUV422 = PixelFormat.PIXEL_FORMAT_YUV422
 PIXEL_FORMAT_RAW8 = PixelFormat.PIXEL_FORMAT_RAW8
+PIXEL_FORMAT_JPEG = PixelFormat.PIXEL_FORMAT_JPEG    # NOUVEAU
+PIXEL_FORMAT_H264 = PixelFormat.PIXEL_FORMAT_H264    # NOUVEAU
 
 PIXEL_FORMATS = {
     "RGB565": PIXEL_FORMAT_RGB565,
     "YUV422": PIXEL_FORMAT_YUV422,
     "RAW8": PIXEL_FORMAT_RAW8,
+    "JPEG": PIXEL_FORMAT_JPEG,      # NOUVEAU
+    "H264": PIXEL_FORMAT_H264,      # NOUVEAU
 }
 
-# Deux résolutions disponibles
 RESOLUTIONS = {
     "720P": (1280, 720),
     "800x640": (800, 640),
@@ -116,6 +124,14 @@ def validate_resolution(value):
             )
     raise cv.Invalid("Le format de résolution doit être '720P' ou '800x640'")
 
+def validate_rotation(value):
+    """Valider l'angle de rotation"""
+    if value not in [0, 90, 180, 270]:
+        raise cv.Invalid(
+            f"Rotation '{value}' invalide. Valeurs acceptées: 0, 90, 180, 270"
+        )
+    return value
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(MipiDsiCam),
@@ -129,10 +145,15 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Required(CONF_SENSOR): validate_sensor,
         cv.Optional(CONF_LANE): cv.int_range(min=1, max=4),
         cv.Optional(CONF_ADDRESS_SENSOR): cv.i2c_address,
-        cv.Optional(CONF_RESOLUTION): validate_resolution,  # Si non spécifié, utilise la résolution native du capteur
+        cv.Optional(CONF_RESOLUTION): validate_resolution,
         cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.enum(PIXEL_FORMATS, upper=True),
         cv.Optional(CONF_FRAMERATE): cv.int_range(min=1, max=60),
         cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
+        
+        # NOUVEAU - Options PPA (comme Tab5)
+        cv.Optional(CONF_MIRROR_X, default=True): cv.boolean,
+        cv.Optional(CONF_MIRROR_Y, default=False): cv.boolean,
+        cv.Optional(CONF_ROTATION, default=0): validate_rotation,
     }
 ).extend(cv.COMPONENT_SCHEMA).extend(i2c.i2c_device_schema(0x36))
 
@@ -153,11 +174,11 @@ async def to_code(config):
     
     cg.add(var.set_external_clock_frequency(config[CONF_FREQUENCY]))
     
-    # Récupérer les infos du capteur
+    # Récupérer infos capteur
     sensor_name = config[CONF_SENSOR]
     sensor_info = AVAILABLE_SENSORS[sensor_name]['info']
     
-    # Utiliser la résolution spécifiée ou la résolution native du capteur
+    # Résolution
     if CONF_RESOLUTION in config:
         width, height = config[CONF_RESOLUTION]
         resolution_source = "configured"
@@ -166,7 +187,7 @@ async def to_code(config):
         height = sensor_info['height']
         resolution_source = "native"
     
-    # Utiliser les paramètres du capteur ou ceux spécifiés par l'utilisateur
+    # Paramètres capteur
     lane_count = config.get(CONF_LANE, sensor_info['lane_count'])
     sensor_address = config.get(CONF_ADDRESS_SENSOR, sensor_info['i2c_address'])
     framerate = config.get(CONF_FRAMERATE, sensor_info['fps'])
@@ -181,6 +202,11 @@ async def to_code(config):
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
     cg.add(var.set_framerate(framerate))
+    
+    # NOUVEAU - Options PPA
+    cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
+    cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
+    cg.add(var.set_rotation(config[CONF_ROTATION]))
     
     if CONF_RESET_PIN in config:
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
@@ -230,9 +256,13 @@ inline ISensorDriver* create_sensor_driver(const std::string& sensor_type, i2c::
         f.write(complete_code)
         f.write("\n#endif\n")
     
+    # Build flags
     cg.add_build_flag("-DBOARD_HAS_PSRAM")
     cg.add_build_flag("-DCONFIG_CAMERA_CORE0=1")
     cg.add_build_flag("-DUSE_ESP32_VARIANT_ESP32P4")
+    
+    # Log configuration
+    ppa_info = f"Mirror X={'ON' if config[CONF_MIRROR_X] else 'OFF'}, Y={'ON' if config[CONF_MIRROR_Y] else 'OFF'}, Rot={config[CONF_ROTATION]}°"
     
     cg.add(cg.RawExpression(f'''
         ESP_LOGI("compile", "Camera configuration:");
@@ -242,4 +272,5 @@ inline ISensorDriver* create_sensor_driver(const std::string& sensor_type, i2c::
         ESP_LOGI("compile", "  Address: 0x{sensor_address:02X}");
         ESP_LOGI("compile", "  Format: {config[CONF_PIXEL_FORMAT]}");
         ESP_LOGI("compile", "  FPS: {framerate}");
+        ESP_LOGI("compile", "  PPA: {ppa_info}");
     '''))
