@@ -1,6 +1,6 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Avec support H264 + JPEG activé et auto-création des stubs
+Avec support H264 + JPEG activé et auto-création des stubs + compilation automatique des sources
 """
 
 import esphome.codegen as cg
@@ -21,6 +21,7 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
+    print("[ESP-Video] 🧠 Initialisation du composant ESP-Video (injection sources & includes)")
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
@@ -50,7 +51,6 @@ async def to_code(config):
         "esp_cam_motor_types.h",
     ]
 
-    # Génération automatique de stubs manquants
     stub_templates = {
         "esp_cam_sensor.h": """#pragma once
 #include "esp_err.h"
@@ -58,7 +58,6 @@ typedef struct { int dummy; } esp_cam_sensor_device_t;
 esp_err_t esp_cam_sensor_init(esp_cam_sensor_device_t **dev);
 esp_err_t esp_cam_sensor_deinit(esp_cam_sensor_device_t *dev);
 """,
-
         "esp_cam_sensor_xclk.h": """#pragma once
 #include "esp_err.h"
 #ifdef __cplusplus
@@ -70,14 +69,12 @@ esp_err_t esp_cam_sensor_stop_xclk(void);
 }
 #endif
 """,
-
         "esp_sccb_i2c.h": """#pragma once
 #include "esp_err.h"
 #include <stdint.h>
 esp_err_t esp_sccb_write(uint8_t addr, uint16_t reg, uint8_t data);
 esp_err_t esp_sccb_read(uint8_t addr, uint16_t reg, uint8_t *data);
 """,
-
         "esp_cam_sensor_types.h": """#pragma once
 typedef enum {
     ESP_CAM_SENSOR_TYPE_UNKNOWN = 0,
@@ -86,12 +83,12 @@ typedef enum {
     ESP_CAM_SENSOR_TYPE_OV5647
 } esp_cam_sensor_type_t;
 """,
-
         "esp_cam_motor_types.h": """#pragma once
 typedef struct { int dummy; } esp_cam_motor_t;
 """,
     }
 
+    # Génération automatique des stubs manquants
     for stub in required_stubs:
         stub_path = os.path.join(deps_include, stub)
         if not os.path.exists(stub_path):
@@ -102,10 +99,10 @@ typedef struct { int dummy; } esp_cam_motor_t;
             print(f"[ESP-Video] ✅ Stub trouvé : {stub}")
 
     # -----------------------------------------------------------------------
-    # Ajout des includes (ordre prioritaire)
+    # Ajout des includes
     # -----------------------------------------------------------------------
     include_dirs = [
-        "deps/include",     # Stubs d’abord
+        "deps/include",
         "include",
         "include/linux",
         "include/sys",
@@ -137,7 +134,33 @@ typedef struct { int dummy; } esp_cam_motor_t;
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Build script post compilation
+    # Ajout explicite des sources ESP-Video à la compilation
+    # -----------------------------------------------------------------------
+    source_files = [
+        "src/esp_video.c",
+        "src/esp_video_buffer.c",
+        "src/esp_video_init.c",
+        "src/esp_video_ioctl.c",
+        "src/esp_video_mman.c",
+        "src/esp_video_vfs.c",
+        "src/esp_video_cam.c",
+        "src/esp_video_isp_pipeline.c",
+        "src/device/esp_video_csi_device.c",
+        "src/device/esp_video_isp_device.c",
+        "src/device/esp_video_jpeg_device.c",
+        "src/device/esp_video_h264_device.c",
+    ]
+
+    for src_file in source_files:
+        full_path = os.path.join(component_dir, src_file)
+        if os.path.exists(full_path):
+            cg.add_source_files(full_path)
+            cg.add(cg.RawExpression(f'// [ESP-Video] Ajouté au build : {src_file}'))
+        else:
+            print(f"[ESP-Video] ⚠️ Fichier source manquant : {src_file}")
+
+    # -----------------------------------------------------------------------
+    # Build script post compilation (optionnel)
     # -----------------------------------------------------------------------
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
@@ -153,7 +176,8 @@ typedef struct { int dummy; } esp_cam_motor_t;
     cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
     cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
-    cg.add(cg.RawExpression('// [ESP-Video] Configuration complete (auto-stubs + H264 + JPEG)'))
+    cg.add(cg.RawExpression('// [ESP-Video] Configuration complète (auto-stubs + sources + flags)'))
+
 
 
 
