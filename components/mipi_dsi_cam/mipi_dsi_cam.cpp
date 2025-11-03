@@ -2,7 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include "mipi_dsi_cam_drivers_generated.h"
-#include "esp_video_init.h"  // ✅ pour esp_video_init()
+#include "esp_video_init.h"  // pour esp_video_init()
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 
@@ -13,14 +13,12 @@ static const char *const TAG = "mipi_dsi_cam";
 
 void MipiDsiCam::setup() {
   // ==========================================================
-  // Vérification et initialisation du moteur ESP-Video
+  // Initialisation ESP-Video
   // ==========================================================
   ESP_LOGI(TAG, "=== Initialisation ESP-Video ===");
 
-  esp_video_init_config_t video_cfg = {
-      .use_dma = true,
-      .use_psram = true,
-  };
+  // ⚠️ version générique du config — certains champs comme use_dma/use_psram peuvent ne pas exister
+  esp_video_init_config_t video_cfg = {};  // vide = configuration par défaut
 
   esp_err_t ret = esp_video_init(&video_cfg);
   if (ret == ESP_OK) {
@@ -36,7 +34,7 @@ void MipiDsiCam::setup() {
 #endif
 
   // ==========================================================
-  // Initialisation caméra MIPI
+  // Initialisation de la caméra MIPI
   // ==========================================================
   ESP_LOGI(TAG, "Init MIPI Camera");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
@@ -402,6 +400,7 @@ void MipiDsiCam::dump_config() {
 }  // namespace esphome
 
 #endif  // USE_ESP32_VARIANT_ESP32P4
+
 
 
 
