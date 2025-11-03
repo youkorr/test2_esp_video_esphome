@@ -31,7 +31,7 @@ void LVGLCameraDisplay::setup() {
       this,
       5,     // priorité moyenne
       &this->camera_task_handle_,
-      1      // core 1 : laisse core 0 au Wi-Fi et ESPHome
+      1      // core 1 : laisse core 0 pour Wi-Fi et ESPHome
   );
 
   if (res != pdPASS) {
@@ -114,9 +114,11 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // ⚡ Directement : zéro copie du buffer caméra vers LVGL
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
-  lv_obj_invalidate(this->canvas_obj_);
+  // ✅ Mise à jour du canvas dans un contexte LVGL sûr
+  App.safe_lvgl([&]() {
+    lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+    lv_obj_invalidate(this->canvas_obj_);
+  });
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
