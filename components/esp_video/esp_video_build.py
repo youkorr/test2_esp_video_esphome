@@ -1,130 +1,111 @@
 """
-esp_video_build.py — version multi-external stable
-Gère l’exécution depuis /data/build/... et détecte automatiquement
-le vrai composant esp_video dans /data/external_components.
+esp_video_build.py — Vérifie la config (sera appelé par PlatformIO, pas ESPHome)
 """
-
 import os
 import sys
-from SCons.Script import Import
-
-Import("env")
-
-print("\n[ESP-Video] ⚙ Initialisation du build script")
 
 # ===============================================================
-# Vérification framework
+# Ce script est appelé par PlatformIO, pas par ESPHome
+# Il ne doit PAS être importé dans __init__.py
 # ===============================================================
-framework = env.get("PIOFRAMEWORK", [])
-if "espidf" not in framework:
-    print("[ESP-Video] ❌ Ce composant nécessite ESP-IDF (pas Arduino)")
-    sys.exit(1)
 
-# ===============================================================
-# Recherche robuste du vrai dossier du composant esp_video
-# ===============================================================
-def find_esp_video_dir():
-    search_roots = [
-        os.getcwd(),
-        "/data/external_components",
-        "/data/data/external_components",
-    ]
-    for base in search_roots:
-        for root, dirs, _ in os.walk(base):
-            if "esp_video" in dirs:
-                candidate = os.path.join(root, "esp_video")
-                if os.path.exists(os.path.join(candidate, "deps", "include")):
-                    print(f"[ESP-Video] 🔍 Composant trouvé : {candidate}")
-                    return candidate
-    print("[ESP-Video] ❌ Composant esp_video introuvable !")
-    sys.exit(1)
+def main():
+    """Fonction principale appelée par PlatformIO"""
+    try:
+        from SCons.Script import Import
+        Import("env")
+    except:
+        # Si appelé hors contexte PlatformIO, ne rien faire
+        print("[ESP-Video] Script appelé hors contexte PlatformIO, ignoré")
+        return
 
-component_dir = find_esp_video_dir()
+    print("\n[ESP-Video] ⚙ Vérification configuration (PlatformIO)")
 
-# ===============================================================
-# Vérification deps/include
-# ===============================================================
-deps_dir = os.path.join(component_dir, "deps", "include")
-print(f"[ESP-Video] 🔧 Vérification des stubs dans : {deps_dir}")
-os.makedirs(deps_dir, exist_ok=True)
+    # Vérifier framework
+    framework = env.get("PIOFRAMEWORK", [])
+    if "espidf" not in framework:
+        print("[ESP-Video] ❌ ESP-IDF requis")
+        sys.exit(1)
 
-required_stubs = [
-    "esp_cam_sensor.h",
-    "esp_cam_sensor_xclk.h",
-    "esp_sccb_i2c.h",
-    "esp_cam_motor_types.h",
-    "esp_cam_sensor_types.h",
-]
+    # Recherche composant
+    def find_esp_video_dir():
+        search_roots = [
+            os.getcwd(),
+            "/data/external_components",
+            "/data/data/external_components",
+        ]
+        for base in search_roots:
+            if not os.path.exists(base):
+                continue
+            for root, dirs, _ in os.walk(base):
+                if "esp_video" in dirs:
+                    candidate = os.path.join(root, "esp_video")
+                    if os.path.exists(os.path.join(candidate, "CMakeLists.txt")):
+                        return candidate
+        return None
 
-missing = []
-for stub in required_stubs:
-    path = os.path.join(deps_dir, stub)
-    if os.path.exists(path):
-        print(f"[ESP-Video]   ✓ {stub}")
+    component_dir = find_esp_video_dir()
+    if not component_dir:
+        print("[ESP-Video] ⚠️ Composant introuvable, mais CMake le trouvera")
+        return
+    
+    print(f"[ESP-Video] 📂 Composant: {component_dir}")
+
+    # Vérifier CMakeLists.txt
+    cmake_file = os.path.join(component_dir, "CMakeLists.txt")
+    if os.path.exists(cmake_file):
+        print("[ESP-Video] ✓ CMakeLists.txt trouvé")
     else:
-        print(f"[ESP-Video]   ❌ {stub} MANQUANT")
-        missing.append(stub)
+        print("[ESP-Video] ❌ CMakeLists.txt manquant!")
+        print("[ESP-Video] ESP-IDF ne compilera PAS les sources sans CMakeLists.txt")
+        sys.exit(1)
 
-if missing:
-    print(f"[ESP-Video] ⚠️ Erreur : fichiers manquants ({', '.join(missing)})")
-    sys.exit(1)
+    # Vérifier stubs
+    deps_dir = os.path.join(component_dir, "deps", "include")
+    if os.path.exists(deps_dir):
+        print(f"[ESP-Video] 🔧 Stubs: {deps_dir}")
+        
+        required_stubs = [
+            "esp_cam_sensor.h",
+            "esp_cam_sensor_xclk.h",
+            "esp_sccb_i2c.h",
+            "esp_cam_sensor_types.h",
+        ]
+        
+        for stub in required_stubs:
+            path = os.path.join(deps_dir, stub)
+            if os.path.exists(path):
+                print(f"[ESP-Video]   ✓ {stub}")
+            else:
+                print(f"[ESP-Video]   ⚠️ {stub} manquant")
 
-# ===============================================================
-# Ajout des includes
-# ===============================================================
-env.Prepend(CPPPATH=[deps_dir])
-print(f"[ESP-Video] ➕ Include deps ajouté EN PRIORITÉ : {deps_dir}")
+    # Vérifier sources
+    src_dir = os.path.join(component_dir, "src")
+    if os.path.exists(src_dir):
+        critical_sources = ["esp_video.c", "esp_video_init.c", "esp_video_vfs.c"]
+        all_found = True
+        for src in critical_sources:
+            if os.path.exists(os.path.join(src_dir, src)):
+                print(f"[ESP-Video]   ✓ {src}")
+            else:
+                print(f"[ESP-Video]   ❌ {src} manquant")
+                all_found = False
+        
+        if all_found:
+            print("[ESP-Video] ✅ Configuration OK")
+            print("[ESP-Video] ℹ️  CMake compilera automatiquement via CMakeLists.txt")
+        else:
+            print("[ESP-Video] ❌ Sources manquantes")
+    else:
+        print("[ESP-Video] ⚠️ src/ introuvable")
 
-def add_include(path):
-    if os.path.exists(path):
-        env.Append(CPPPATH=[path])
-        print(f"[ESP-Video] ➕ Include : {path}")
-
-include_paths = [
-    os.path.join(component_dir, "include"),
-    os.path.join(component_dir, "include", "linux"),
-    os.path.join(component_dir, "include", "sys"),
-    os.path.join(component_dir, "private_include"),
-    os.path.join(component_dir, "src"),
-    os.path.join(component_dir, "src", "device"),
-]
-for p in include_paths:
-    add_include(p)
-
-# ===============================================================
-# Recherche du composant tab5_camera
-# ===============================================================
-def find_tab5_camera_dir():
-    for base in ["/data/external_components", "/data/data/external_components"]:
-        for root, dirs, _ in os.walk(base):
-            if "tab5_camera" in dirs:
-                return os.path.join(root, "tab5_camera")
-    return None
-
-tab5_dir = find_tab5_camera_dir()
-if tab5_dir:
-    env.Append(CPPPATH=[tab5_dir])
-    print(f"[ESP-Video] 🎯 tab5_camera trouvé : {tab5_dir}")
-else:
-    print("[ESP-Video] ⚠️ Aucun tab5_camera trouvé")
-
-# ===============================================================
-# Flags de compilation
-# ===============================================================
-flags = [
-    "CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
-    "CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
-    "CONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1",
-]
-env.Append(CPPDEFINES=flags)
+    print()
 
 # ===============================================================
-# Fin
+# Exécution seulement si appelé par PlatformIO
 # ===============================================================
-print("[ESP-Video] ✅ Configuration terminée")
-print(f"[ESP-Video] 📋 CPPPATH (top3): {env['CPPPATH'][:3]}\n")
+if __name__ == "__main__" or "env" in dir():
+    main()
 
 
 
