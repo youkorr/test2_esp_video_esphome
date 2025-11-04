@@ -327,71 +327,6 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
   if (trans->received_size > 0) {
-    // Utiliser les gains précalculés (pas de calcul float dans l'ISR!)
-    uint32_t red_gain_fixed = cam->red_gain_fixed_;
-    uint32_t green_gain_fixed = cam->green_gain_fixed_;
-    uint32_t blue_gain_fixed = cam->blue_gain_fixed_;
-    
-    // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
-    if (cam->pixel_format_ == PIXEL_FORMAT_BGR888) {
-      uint8_t* buffer = cam->frame_buffers_[cam->buffer_index_];
-      size_t pixel_count = cam->width_ * cam->height_;
-      
-      for (size_t i = 0; i < pixel_count; i++) {
-        size_t offset = i * 3;
-        uint8_t r = buffer[offset];
-        uint8_t g = buffer[offset + 1];
-        uint8_t b = buffer[offset + 2];
-        
-        // Appliquer les gains de couleur (calculs entiers uniquement)
-        uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
-        uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
-        uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
-        
-        // Limiter à 255
-        r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
-        g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
-        b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
-        
-        // Inverser R et B pour BGR
-        buffer[offset] = (uint8_t)b_adjusted;     // B
-        buffer[offset + 1] = (uint8_t)g_adjusted; // G
-        buffer[offset + 2] = (uint8_t)r_adjusted; // R
-      }
-    }
-    // Pour RGB565, appliquer les gains de couleur aussi
-    else if (cam->pixel_format_ == PIXEL_FORMAT_RGB565) {
-      uint8_t* buffer = cam->frame_buffers_[cam->buffer_index_];
-      size_t pixel_count = cam->width_ * cam->height_;
-      uint16_t* pixels = (uint16_t*)buffer;
-      
-      for (size_t i = 0; i < pixel_count; i++) {
-        uint16_t pixel = pixels[i];
-        
-        // Extraire R, G, B de RGB565
-        uint8_t r = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
-        uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
-        uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
-        
-        // Appliquer les gains (calculs entiers uniquement)
-        uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
-        uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
-        uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
-        
-        // Limiter à 255
-        r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
-        g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
-        b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
-        
-        // Reconvertir en RGB565
-        uint8_t r5 = ((uint8_t)r_adjusted) >> 3;
-        uint8_t g6 = ((uint8_t)g_adjusted) >> 2;
-        uint8_t b5 = ((uint8_t)b_adjusted) >> 3;
-        
-        pixels[i] = (r5 << 11) | (g6 << 5) | b5;
-      }
-    }
-    
     cam->frame_ready_ = true;
     cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
     cam->total_frames_received_++;
@@ -464,9 +399,81 @@ bool MipiDsiCam::capture_frame() {
     this->frame_ready_ = false;
     uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
     this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
+    
+    // Appliquer les gains de couleur ICI (hors ISR)
+    this->apply_color_gains_(this->current_frame_buffer_);
   }
   
   return was_ready;
+}
+
+void MipiDsiCam::apply_color_gains_(uint8_t* buffer) {
+  if (buffer == nullptr) {
+    return;
+  }
+  
+  // Utiliser les gains précalculés
+  uint32_t red_gain_fixed = this->red_gain_fixed_;
+  uint32_t green_gain_fixed = this->green_gain_fixed_;
+  uint32_t blue_gain_fixed = this->blue_gain_fixed_;
+  
+  // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
+  if (this->pixel_format_ == PIXEL_FORMAT_BGR888) {
+    size_t pixel_count = this->width_ * this->height_;
+    
+    for (size_t i = 0; i < pixel_count; i++) {
+      size_t offset = i * 3;
+      uint8_t r = buffer[offset];
+      uint8_t g = buffer[offset + 1];
+      uint8_t b = buffer[offset + 2];
+      
+      // Appliquer les gains de couleur (calculs entiers uniquement)
+      uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
+      uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
+      uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
+      
+      // Limiter à 255
+      r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
+      g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
+      b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
+      
+      // Inverser R et B pour BGR
+      buffer[offset] = (uint8_t)b_adjusted;     // B
+      buffer[offset + 1] = (uint8_t)g_adjusted; // G
+      buffer[offset + 2] = (uint8_t)r_adjusted; // R
+    }
+  }
+  // Pour RGB565, appliquer les gains de couleur aussi
+  else if (this->pixel_format_ == PIXEL_FORMAT_RGB565) {
+    size_t pixel_count = this->width_ * this->height_;
+    uint16_t* pixels = (uint16_t*)buffer;
+    
+    for (size_t i = 0; i < pixel_count; i++) {
+      uint16_t pixel = pixels[i];
+      
+      // Extraire R, G, B de RGB565
+      uint8_t r = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
+      uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
+      uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
+      
+      // Appliquer les gains (calculs entiers uniquement)
+      uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
+      uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
+      uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
+      
+      // Limiter à 255
+      r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
+      g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
+      b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
+      
+      // Reconvertir en RGB565
+      uint8_t r5 = ((uint8_t)r_adjusted) >> 3;
+      uint8_t g6 = ((uint8_t)g_adjusted) >> 2;
+      uint8_t b5 = ((uint8_t)b_adjusted) >> 3;
+      
+      pixels[i] = (r5 << 11) | (g6 << 5) | b5;
+    }
+  }
 }
 
 void MipiDsiCam::loop() {
