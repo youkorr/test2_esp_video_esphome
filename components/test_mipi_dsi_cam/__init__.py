@@ -41,7 +41,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_sensor_type(0))
+    cg.add(var.set_sensor_type(config[CONF_SENSOR]))
     cg.add(var.set_i2c_id(config[CONF_I2C_ID]))
     cg.add(var.set_lane(config[CONF_LANE]))
     cg.add(var.set_xclk_pin(config[CONF_EXTCLK_PIN]))
@@ -58,6 +58,6 @@ async def to_code(config):
         cg.add(var.set_sd_card(sd))
         cg.add_define("USE_SD_CARD")
 
-    # Déclarer un service pour déclencher un snapshot depuis Home Assistant / API
     cg.add_define("USE_MIPI_DSI_CAM_SNAPSHOT_SERVICE")
+
 
