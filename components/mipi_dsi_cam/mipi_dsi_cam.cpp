@@ -477,10 +477,6 @@ void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  FPS: %d", this->framerate_);
   ESP_LOGCONFIG(TAG, "  État: %s", this->pipeline_started_ ? "ACTIF" : "INACTIF");
   ESP_LOGCONFIG(TAG, "  Snapshots capturés: %u", (unsigned)this->snapshot_count_);
-  
-#ifdef USE_SD_CARD
-  ESP_LOGCONFIG(TAG, "  Carte SD: %s", this->sd_card_ ? "Configurée" : "Non configurée");
-#endif
 }
 
 // ============================================================================
@@ -491,19 +487,6 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     ESP_LOGE(TAG, "Pipeline non démarré, impossible de capturer");
     return false;
   }
-
-#ifdef USE_SD_CARD
-  if (!this->sd_card_) {
-    ESP_LOGE(TAG, "Carte SD non configurée");
-    return false;
-  }
-  
-  // Vérifier que la carte SD est montée
-  if (!this->sd_card_->is_mounted()) {
-    ESP_LOGE(TAG, "Carte SD non montée");
-    return false;
-  }
-#endif
 
   // Vérifier la mémoire disponible
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -607,7 +590,6 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
-
 
 
 
