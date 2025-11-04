@@ -1,8 +1,3 @@
-"""
-Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Support complet H264 + JPEG (sans auto-création de stubs)
-"""
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
@@ -22,6 +17,7 @@ CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 
+# Définition du schéma de configuration de base
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ESPVideoComponent),
     cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
@@ -37,9 +33,10 @@ def validate_esp_video_config(config):
     if not config[CONF_ENABLE_H264] and not config[CONF_ENABLE_JPEG]:
         raise cv.Invalid("Au moins un encodeur (H264 ou JPEG) doit être activé")
     
-    return config
+    return config  # Retourne la configuration sans modification
 
 
+# Applique la validation après la définition du schéma
 CONFIG_SCHEMA = CONFIG_SCHEMA.extend(validate_esp_video_config)
 
 
@@ -115,9 +112,9 @@ async def to_code(config):
     flags = []
     
     # Flags de base (toujours activés)
-    flags.extend([
-        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
-        "-DCONFIG_IDF_TARGET_ESP32P4=1",
+    flags.extend([ 
+        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1", 
+        "-DCONFIG_IDF_TARGET_ESP32P4=1", 
     ])
 
     # ISP (Image Signal Processor)
@@ -198,6 +195,7 @@ async def to_code(config):
     
     import logging
     logging.info(f"[ESP-Video] ✅ Configuration terminée: {config_summary}")
+
 
 
 
