@@ -119,6 +119,16 @@ bool MipiDsiCam::init_sensor_() {
   
   ESP_LOGI(TAG, "Sensor initialized");
   
+  // Appliquer le gain du capteur
+  if (this->gain_ > 0) {
+    ret = this->sensor_driver_->set_gain(this->gain_);
+    if (ret != ESP_OK) {
+      ESP_LOGW(TAG, "Failed to set sensor gain: %d", ret);
+    } else {
+      ESP_LOGI(TAG, "Sensor gain set to: %u", this->gain_);
+    }
+  }
+  
   delay(200);
   ESP_LOGI(TAG, "Sensor stabilized");
   
@@ -146,6 +156,27 @@ bool MipiDsiCam::init_ldo_() {
 bool MipiDsiCam::init_csi_() {
   ESP_LOGI(TAG, "Init MIPI-CSI");
   
+  // Déterminer le format de sortie CSI en fonction du format pixel demandé
+  cam_ctlr_color_t output_color;
+  switch (this->pixel_format_) {
+    case PIXEL_FORMAT_RGB565:
+      output_color = CAM_CTLR_COLOR_RGB565;
+      ESP_LOGI(TAG, "  Output format: RGB565");
+      break;
+    case PIXEL_FORMAT_BGR888:
+      output_color = CAM_CTLR_COLOR_RGB888;  // Le CSI produit RGB888, on inversera plus tard
+      ESP_LOGI(TAG, "  Output format: BGR888");
+      break;
+    case PIXEL_FORMAT_YUV422:
+      output_color = CAM_CTLR_COLOR_YUV422;
+      ESP_LOGI(TAG, "  Output format: YUV422");
+      break;
+    default:
+      output_color = CAM_CTLR_COLOR_RGB565;
+      ESP_LOGW(TAG, "  Unsupported format, defaulting to RGB565");
+      break;
+  }
+  
   esp_cam_ctlr_csi_config_t csi_config = {};
   csi_config.ctlr_id = 0;
   csi_config.clk_src = MIPI_CSI_PHY_CLK_SRC_DEFAULT;
@@ -153,7 +184,7 @@ bool MipiDsiCam::init_csi_() {
   csi_config.v_res = this->height_;
   csi_config.lane_bit_rate_mbps = this->lane_bitrate_mbps_;
   csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
-  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
+  csi_config.output_data_color_type = output_color;
   csi_config.data_lane_num = this->lane_count_;
   csi_config.byte_swap_en = false;
   csi_config.queue_items = 10;
@@ -190,11 +221,28 @@ bool MipiDsiCam::init_isp_() {
   
   uint32_t isp_clock_hz = 120000000;
   
+  // Déterminer le format de sortie ISP
+  isp_color_t output_color;
+  switch (this->pixel_format_) {
+    case PIXEL_FORMAT_RGB565:
+      output_color = ISP_COLOR_RGB565;
+      break;
+    case PIXEL_FORMAT_BGR888:
+      output_color = ISP_COLOR_RGB888;  // ISP produit RGB888
+      break;
+    case PIXEL_FORMAT_YUV422:
+      output_color = ISP_COLOR_YUV422;
+      break;
+    default:
+      output_color = ISP_COLOR_RGB565;
+      break;
+  }
+  
   esp_isp_processor_cfg_t isp_config = {};
   isp_config.clk_src = ISP_CLK_SRC_DEFAULT;
   isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
   isp_config.input_data_color_type = ISP_COLOR_RAW8;
-  isp_config.output_data_color_type = ISP_COLOR_RGB565;
+  isp_config.output_data_color_type = output_color;
   isp_config.h_res = this->width_;
   isp_config.v_res = this->height_;
   isp_config.has_line_start_packet = false;
@@ -221,7 +269,24 @@ bool MipiDsiCam::init_isp_() {
 }
 
 bool MipiDsiCam::allocate_buffer_() {
-  this->frame_buffer_size_ = this->width_ * this->height_ * 2;
+  // Calculer la taille du buffer en fonction du format
+  size_t bytes_per_pixel;
+  switch (this->pixel_format_) {
+    case PIXEL_FORMAT_RGB565:
+      bytes_per_pixel = 2;
+      break;
+    case PIXEL_FORMAT_BGR888:
+      bytes_per_pixel = 3;
+      break;
+    case PIXEL_FORMAT_YUV422:
+      bytes_per_pixel = 2;
+      break;
+    default:
+      bytes_per_pixel = 2;
+      break;
+  }
+  
+  this->frame_buffer_size_ = this->width_ * this->height_ * bytes_per_pixel;
   
   this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(
     64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
@@ -238,7 +303,8 @@ bool MipiDsiCam::allocate_buffer_() {
   
   this->current_frame_buffer_ = this->frame_buffers_[0];
   
-  ESP_LOGI(TAG, "Buffers: 2x%u bytes", this->frame_buffer_size_);
+  ESP_LOGI(TAG, "Buffers: 2x%u bytes (%u bytes/pixel)", 
+           this->frame_buffer_size_, bytes_per_pixel);
   return true;
 }
 
@@ -261,6 +327,66 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
   if (trans->received_size > 0) {
+    // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
+    if (cam->pixel_format_ == PIXEL_FORMAT_BGR888) {
+      uint8_t* buffer = cam->frame_buffers_[cam->buffer_index_];
+      size_t pixel_count = cam->width_ * cam->height_;
+      
+      for (size_t i = 0; i < pixel_count; i++) {
+        size_t offset = i * 3;
+        uint8_t r = buffer[offset];
+        uint8_t g = buffer[offset + 1];
+        uint8_t b = buffer[offset + 2];
+        
+        // Appliquer les gains de couleur
+        float r_adjusted = r * cam->red_gain_;
+        float g_adjusted = g * cam->green_gain_;
+        float b_adjusted = b * cam->blue_gain_;
+        
+        // Limiter à 255
+        r_adjusted = r_adjusted > 255.0f ? 255.0f : r_adjusted;
+        g_adjusted = g_adjusted > 255.0f ? 255.0f : g_adjusted;
+        b_adjusted = b_adjusted > 255.0f ? 255.0f : b_adjusted;
+        
+        // Inverser R et B pour BGR
+        buffer[offset] = (uint8_t)b_adjusted;     // B
+        buffer[offset + 1] = (uint8_t)g_adjusted; // G
+        buffer[offset + 2] = (uint8_t)r_adjusted; // R
+      }
+    }
+    // Pour RGB565, appliquer les gains de couleur aussi
+    else if (cam->pixel_format_ == PIXEL_FORMAT_RGB565) {
+      uint8_t* buffer = cam->frame_buffers_[cam->buffer_index_];
+      size_t pixel_count = cam->width_ * cam->height_;
+      uint16_t* pixels = (uint16_t*)buffer;
+      
+      for (size_t i = 0; i < pixel_count; i++) {
+        uint16_t pixel = pixels[i];
+        
+        // Extraire R, G, B de RGB565
+        uint8_t r = ((pixel >> 11) & 0x1F) << 3;  // 5 bits -> 8 bits
+        uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
+        uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
+        
+        // Appliquer les gains
+        float r_adjusted = r * cam->red_gain_;
+        float g_adjusted = g * cam->green_gain_;
+        float b_adjusted = b * cam->blue_gain_;
+        
+        // Limiter à 255
+        r_adjusted = r_adjusted > 255.0f ? 255.0f : r_adjusted;
+        g_adjusted = g_adjusted > 255.0f ? 255.0f : g_adjusted;
+        b_adjusted = b_adjusted > 255.0f ? 255.0f : b_adjusted;
+        
+        // Reconvertir en RGB565
+        uint8_t r5 = ((uint8_t)r_adjusted) >> 3;
+        uint8_t g6 = ((uint8_t)g_adjusted) >> 2;
+        uint8_t b5 = ((uint8_t)b_adjusted) >> 3;
+        
+        pixels[i] = (r5 << 11) | (g6 << 5) | b5;
+      }
+    }
+    
     cam->frame_ready_ = true;
     cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
     cam->total_frames_received_++;
@@ -366,9 +492,30 @@ void MipiDsiCam::dump_config() {
     ESP_LOGCONFIG(TAG, "  Sensor: %s (driver not loaded)", this->sensor_type_.c_str());
   }
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
-  ESP_LOGCONFIG(TAG, "  Format: RGB565");
+  
+  // Afficher le format pixel
+  const char* format_name;
+  switch (this->pixel_format_) {
+    case PIXEL_FORMAT_RGB565:
+      format_name = "RGB565";
+      break;
+    case PIXEL_FORMAT_BGR888:
+      format_name = "BGR888";
+      break;
+    case PIXEL_FORMAT_YUV422:
+      format_name = "YUV422";
+      break;
+    default:
+      format_name = "UNKNOWN";
+      break;
+  }
+  
+  ESP_LOGCONFIG(TAG, "  Format: %s", format_name);
   ESP_LOGCONFIG(TAG, "  Lanes: %u", this->lane_count_);
   ESP_LOGCONFIG(TAG, "  Bayer: %u", this->bayer_pattern_);
+  ESP_LOGCONFIG(TAG, "  Color gains - R: %.1f, G: %.1f, B: %.1f", 
+                this->red_gain_, this->green_gain_, this->blue_gain_);
+  ESP_LOGCONFIG(TAG, "  Sensor gain: %u", this->gain_);
   ESP_LOGCONFIG(TAG, "  Streaming: %s", this->streaming_ ? "YES" : "NO");
 }
 
