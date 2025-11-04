@@ -17,16 +17,16 @@ CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 
-# Définition du schéma de configuration
+# Définition du schéma avec validation intégrée
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ESPVideoComponent),
     cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
     cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-}).extend(cv.COMPONENT_SCHEMA)
+})
 
-# Validation personnalisée pour s'assurer qu'au moins un encodeur est activé
+# Fonction de validation personnalisée
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
@@ -35,16 +35,7 @@ def validate_esp_video_config(config):
     
     return config
 
-# Appliquer la validation avant de traiter le schéma
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(ESPVideoComponent),
-    cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
-    cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
-    cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
-    cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-}).extend(cv.COMPONENT_SCHEMA)
-
-# Appliquer directement la validation du schéma
+# Appliquer la validation personnalisée directement dans le schéma
 CONFIG_SCHEMA = CONFIG_SCHEMA.extend(validate_esp_video_config)
 
 async def to_code(config):
@@ -202,6 +193,7 @@ async def to_code(config):
     
     import logging
     logging.info(f"[ESP-Video] ✅ Configuration terminée: {config_summary}")
+
 
 
 
