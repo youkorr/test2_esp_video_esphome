@@ -163,6 +163,10 @@ bool MipiDsiCam::init_csi_() {
       output_color = CAM_CTLR_COLOR_RGB565;
       ESP_LOGI(TAG, "  Output format: RGB565");
       break;
+    case PIXEL_FORMAT_RGB888:
+      output_color = CAM_CTLR_COLOR_RGB888;
+      ESP_LOGI(TAG, "  Output format: RGB888");
+      break;
     case PIXEL_FORMAT_BGR888:
       output_color = CAM_CTLR_COLOR_RGB888;  // Le CSI produit RGB888, on inversera plus tard
       ESP_LOGI(TAG, "  Output format: BGR888");
@@ -227,6 +231,9 @@ bool MipiDsiCam::init_isp_() {
     case PIXEL_FORMAT_RGB565:
       output_color = ISP_COLOR_RGB565;
       break;
+    case PIXEL_FORMAT_RGB888:
+      output_color = ISP_COLOR_RGB888;
+      break;
     case PIXEL_FORMAT_BGR888:
       output_color = ISP_COLOR_RGB888;  // ISP produit RGB888
       break;
@@ -274,6 +281,9 @@ bool MipiDsiCam::allocate_buffer_() {
   switch (this->pixel_format_) {
     case PIXEL_FORMAT_RGB565:
       bytes_per_pixel = 2;
+      break;
+    case PIXEL_FORMAT_RGB888:
+      bytes_per_pixel = 3;
       break;
     case PIXEL_FORMAT_BGR888:
       bytes_per_pixel = 3;
@@ -417,8 +427,34 @@ void MipiDsiCam::apply_color_gains_(uint8_t* buffer) {
   uint32_t green_gain_fixed = this->green_gain_fixed_;
   uint32_t blue_gain_fixed = this->blue_gain_fixed_;
   
+  // Si RGB888, appliquer les gains sans inverser les canaux
+  if (this->pixel_format_ == PIXEL_FORMAT_RGB888) {
+    size_t pixel_count = this->width_ * this->height_;
+    
+    for (size_t i = 0; i < pixel_count; i++) {
+      size_t offset = i * 3;
+      uint8_t r = buffer[offset];
+      uint8_t g = buffer[offset + 1];
+      uint8_t b = buffer[offset + 2];
+      
+      // Appliquer les gains de couleur (calculs entiers uniquement)
+      uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
+      uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
+      uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
+      
+      // Limiter à 255
+      r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
+      g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
+      b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
+      
+      // RGB888 : pas d'inversion
+      buffer[offset] = (uint8_t)r_adjusted;     // R
+      buffer[offset + 1] = (uint8_t)g_adjusted; // G
+      buffer[offset + 2] = (uint8_t)b_adjusted; // B
+    }
+  }
   // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
-  if (this->pixel_format_ == PIXEL_FORMAT_BGR888) {
+  else if (this->pixel_format_ == PIXEL_FORMAT_BGR888) {
     size_t pixel_count = this->width_ * this->height_;
     
     for (size_t i = 0; i < pixel_count; i++) {
@@ -518,6 +554,9 @@ void MipiDsiCam::dump_config() {
   switch (this->pixel_format_) {
     case PIXEL_FORMAT_RGB565:
       format_name = "RGB565";
+      break;
+    case PIXEL_FORMAT_RGB888:
+      format_name = "RGB888";
       break;
     case PIXEL_FORMAT_BGR888:
       format_name = "BGR888";
