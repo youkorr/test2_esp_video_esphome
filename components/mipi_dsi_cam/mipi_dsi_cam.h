@@ -21,6 +21,9 @@ enum PixelFormat {
   PIXEL_FORMAT_RGB565 = 0,
   PIXEL_FORMAT_YUV422 = 1,
   PIXEL_FORMAT_RAW8 = 2,
+  PIXEL_FORMAT_BGR888 = 3,
+  PIXEL_FORMAT_JPEG = 4,
+  PIXEL_FORMAT_H264 = 5,
 };
 
 class ISensorDriver {
@@ -67,6 +70,10 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   void set_pixel_format(PixelFormat format) { this->pixel_format_ = format; }
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
+  void set_red_gain(float gain) { this->red_gain_ = gain; }
+  void set_green_gain(float gain) { this->green_gain_ = gain; }
+  void set_blue_gain(float gain) { this->blue_gain_ = gain; }
+  void set_gain(uint8_t gain) { this->gain_ = gain; }
 
   bool capture_frame();
   bool start_streaming();
@@ -77,6 +84,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   size_t get_image_size() const { return this->frame_buffer_size_; }
   uint16_t get_image_width() const { return this->width_; }
   uint16_t get_image_height() const { return this->height_; }
+  PixelFormat get_pixel_format() const { return this->pixel_format_; }
 
  protected:
   uint8_t external_clock_pin_{36};
@@ -95,6 +103,10 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   PixelFormat pixel_format_{PIXEL_FORMAT_RGB565};
   uint8_t jpeg_quality_{10};
   uint8_t framerate_{30};
+  float red_gain_{1.0};
+  float green_gain_{1.0};
+  float blue_gain_{1.0};
+  uint8_t gain_{90};
 
   bool initialized_{false};
   bool streaming_{false};
