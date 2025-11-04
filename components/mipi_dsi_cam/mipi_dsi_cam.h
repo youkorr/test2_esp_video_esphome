@@ -4,10 +4,6 @@
 #include <string>
 #include <vector>
 
-#ifdef USE_SD_CARD
-#include "esphome/components/sd_card/sd_card.h"
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #include "esp_video_init.h"
@@ -40,10 +36,6 @@ class MipiDSICamComponent : public Component {
   void set_pixel_format(const std::string &f) { pixel_format_ = f; }
   void set_framerate(int f) { framerate_ = f; }
   void set_jpeg_quality(int q) { jpeg_quality_ = q; }
-  
-#ifdef USE_SD_CARD
-  void set_sd_card(sd_card::SDCardComponent *sd) { sd_card_ = sd; }
-#endif
 
   // Capture snapshot vers SD
   bool capture_snapshot_to_file(const std::string &path);
@@ -63,10 +55,6 @@ class MipiDSICamComponent : public Component {
   std::string pixel_format_{"JPEG"};
   int framerate_{30};
   int jpeg_quality_{10};
-
-#ifdef USE_SD_CARD
-  sd_card::SDCardComponent *sd_card_{nullptr};
-#endif
 
   // État du pipeline
   esp_cam_sensor_device_t *sensor_dev_{nullptr};
@@ -100,6 +88,9 @@ class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamCo
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
+
+
 
 
 
