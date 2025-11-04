@@ -327,11 +327,10 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
   if (trans->received_size > 0) {
-    // Convertir les gains float en entiers (multiplié par 256 pour la précision)
-    // Ceci est fait une seule fois au lieu d'être dans la boucle
-    uint32_t red_gain_fixed = (uint32_t)(cam->red_gain_ * 256.0f);
-    uint32_t green_gain_fixed = (uint32_t)(cam->green_gain_ * 256.0f);
-    uint32_t blue_gain_fixed = (uint32_t)(cam->blue_gain_ * 256.0f);
+    // Utiliser les gains précalculés (pas de calcul float dans l'ISR!)
+    uint32_t red_gain_fixed = cam->red_gain_fixed_;
+    uint32_t green_gain_fixed = cam->green_gain_fixed_;
+    uint32_t blue_gain_fixed = cam->blue_gain_fixed_;
     
     // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
     if (cam->pixel_format_ == PIXEL_FORMAT_BGR888) {
@@ -344,7 +343,7 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
         uint8_t g = buffer[offset + 1];
         uint8_t b = buffer[offset + 2];
         
-        // Appliquer les gains de couleur (calculs entiers)
+        // Appliquer les gains de couleur (calculs entiers uniquement)
         uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
         uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
         uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
@@ -374,7 +373,7 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
         uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
         uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
         
-        // Appliquer les gains (calculs entiers)
+        // Appliquer les gains (calculs entiers uniquement)
         uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
         uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
         uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
@@ -407,6 +406,14 @@ bool MipiDsiCam::start_streaming() {
   }
   
   ESP_LOGI(TAG, "Start streaming");
+  
+  // Précalculer les gains en virgule fixe pour éviter les calculs float dans l'ISR
+  this->red_gain_fixed_ = (uint32_t)(this->red_gain_ * 256.0f);
+  this->green_gain_fixed_ = (uint32_t)(this->green_gain_ * 256.0f);
+  this->blue_gain_fixed_ = (uint32_t)(this->blue_gain_ * 256.0f);
+  
+  ESP_LOGI(TAG, "Color gains (fixed): R=%u, G=%u, B=%u", 
+           this->red_gain_fixed_, this->green_gain_fixed_, this->blue_gain_fixed_);
   
   this->total_frames_received_ = 0;
   this->last_frame_log_time_ = millis();
