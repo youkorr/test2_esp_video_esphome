@@ -21,9 +21,10 @@ enum PixelFormat {
   PIXEL_FORMAT_RGB565 = 0,
   PIXEL_FORMAT_YUV422 = 1,
   PIXEL_FORMAT_RAW8 = 2,
-  PIXEL_FORMAT_BGR888 = 3,
-  PIXEL_FORMAT_JPEG = 4,
-  PIXEL_FORMAT_H264 = 5,
+  PIXEL_FORMAT_RGB888 = 3,
+  PIXEL_FORMAT_BGR888 = 4,
+  PIXEL_FORMAT_JPEG = 5,
+  PIXEL_FORMAT_H264 = 6,
 };
 
 class ISensorDriver {
@@ -156,7 +157,6 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
-
 
 
 
