@@ -115,3 +115,4 @@ async def capture_snapshot_to_code(config, action_id, template_arg, args):
     cg.add(var.set_filename(template_))
     
     return var
+
