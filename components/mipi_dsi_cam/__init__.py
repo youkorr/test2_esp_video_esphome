@@ -25,20 +25,26 @@ CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FORMAT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
+CONF_RED_GAIN = "red"
+CONF_GREEN_GAIN = "green"
+CONF_BLUE_GAIN = "blue"
+CONF_GAIN = "gain"
 
 PixelFormat = mipi_dsi_cam_ns.enum("PixelFormat")
 PIXEL_FORMAT_RGB565 = PixelFormat.PIXEL_FORMAT_RGB565
 PIXEL_FORMAT_YUV422 = PixelFormat.PIXEL_FORMAT_YUV422
 PIXEL_FORMAT_RAW8 = PixelFormat.PIXEL_FORMAT_RAW8
-PIXEL_FORMAT_JPEG = PixelFormat.PIXEL_FORMAT_JPEG    # NOUVEAU
-PIXEL_FORMAT_H264 = PixelFormat.PIXEL_FORMAT_H264    # NOUVEAU
+PIXEL_FORMAT_BGR888 = PixelFormat.PIXEL_FORMAT_BGR888
+PIXEL_FORMAT_JPEG = PixelFormat.PIXEL_FORMAT_JPEG
+PIXEL_FORMAT_H264 = PixelFormat.PIXEL_FORMAT_H264
 
 PIXEL_FORMATS = {
     "RGB565": PIXEL_FORMAT_RGB565,
     "YUV422": PIXEL_FORMAT_YUV422,
     "RAW8": PIXEL_FORMAT_RAW8,
-    "JPEG": PIXEL_FORMAT_JPEG,      # NOUVEAU
-    "H264": PIXEL_FORMAT_H264,      # NOUVEAU
+    "BGR888": PIXEL_FORMAT_BGR888,
+    "JPEG": PIXEL_FORMAT_JPEG,
+    "H264": PIXEL_FORMAT_H264,
 }
 
 # Deux résolutions disponibles
@@ -137,6 +143,10 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.enum(PIXEL_FORMATS, upper=True),
         cv.Optional(CONF_FRAMERATE): cv.int_range(min=1, max=60),
         cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
+        cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.0, max=4.0),
+        cv.Optional(CONF_GREEN_GAIN, default=1.0): cv.float_range(min=0.0, max=4.0),
+        cv.Optional(CONF_BLUE_GAIN, default=1.0): cv.float_range(min=0.0, max=4.0),
+        cv.Optional(CONF_GAIN, default=90): cv.int_range(min=0, max=191),
     }
 ).extend(cv.COMPONENT_SCHEMA).extend(i2c.i2c_device_schema(0x36))
 
@@ -185,6 +195,10 @@ async def to_code(config):
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
     cg.add(var.set_framerate(framerate))
+    cg.add(var.set_red_gain(config[CONF_RED_GAIN]))
+    cg.add(var.set_green_gain(config[CONF_GREEN_GAIN]))
+    cg.add(var.set_blue_gain(config[CONF_BLUE_GAIN]))
+    cg.add(var.set_gain(config[CONF_GAIN]))
     
     if CONF_RESET_PIN in config:
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
@@ -246,4 +260,6 @@ inline ISensorDriver* create_sensor_driver(const std::string& sensor_type, i2c::
         ESP_LOGI("compile", "  Address: 0x{sensor_address:02X}");
         ESP_LOGI("compile", "  Format: {config[CONF_PIXEL_FORMAT]}");
         ESP_LOGI("compile", "  FPS: {framerate}");
+        ESP_LOGI("compile", "  Color gains - R: {config[CONF_RED_GAIN]:.1f}, G: {config[CONF_GREEN_GAIN]:.1f}, B: {config[CONF_BLUE_GAIN]:.1f}");
+        ESP_LOGI("compile", "  Sensor gain: {config[CONF_GAIN]}");
     '''))
