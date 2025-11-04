@@ -27,7 +27,16 @@ class MipiDSICamComponent : public Component {
 
   // Configuration setters (depuis __init__.py)
   void set_sensor_type(const std::string &s) { sensor_name_ = s; }
-  void set_i2c_id(int id) { i2c_id_ = id; }
+  void set_i2c_id(int id) { i2c_id_ = id; i2c_bus_name_.clear(); }
+  void set_i2c_id(const std::string &bus_name) {
+    i2c_bus_name_ = bus_name;
+    // Essayer de parser comme int si possible
+    try {
+      i2c_id_ = std::stoi(bus_name);
+    } catch (...) {
+      i2c_id_ = 0; // Défaut
+    }
+  }
   void set_lane(int l) { lane_ = l; }
   void set_xclk_pin(const std::string &p) { xclk_pin_ = p; }
   void set_xclk_freq(int f) { xclk_freq_ = f; }
@@ -47,6 +56,7 @@ class MipiDSICamComponent : public Component {
   // Configuration
   std::string sensor_name_{"sc202cs"};
   int i2c_id_{0};
+  std::string i2c_bus_name_;  // Nom optionnel du bus I2C (ex: "bsp_bus")
   int lane_{1};
   std::string xclk_pin_{"GPIO36"};
   int xclk_freq_{24000000};
@@ -88,6 +98,10 @@ class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamCo
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
+
+
+
 
 
 
