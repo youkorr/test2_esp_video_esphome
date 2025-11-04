@@ -1,3 +1,8 @@
+"""
+Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
+Support complet H264 + JPEG (sans auto-création de stubs)
+"""
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
@@ -17,16 +22,15 @@ CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 
-# Définition du schéma avec validation intégrée
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ESPVideoComponent),
     cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
     cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-})
+}).extend(cv.COMPONENT_SCHEMA)
 
-# Fonction de validation personnalisée
+
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
@@ -35,8 +39,9 @@ def validate_esp_video_config(config):
     
     return config
 
-# Appliquer la validation personnalisée directement dans le schéma
+
 CONFIG_SCHEMA = CONFIG_SCHEMA.extend(validate_esp_video_config)
+
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
@@ -110,9 +115,9 @@ async def to_code(config):
     flags = []
     
     # Flags de base (toujours activés)
-    flags.extend([ 
-        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1", 
-        "-DCONFIG_IDF_TARGET_ESP32P4=1", 
+    flags.extend([
+        "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
+        "-DCONFIG_IDF_TARGET_ESP32P4=1",
     ])
 
     # ISP (Image Signal Processor)
