@@ -8,8 +8,8 @@ CODEOWNERS = ["@youkorr"]
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
 MipiDSICamComponent = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
-# Alias pour compatibilité avec lvgl_camera_display
-MipiDsiCam = MipiDSICamComponent
+# Alias pour compatibilité avec lvgl_camera_display (pointe vers la même classe C++)
+MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 
 # Actions
 CaptureSnapshotAction = mipi_dsi_cam_ns.class_("CaptureSnapshotAction", automation.Action)
