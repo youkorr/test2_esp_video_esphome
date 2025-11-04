@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/defines.h"
+#include "../sd_mmc_card/sd_mmc_card.h"   
 
 #include <string>
 #include <vector>
@@ -12,25 +13,17 @@ extern "C" {
   #include "esp_cam_sensor.h"
   #include "esp_video_init.h"
   #include "esp_video_isp_ioctl.h"
+  #include "esp_log.h"
 }
-
-/**
- * Composant ESPHome MIPI-DSI-CAM
- * pour ESP32-P4 et ESP-Video (H.264 + JPEG)
- *
- * Supporte :
- *  - Initialisation complète pipeline CSI → ISP → encodeur
- *  - Contrôle du LDO 2.5V via esp_ldo
- *  - Capture snapshot JPEG vers SD
- *  - Configuration dynamique résolution / framerate / format
- */
 
 namespace esphome {
 namespace mipi_dsi_cam {
 
+using namespace esphome::sd_mmc_card;
+
 class MipiDSICamComponent : public Component {
  public:
-  // Configuration de base
+  // Config YAML
   std::string sensor_name_{"unknown"};
   int i2c_id_{0};
   int lane_{1};
@@ -42,20 +35,24 @@ class MipiDSICamComponent : public Component {
   int framerate_{30};
   int jpeg_quality_{10};
 
-  // Handles & état
-  bool pipeline_started_{false};
+  // Liaison carte SD
+  SDMMCCardComponent *sd_card_ = nullptr;  // 👈 correspond à ton lecteur
+  void set_sd_card(SDMMCCardComponent *sd) { this->sd_card_ = sd; }
+
+  // Vidéo / pipeline
   esp_cam_sensor_device_t *sensor_dev_{nullptr};
   esp_video_init_config_t init_cfg_{};
   esp_video_isp_config_t isp_cfg_{};
   esp_ldo_channel_handle_t ldo_handle_{nullptr};
+  bool pipeline_started_{false};
 
-  // Fonctions principales
   void setup() override;
   void loop() override;
   void dump_config() override {}
 
-  // Capture
   bool capture_snapshot_to_file(const std::string &path);
+  bool start_streaming();
+  bool stop_streaming();
 
  protected:
   bool init_ldo_();
@@ -63,3 +60,4 @@ class MipiDSICamComponent : public Component {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
