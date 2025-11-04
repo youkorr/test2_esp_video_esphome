@@ -1,7 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
-from esphome.components import sd_card
 from esphome import automation
 
 DEPENDENCIES = ["esp32", "sd_card"]
@@ -71,7 +70,7 @@ CONFIG_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
     cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=100),
-    cv.Optional(CONF_SD_CARD_ID): cv.use_id(sd_card.SDCardComponent),
+    cv.Optional(CONF_SD_CARD_ID): cv.use_id(cg.Component),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
