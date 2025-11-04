@@ -55,10 +55,21 @@ def validate_resolution(value):
                 pass
     raise cv.Invalid(f"Résolution invalide: {value}. Utilisez un preset (QVGA, VGA, 480P, 720P, 1080P) ou le format WIDTHxHEIGHT (ex: 1280x720)")
 
+def validate_i2c_id(value):
+    """Valide l'ID I2C (entier 0-1 ou nom de bus comme string)"""
+    if isinstance(value, int):
+        if 0 <= value <= 1:
+            return value
+        raise cv.Invalid(f"i2c_id doit être 0 ou 1, reçu: {value}")
+    elif isinstance(value, str):
+        # Accepter un nom de bus I2C comme "bsp_bus"
+        return value
+    raise cv.Invalid(f"i2c_id doit être un entier (0-1) ou une chaîne, reçu: {type(value)}")
+
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(MipiDSICamComponent),
     cv.Optional(CONF_SENSOR, default="sc202cs"): cv.string,
-    cv.Optional(CONF_I2C_ID, default=0): cv.int_range(min=0, max=1),
+    cv.Optional(CONF_I2C_ID, default=0): validate_i2c_id,
     cv.Optional(CONF_LANE, default=1): cv.int_range(min=1, max=2),
     cv.Optional(CONF_EXTCLK_PIN, default="GPIO36"): cv.string,
     cv.Optional(CONF_FREQ, default=24000000): cv.int_range(min=1000000, max=50000000),
