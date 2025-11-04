@@ -17,7 +17,7 @@ CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 
-# Définition du schéma de configuration de base
+# Définition du schéma de configuration avec validation intégrée
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(ESPVideoComponent),
     cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
@@ -26,19 +26,18 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
-
+# Ajouter la logique de validation directement dans le schéma
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
     if not config[CONF_ENABLE_H264] and not config[CONF_ENABLE_JPEG]:
         raise cv.Invalid("Au moins un encodeur (H264 ou JPEG) doit être activé")
     
-    return config  # Retourne la configuration sans modification
+    # Retourne la configuration valide
+    return config
 
-
-# Applique la validation après la définition du schéma
+# Appliquer la validation avant la création du composant
 CONFIG_SCHEMA = CONFIG_SCHEMA.extend(validate_esp_video_config)
-
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
@@ -195,6 +194,7 @@ async def to_code(config):
     
     import logging
     logging.info(f"[ESP-Video] ✅ Configuration terminée: {config_summary}")
+
 
 
 
