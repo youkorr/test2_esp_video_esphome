@@ -13,7 +13,8 @@ lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
-MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDsiCam")
+# Utiliser le nom réel de la classe C++ (MipiDSICamComponent)
+MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(LVGLCameraDisplay),
