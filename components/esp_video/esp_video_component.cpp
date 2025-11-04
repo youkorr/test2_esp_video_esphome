@@ -1,5 +1,6 @@
 #include "esp_video_component.h"
 #include "esphome/core/log.h"
+#include "esp_heap_caps.h"
 
 namespace esphome {
 namespace esp_video {
