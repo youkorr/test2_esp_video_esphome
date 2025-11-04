@@ -388,7 +388,8 @@ void MipiDSICamComponent::setup() {
   // Étape 3 : Activer le pipeline ISP (cam_dev="/dev/video0")
   // --------------------------------------------------------------------------
   memset(&this->isp_cfg_, 0, sizeof(this->isp_cfg_));
-  this->isp_cfg_.cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;
+  this->isp_cfg_.isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME;  // "/dev/video20"
+  this->isp_cfg_.cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // "/dev/video0"
   this->isp_cfg_.ipa_config = nullptr;
 
   err = esp_video_isp_pipeline_init(&this->isp_cfg_);
