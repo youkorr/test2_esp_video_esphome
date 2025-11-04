@@ -22,25 +22,25 @@ CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(ESPVideoComponent),
-    cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
-    cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
-    cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
-    cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-}).extend(cv.COMPONENT_SCHEMA)
-
-
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
     if not config[CONF_ENABLE_H264] and not config[CONF_ENABLE_JPEG]:
         raise cv.Invalid("Au moins un encodeur (H264 ou JPEG) doit être activé")
-    
+
     return config
 
 
-CONFIG_SCHEMA = CONFIG_SCHEMA.extend(validate_esp_video_config)
+CONFIG_SCHEMA = cv.All(
+    cv.Schema({
+        cv.GenerateID(): cv.declare_id(ESPVideoComponent),
+        cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
+        cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
+    }).extend(cv.COMPONENT_SCHEMA),
+    validate_esp_video_config
+)
 
 
 async def to_code(config):
