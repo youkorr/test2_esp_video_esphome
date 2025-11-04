@@ -614,3 +614,4 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
 
 
 
+
