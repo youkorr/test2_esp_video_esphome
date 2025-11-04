@@ -1,25 +1,20 @@
 #include "mipi_dsi_cam.h"
 #include "esphome/core/hal.h"  // Pour millis()
-
-// ============================================================================
-// Inclusions ESP-IDF sécurisées (ESP-IDF 5.4.2)
-// ============================================================================
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
+
 #include <string.h>
 #include <vector>
 #include <sys/stat.h>
-
-// POSIX pour open/ioctl/read/write
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <errno.h>
 
 // ============================================================================
-// Inclusions Espressif natives (présentes dans ton dépôt components/)
+// Inclusions des headers C d'Espressif - UNIQUEMENT dans extern "C"
 // ============================================================================
 extern "C" {
   #include "esp_cam_sensor.h"
@@ -30,8 +25,8 @@ extern "C" {
   #include "esp_video_isp_ioctl.h"
   #include "esp_ipa.h"
   #include "esp_ipa_types.h"
-  #include "linux/videodev2.h"   // V4L2
-}  // extern "C"
+  #include "linux/videodev2.h"
+}
 
 namespace esphome {
 namespace mipi_dsi_cam {
@@ -39,9 +34,9 @@ namespace mipi_dsi_cam {
 static const char *const TAG = "mipi_dsi_cam";
 
 // Constantes
-static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS = 30000;  // 30 secondes
-static constexpr size_t MAX_FRAME_SIZE = 512 * 1024;         // 512 KB
-static constexpr size_t MIN_FREE_HEAP = 100 * 1024;          // 100 KB minimum
+static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS = 30000;
+static constexpr size_t MAX_FRAME_SIZE = 512 * 1024;
+static constexpr size_t MIN_FREE_HEAP = 100 * 1024;
 
 static inline bool wants_jpeg_(const std::string &fmt) {
   return (fmt == "JPEG" || fmt == "MJPEG");
@@ -187,13 +182,7 @@ static bool h264_apply_basic_params_(int /*fps*/) {
 // ============================================================================
 void MipiDSICamComponent::cleanup_pipeline_() {
   ESP_LOGW(TAG, "Nettoyage du pipeline vidéo...");
-  
-  // Note: Les fonctions esp_video_destroy_*() peuvent ne pas être disponibles
-  // dans toutes les versions d'ESP-Video. On tente de les appeler si elles existent.
-  
-  // Utiliser esp_video_deinit() qui nettoie tout le pipeline
   esp_video_deinit();
-  
   this->pipeline_started_ = false;
   ESP_LOGI(TAG, "Pipeline vidéo nettoyé");
 }
@@ -259,12 +248,8 @@ void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "✓ ESP-Video initialisé");
 
   // --------------------------------------------------------------------------
-  // Étape 2 : Créer devices vidéo
+  // Étape 2 : Les devices vidéo sont créés automatiquement
   // --------------------------------------------------------------------------
-  // Note: esp_video_create_*_video_device() peuvent créer les devices
-  // automatiquement via esp_video_init() selon la configuration.
-  // On vérifie juste que les devices sont accessibles.
-  
   ESP_LOGI(TAG, "✓ Devices vidéo créés par esp_video_init()");
 
   // --------------------------------------------------------------------------
