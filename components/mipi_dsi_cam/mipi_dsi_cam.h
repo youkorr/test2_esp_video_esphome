@@ -15,6 +15,19 @@ extern "C" {
 }
 #endif
 
+// Définition du type ISP config basée sur le code source ESP-Video
+// Voir esp_video_pipeline_isp.c ligne 1053+
+#ifndef ESP_VIDEO_ISP_CONFIG_DEFINED
+#define ESP_VIDEO_ISP_CONFIG_DEFINED
+
+typedef struct {
+    const char *isp_dev;      // Device ISP (ex: "/dev/video20")
+    const char *cam_dev;      // Device caméra source (ex: "/dev/video0")
+    void *ipa_config;         // Configuration IPA (Image Processing Algorithms)
+} esp_video_isp_config_t;
+
+#endif
+
 namespace esphome {
 namespace mipi_dsi_cam {
 
@@ -78,7 +91,7 @@ class MipiDSICamComponent : public Component {
   // État du pipeline
   esp_cam_sensor_device_t *sensor_dev_{nullptr};
   esp_video_init_config_t init_cfg_{};
-  esp_video_isp_pipeline_config_t isp_cfg_{};  // Type corrigé
+  esp_video_isp_config_t isp_cfg_{};  // Structure ISP basée sur esp_video_pipeline_isp.c
   bool pipeline_started_{false};
 
   // Monitoring
