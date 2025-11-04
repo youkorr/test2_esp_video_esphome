@@ -12,6 +12,7 @@ MipiDSICamComponent = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component
 # Actions
 CaptureSnapshotAction = mipi_dsi_cam_ns.class_("CaptureSnapshotAction", automation.Action)
 
+CONF_NAME = "name"
 CONF_SENSOR = "sensor"
 CONF_I2C_ID = "i2c_id"
 CONF_LANE = "lane"
@@ -68,6 +69,7 @@ def validate_i2c_id(value):
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(MipiDSICamComponent),
+    cv.Optional(CONF_NAME): cv.string,
     cv.Optional(CONF_SENSOR, default="sc202cs"): cv.string,
     cv.Optional(CONF_I2C_ID, default=0): validate_i2c_id,
     cv.Optional(CONF_LANE, default=1): cv.int_range(min=1, max=2),
@@ -118,4 +120,3 @@ async def capture_snapshot_to_code(config, action_id, template_arg, args):
     cg.add(var.set_filename(template_))
     
     return var
-
