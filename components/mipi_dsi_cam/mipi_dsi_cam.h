@@ -30,10 +30,12 @@ class MipiDSICamComponent : public Component {
   void set_i2c_id(int id) { i2c_id_ = id; i2c_bus_name_.clear(); }
   void set_i2c_id(const std::string &bus_name) {
     i2c_bus_name_ = bus_name;
-    // Essayer de parser comme int si possible
-    try {
-      i2c_id_ = std::stoi(bus_name);
-    } catch (...) {
+    // Essayer de parser comme int si possible (sans exceptions)
+    char *end;
+    long val = strtol(bus_name.c_str(), &end, 10);
+    if (end != bus_name.c_str() && *end == '\0') {
+      i2c_id_ = (int)val;
+    } else {
       i2c_id_ = 0; // Défaut
     }
   }
@@ -52,6 +54,13 @@ class MipiDSICamComponent : public Component {
   // Vérification de l'état du pipeline
   bool is_pipeline_ready() const { return pipeline_started_; }
 
+  // Méthodes pour lvgl_camera_display (stubs pour compatibilité)
+  bool is_streaming() const { return pipeline_started_; }
+  bool capture_frame() { return true; }  // Stub - pas utilisé avec ESP-Video
+  uint8_t* get_image_data() { return nullptr; }  // Stub - géré différemment
+  uint16_t get_image_width() const { return 0; }
+  uint16_t get_image_height() const { return 0; }
+
  protected:
   // Configuration
   std::string sensor_name_{"sc202cs"};
@@ -69,7 +78,7 @@ class MipiDSICamComponent : public Component {
   // État du pipeline
   esp_cam_sensor_device_t *sensor_dev_{nullptr};
   esp_video_init_config_t init_cfg_{};
-  esp_video_isp_config_t isp_cfg_{};
+  esp_video_isp_pipeline_config_t isp_cfg_{};  // Type corrigé
   bool pipeline_started_{false};
 
   // Monitoring
@@ -81,6 +90,9 @@ class MipiDSICamComponent : public Component {
   bool check_pipeline_health_();
   void cleanup_pipeline_();
 };
+
+// Alias pour compatibilité avec lvgl_camera_display
+using MipiDsiCam = MipiDSICamComponent;
 
 // Action pour Home Assistant
 template<typename... Ts>
