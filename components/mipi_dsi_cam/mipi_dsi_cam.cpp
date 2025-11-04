@@ -327,6 +327,12 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   MipiDsiCam *cam = (MipiDsiCam*)user_data;
   
   if (trans->received_size > 0) {
+    // Convertir les gains float en entiers (multiplié par 256 pour la précision)
+    // Ceci est fait une seule fois au lieu d'être dans la boucle
+    uint32_t red_gain_fixed = (uint32_t)(cam->red_gain_ * 256.0f);
+    uint32_t green_gain_fixed = (uint32_t)(cam->green_gain_ * 256.0f);
+    uint32_t blue_gain_fixed = (uint32_t)(cam->blue_gain_ * 256.0f);
+    
     // Si BGR888, convertir RGB888 en BGR888 et appliquer les gains de couleur
     if (cam->pixel_format_ == PIXEL_FORMAT_BGR888) {
       uint8_t* buffer = cam->frame_buffers_[cam->buffer_index_];
@@ -338,15 +344,15 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
         uint8_t g = buffer[offset + 1];
         uint8_t b = buffer[offset + 2];
         
-        // Appliquer les gains de couleur
-        float r_adjusted = r * cam->red_gain_;
-        float g_adjusted = g * cam->green_gain_;
-        float b_adjusted = b * cam->blue_gain_;
+        // Appliquer les gains de couleur (calculs entiers)
+        uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
+        uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
+        uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
         
         // Limiter à 255
-        r_adjusted = r_adjusted > 255.0f ? 255.0f : r_adjusted;
-        g_adjusted = g_adjusted > 255.0f ? 255.0f : g_adjusted;
-        b_adjusted = b_adjusted > 255.0f ? 255.0f : b_adjusted;
+        r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
+        g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
+        b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
         
         // Inverser R et B pour BGR
         buffer[offset] = (uint8_t)b_adjusted;     // B
@@ -368,15 +374,15 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
         uint8_t g = ((pixel >> 5) & 0x3F) << 2;   // 6 bits -> 8 bits
         uint8_t b = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
         
-        // Appliquer les gains
-        float r_adjusted = r * cam->red_gain_;
-        float g_adjusted = g * cam->green_gain_;
-        float b_adjusted = b * cam->blue_gain_;
+        // Appliquer les gains (calculs entiers)
+        uint32_t r_adjusted = (r * red_gain_fixed) >> 8;
+        uint32_t g_adjusted = (g * green_gain_fixed) >> 8;
+        uint32_t b_adjusted = (b * blue_gain_fixed) >> 8;
         
         // Limiter à 255
-        r_adjusted = r_adjusted > 255.0f ? 255.0f : r_adjusted;
-        g_adjusted = g_adjusted > 255.0f ? 255.0f : g_adjusted;
-        b_adjusted = b_adjusted > 255.0f ? 255.0f : b_adjusted;
+        r_adjusted = r_adjusted > 255 ? 255 : r_adjusted;
+        g_adjusted = g_adjusted > 255 ? 255 : g_adjusted;
+        b_adjusted = b_adjusted > 255 ? 255 : b_adjusted;
         
         // Reconvertir en RGB565
         uint8_t r5 = ((uint8_t)r_adjusted) >> 3;
