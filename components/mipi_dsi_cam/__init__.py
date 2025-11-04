@@ -3,7 +3,7 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
 
-DEPENDENCIES = ["esp32", "sd_card"]
+DEPENDENCIES = ["esp32"]
 CODEOWNERS = ["@youkorr"]
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
@@ -22,7 +22,6 @@ CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FMT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
-CONF_SD_CARD_ID = "sd_card_id"
 CONF_MIPI_DSI_CAM_ID = "mipi_dsi_cam_id"
 CONF_FILENAME = "filename"
 
@@ -70,7 +69,6 @@ CONFIG_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
     cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=100),
-    cv.Optional(CONF_SD_CARD_ID): cv.use_id(cg.Component),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -88,12 +86,6 @@ async def to_code(config):
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FMT]))
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
-
-    # Associer la carte SD si présente
-    if CONF_SD_CARD_ID in config:
-        sd = await cg.get_variable(config[CONF_SD_CARD_ID])
-        cg.add(var.set_sd_card(sd))
-        cg.add_define("USE_SD_CARD")
 
     cg.add_define("USE_MIPI_DSI_CAM_SNAPSHOT_SERVICE")
 
