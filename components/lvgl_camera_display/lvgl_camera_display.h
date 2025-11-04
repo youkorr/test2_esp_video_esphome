@@ -13,7 +13,7 @@ class LVGLCameraDisplay : public Component {
   void loop() override;
   void dump_config() override;
 
-  void set_camera(mipi_dsi_cam::MipiDsiCam *camera) { this->camera_ = camera; }
+  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
 
@@ -22,7 +22,7 @@ class LVGLCameraDisplay : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
-  mipi_dsi_cam::MipiDsiCam *camera_{nullptr};
+  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
 
