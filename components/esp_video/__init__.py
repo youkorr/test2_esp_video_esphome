@@ -1,6 +1,6 @@
 """
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Support complet H264 + JPEG (sans auto-création de stubs)
+Support complet H264 + JPEG avec dépendances ESP-IDF
 """
 
 import esphome.codegen as cg
@@ -69,17 +69,38 @@ async def to_code(config):
         )
 
     # -----------------------------------------------------------------------
-    # Détection du chemin du composant
+    # Détection du chemin du composant esp_video
     # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
-    cg.add(cg.RawExpression(f'// [ESP-Video] Component dir: {component_dir}'))
     
-    # Log pour debug
     import logging
     logging.info(f"[ESP-Video] Répertoire du composant: {component_dir}")
 
     # -----------------------------------------------------------------------
-    # Ajout des includes (ordre prioritaire)
+    # Détecter le répertoire parent contenant les composants ESP-IDF
+    # -----------------------------------------------------------------------
+    # Structure attendue:
+    # - components/esp_video/
+    # - components/esp_cam_sensor/
+    # - components/esp_h264/
+    # - components/esp_ipa/
+    # - components/esp_jpeg/
+    # - components/esp_sccb_intf/
+    
+    parent_components_dir = os.path.dirname(component_dir)
+    logging.info(f"[ESP-Video] Répertoire parent des composants: {parent_components_dir}")
+
+    # Liste des composants ESP-IDF requis
+    esp_idf_components = [
+        "esp_cam_sensor",
+        "esp_h264", 
+        "esp_jpeg",
+        "esp_ipa",
+        "esp_sccb_intf",
+    ]
+
+    # -----------------------------------------------------------------------
+    # Ajout des includes ESP-Video
     # -----------------------------------------------------------------------
     include_dirs = [
         "include",
@@ -96,14 +117,33 @@ async def to_code(config):
         if os.path.exists(abs_path) and os.path.isdir(abs_path):
             cg.add_build_flag(f"-I{abs_path}")
             includes_found.append(abs_path)
-            import logging
             logging.info(f"[ESP-Video] 📁 Include ajouté: {abs_path}")
-        else:
-            import logging
-            logging.debug(f"[ESP-Video] ⚠️ Répertoire non trouvé (ignoré): {abs_path}")
+
+    # -----------------------------------------------------------------------
+    # Ajout des includes des composants ESP-IDF dépendants
+    # -----------------------------------------------------------------------
+    for comp_name in esp_idf_components:
+        comp_path = os.path.join(parent_components_dir, comp_name)
+        
+        if not os.path.exists(comp_path):
+            logging.warning(f"[ESP-Video] ⚠️ Composant '{comp_name}' non trouvé dans {parent_components_dir}")
+            continue
+        
+        # Ajouter les répertoires include typiques pour chaque composant
+        comp_include_dirs = [
+            "include",
+            "private_include", 
+            "src",
+            "",  # Racine du composant
+        ]
+        
+        for inc_subdir in comp_include_dirs:
+            inc_path = os.path.join(comp_path, inc_subdir) if inc_subdir else comp_path
+            if os.path.exists(inc_path) and os.path.isdir(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+                logging.info(f"[ESP-Video] 📁 Include {comp_name} ajouté: {inc_path}")
 
     if not includes_found:
-        import logging
         logging.warning(
             "[ESP-Video] ⚠️ Aucun répertoire d'include trouvé! "
             "Vérifiez la structure du composant ESP-Video."
@@ -147,7 +187,6 @@ async def to_code(config):
     for flag in flags:
         cg.add_build_flag(flag)
 
-    import logging
     logging.info(f"[ESP-Video] {len(flags)} flags de compilation ajoutés")
 
     # -----------------------------------------------------------------------
@@ -169,14 +208,7 @@ async def to_code(config):
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
         cg.add(cg.RawExpression('// [ESP-Video] Script de build personnalisé activé'))
-        import logging
         logging.info(f"[ESP-Video] Script de build trouvé: {build_script_path}")
-    else:
-        import logging
-        logging.debug(
-            f"[ESP-Video] Aucun esp_video_build.py trouvé dans {component_dir} "
-            "(optionnel, pas d'erreur)"
-        )
 
     # -----------------------------------------------------------------------
     # Définitions globales
@@ -196,7 +228,6 @@ async def to_code(config):
     
     cg.add(cg.RawExpression(f'// [ESP-Video] {config_summary}'))
     
-    import logging
     logging.info(f"[ESP-Video] ✅ Configuration terminée: {config_summary}")
 
 
