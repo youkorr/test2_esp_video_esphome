@@ -107,6 +107,11 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   float green_gain_{1.0};
   float blue_gain_{1.0};
   uint8_t gain_{90};
+  
+  // Gains précalculés en virgule fixe (x256) pour éviter les float dans l'ISR
+  uint32_t red_gain_fixed_{256};
+  uint32_t green_gain_fixed_{256};
+  uint32_t blue_gain_fixed_{256};
 
   bool initialized_{false};
   bool streaming_{false};
