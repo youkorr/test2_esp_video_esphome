@@ -138,6 +138,7 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   bool init_csi_();
   bool init_isp_();
   bool allocate_buffer_();
+  void apply_color_gains_(uint8_t* buffer);
   
   static bool IRAM_ATTR on_csi_new_frame_(
     esp_cam_ctlr_handle_t handle,
