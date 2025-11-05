@@ -210,7 +210,7 @@ void MipiDSICamComponent::setup() {
 
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   ESP_LOGI(TAG, "Mémoire libre: %u octets", (unsigned)free_heap);
-  
+
   if (free_heap < MIN_FREE_HEAP * 2) {
     ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
   }
@@ -219,24 +219,109 @@ void MipiDSICamComponent::setup() {
   // Nous configurons seulement les paramètres V4L2
   ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
 
-  if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
-    ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
+  // Vérifier que les devices nécessaires sont disponibles
+  bool isp_available = false;
+  bool jpeg_available = false;
+  bool h264_available = false;
+
+  // Tester si l'ISP est disponible
+  int test_fd = -1;
+  if (open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &test_fd)) {
+    isp_available = true;
+    close_fd_(test_fd);
+    ESP_LOGI(TAG, "✓ ISP détecté: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+  } else {
+    ESP_LOGW(TAG, "✗ ISP non disponible: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
   }
 
+  // Tester si JPEG est disponible
+  test_fd = -1;
+  if (open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &test_fd)) {
+    jpeg_available = true;
+    close_fd_(test_fd);
+    ESP_LOGI(TAG, "✓ Encodeur JPEG détecté: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
+  } else {
+    ESP_LOGW(TAG, "✗ Encodeur JPEG non disponible: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
+  }
+
+  // Tester si H264 est disponible
+  test_fd = -1;
+  if (open_node_(ESP_VIDEO_H264_DEVICE_NAME, &test_fd)) {
+    h264_available = true;
+    close_fd_(test_fd);
+    ESP_LOGI(TAG, "✓ Encodeur H.264 détecté: %s", ESP_VIDEO_H264_DEVICE_NAME);
+  } else {
+    ESP_LOGW(TAG, "✗ Encodeur H.264 non disponible: %s", ESP_VIDEO_H264_DEVICE_NAME);
+  }
+
+  // Vérifier qu'au moins un device est disponible
+  if (!isp_available && !jpeg_available && !h264_available) {
+    ESP_LOGE(TAG, "==============================");
+    ESP_LOGE(TAG, "❌ ERREUR: Aucun device vidéo disponible!");
+    ESP_LOGE(TAG, "==============================");
+    ESP_LOGE(TAG, "Les devices suivants sont requis:");
+    ESP_LOGE(TAG, "  - ISP: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+    ESP_LOGE(TAG, "  - JPEG: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
+    ESP_LOGE(TAG, "  - H.264: %s", ESP_VIDEO_H264_DEVICE_NAME);
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "Vérifiez votre configuration esp_video:");
+    ESP_LOGE(TAG, "  esp_video:");
+    ESP_LOGE(TAG, "    enable_isp: true    # Requis pour RGB565/YUYV");
+    ESP_LOGE(TAG, "    enable_jpeg: true   # Requis pour JPEG/MJPEG");
+    ESP_LOGE(TAG, "    enable_h264: true   # Requis pour H.264");
+    ESP_LOGE(TAG, "==============================");
+    this->pipeline_started_ = false;
+    this->mark_failed();
+    return;
+  }
+
+  // Configurer l'ISP si disponible et si le format le nécessite
+  if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
+    if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
+      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
+    } else {
+      ESP_LOGI(TAG, "✓ ISP configuré avec succès");
+    }
+  }
+
+  // Configurer l'encodeur JPEG si nécessaire
   if (wants_jpeg_(this->pixel_format_)) {
+    if (!jpeg_available) {
+      ESP_LOGE(TAG, "❌ Format JPEG demandé mais encodeur JPEG non disponible");
+      ESP_LOGE(TAG, "   Activez enable_jpeg: true dans esp_video");
+      this->pipeline_started_ = false;
+      this->mark_failed();
+      return;
+    }
     if (!jpeg_apply_quality_(this->jpeg_quality_)) {
       ESP_LOGW(TAG, "⚠️ Qualité JPEG non appliquée");
+    } else {
+      ESP_LOGI(TAG, "✓ Encodeur JPEG configuré (qualité: %d)", this->jpeg_quality_);
     }
-  } else if (wants_h264_(this->pixel_format_)) {
+  }
+
+  // Configurer l'encodeur H264 si nécessaire
+  if (wants_h264_(this->pixel_format_)) {
+    if (!h264_available) {
+      ESP_LOGE(TAG, "❌ Format H.264 demandé mais encodeur H.264 non disponible");
+      ESP_LOGE(TAG, "   Activez enable_h264: true dans esp_video");
+      this->pipeline_started_ = false;
+      this->mark_failed();
+      return;
+    }
     (void)h264_apply_basic_params_(this->framerate_);
+    ESP_LOGI(TAG, "✓ Encodeur H.264 configuré");
   }
 
   this->pipeline_started_ = true;
   this->last_health_check_ = millis();
-  
+
   ESP_LOGI(TAG, "==============================");
   ESP_LOGI(TAG, "✅ Configuration caméra prête!");
   ESP_LOGI(TAG, "   Format: %s", this->pixel_format_.c_str());
+  if (isp_available) ESP_LOGI(TAG, "   ISP: Disponible");
+  if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
+  if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
   ESP_LOGI(TAG, "==============================");
 }
 
@@ -371,6 +456,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
+
 
 
 
