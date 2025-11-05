@@ -11,7 +11,7 @@ import os
 
 CODEOWNERS = ["@youkorr"]
 DEPENDENCIES = ["esp32"]
-AUTO_LOAD = []
+AUTO_LOAD = ["esp_cam_sensor", "esp_h264", "esp_ipa", "esp_sccb_intf"]
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
 ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
@@ -72,38 +72,12 @@ async def to_code(config):
     # Détection du chemin du composant esp_video
     # -----------------------------------------------------------------------
     component_dir = os.path.dirname(os.path.abspath(__file__))
-    
+
     import logging
     logging.info(f"[ESP-Video] Répertoire du composant: {component_dir}")
 
-    # -----------------------------------------------------------------------
-    # Détecter le répertoire parent contenant les composants ESP-IDF
-    # -----------------------------------------------------------------------
-    # Structure attendue:
-    # - components/esp_video/
-    # - components/esp_cam_sensor/
-    # - components/esp_h264/
-    # - components/esp_ipa/
-    # - components/esp_jpeg/
-    # - components/esp_sccb_intf/
-    
-    parent_components_dir = os.path.dirname(component_dir)
-    logging.info(f"[ESP-Video] Répertoire parent des composants: {parent_components_dir}")
-
-    # Ajouter le répertoire components/ comme répertoire de composants ESP-IDF
-    # Ceci permet à ESP-IDF de trouver et compiler automatiquement tous les CMakeLists.txt
-    cg.add_platformio_option("board_build.cmake_extra_args", [
-        f"-DEXTRA_COMPONENT_DIRS={parent_components_dir}"
-    ])
-    logging.info(f"[ESP-Video] ✓ Répertoire de composants ESP-IDF ajouté: {parent_components_dir}")
-
-    # Liste des composants ESP-IDF requis (sans esp_jpeg qui n'existe pas)
-    esp_idf_components = [
-        "esp_cam_sensor",
-        "esp_h264",
-        "esp_ipa",
-        "esp_sccb_intf",
-    ]
+    # Les composants ESP-IDF dépendants (esp_cam_sensor, esp_h264, esp_ipa, esp_sccb_intf)
+    # sont automatiquement chargés via AUTO_LOAD et compilés via leurs fichiers __init__.py
 
     # -----------------------------------------------------------------------
     # Ajout des includes ESP-Video
@@ -125,29 +99,7 @@ async def to_code(config):
             includes_found.append(abs_path)
             logging.info(f"[ESP-Video] 📁 Include ajouté: {abs_path}")
 
-    # -----------------------------------------------------------------------
-    # Ajout des includes des composants ESP-IDF dépendants
-    # -----------------------------------------------------------------------
-    for comp_name in esp_idf_components:
-        comp_path = os.path.join(parent_components_dir, comp_name)
-        
-        if not os.path.exists(comp_path):
-            logging.warning(f"[ESP-Video] ⚠️ Composant '{comp_name}' non trouvé dans {parent_components_dir}")
-            continue
-        
-        # Ajouter les répertoires include typiques pour chaque composant
-        comp_include_dirs = [
-            "include",
-            "private_include", 
-            "src",
-            "",  # Racine du composant
-        ]
-        
-        for inc_subdir in comp_include_dirs:
-            inc_path = os.path.join(comp_path, inc_subdir) if inc_subdir else comp_path
-            if os.path.exists(inc_path) and os.path.isdir(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
-                logging.info(f"[ESP-Video] 📁 Include {comp_name} ajouté: {inc_path}")
+    # Les includes des composants dépendants sont gérés par leurs __init__.py respectifs
 
     if not includes_found:
         logging.warning(
@@ -206,6 +158,47 @@ async def to_code(config):
     logging.info(f"[ESP-Video] {len(flags)} flags de compilation ajoutés")
 
     # -----------------------------------------------------------------------
+    # Ajout des sources C du composant esp_video
+    # -----------------------------------------------------------------------
+    # Sources de base (toujours compilées)
+    base_sources = [
+        "src/esp_video_buffer.c",
+        "src/esp_video_init.c",
+        "src/esp_video_ioctl.c",
+        "src/esp_video_mman.c",
+        "src/esp_video_vfs.c",
+        "src/esp_video.c",
+        "src/esp_video_cam.c",
+    ]
+
+    # Sources conditionnelles
+    # MIPI CSI (toujours activé car CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1)
+    base_sources.append("src/device/esp_video_csi_device.c")
+
+    # H.264
+    if config[CONF_ENABLE_H264]:
+        base_sources.append("src/device/esp_video_h264_device.c")
+
+    # JPEG
+    if config[CONF_ENABLE_JPEG]:
+        base_sources.append("src/device/esp_video_jpeg_device.c")
+
+    # ISP
+    if config[CONF_ENABLE_ISP]:
+        base_sources.append("src/device/esp_video_isp_device.c")
+        base_sources.append("src/esp_video_isp_pipeline.c")
+
+    # Ajouter toutes les sources
+    for src in base_sources:
+        src_path = os.path.join(component_dir, src)
+        if os.path.exists(src_path):
+            cg.add_library(src_path)
+        else:
+            logging.warning(f"[ESP-Video] ⚠️ Source non trouvée: {src}")
+
+    logging.info(f"[ESP-Video] {len(base_sources)} fichiers sources ajoutés")
+
+    # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité
     # -----------------------------------------------------------------------
     extra_flags = [
@@ -213,7 +206,7 @@ async def to_code(config):
         "-Wno-unused-variable",
         "-Wno-missing-field-initializers",
     ]
-    
+
     for flag in extra_flags:
         cg.add_build_flag(flag)
 
