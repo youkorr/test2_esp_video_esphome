@@ -107,7 +107,8 @@ async def to_code(config):
     # esp_cam_sensor
     esp_cam_sensor_dir = os.path.join(parent_components_dir, "esp_cam_sensor")
     if os.path.exists(esp_cam_sensor_dir):
-        for inc in ["include", "sensor/ov5647/include", "sensor/sc202cs/include",
+        for inc in ["include", "sensor/ov5647/include", "sensor/ov5647/private_include",
+                    "sensor/sc202cs/include", "sensor/sc202cs/include/private_include",
                     "src", "src/driver_spi", "src/driver_cam"]:
             inc_path = os.path.join(esp_cam_sensor_dir, inc)
             if os.path.exists(inc_path):

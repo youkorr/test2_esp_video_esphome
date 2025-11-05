@@ -141,6 +141,7 @@ static void print_stats_info(const esp_ipa_stats_t *stats)
         ESP_LOGD(TAG, "Sharpen high frequency pixel maximum value: %d", stats->sharpen_stats.value);
     }
 
+#if CONFIG_ESP_IPA_AF_ALGORITHM
     if (stats->flags & IPA_STATS_FLAGS_AF) {
         const esp_ipa_stats_af_t *af_stats = stats->af_stats;
 
@@ -150,6 +151,7 @@ static void print_stats_info(const esp_ipa_stats_t *stats)
             ESP_LOGD(TAG, "  luminance[%2d]:  %"PRIu32, i, af_stats[i].luminance);
         }
     }
+#endif
 
     ESP_LOGD(TAG, "");
 #endif
@@ -662,6 +664,7 @@ static void config_lsc(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 
 static void config_sensor_ae_target_level(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
+#if 0  // Optional IPA feature not available in this build
     struct v4l2_ext_controls controls;
     struct v4l2_ext_control control[1];
 
@@ -678,10 +681,14 @@ static void config_sensor_ae_target_level(esp_video_isp_t *isp, esp_ipa_metadata
             isp->sensor.cur_ae_target_level = metadata->ae_target_level;
         }
     }
+#endif
+    (void)isp;
+    (void)metadata;
 }
 
 static void config_awb(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
+#if 0  // Optional IPA feature not available in this build
     struct v4l2_ext_controls controls;
     struct v4l2_ext_control control[1];
     esp_video_isp_awb_t awb;
@@ -706,10 +713,14 @@ static void config_awb(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
             ESP_LOGE(TAG, "failed to set AWB");
         }
     }
+#endif
+    (void)isp;
+    (void)metadata;
 }
 
 static void config_statistics_region(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
+#if 0  // Optional IPA feature not available in this build
     if (metadata->flags & IPA_METADATA_FLAGS_SR) {
         esp_ipa_region_t *sr = &metadata->stats_region;
         struct v4l2_selection selection;
@@ -724,10 +735,14 @@ static void config_statistics_region(esp_video_isp_t *isp, esp_ipa_metadata_t *m
             ESP_LOGE(TAG, "failed to set selection");
         }
     }
+#endif
+    (void)isp;
+    (void)metadata;
 }
 
 static void config_af(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
+#if CONFIG_ESP_IPA_AF_ALGORITHM
     struct v4l2_ext_controls controls;
     struct v4l2_ext_control control[1];
     esp_video_isp_af_t af;
@@ -748,6 +763,10 @@ static void config_af(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
             ESP_LOGE(TAG, "failed to set AF");
         }
     }
+#else
+    (void)isp;
+    (void)metadata;
+#endif
 }
 
 #if CONFIG_ESP_VIDEO_ISP_PIPELINE_CONTROL_CAMERA_MOTOR
@@ -859,6 +878,7 @@ static void isp_stats_to_ipa_stats(esp_video_isp_stats_t *isp_stat, esp_ipa_stat
         ipa_stats->flags |= IPA_STATS_FLAGS_SHARPEN;
     }
 
+#if CONFIG_ESP_IPA_AF_ALGORITHM
     if (isp_stat->flags & ESP_VIDEO_ISP_STATS_FLAG_AF) {
         esp_ipa_stats_af_t *ipa_af = ipa_stats->af_stats;
         isp_af_result_t *isp_af = &isp_stat->af.af_result;
@@ -869,6 +889,7 @@ static void isp_stats_to_ipa_stats(esp_video_isp_stats_t *isp_stat, esp_ipa_stat
         }
         ipa_stats->flags |= IPA_STATS_FLAGS_AF;
     }
+#endif
 }
 
 static void get_sensor_state(esp_video_isp_t *isp, int index)
@@ -1098,6 +1119,7 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_LOGD(TAG, "V4L2_CID_CAMERA_GROUP is not supported");
     }
 
+#if 0  // Optional IPA feature not available in this build
     qctrl.id = V4L2_CID_CAMERA_AE_LEVEL;
     ret = ioctl(fd, VIDIOC_QUERY_EXT_CTRL, &qctrl);
     if (ret == 0) {
@@ -1124,6 +1146,7 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
     } else {
         ESP_LOGD(TAG, "V4L2_CID_CAMERA_AE_LEVEL is not supported");
     }
+#endif
 
 #if CONFIG_ESP_VIDEO_ISP_PIPELINE_CONTROL_CAMERA_MOTOR
     qctrl.id = V4L2_CID_MOTOR_START_TIME;
