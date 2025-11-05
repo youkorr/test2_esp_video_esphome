@@ -181,7 +181,8 @@ async def to_code(config):
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
-            "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+            # Disable ISP pipeline controller to prevent background task crashes
+            # "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
             "-DESP_VIDEO_ISP_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_ISP_ENABLED", "1")
