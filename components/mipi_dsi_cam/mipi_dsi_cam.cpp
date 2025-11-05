@@ -236,10 +236,11 @@ void MipiDSICamComponent::setup() {
   csi_cfg.reset_pin = (gpio_num_t)-1;
   csi_cfg.pwdn_pin  = (gpio_num_t)-1;
 
-  memset(&this->init_cfg_, 0, sizeof(this->init_cfg_));
-  this->init_cfg_.csi = &csi_cfg;
+  // Allouer init_cfg dynamiquement
+  esp_video_init_config_t init_cfg = {};
+  init_cfg.csi = &csi_cfg;
 
-  err = esp_video_init(&this->init_cfg_);
+  err = esp_video_init(&init_cfg);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "esp_video_init() a échoué (err=0x%X)", err);
     this->mark_failed();
@@ -421,7 +422,6 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
-
 
 
 
