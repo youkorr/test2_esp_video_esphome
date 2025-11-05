@@ -1,0 +1,5 @@
+version: "1.0.0"
+description: ESP SCCB Interface for camera sensors
+url: https://github.com/espressif/esp-video
+dependencies:
+  idf: ">=5.0"
