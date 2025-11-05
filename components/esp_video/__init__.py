@@ -11,7 +11,7 @@ import os
 
 CODEOWNERS = ["@youkorr"]
 DEPENDENCIES = ["esp32"]
-AUTO_LOAD = ["esp_cam_sensor", "esp_h264", "esp_ipa", "esp_sccb_intf"]
+AUTO_LOAD = []
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
 ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
@@ -76,8 +76,10 @@ async def to_code(config):
     import logging
     logging.info(f"[ESP-Video] Répertoire du composant: {component_dir}")
 
-    # Les composants ESP-IDF dépendants (esp_cam_sensor, esp_h264, esp_ipa, esp_sccb_intf)
-    # sont automatiquement chargés via AUTO_LOAD et compilés via leurs fichiers __init__.py
+    # -----------------------------------------------------------------------
+    # Détection des composants dépendants
+    # -----------------------------------------------------------------------
+    parent_components_dir = os.path.dirname(component_dir)
 
     # -----------------------------------------------------------------------
     # Ajout des includes ESP-Video
@@ -99,7 +101,44 @@ async def to_code(config):
             includes_found.append(abs_path)
             logging.info(f"[ESP-Video] 📁 Include ajouté: {abs_path}")
 
-    # Les includes des composants dépendants sont gérés par leurs __init__.py respectifs
+    # -----------------------------------------------------------------------
+    # Ajout des includes des composants ESP-IDF dépendants
+    # -----------------------------------------------------------------------
+    # esp_cam_sensor
+    esp_cam_sensor_dir = os.path.join(parent_components_dir, "esp_cam_sensor")
+    if os.path.exists(esp_cam_sensor_dir):
+        for inc in ["include", "sensor/ov5647/include", "sensor/sc202cs/include",
+                    "src", "src/driver_spi", "src/driver_cam"]:
+            inc_path = os.path.join(esp_cam_sensor_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+                logging.info(f"[ESP-Video] 📁 Include esp_cam_sensor ajouté: {inc_path}")
+
+    # esp_h264
+    esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
+    if os.path.exists(esp_h264_dir):
+        for inc in ["interface/include", "port/include", "sw/include"]:
+            inc_path = os.path.join(esp_h264_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+                logging.info(f"[ESP-Video] 📁 Include esp_h264 ajouté: {inc_path}")
+
+    # esp_ipa
+    esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
+    if os.path.exists(esp_ipa_dir):
+        inc_path = os.path.join(esp_ipa_dir, "include")
+        if os.path.exists(inc_path):
+            cg.add_build_flag(f"-I{inc_path}")
+            logging.info(f"[ESP-Video] 📁 Include esp_ipa ajouté: {inc_path}")
+
+    # esp_sccb_intf
+    esp_sccb_intf_dir = os.path.join(parent_components_dir, "esp_sccb_intf")
+    if os.path.exists(esp_sccb_intf_dir):
+        for inc in ["include", "interface", "sccb_i2c/include"]:
+            inc_path = os.path.join(esp_sccb_intf_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+                logging.info(f"[ESP-Video] 📁 Include esp_sccb_intf ajouté: {inc_path}")
 
     if not includes_found:
         logging.warning(
@@ -197,6 +236,82 @@ async def to_code(config):
             logging.warning(f"[ESP-Video] ⚠️ Source non trouvée: {src}")
 
     logging.info(f"[ESP-Video] {len(base_sources)} fichiers sources ajoutés")
+
+    # -----------------------------------------------------------------------
+    # Compilation des sources des composants ESP-IDF dépendants
+    # -----------------------------------------------------------------------
+
+    # esp_cam_sensor sources
+    esp_cam_sensor_sources = [
+        "src/esp_cam_sensor.c",
+        "src/esp_cam_motor.c",
+        "src/esp_cam_sensor_xclk.c",
+        "src/driver_spi/spi_slave.c",
+        "src/driver_cam/esp_cam_ctlr_spi_cam.c",
+        "sensor/ov5647/ov5647.c",
+        "sensor/sc202cs/sc202cs.c",
+    ]
+
+    for src in esp_cam_sensor_sources:
+        src_path = os.path.join(esp_cam_sensor_dir, src)
+        if os.path.exists(src_path):
+            cg.add_library(src_path)
+
+    logging.info(f"[ESP-Video] {len(esp_cam_sensor_sources)} sources esp_cam_sensor ajoutées")
+
+    # esp_h264 sources
+    esp_h264_sources = [
+        "port/src/esp_h264_alloc.c",
+        "port/src/esp_h264_alloc_less_than_5_3.c",
+        "port/src/esp_h264_cache.c",
+        "sw/src/h264_color_convert.c",
+        "sw/src/esp_h264_enc_sw_param.c",
+        "sw/src/esp_h264_dec_sw.c",
+        "sw/src/esp_h264_enc_single_sw.c",
+        "interface/include/src/esp_h264_enc_param.c",
+        "interface/include/src/esp_h264_enc_param_hw.c",
+        "interface/include/src/esp_h264_enc_dual.c",
+        "interface/include/src/esp_h264_dec_param.c",
+        "interface/include/src/esp_h264_version.c",
+        "interface/include/src/esp_h264_dec.c",
+        "interface/include/src/esp_h264_enc_single.c",
+    ]
+
+    for src in esp_h264_sources:
+        src_path = os.path.join(esp_h264_dir, src)
+        if os.path.exists(src_path):
+            cg.add_library(src_path)
+
+    logging.info(f"[ESP-Video] {len(esp_h264_sources)} sources esp_h264 ajoutées")
+
+    # esp_ipa sources + bibliothèque précompilée
+    esp_ipa_src = os.path.join(esp_ipa_dir, "src/version.c")
+    if os.path.exists(esp_ipa_src):
+        cg.add_library(esp_ipa_src)
+
+    # Ajouter la bibliothèque précompilée
+    variant = CORE.data.get("esp32", {}).get("variant", "esp32p4")
+    if not variant:
+        variant = "esp32p4"
+
+    lib_path = os.path.join(esp_ipa_dir, f"lib/{variant}")
+    if os.path.exists(lib_path):
+        cg.add_build_flag(f"-L{lib_path}")
+        cg.add_build_flag("-lesp_ipa")
+        logging.info(f"[ESP-Video] Bibliothèque esp_ipa ajoutée pour {variant}")
+
+    # esp_sccb_intf sources
+    esp_sccb_intf_sources = [
+        "src/sccb.c",
+        "sccb_i2c/src/sccb_i2c.c",
+    ]
+
+    for src in esp_sccb_intf_sources:
+        src_path = os.path.join(esp_sccb_intf_dir, src)
+        if os.path.exists(src_path):
+            cg.add_library(src_path)
+
+    logging.info(f"[ESP-Video] {len(esp_sccb_intf_sources)} sources esp_sccb_intf ajoutées")
 
     # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité
