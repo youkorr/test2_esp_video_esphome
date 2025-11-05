@@ -157,6 +157,7 @@ async def to_code(config):
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
         "-DCONFIG_IDF_TARGET_ESP32P4=1",
         "-DCONFIG_SOC_I2C_SUPPORTED=1",
+        "-DCONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT=1000",  # SCCB transaction timeout in ms
     ])
 
     # Capteur de caméra SC202CS (activé par défaut pour mipi_dsi_cam)
