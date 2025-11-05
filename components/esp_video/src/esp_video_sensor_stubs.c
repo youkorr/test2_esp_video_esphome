@@ -3,26 +3,35 @@
  *
  * In ESP-IDF CMake builds, these symbols are created by linker fragments.
  * For PlatformIO builds, we define them to represent an empty array.
+ *
+ * The trick: we place "end" before "start" in memory using section ordering,
+ * so the loop condition (p < &end) is immediately false.
  */
 
 #include "esp_cam_sensor_detect.h"
 
 /*
- * Define start and end markers for sensor detection array.
- * They point to the same dummy object, representing an empty array.
- * When code does: for (p = &start; p < &end; ++p), the loop won't execute.
+ * Define end marker FIRST (using section .1) and start marker SECOND (using section .2)
+ * This ensures &start >= &end, making the loop condition false immediately.
  */
-static const esp_cam_sensor_detect_fn_t __empty_sensor_marker = {
+
+/* End marker - comes first in memory (section .1 < .2) */
+__attribute__((section(".rodata.esp_cam_detect.1_end")))
+__attribute__((used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
     .sccb_addr = 0
 };
 
-__attribute__((weak, alias("__empty_sensor_marker")))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
-
-__attribute__((weak, alias("__empty_sensor_marker")))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
+/* Start marker - comes after in memory (section .2 > .1) */
+__attribute__((section(".rodata.esp_cam_detect.2_start")))
+__attribute__((used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
 
 /* Motor detection arrays (if camera motor support is enabled) */
 #ifdef CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
@@ -32,15 +41,20 @@ typedef struct {
     uint8_t port;
 } esp_cam_motor_detect_fn_t;
 
-static const esp_cam_motor_detect_fn_t __empty_motor_marker = {
+/* End before start for motor array too */
+__attribute__((section(".rodata.esp_cam_motor.1_end")))
+__attribute__((used))
+esp_cam_motor_detect_fn_t __esp_cam_motor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
     .sccb_addr = 0
 };
 
-__attribute__((weak, alias("__empty_motor_marker")))
-esp_cam_motor_detect_fn_t __esp_cam_motor_detect_fn_array_start;
-
-__attribute__((weak, alias("__empty_motor_marker")))
-esp_cam_motor_detect_fn_t __esp_cam_motor_detect_fn_array_end;
+__attribute__((section(".rodata.esp_cam_motor.2_start")))
+__attribute__((used))
+esp_cam_motor_detect_fn_t __esp_cam_motor_detect_fn_array_start = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
 #endif
