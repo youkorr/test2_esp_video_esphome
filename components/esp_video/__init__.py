@@ -182,6 +182,7 @@ async def to_code(config):
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+            "-DESP_VIDEO_ISP_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_ISP_ENABLED", "1")
 
@@ -191,7 +192,10 @@ async def to_code(config):
 
     # Encodeur H.264 (CORRIGÉ: utilise H264_VIDEO_DEVICE, pas HW_H264_VIDEO_DEVICE)
     if config[CONF_ENABLE_H264]:
-        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1")
+        flags.extend([
+            "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
+            "-DESP_VIDEO_H264_ENABLED=1",
+        ])
         cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
 
     # Encodeur JPEG (CORRIGÉ: utilise JPEG_VIDEO_DEVICE, pas HW_JPEG)
@@ -199,6 +203,7 @@ async def to_code(config):
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",  # Pour esp_driver_jpeg
+            "-DESP_VIDEO_JPEG_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
