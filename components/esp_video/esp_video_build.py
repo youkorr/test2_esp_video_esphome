@@ -120,17 +120,15 @@ if os.path.exists(esp_sccb_intf_dir):
 # Ajouter toutes les sources à la compilation
 # ========================================================================
 if sources_to_add:
-    # Créer un répertoire de build pour les composants ESP-Video
-    build_dir = os.path.join("$BUILD_DIR", "esp_video_components")
+    # Compiler chaque fichier source en objet
+    objects = []
+    for src_file in sources_to_add:
+        # Compiler le fichier source en .o
+        obj = env.Object(src_file)
+        objects.extend(obj)
 
-    # Ajouter les sources à la compilation
-    lib = env.BuildLibrary(
-        build_dir,
-        sources_to_add
-    )
-
-    # Ajouter la bibliothèque aux dépendances
-    env.Prepend(LIBS=[lib])
+    # Ajouter les objets compilés au projet
+    env.Append(PIOBUILDFILES=objects)
 
     print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
 else:
