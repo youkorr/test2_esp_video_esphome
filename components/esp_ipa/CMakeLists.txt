@@ -4,9 +4,6 @@ idf_component_register(SRCS "src/version.c"
                        INCLUDE_DIRS ${include_dirs}
                        LDFRAGMENTS linker.lf)
 
-include(package_manager)
-cu_pkg_define_version(${CMAKE_CURRENT_LIST_DIR})
-
 idf_build_get_property(idf_target IDF_TARGET)
 
 add_prebuilt_library(prebuilt "lib/${idf_target}/libesp_ipa.a"
@@ -36,4 +33,6 @@ endif()
 if(CONFIG_ESP_IPA_CC_LINEAR)
     target_link_libraries(${COMPONENT_LIB} INTERFACE "-u __esp_ipa_detect_fn_cc_linear")
 endif()
+
+
 
