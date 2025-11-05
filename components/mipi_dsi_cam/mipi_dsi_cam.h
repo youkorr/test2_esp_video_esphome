@@ -53,10 +53,13 @@ class MipiDSICamComponent : public Component {
 
   // Stubs pour lvgl_camera_display
   bool is_streaming() const { return pipeline_started_; }
+  bool start_streaming() { return pipeline_started_; }
+  void stop_streaming() { /* Le pipeline reste actif */ }
   bool capture_frame() { return true; }
   uint8_t* get_image_data() { return nullptr; }
   uint16_t get_image_width() const { return 0; }
   uint16_t get_image_height() const { return 0; }
+  size_t get_image_size() const { return 0; }
 
  protected:
   std::string sensor_name_{"sc202cs"};
