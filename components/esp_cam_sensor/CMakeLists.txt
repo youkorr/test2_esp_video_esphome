@@ -16,9 +16,12 @@ set(priv_include_dirs "src"
                       "sensor/ov5647/private_include"
                       "sensor/sc202cs/include/private_include")
 
-set(requires "esp_driver_i2c" "esp_driver_gpio" "esp_driver_ledc")
+set(requires "esp_driver_i2c" "esp_driver_gpio" "esp_driver_ledc" "esp_driver_cam")
+set(priv_requires "spi_flash" "driver")
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${include_dirs}
                        PRIV_INCLUDE_DIRS ${priv_include_dirs}
-                       REQUIRES ${requires})
+                       REQUIRES ${requires}
+                       PRIV_REQUIRES ${priv_requires})
+
