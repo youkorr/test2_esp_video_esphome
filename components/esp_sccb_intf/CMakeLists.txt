@@ -1,21 +1,16 @@
-# ESP SCCB Interface Component
+set(srcs)
 
-file(GLOB_RECURSE component_srcs
-    "src/*.c"
-)
+set(include "include" "interface")
 
-set(component_include_dirs
-    "include"
-)
+list(APPEND srcs "src/sccb.c")
 
-set(component_requires
-    driver
-)
+if(CONFIG_SOC_I2C_SUPPORTED)
+    list(APPEND srcs "sccb_i2c/src/sccb_i2c.c")
+endif()
 
-idf_component_register(
-    SRCS ${component_srcs}
-    INCLUDE_DIRS ${component_include_dirs}
-    REQUIRES ${component_requires}
-)
+list(APPEND include "sccb_i2c/include")
 
-message(STATUS "ESP SCCB Interface component registered")
+idf_component_register(SRCS ${srcs}
+                       INCLUDE_DIRS ${include}
+                       REQUIRES esp_driver_i2c
+                      )
