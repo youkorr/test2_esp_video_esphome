@@ -21,6 +21,7 @@ set(component_include_dirs
     "interface/include"
     "port/include"
     "sw/include"
+    "hw/include"
 )
 
 set(component_requires
