@@ -133,5 +133,16 @@ if sources_to_add:
     env.Append(PIOBUILDFILES=objects)
 
     print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
+
+    # ========================================================================
+    # Linker l'esp_ipa library
+    # ========================================================================
+    esp_ipa_lib = os.path.join(parent_components_dir, "esp_ipa/lib/esp32p4/libesp_ipa.a")
+    if os.path.exists(esp_ipa_lib):
+        # Add the library to be linked
+        env.Append(LIBS=[File(esp_ipa_lib)])
+        print(f"[ESP-Video Build] ✓ Bibliothèque esp_ipa ajoutée: {esp_ipa_lib}")
+    else:
+        print(f"[ESP-Video Build] ⚠️ Bibliothèque esp_ipa non trouvée: {esp_ipa_lib}")
 else:
     print("[ESP-Video Build] ⚠️ Aucune source trouvée!")
