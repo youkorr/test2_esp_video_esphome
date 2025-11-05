@@ -197,99 +197,13 @@ async def to_code(config):
     logging.info(f"[ESP-Video] {len(flags)} flags de compilation ajoutés")
 
     # -----------------------------------------------------------------------
-    # Ajout des sources C du composant esp_video
+    # Compilation des sources via script PlatformIO
     # -----------------------------------------------------------------------
-    # Sources de base (toujours compilées)
-    base_sources = [
-        "src/esp_video_buffer.c",
-        "src/esp_video_init.c",
-        "src/esp_video_ioctl.c",
-        "src/esp_video_mman.c",
-        "src/esp_video_vfs.c",
-        "src/esp_video.c",
-        "src/esp_video_cam.c",
-    ]
+    # Les sources C/C++ de tous les composants (esp_video, esp_cam_sensor,
+    # esp_h264, esp_ipa, esp_sccb_intf) sont compilées via le script
+    # esp_video_build.py qui est exécuté pendant la phase de build PlatformIO.
 
-    # Sources conditionnelles
-    # MIPI CSI (toujours activé car CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1)
-    base_sources.append("src/device/esp_video_csi_device.c")
-
-    # H.264
-    if config[CONF_ENABLE_H264]:
-        base_sources.append("src/device/esp_video_h264_device.c")
-
-    # JPEG
-    if config[CONF_ENABLE_JPEG]:
-        base_sources.append("src/device/esp_video_jpeg_device.c")
-
-    # ISP
-    if config[CONF_ENABLE_ISP]:
-        base_sources.append("src/device/esp_video_isp_device.c")
-        base_sources.append("src/esp_video_isp_pipeline.c")
-
-    # Ajouter toutes les sources
-    for src in base_sources:
-        src_path = os.path.join(component_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
-        else:
-            logging.warning(f"[ESP-Video] ⚠️ Source non trouvée: {src}")
-
-    logging.info(f"[ESP-Video] {len(base_sources)} fichiers sources ajoutés")
-
-    # -----------------------------------------------------------------------
-    # Compilation des sources des composants ESP-IDF dépendants
-    # -----------------------------------------------------------------------
-
-    # esp_cam_sensor sources
-    esp_cam_sensor_sources = [
-        "src/esp_cam_sensor.c",
-        "src/esp_cam_motor.c",
-        "src/esp_cam_sensor_xclk.c",
-        "src/driver_spi/spi_slave.c",
-        "src/driver_cam/esp_cam_ctlr_spi_cam.c",
-        "sensor/ov5647/ov5647.c",
-        "sensor/sc202cs/sc202cs.c",
-    ]
-
-    for src in esp_cam_sensor_sources:
-        src_path = os.path.join(esp_cam_sensor_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
-
-    logging.info(f"[ESP-Video] {len(esp_cam_sensor_sources)} sources esp_cam_sensor ajoutées")
-
-    # esp_h264 sources
-    esp_h264_sources = [
-        "port/src/esp_h264_alloc.c",
-        "port/src/esp_h264_alloc_less_than_5_3.c",
-        "port/src/esp_h264_cache.c",
-        "sw/src/h264_color_convert.c",
-        "sw/src/esp_h264_enc_sw_param.c",
-        "sw/src/esp_h264_dec_sw.c",
-        "sw/src/esp_h264_enc_single_sw.c",
-        "interface/include/src/esp_h264_enc_param.c",
-        "interface/include/src/esp_h264_enc_param_hw.c",
-        "interface/include/src/esp_h264_enc_dual.c",
-        "interface/include/src/esp_h264_dec_param.c",
-        "interface/include/src/esp_h264_version.c",
-        "interface/include/src/esp_h264_dec.c",
-        "interface/include/src/esp_h264_enc_single.c",
-    ]
-
-    for src in esp_h264_sources:
-        src_path = os.path.join(esp_h264_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
-
-    logging.info(f"[ESP-Video] {len(esp_h264_sources)} sources esp_h264 ajoutées")
-
-    # esp_ipa sources + bibliothèque précompilée
-    esp_ipa_src = os.path.join(esp_ipa_dir, "src/version.c")
-    if os.path.exists(esp_ipa_src):
-        cg.add_library(esp_ipa_src)
-
-    # Ajouter la bibliothèque précompilée
+    # Ajouter la bibliothèque précompilée esp_ipa
     variant = CORE.data.get("esp32", {}).get("variant", "esp32p4")
     if not variant:
         variant = "esp32p4"
@@ -298,20 +212,7 @@ async def to_code(config):
     if os.path.exists(lib_path):
         cg.add_build_flag(f"-L{lib_path}")
         cg.add_build_flag("-lesp_ipa")
-        logging.info(f"[ESP-Video] Bibliothèque esp_ipa ajoutée pour {variant}")
-
-    # esp_sccb_intf sources
-    esp_sccb_intf_sources = [
-        "src/sccb.c",
-        "sccb_i2c/src/sccb_i2c.c",
-    ]
-
-    for src in esp_sccb_intf_sources:
-        src_path = os.path.join(esp_sccb_intf_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
-
-    logging.info(f"[ESP-Video] {len(esp_sccb_intf_sources)} sources esp_sccb_intf ajoutées")
+        logging.info(f"[ESP-Video] Bibliothèque précompilée esp_ipa ajoutée pour {variant}")
 
     # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité
@@ -326,13 +227,14 @@ async def to_code(config):
         cg.add_build_flag(flag)
 
     # -----------------------------------------------------------------------
-    # Script post-compilation (optionnel)
+    # Script de build PlatformIO (obligatoire)
     # -----------------------------------------------------------------------
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-        cg.add(cg.RawExpression('// [ESP-Video] Script de build personnalisé activé'))
-        logging.info(f"[ESP-Video] Script de build trouvé: {build_script_path}")
+        cg.add_platformio_option("extra_scripts", ["pre:" + build_script_path])
+        logging.info(f"[ESP-Video] ✓ Script de build activé: {build_script_path}")
+    else:
+        logging.error(f"[ESP-Video] ❌ Script de build manquant: {build_script_path}")
 
     # -----------------------------------------------------------------------
     # Définitions globales
