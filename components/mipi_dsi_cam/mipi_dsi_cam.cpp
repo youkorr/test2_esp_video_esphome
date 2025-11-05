@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "hal/gpio_types.h"
 #include "esp_heap_caps.h"
 
 #include <string.h>
@@ -215,9 +216,31 @@ void MipiDSICamComponent::setup() {
     ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
   }
 
-  // Le pipeline ESP-Video est géré par le composant esp_video
-  // Nous configurons seulement les paramètres V4L2
-  ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
+  // Initialiser le framework ESP-Video pour créer les devices /dev/video*
+  ESP_LOGI(TAG, "Initialisation du framework ESP-Video...");
+
+  // Configuration MIPI CSI avec I2C pour le capteur
+  esp_video_init_csi_config_t csi_config = {};
+  csi_config.sccb_config.init_sccb = true;
+  csi_config.sccb_config.i2c_config.port = 0;  // I2C0 pour ESP32-P4 BSP
+  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_8;  // GPIO8 = SCL sur ESP32-P4 BSP
+  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_7;  // GPIO7 = SDA sur ESP32-P4 BSP
+  csi_config.sccb_config.freq = 400000;  // 400 kHz I2C
+  csi_config.reset_pin = GPIO_NUM_NC;  // Pas de reset pin
+  csi_config.pwdn_pin = GPIO_NUM_NC;   // Pas de power down pin
+
+  esp_video_init_config_t video_config = {};
+  video_config.csi = &csi_config;
+
+  esp_err_t err = esp_video_init(&video_config);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ esp_video_init() a échoué: %s (0x%x)", esp_err_to_name(err), err);
+    this->pipeline_started_ = false;
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "✓ Framework ESP-Video initialisé avec succès");
 
   // Vérifier que les devices nécessaires sont disponibles
   bool isp_available = false;
