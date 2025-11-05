@@ -1,86 +1,49 @@
-# ESP-Video Component CMakeLists.txt
-# Ce fichier indique à ESP-IDF comment compiler le composant esp_video
+set(srcs "src/esp_video_buffer.c"
+         "src/esp_video_init.c"
+         "src/esp_video_ioctl.c"
+         "src/esp_video_mman.c"
+         "src/esp_video_vfs.c"
+         "src/esp_video.c"
+         "src/esp_video_sensor.c")
 
-set(component_srcs
-    "esp_video_component.cpp"
-    "src/esp_video.c"
-    "src/esp_video_init.c"
-    "src/esp_video_buffer.c"
-    "src/esp_video_cam.c"
-    "src/esp_video_mman.c"
-    "src/esp_video_vfs.c"
-    "src/esp_video_ioctl.c"
-    "src/device/esp_video_csi_device.c"
-)
+set(include_dirs "include")
+set(priv_include_dirs "private_include")
+set(priv_requires "vfs")
+set(requires "esp_driver_cam" "esp_driver_isp" "esp_cam_sensor" "esp_h264" "esp_driver_jpeg")
 
-# Ajouter conditionnellement les devices selon les flags de configuration
-if(CONFIG_ESP_VIDEO_ENABLE_ISP OR DEFINED ENV{ESP_VIDEO_ISP_ENABLED})
-    list(APPEND component_srcs
-        "src/device/esp_video_isp_device.c"
-        "src/esp_video_isp_pipeline.c"
-    )
-    message(STATUS "ESP-Video: ISP device sources included")
+if(CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE)
+    list(APPEND srcs "src/device/esp_video_csi_device.c")
 endif()
 
-if(CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE OR DEFINED ENV{ESP_VIDEO_JPEG_ENABLED})
-    list(APPEND component_srcs
-        "src/device/esp_video_jpeg_device.c"
-    )
-    message(STATUS "ESP-Video: JPEG device sources included")
+if(CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE)
+    list(APPEND srcs "src/device/esp_video_dvp_device.c")
 endif()
 
-if(CONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE OR DEFINED ENV{ESP_VIDEO_H264_ENABLED})
-    list(APPEND component_srcs
-        "src/device/esp_video_h264_device.c"
-    )
-    message(STATUS "ESP-Video: H.264 device sources included")
+if(CONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE)
+    list(APPEND srcs "src/device/esp_video_h264_device.c")
 endif()
 
-# Optionnel : DVP, SPI, USB UVC (pas utilisés pour MIPI-CSI)
-# list(APPEND component_srcs
-#     "src/device/esp_video_dvp_device.c"
-#     "src/device/esp_video_spi_device.c"
-#     "src/device/esp_video_usb_uvc_device.c"
-# )
+if(CONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE)
+    list(APPEND srcs "src/device/esp_video_jpeg_device.c")
+endif()
 
-# Répertoires d'include
-set(component_include_dirs
-    "."
-    "include"
-    "include/linux"
-    "include/sys"
-    "src"
-    "src/device"
-    "private_include"
-)
+if(CONFIG_ESP_VIDEO_ENABLE_ISP)
+    list(APPEND srcs "src/device/esp_video_isp_device.c")
 
-# Composants ESP-IDF requis
-set(component_requires
-    driver
-    esp_driver_isp
-    esp_driver_cam
-    esp_mm
-    spi_flash
-    vfs
-)
+    if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
+        list(APPEND srcs "src/esp_video_isp_pipeline.c")
+    endif()
+endif()
 
-set(component_priv_requires
-    # Composants ESP-IDF supplémentaires si nécessaires
-)
+idf_component_register(SRCS ${srcs}
+                       INCLUDE_DIRS ${include_dirs}
+                       PRIV_INCLUDE_DIRS ${priv_include_dirs}
+                       PRIV_REQUIRES ${priv_requires}
+                       REQUIRES ${requires})
 
-# Enregistrer le composant
-idf_component_register(
-    SRCS ${component_srcs}
-    INCLUDE_DIRS ${component_include_dirs}
-    REQUIRES ${component_requires}
-    PRIV_REQUIRES ${component_priv_requires}
-)
+include(package_manager)
+cu_pkg_define_version(${CMAKE_CURRENT_LIST_DIR})
 
-# Flags de compilation spécifiques au composant
-target_compile_options(${COMPONENT_LIB} PRIVATE
-    -Wno-unused-function
-    -Wno-unused-variable
-    -Wno-missing-field-initializers
-)
-
-message(STATUS "ESP-Video component registered with ${list(LENGTH component_srcs)} source files")
+if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
+    idf_component_optional_requires(PRIVATE "esp_ipa")
+endif()
