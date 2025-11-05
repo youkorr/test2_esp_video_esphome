@@ -16,11 +16,21 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
+  // Vérifier que la caméra est opérationnelle
+  if (!this->camera_->is_pipeline_ready()) {
+    ESP_LOGE(TAG, "❌ Camera non opérationnelle - pipeline non démarré");
+    ESP_LOGE(TAG, "   Le composant mipi_dsi_cam a échoué à s'initialiser");
+    ESP_LOGE(TAG, "   Vérifiez les logs de mipi_dsi_cam pour plus de détails");
+    this->mark_failed();
+    return;
+  }
+
   // Intervalle pour 30 FPS
   this->update_interval_ = 33;  // ms
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
-  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS)", 
+  ESP_LOGI(TAG, "   Camera: Opérationnelle");
+  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS)",
            this->update_interval_, 1000 / this->update_interval_);
 }
 
@@ -112,7 +122,6 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
-
 
 
 
