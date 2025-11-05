@@ -222,9 +222,9 @@ void MipiDSICamComponent::setup() {
   // Configuration MIPI CSI avec I2C pour le capteur
   esp_video_init_csi_config_t csi_config = {};
   csi_config.sccb_config.init_sccb = true;
-  csi_config.sccb_config.i2c_config.port = 0;  // I2C0 pour ESP32-P4 BSP
-  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_8;  // GPIO8 = SCL sur ESP32-P4 BSP
-  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_7;  // GPIO7 = SDA sur ESP32-P4 BSP
+  csi_config.sccb_config.i2c_config.port = 0;  // I2C0
+  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_32;  // SCL pin from your config
+  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_31;  // SDA pin from your config
   csi_config.sccb_config.freq = 400000;  // 400 kHz I2C
   csi_config.reset_pin = GPIO_NUM_NC;  // Pas de reset pin
   csi_config.pwdn_pin = GPIO_NUM_NC;   // Pas de power down pin
