@@ -1261,8 +1261,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     esp_log_level_set(TAG, ESP_LOG_DEBUG);
 #endif
 
-    if (!config || !config->isp_dev || !config->cam_dev ||
-            !config->ipa_config) {
+    if (!config || !config->isp_dev || !config->cam_dev) {
         ESP_LOGE(TAG, "failed to check ISP configuration");
         return ESP_ERR_INVALID_ARG;
     }
@@ -1270,16 +1269,22 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     isp = calloc(1, sizeof(esp_video_isp_t));
     ESP_RETURN_ON_FALSE(isp, ESP_ERR_NO_MEM, TAG, "failed to malloc isp");
 
-    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create(config->ipa_config, &isp->ipa_pipeline),
-                      fail_0, TAG, "failed to create IPA pipeline");
+    if (config->ipa_config) {
+        ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create(config->ipa_config->ipa_nums,
+                                                   config->ipa_config->ipa_names,
+                                                   &isp->ipa_pipeline),
+                          fail_0, TAG, "failed to create IPA pipeline");
+    }
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
     ESP_GOTO_ON_ERROR(init_isp_dev(config, isp), fail_2, TAG, "failed to initialize ISP device");
 
     metadata.flags = 0;
-    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
-                      fail_3, TAG, "failed to initialize IPA pipeline");
-    config_isp_and_camera(isp, &metadata);
+    if (config->ipa_config && isp->ipa_pipeline) {
+        ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
+                          fail_3, TAG, "failed to initialize IPA pipeline");
+        config_isp_and_camera(isp, &metadata);
+    }
 
     /**
      * If CONFIG_ISP_PIPELINE_CONTROLLER_TASK_STACK_USE_PSRAM is enabled, the ISP controller task stack

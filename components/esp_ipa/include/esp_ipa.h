@@ -20,6 +20,14 @@ extern "C" {
 typedef esp_ipa_pipeline_t *esp_ipa_pipeline_handle_t;
 
 /**
+ * @brief Image process algorithm configuration
+ */
+typedef struct {
+    uint8_t ipa_nums;        /*!< Number of IPAs in the pipeline */
+    const char **ipa_names;  /*!< Array of IPA names */
+} esp_ipa_config_t;
+
+/**
  * @brief Enable or disable image process algorithm pipeline debug log.
  *
  * @param enable    true: enable debug log, false: disable debug log

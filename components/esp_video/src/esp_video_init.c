@@ -456,21 +456,18 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
             if (cam_dev->cur_format && cam_dev->cur_format->isp_info) {
-                const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(cam_dev->name);
-                if (ipa_config) {
-                    esp_video_isp_config_t isp_config = {
-                        .cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
-                        .isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME,
-                        .ipa_config = ipa_config
-                    };
+                // TODO: Implement esp_ipa_pipeline_get_config or provide IPA configuration
+                // For now, initialize ISP pipeline without IPA config
+                esp_video_isp_config_t isp_config = {
+                    .cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
+                    .isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME,
+                    .ipa_config = NULL
+                };
 
-                    ret = esp_video_isp_pipeline_init(&isp_config);
-                    if (ret != ESP_OK) {
-                        ESP_LOGE(TAG, "failed to create ISP pipeline controller");
-                        return ret;
-                    }
-                } else {
-                    ESP_LOGW(TAG, "failed to get configuration to initialize ISP controller");
+                ret = esp_video_isp_pipeline_init(&isp_config);
+                if (ret != ESP_OK) {
+                    ESP_LOGE(TAG, "failed to create ISP pipeline controller");
+                    return ret;
                 }
             }
 #endif
