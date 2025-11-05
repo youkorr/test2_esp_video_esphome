@@ -21,7 +21,9 @@ async def to_code(config):
     includes = [
         "interface/include",
         "port/include",
+        "port/inc",
         "sw/include",
+        "hw/include",
     ]
 
     for inc in includes:
