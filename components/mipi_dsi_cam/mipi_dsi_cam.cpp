@@ -1,5 +1,5 @@
 #include "mipi_dsi_cam.h"
-#include "esphome/core/hal.h"  // Pour millis()
+#include "esphome/core/hal.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
@@ -13,9 +13,6 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-// ============================================================================
-// Inclusions des headers C d'Espressif - UNIQUEMENT dans extern "C"
-// ============================================================================
 extern "C" {
   #include "esp_cam_sensor.h"
   #include "esp_cam_sensor_types.h"
@@ -33,7 +30,6 @@ namespace mipi_dsi_cam {
 
 static const char *const TAG = "mipi_dsi_cam";
 
-// Constantes
 static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS = 30000;
 static constexpr size_t MAX_FRAME_SIZE = 512 * 1024;
 static constexpr size_t MIN_FREE_HEAP = 100 * 1024;
@@ -45,8 +41,6 @@ static inline bool wants_jpeg_(const std::string &fmt) {
 static inline bool wants_h264_(const std::string &fmt) {
   return (fmt == "H264");
 }
-
-// ============================ Helpers généraux ============================
 
 static inline int safe_ioctl_(int fd, unsigned long req, void *arg, const char *req_name) {
   int r;
@@ -177,9 +171,6 @@ static bool h264_apply_basic_params_(int /*fps*/) {
   return true;
 }
 
-// ============================================================================
-// Nettoyage du pipeline
-// ============================================================================
 void MipiDSICamComponent::cleanup_pipeline_() {
   ESP_LOGW(TAG, "Nettoyage du pipeline vidéo...");
   esp_video_deinit();
@@ -187,9 +178,6 @@ void MipiDSICamComponent::cleanup_pipeline_() {
   ESP_LOGI(TAG, "Pipeline vidéo nettoyé");
 }
 
-// ============================================================================
-// Vérification de santé du pipeline
-// ============================================================================
 bool MipiDSICamComponent::check_pipeline_health_() {
   if (!this->pipeline_started_) {
     return false;
@@ -206,9 +194,6 @@ bool MipiDSICamComponent::check_pipeline_health_() {
   return true;
 }
 
-// ============================================================================
-// Initialisation complète du pipeline vidéo
-// ============================================================================
 void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "==============================");
   ESP_LOGI(TAG, " Initialisation MIPI-DSI-CAM");
@@ -228,15 +213,11 @@ void MipiDSICamComponent::setup() {
 
   esp_err_t err = ESP_OK;
 
-  // --------------------------------------------------------------------------
-  // Étape 1 : Initialiser ESP-Video
-  // --------------------------------------------------------------------------
   esp_video_init_csi_config_t csi_cfg = {};
   csi_cfg.sccb_config.init_sccb = false;
   csi_cfg.reset_pin = (gpio_num_t)-1;
   csi_cfg.pwdn_pin  = (gpio_num_t)-1;
 
-  // Allouer init_cfg dynamiquement
   esp_video_init_config_t init_cfg = {};
   init_cfg.csi = &csi_cfg;
 
@@ -248,21 +229,12 @@ void MipiDSICamComponent::setup() {
   }
   ESP_LOGI(TAG, "✓ ESP-Video initialisé");
 
-  // --------------------------------------------------------------------------
-  // Étape 2 : Les devices vidéo sont créés automatiquement
-  // --------------------------------------------------------------------------
   ESP_LOGI(TAG, "✓ Devices vidéo créés par esp_video_init()");
 
-  // --------------------------------------------------------------------------
-  // Étape 3 : Appliquer format/résolution/FPS côté ISP (V4L2)
-  // --------------------------------------------------------------------------
   if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
     ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
   }
 
-  // --------------------------------------------------------------------------
-  // Étape 4 : Paramètres encodeur
-  // --------------------------------------------------------------------------
   if (wants_jpeg_(this->pixel_format_)) {
     if (!jpeg_apply_quality_(this->jpeg_quality_)) {
       ESP_LOGW(TAG, "⚠️ Qualité JPEG non appliquée");
@@ -282,9 +254,6 @@ void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "==============================");
 }
 
-// ============================================================================
-// Boucle principale avec monitoring
-// ============================================================================
 void MipiDSICamComponent::loop() {
   if (!this->pipeline_started_) {
     return;
@@ -312,9 +281,6 @@ void MipiDSICamComponent::loop() {
   }
 }
 
-// ============================================================================
-// Affichage de la configuration
-// ============================================================================
 void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI DSI Camera:");
   ESP_LOGCONFIG(TAG, "  Capteur: %s", this->sensor_name_.c_str());
@@ -325,9 +291,6 @@ void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Snapshots: %u", (unsigned)this->snapshot_count_);
 }
 
-// ============================================================================
-// Fonction de capture d'image (snapshot) -> carte SD
-// ============================================================================
 bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   if (!this->pipeline_started_) {
     ESP_LOGE(TAG, "Pipeline non démarré, impossible de capturer");
