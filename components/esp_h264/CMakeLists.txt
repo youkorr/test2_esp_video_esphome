@@ -23,3 +23,4 @@ idf_component_register(
 )
 
 message(STATUS "ESP H.264 component registered")
+
