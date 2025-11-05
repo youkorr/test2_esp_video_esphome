@@ -177,9 +177,9 @@ static bool h264_apply_basic_params_(int /*fps*/) {
 
 void MipiDSICamComponent::cleanup_pipeline_() {
   ESP_LOGW(TAG, "Nettoyage du pipeline vidéo...");
-  esp_video_deinit();
+  // Le pipeline est géré par le composant esp_video
   this->pipeline_started_ = false;
-  ESP_LOGI(TAG, "Pipeline vidéo nettoyé");
+  ESP_LOGI(TAG, "Pipeline vidéo marqué comme arrêté");
 }
 
 bool MipiDSICamComponent::check_pipeline_health_() {
@@ -215,25 +215,9 @@ void MipiDSICamComponent::setup() {
     ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
   }
 
-  esp_err_t err = ESP_OK;
-
-  esp_video_init_csi_config_t csi_cfg = {};
-  csi_cfg.sccb_config.init_sccb = false;
-  csi_cfg.reset_pin = (gpio_num_t)-1;
-  csi_cfg.pwdn_pin  = (gpio_num_t)-1;
-
-  esp_video_init_config_t init_cfg = {};
-  init_cfg.csi = &csi_cfg;
-
-  err = esp_video_init(&init_cfg);
-  if (err != ESP_OK) {
-    ESP_LOGE(TAG, "esp_video_init() a échoué (err=0x%X)", err);
-    this->mark_failed();
-    return;
-  }
-  ESP_LOGI(TAG, "✓ ESP-Video initialisé");
-
-  ESP_LOGI(TAG, "✓ Devices vidéo créés par esp_video_init()");
+  // Le pipeline ESP-Video est géré par le composant esp_video
+  // Nous configurons seulement les paramètres V4L2
+  ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
 
   if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
     ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
@@ -251,10 +235,8 @@ void MipiDSICamComponent::setup() {
   this->last_health_check_ = millis();
   
   ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "✅ Pipeline vidéo prêt!");
-  ESP_LOGI(TAG, "   Encodeur: %s", 
-           wants_jpeg_(this->pixel_format_) ? "JPEG" : 
-           wants_h264_(this->pixel_format_) ? "H.264" : "RAW");
+  ESP_LOGI(TAG, "✅ Configuration caméra prête!");
+  ESP_LOGI(TAG, "   Format: %s", this->pixel_format_.c_str());
   ESP_LOGI(TAG, "==============================");
 }
 
