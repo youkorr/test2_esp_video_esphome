@@ -6,8 +6,10 @@ Ajoute tous les fichiers sources C/C++ des composants ESP-IDF
 import os
 Import("env")
 
-# Obtenir le répertoire du composant
-component_dir = os.path.dirname(os.path.abspath(__file__))
+# Obtenir le répertoire du composant (ce script est dans components/esp_video/)
+# Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
+script_dir = Dir('.').srcnode().abspath
+component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
 print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
