@@ -1,19 +1,13 @@
 #pragma once
+
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include <string>
 #include <vector>
 
-#ifdef __cplusplus
-extern "C" {
-#include "esp_video_init.h"
-#include "esp_video_device.h"
-#include "esp_video_isp_ioctl.h"
-#include "esp_cam_sensor.h"
-#include "esp_cam_sensor_types.h"
-#include "esp_err.h"
-}
-#endif
+// Forward declarations des types C
+struct esp_cam_sensor_device_t;
+struct esp_video_init_config_t;
 
 // Définition du type ISP config basée sur le code source ESP-Video
 // Voir esp_video_pipeline_isp.c ligne 1053+
@@ -88,10 +82,10 @@ class MipiDSICamComponent : public Component {
   int framerate_{30};
   int jpeg_quality_{10};
 
-  // État du pipeline
-  esp_cam_sensor_device_t *sensor_dev_{nullptr};
+  // État du pipeline - utilisation de pointeurs opaques
+  void *sensor_dev_{nullptr};
   esp_video_init_config_t init_cfg_{};
-  esp_video_isp_config_t isp_cfg_{};  // Structure ISP basée sur esp_video_pipeline_isp.c
+  esp_video_isp_config_t isp_cfg_{};
   bool pipeline_started_{false};
 
   // Monitoring
@@ -123,7 +117,6 @@ class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamCo
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
-
 
 
 
