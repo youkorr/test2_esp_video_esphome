@@ -163,6 +163,16 @@ async def to_code(config):
     flags.extend([
         "-DCONFIG_CAMERA_SC202CS=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
+        "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=63",
+        "-DCONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT=0",
+        "-DCONFIG_CAMERA_SC202CS_MAX_SUPPORT=2",
+        "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=1",
+    ])
+
+    # Capteur de caméra OV5647
+    flags.extend([
+        "-DCONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=0",
+        "-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT=0",
     ])
 
     # ISP (Image Signal Processor)
