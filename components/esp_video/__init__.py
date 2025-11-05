@@ -90,11 +90,17 @@ async def to_code(config):
     parent_components_dir = os.path.dirname(component_dir)
     logging.info(f"[ESP-Video] Répertoire parent des composants: {parent_components_dir}")
 
-    # Liste des composants ESP-IDF requis
+    # Ajouter le répertoire components/ comme répertoire de composants ESP-IDF
+    # Ceci permet à ESP-IDF de trouver et compiler automatiquement tous les CMakeLists.txt
+    cg.add_platformio_option("board_build.cmake_extra_args", [
+        f"-DEXTRA_COMPONENT_DIRS={parent_components_dir}"
+    ])
+    logging.info(f"[ESP-Video] ✓ Répertoire de composants ESP-IDF ajouté: {parent_components_dir}")
+
+    # Liste des composants ESP-IDF requis (sans esp_jpeg qui n'existe pas)
     esp_idf_components = [
         "esp_cam_sensor",
-        "esp_h264", 
-        "esp_jpeg",
+        "esp_h264",
         "esp_ipa",
         "esp_sccb_intf",
     ]
@@ -153,11 +159,18 @@ async def to_code(config):
     # FLAGS ESP-Video selon la configuration
     # -----------------------------------------------------------------------
     flags = []
-    
+
     # Flags de base (toujours activés)
     flags.extend([
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
         "-DCONFIG_IDF_TARGET_ESP32P4=1",
+        "-DCONFIG_SOC_I2C_SUPPORTED=1",
+    ])
+
+    # Capteur de caméra SC202CS (activé par défaut pour mipi_dsi_cam)
+    flags.extend([
+        "-DCONFIG_CAMERA_SC202CS=1",
+        "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
     ])
 
     # ISP (Image Signal Processor)
@@ -173,14 +186,17 @@ async def to_code(config):
     if config[CONF_USE_HEAP_ALLOCATOR]:
         flags.append("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
 
-    # Encodeur H.264
+    # Encodeur H.264 (CORRIGÉ: utilise H264_VIDEO_DEVICE, pas HW_H264_VIDEO_DEVICE)
     if config[CONF_ENABLE_H264]:
-        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1")
+        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1")
         cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
 
-    # Encodeur JPEG
+    # Encodeur JPEG (CORRIGÉ: utilise JPEG_VIDEO_DEVICE, pas HW_JPEG)
     if config[CONF_ENABLE_JPEG]:
-        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1")
+        flags.extend([
+            "-DCONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE=1",
+            "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",  # Pour esp_driver_jpeg
+        ])
         cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     # Appliquer tous les flags
