@@ -1,49 +1,53 @@
-set(srcs "src/esp_video_buffer.c"
-         "src/esp_video_init.c"
-         "src/esp_video_ioctl.c"
-         "src/esp_video_mman.c"
-         "src/esp_video_vfs.c"
-         "src/esp_video.c"
-         "src/esp_video_sensor.c")
+set(srcs "src/esp_cam_sensor.c"
 
-set(include_dirs "include")
-set(priv_include_dirs "private_include")
-set(priv_requires "vfs")
-set(requires "esp_driver_cam" "esp_driver_isp" "esp_cam_sensor" "esp_h264" "esp_driver_jpeg")
+         "src/esp_cam_motor.c"
 
-if(CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE)
-    list(APPEND srcs "src/device/esp_video_csi_device.c")
-endif()
+         "src/esp_cam_sensor_xclk.c"
 
-if(CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE)
-    list(APPEND srcs "src/device/esp_video_dvp_device.c")
-endif()
+         "src/driver_spi/spi_slave.c"
 
-if(CONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE)
-    list(APPEND srcs "src/device/esp_video_h264_device.c")
-endif()
+         "src/driver_cam/esp_cam_ctlr_spi_cam.c"
 
-if(CONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE)
-    list(APPEND srcs "src/device/esp_video_jpeg_device.c")
-endif()
+         "sensor/ov5647/ov5647.c"
 
-if(CONFIG_ESP_VIDEO_ENABLE_ISP)
-    list(APPEND srcs "src/device/esp_video_isp_device.c")
+         "sensor/sc202cs/sc202cs.c")
 
-    if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
-        list(APPEND srcs "src/esp_video_isp_pipeline.c")
-    endif()
-endif()
+ 
+
+set(include_dirs "include"
+
+                 "sensor/ov5647/include"
+
+                 "sensor/sc202cs/include")
+
+ 
+
+set(priv_include_dirs "src"
+
+                      "src/driver_spi"
+
+                      "src/driver_cam"
+
+                      "sensor/ov5647/private_include"
+
+                      "sensor/sc202cs/include/private_include")
+
+ 
+
+set(requires "esp_driver_i2c" "esp_driver_gpio" "esp_driver_ledc")
+
+ 
 
 idf_component_register(SRCS ${srcs}
+
                        INCLUDE_DIRS ${include_dirs}
+
                        PRIV_INCLUDE_DIRS ${priv_include_dirs}
-                       PRIV_REQUIRES ${priv_requires}
+
                        REQUIRES ${requires})
 
-include(package_manager)
-cu_pkg_define_version(${CMAKE_CURRENT_LIST_DIR})
+ 
 
-if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
-    idf_component_optional_requires(PRIVATE "esp_ipa")
-endif()
+include(package_manager)
+
+cu_pkg_define_version(${CMAKE_CURRENT_LIST_DIR})
