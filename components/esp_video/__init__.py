@@ -190,10 +190,11 @@ async def to_code(config):
     if config[CONF_USE_HEAP_ALLOCATOR]:
         flags.append("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
 
-    # Encodeur H.264 (CORRIGÉ: utilise H264_VIDEO_DEVICE, pas HW_H264_VIDEO_DEVICE)
+    # Encodeur H.264 matériel
     if config[CONF_ENABLE_H264]:
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
+            "-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",  # Required for device creation
             "-DESP_VIDEO_H264_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
