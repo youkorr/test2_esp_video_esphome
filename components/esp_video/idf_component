@@ -1,0 +1,5 @@
+version: "1.0.0"
+description: ESP-Video component for camera and video encoding
+url: https://github.com/espressif/esp-video
+dependencies:
+  idf: ">=5.0"
