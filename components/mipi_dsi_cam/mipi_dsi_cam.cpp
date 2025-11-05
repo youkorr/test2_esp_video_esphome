@@ -13,17 +13,16 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-extern "C" {
-  #include "esp_cam_sensor.h"
-  #include "esp_cam_sensor_types.h"
-  #include "esp_video_init.h"
-  #include "esp_video_device.h"
-  #include "esp_video_ioctl.h"
-  #include "esp_video_isp_ioctl.h"
-  #include "esp_ipa.h"
-  #include "esp_ipa_types.h"
-  #include "linux/videodev2.h"
-}
+// Headers C - ils gèrent eux-mêmes le extern "C" 
+#include "esp_cam_sensor.h"
+#include "esp_cam_sensor_types.h"
+#include "esp_video_init.h"
+#include "esp_video_device.h"
+#include "esp_video_ioctl.h"
+#include "esp_video_isp_ioctl.h"
+#include "esp_ipa.h"
+#include "esp_ipa_types.h"
+#include "linux/videodev2.h"
 
 namespace esphome {
 namespace mipi_dsi_cam {
