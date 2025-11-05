@@ -1,5 +1,5 @@
 /*
- * Stub definitions for sensor detection arrays
+ * Stub definitions for sensor and IPA detection arrays
  *
  * In ESP-IDF CMake builds, these symbols are created by linker fragments.
  * For PlatformIO builds, we define them to represent an empty array.
@@ -9,6 +9,7 @@
  */
 
 #include "esp_cam_sensor_detect.h"
+#include "esp_ipa_detect.h"
 
 /*
  * Define end marker FIRST (using section .1) and start marker SECOND (using section .2)
@@ -58,3 +59,23 @@ esp_cam_motor_detect_fn_t __esp_cam_motor_detect_fn_array_start = {
     .sccb_addr = 0
 };
 #endif
+
+/* ========================================================================
+ * IPA (Image Processing Algorithm) detection arrays
+ * ======================================================================== */
+
+/* IPA end marker - comes first in memory */
+__attribute__((section(".rodata.esp_ipa_detect.1_end")))
+__attribute__((used))
+esp_ipa_detect_t __esp_ipa_detect_array_end = {
+    .name = NULL,
+    .detect = NULL
+};
+
+/* IPA start marker - comes after in memory */
+__attribute__((section(".rodata.esp_ipa_detect.2_start")))
+__attribute__((used))
+esp_ipa_detect_t __esp_ipa_detect_array_start = {
+    .name = NULL,
+    .detect = NULL
+};
