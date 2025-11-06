@@ -53,11 +53,14 @@ inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
   ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[2]: %p", obj_ptr[2]);
   ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[3]: %p", obj_ptr[3]);
   ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[4]: %p", obj_ptr[4]);
+  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[5]: %p", obj_ptr[5]);
+  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[6]: %p", obj_ptr[6]);
 
-  // Retournons obj_ptr[1] comme tentative (premier membre après vtable)
-  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[1]);
+  // TENTATIVE 2: obj_ptr[2] au lieu de obj_ptr[1]
+  // obj_ptr[1] a causé un crash, essayons obj_ptr[2]
+  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[2]);
 
-  ESP_LOGI(TAG_I2C_HELPER, "  Handle retourné: %p", handle);
+  ESP_LOGI(TAG_I2C_HELPER, "  Handle retourné (obj_ptr[2]): %p", handle);
 
   return handle;
 }
