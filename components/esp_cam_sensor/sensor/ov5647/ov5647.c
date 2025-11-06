@@ -28,6 +28,15 @@
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
 #endif
+
+// Configuration par défaut si non définie
+#ifndef CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE
+#define CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE 0
+#endif
+
+#ifndef CONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT
+#define CONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT 0
+#endif
 #define delay_ms(ms)  vTaskDelay((ms > portTICK_PERIOD_MS ? ms/ portTICK_PERIOD_MS : 1))
 #define OV5647_SUPPORT_NUM CONFIG_CAMERA_OV5647_MAX_SUPPORT
 

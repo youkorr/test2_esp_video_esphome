@@ -58,6 +58,24 @@ struct sc202cs_cam {
 #define delay_ms(ms)        vTaskDelay((ms > portTICK_PERIOD_MS ? ms / portTICK_PERIOD_MS : 1))
 #define SC202CS_SUPPORT_NUM CONFIG_CAMERA_SC202CS_MAX_SUPPORT
 
+// Configuration par défaut si non définie
+#ifndef CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT
+#define CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT 0x200
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT
+#define CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT 0
+#endif
+
+// Une des deux priorités doit être définie (analog ou digital gain priority)
+#ifndef CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY
+#define CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY 1
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY
+#define CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY 0
+#endif
+
 static const uint32_t s_limited_abs_gain = CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT;
 static size_t s_limited_abs_gain_index;
 static const char *TAG = "sc202cs";
