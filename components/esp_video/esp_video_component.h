@@ -21,8 +21,9 @@ class ESPVideoComponent : public Component {
   void dump_config() override;
 
   float get_setup_priority() const override {
-    // Priorité HARDWARE pour initialiser esp_video_init() tôt
-    return setup_priority::HARDWARE;
+    // Priorité encore plus élevée que BUS (1000) pour s'initialiser avant I2C
+    // esp_video doit créer son bus I2C AVANT que le composant i2c ESPHome ne s'initialise
+    return 1100.0f;
   }
 
   // Setters pour configuration I2C

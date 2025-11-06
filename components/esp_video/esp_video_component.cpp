@@ -71,12 +71,12 @@ void ESPVideoComponent::setup() {
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
   // esp_video crée son propre bus I2C pour initialiser le capteur MIPI-CSI
-  // IMPORTANT: esp_video s'initialise AVANT i2c component (priorité HARDWARE, pas de DEPENDENCY)
+  // IMPORTANT: esp_video s'initialise AVANT i2c component (priorité 1100 > BUS 1000)
   ESP_LOGI(TAG, "Configuration esp_video:");
   ESP_LOGI(TAG, "  init_sccb: true (esp_video crée son bus I2C)");
   ESP_LOGI(TAG, "  I2C: Port 0, SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
            this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
-  ESP_LOGI(TAG, "  Ordre: esp_video setup() s'exécute AVANT i2c component");
+  ESP_LOGI(TAG, "  Setup priority: 1100 (avant I2C BUS:1000)");
 
   esp_video_init_csi_config_t csi_config = {};
 
