@@ -35,7 +35,8 @@ esp_video_sources = [
     # ISP device and pipeline disabled - causes NULL pointer crash without full esp_ipa library
     # "src/device/esp_video_isp_device.c",
     # "src/esp_video_isp_pipeline.c",
-    "src/esp_video_sensor_stubs.c",  # Stub definitions for sensor detection arrays
+    "src/esp_video_sensor_stubs.c",
+    "src/esp_video_isp_stubs.c",# Stub definitions for sensor detection arrays
 ]
 
 for src in esp_video_sources:
