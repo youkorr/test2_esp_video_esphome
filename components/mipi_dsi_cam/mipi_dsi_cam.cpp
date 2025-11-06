@@ -1,462 +1,633 @@
 #include "mipi_dsi_cam.h"
-#include "esphome/core/hal.h"
-#include "esp_err.h"
-#include "esp_log.h"
-#include "driver/gpio.h"
-#include "esp_heap_caps.h"
+#include "esphome/core/log.h"
+#include "esphome/core/application.h"
 
-#include <string.h>
-#include <vector>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <sys/ioctl.h>
-#include <errno.h>
+#include "mipi_dsi_cam_drivers_generated.h"
 
-// Headers C - certains ont des extern "C" non fermés
-#include "esp_cam_sensor.h"
-#include "esp_cam_sensor_types.h"
-#include "esp_video_init.h"
-#include "esp_video_device.h"
-#include "esp_video_ioctl.h"
-#include "esp_video_isp_ioctl.h"
-#include "esp_ipa.h"
-#include "esp_ipa_types.h"
-#include "linux/videodev2.h"
+#ifdef USE_ESP32_VARIANT_ESP32P4
 
-// Fermer les extern "C" qui n'ont pas été fermés par les headers
-#ifdef __cplusplus
-}
-#endif
+#include "driver/ledc.h"
 
 namespace esphome {
 namespace mipi_dsi_cam {
 
 static const char *const TAG = "mipi_dsi_cam";
 
-static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS = 30000;
-static constexpr size_t MAX_FRAME_SIZE = 512 * 1024;
-static constexpr size_t MIN_FREE_HEAP = 100 * 1024;
-
-static inline bool wants_jpeg_(const std::string &fmt) {
-  return (fmt == "JPEG" || fmt == "MJPEG");
-}
-
-static inline bool wants_h264_(const std::string &fmt) {
-  return (fmt == "H264");
-}
-
-static inline int safe_ioctl_(int fd, unsigned long req, void *arg, const char *req_name) {
-  int r;
-  do {
-    r = ioctl(fd, req, arg);
-  } while (r == -1 && errno == EINTR);
-  if (r < 0) {
-    ESP_LOGE(TAG, "ioctl(%s) a échoué: errno=%d (%s)", req_name, errno, strerror(errno));
+void MipiDsiCam::setup() {
+  ESP_LOGI(TAG, "Init MIPI Camera");
+  ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
+  
+  if (this->reset_pin_ != nullptr) {
+    this->reset_pin_->setup();
+    this->reset_pin_->digital_write(false);
+    delay(10);
+    this->reset_pin_->digital_write(true);
+    delay(20);
   }
-  return r;
+  
+  if (!this->create_sensor_driver_()) {
+    ESP_LOGE(TAG, "Driver creation failed");
+    this->mark_failed();
+    return;
+  }
+  
+  if (!this->init_sensor_()) {
+    ESP_LOGE(TAG, "Sensor init failed");
+    this->mark_failed();
+    return;
+  }
+  
+  if (this->has_external_clock()) {
+    if (!this->init_external_clock_()) {
+      ESP_LOGE(TAG, "External clock init failed");
+      this->mark_failed();
+      return;
+    }
+  } else {
+    ESP_LOGI(TAG, "No external clock configured - sensor must use internal clock");
+  }
+  
+  if (!this->init_ldo_()) {
+    ESP_LOGE(TAG, "LDO init failed");
+    this->mark_failed();
+    return;
+  }
+  
+  if (!this->init_csi_()) {
+    ESP_LOGE(TAG, "CSI init failed");
+    this->mark_failed();
+    return;
+  }
+  
+  if (!this->init_isp_()) {
+    ESP_LOGE(TAG, "ISP init failed");
+    this->mark_failed();
+    return;
+  }
+  
+  if (!this->allocate_buffer_()) {
+    ESP_LOGE(TAG, "Buffer alloc failed");
+    this->mark_failed();
+    return;
+  }
+  
+  this->initialized_ = true;
+  ESP_LOGI(TAG, "Camera ready (%ux%u) with Auto Exposure", this->width_, this->height_);
 }
 
-static bool open_node_(const char *node, int *fd_out) {
-  int fd = open(node, O_RDWR | O_NONBLOCK);
-  if (fd < 0) {
-    ESP_LOGE(TAG, "open(%s) a échoué: errno=%d (%s)", node, errno, strerror(errno));
+bool MipiDsiCam::create_sensor_driver_() {
+  ESP_LOGI(TAG, "Creating driver for: %s", this->sensor_type_.c_str());
+  
+  this->sensor_driver_ = create_sensor_driver(this->sensor_type_, this);
+  
+  if (this->sensor_driver_ == nullptr) {
+    ESP_LOGE(TAG, "Unknown or unavailable sensor: %s", this->sensor_type_.c_str());
     return false;
   }
-  *fd_out = fd;
-  ESP_LOGI(TAG, "Ouvert: %s (fd=%d)", node, fd);
+  
+  ESP_LOGI(TAG, "Driver created for: %s", this->sensor_driver_->get_name());
   return true;
 }
 
-static void close_fd_(int &fd) {
-  if (fd >= 0) {
-    close(fd);
-    fd = -1;
+bool MipiDsiCam::init_sensor_() {
+  if (!this->sensor_driver_) {
+    ESP_LOGE(TAG, "No sensor driver");
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Init sensor: %s", this->sensor_driver_->get_name());
+  
+  this->width_ = this->sensor_driver_->get_width();
+  this->height_ = this->sensor_driver_->get_height();
+  this->lane_count_ = this->sensor_driver_->get_lane_count();
+  this->bayer_pattern_ = this->sensor_driver_->get_bayer_pattern();
+  this->lane_bitrate_mbps_ = this->sensor_driver_->get_lane_bitrate_mbps();
+  
+  ESP_LOGI(TAG, "  Resolution: %ux%u", this->width_, this->height_);
+  ESP_LOGI(TAG, "  Lanes: %u", this->lane_count_);
+  ESP_LOGI(TAG, "  Bayer: %u", this->bayer_pattern_);
+  ESP_LOGI(TAG, "  Bitrate: %u Mbps", this->lane_bitrate_mbps_);
+  
+  uint16_t pid = 0;
+  esp_err_t ret = this->sensor_driver_->read_id(&pid);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to read sensor ID");
+    return false;
+  }
+  
+  if (pid != this->sensor_driver_->get_pid()) {
+    ESP_LOGE(TAG, "Wrong PID: 0x%04X (expected 0x%04X)", 
+             pid, this->sensor_driver_->get_pid());
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Sensor ID: 0x%04X", pid);
+  
+  ret = this->sensor_driver_->init();
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Sensor init failed: %d", ret);
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "Sensor initialized");
+  
+  delay(200);
+  ESP_LOGI(TAG, "Sensor stabilized");
+  
+  return true;
+}
+
+bool MipiDsiCam::init_external_clock_() {
+  ESP_LOGI(TAG, "Init external clock on GPIO%d @ %u Hz", 
+           this->external_clock_pin_, this->external_clock_frequency_);
+  
+  ledc_timer_config_t ledc_timer = {};
+  ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
+  ledc_timer.duty_resolution = LEDC_TIMER_1_BIT;
+  ledc_timer.timer_num = LEDC_TIMER_0;
+  ledc_timer.freq_hz = this->external_clock_frequency_;
+  ledc_timer.clk_cfg = LEDC_AUTO_CLK;
+  
+  esp_err_t ret = ledc_timer_config(&ledc_timer);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "LEDC timer config failed: %d", ret);
+    return false;
+  }
+  
+  ledc_channel_config_t ledc_channel = {};
+  ledc_channel.gpio_num = this->external_clock_pin_;
+  ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
+  ledc_channel.channel = LEDC_CHANNEL_0;
+  ledc_channel.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel.timer_sel = LEDC_TIMER_0;
+  ledc_channel.duty = 1;
+  ledc_channel.hpoint = 0;
+  
+  ret = ledc_channel_config(&ledc_channel);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "LEDC channel config failed: %d", ret);
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "External clock initialized");
+  return true;
+}
+
+bool MipiDsiCam::init_ldo_() {
+  ESP_LOGI(TAG, "Init LDO MIPI");
+  
+  esp_ldo_channel_config_t ldo_config = {
+    .chan_id = 3,
+    .voltage_mv = 2500,
+  };
+  
+  esp_err_t ret = esp_ldo_acquire_channel(&ldo_config, &this->ldo_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "LDO failed: %d", ret);
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "LDO OK (2.5V)");
+  return true;
+}
+
+bool MipiDsiCam::init_csi_() {
+  ESP_LOGI(TAG, "Init MIPI-CSI");
+  
+  esp_cam_ctlr_csi_config_t csi_config = {};
+  csi_config.ctlr_id = 0;
+  csi_config.clk_src = MIPI_CSI_PHY_CLK_SRC_DEFAULT;
+  csi_config.h_res = this->width_;
+  csi_config.v_res = this->height_;
+  csi_config.lane_bit_rate_mbps = this->lane_bitrate_mbps_;
+  csi_config.input_data_color_type = CAM_CTLR_COLOR_RAW8;
+  csi_config.output_data_color_type = CAM_CTLR_COLOR_RGB565;
+  csi_config.data_lane_num = this->lane_count_;
+  csi_config.byte_swap_en = false;
+  csi_config.queue_items = 10;
+  
+  esp_err_t ret = esp_cam_new_csi_ctlr(&csi_config, &this->csi_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CSI failed: %d", ret);
+    return false;
+  }
+  
+  esp_cam_ctlr_evt_cbs_t callbacks = {
+    .on_get_new_trans = MipiDsiCam::on_csi_new_frame_,
+    .on_trans_finished = MipiDsiCam::on_csi_frame_done_,
+  };
+  
+  ret = esp_cam_ctlr_register_event_callbacks(this->csi_handle_, &callbacks, this);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Callbacks failed: %d", ret);
+    return false;
+  }
+  
+  ret = esp_cam_ctlr_enable(this->csi_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Enable CSI failed: %d", ret);
+    return false;
+  }
+  
+  ESP_LOGI(TAG, "CSI OK");
+  return true;
+}
+
+bool MipiDsiCam::init_isp_() {
+  ESP_LOGI(TAG, "Init ISP");
+  
+  uint32_t isp_clock_hz = 120000000;
+  
+  esp_isp_processor_cfg_t isp_config = {};
+  isp_config.clk_src = ISP_CLK_SRC_DEFAULT;
+  isp_config.input_data_source = ISP_INPUT_DATA_SOURCE_CSI;
+  isp_config.input_data_color_type = ISP_COLOR_RAW8;
+  isp_config.output_data_color_type = ISP_COLOR_RGB565;
+  isp_config.h_res = this->width_;
+  isp_config.v_res = this->height_;
+  isp_config.has_line_start_packet = false;
+  isp_config.has_line_end_packet = false;
+  isp_config.clk_hz = isp_clock_hz;
+  isp_config.bayer_order = (color_raw_element_order_t)this->bayer_pattern_;
+  
+  esp_err_t ret = esp_isp_new_processor(&isp_config, &this->isp_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "ISP creation failed: 0x%x", ret);
+    return false;
+  }
+  
+  ret = esp_isp_enable(this->isp_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "ISP enable failed: 0x%x", ret);
+    esp_isp_del_processor(this->isp_handle_);
+    this->isp_handle_ = nullptr;
+    return false;
+  }
+  
+  // Configure AWB si supporté par le capteur
+  this->configure_white_balance_();
+  
+  ESP_LOGI(TAG, "ISP OK");
+  return true;
+}
+
+void MipiDsiCam::configure_white_balance_() {
+  if (!this->isp_handle_) return;
+  
+  // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
+  if (this->sensor_type_ == "ov5647" || this->sensor_type_ == "sc202cs") {
+    ESP_LOGI(TAG, "%s détecté - AWB matériel désactivé (correction logicielle uniquement)", 
+             this->sensor_type_.c_str());
+    return;
+  }
+  
+  // Tentative de configuration AWB pour les autres capteurs
+  esp_isp_awb_config_t awb_config = {};
+  awb_config.sample_point = ISP_AWB_SAMPLE_POINT_AFTER_CCM;
+  
+  // Configuration de la window (noms corrects pour ESP32-P4)
+  awb_config.window.top_left.x = this->width_ / 4;
+  awb_config.window.top_left.y = this->height_ / 4;
+  awb_config.window.btm_right.x = (this->width_ * 3) / 4;
+  awb_config.window.btm_right.y = (this->height_ * 3) / 4;
+  
+  esp_err_t ret = esp_isp_new_awb_controller(this->isp_handle_, &awb_config, &this->awb_ctlr_);
+  
+  if (ret == ESP_OK && this->awb_ctlr_ != nullptr) {
+    esp_isp_awb_controller_enable(this->awb_ctlr_);
+    ESP_LOGI(TAG, "✅ AWB matériel activé (auto-correction couleurs)");
+  } else {
+    ESP_LOGW(TAG, "AWB matériel non disponible (0x%x), utilisation ISP par défaut", ret);
   }
 }
 
-static bool map_resolution_(const std::string &res, uint32_t &w, uint32_t &h) {
-  std::string res_upper = res;
-  std::transform(res_upper.begin(), res_upper.end(), res_upper.begin(), ::toupper);
+bool MipiDsiCam::allocate_buffer_() {
+  this->frame_buffer_size_ = this->width_ * this->height_ * 2;
   
-  if (res_upper == "QVGA")   { w = 320;  h = 240;  return true; }
-  if (res_upper == "VGA")    { w = 640;  h = 480;  return true; }
-  if (res_upper == "480P")   { w = 640;  h = 480;  return true; }
-  if (res_upper == "720P")   { w = 1280; h = 720;  return true; }
-  if (res_upper == "1080P")  { w = 1920; h = 1080; return true; }
+  this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(
+    64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
+  );
+  
+  this->frame_buffers_[1] = (uint8_t*)heap_caps_aligned_alloc(
+    64, this->frame_buffer_size_, MALLOC_CAP_SPIRAM
+  );
+  
+  if (!this->frame_buffers_[0] || !this->frame_buffers_[1]) {
+    ESP_LOGE(TAG, "Buffer alloc failed");
+    return false;
+  }
+  
+  this->current_frame_buffer_ = this->frame_buffers_[0];
+  
+  ESP_LOGI(TAG, "Buffers: 2x%u bytes", this->frame_buffer_size_);
+  return true;
+}
 
-  unsigned int pw = 0, ph = 0;
-  if (sscanf(res.c_str(), "%ux%u", &pw, &ph) == 2 && pw > 0 && ph > 0) {
-    w = pw; h = ph; return true;
+bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
+  esp_cam_ctlr_handle_t handle,
+  esp_cam_ctlr_trans_t *trans,
+  void *user_data
+) {
+  MipiDsiCam *cam = (MipiDsiCam*)user_data;
+  trans->buffer = cam->frame_buffers_[cam->buffer_index_];
+  trans->buflen = cam->frame_buffer_size_;
+  return false;
+}
+
+bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
+  esp_cam_ctlr_handle_t handle,
+  esp_cam_ctlr_trans_t *trans,
+  void *user_data
+) {
+  MipiDsiCam *cam = (MipiDsiCam*)user_data;
+  
+  if (trans->received_size > 0) {
+    cam->frame_ready_ = true;
+    cam->buffer_index_ = (cam->buffer_index_ + 1) % 2;
+    cam->total_frames_received_++;
   }
   
   return false;
 }
 
-static uint32_t map_pixfmt_fourcc_(const std::string &fmt) {
-  if (fmt == "RGB565") return V4L2_PIX_FMT_RGB565;
-  if (fmt == "YUYV")   return V4L2_PIX_FMT_YUYV;
-  if (fmt == "UYVY")   return V4L2_PIX_FMT_UYVY;
-  if (fmt == "NV12")   return V4L2_PIX_FMT_NV12;
-  if (fmt == "MJPEG" || fmt == "JPEG") return V4L2_PIX_FMT_MJPEG;
-  return V4L2_PIX_FMT_YUYV;
-}
-
-static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_s, int fps) {
-  int fd = -1;
-  if (!open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &fd)) return false;
-
-  uint32_t w = 0, h = 0;
-  if (!map_resolution_(res_s, w, h)) {
-    ESP_LOGW(TAG, "Résolution '%s' non reconnue, fallback 1280x720", res_s.c_str());
-    w = 1280; h = 720;
-  }
-  const uint32_t fourcc = map_pixfmt_fourcc_(fmt_s);
-
-  struct v4l2_format fmt;
-  memset(&fmt, 0, sizeof(fmt));
-  fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  fmt.fmt.pix.width = w;
-  fmt.fmt.pix.height = h;
-  fmt.fmt.pix.pixelformat = fourcc;
-  fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-  if (safe_ioctl_(fd, VIDIOC_S_FMT, &fmt, "VIDIOC_S_FMT") < 0) {
-    close_fd_(fd);
+bool MipiDsiCam::start_streaming() {
+  if (!this->initialized_ || this->streaming_) {
     return false;
   }
-  ESP_LOGI(TAG, "ISP S_FMT: %ux%u FOURCC=0x%08X", fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
-
-  if (fps > 0) {
-    struct v4l2_streamparm parm;
-    memset(&parm, 0, sizeof(parm));
-    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    parm.parm.capture.timeperframe.numerator = 1;
-    parm.parm.capture.timeperframe.denominator = fps;
-
-    if (safe_ioctl_(fd, VIDIOC_S_PARM, &parm, "VIDIOC_S_PARM") < 0) {
-      ESP_LOGW(TAG, "Impossible d'appliquer FPS=%d", fps);
-    } else {
-      ESP_LOGI(TAG, "ISP S_PARM: FPS=%d", fps);
+  
+  ESP_LOGI(TAG, "Start streaming");
+  
+  this->total_frames_received_ = 0;
+  this->last_frame_log_time_ = millis();
+  
+  if (this->sensor_driver_) {
+    esp_err_t ret = this->sensor_driver_->start_stream();
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "Sensor start failed: %d", ret);
+      return false;
     }
+    delay(100);
   }
-
-  close_fd_(fd);
-  return true;
-}
-
-static bool jpeg_apply_quality_(int quality) {
-  int fd = -1;
-  if (!open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &fd)) return false;
-
-#ifndef V4L2_CID_JPEG_COMPRESSION_QUALITY
-#define V4L2_CID_JPEG_COMPRESSION_QUALITY (V4L2_CID_JPEG_CLASS_BASE+1)
-#endif
-  struct v4l2_control ctrl;
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-  ctrl.value = quality;
-
-  if (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(JPEG_QUALITY)") < 0) {
-    ESP_LOGW(TAG, "Impossible de régler la qualité JPEG");
-  } else {
-    ESP_LOGI(TAG, "Encodeur JPEG: Qualité=%d", quality);
-  }
-
-  close_fd_(fd);
-  return true;
-}
-
-static bool h264_apply_basic_params_(int /*fps*/) {
-  int fd = -1;
-  if (!open_node_(ESP_VIDEO_H264_DEVICE_NAME, &fd)) return false;
-  ESP_LOGI(TAG, "Encodeur H.264 ouvert pour configuration");
-  close_fd_(fd);
-  return true;
-}
-
-void MipiDSICamComponent::cleanup_pipeline_() {
-  ESP_LOGW(TAG, "Nettoyage du pipeline vidéo...");
-  // Le pipeline est géré par le composant esp_video
-  this->pipeline_started_ = false;
-  ESP_LOGI(TAG, "Pipeline vidéo marqué comme arrêté");
-}
-
-bool MipiDSICamComponent::check_pipeline_health_() {
-  if (!this->pipeline_started_) {
+  
+  esp_err_t ret = esp_cam_ctlr_start(this->csi_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "CSI start failed: %d", ret);
     return false;
   }
-
-  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  if (free_heap < MIN_FREE_HEAP) {
-    ESP_LOGW(TAG, "⚠️ Mémoire faible: %u octets libres (min: %u)", 
-             (unsigned)free_heap, (unsigned)MIN_FREE_HEAP);
-    this->error_count_++;
-    return false;
-  }
-
+  
+  this->streaming_ = true;
+  ESP_LOGI(TAG, "Streaming active avec Auto Exposure");
   return true;
 }
 
-void MipiDSICamComponent::setup() {
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, " Initialisation MIPI-DSI-CAM");
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "Capteur      : %s", this->sensor_name_.c_str());
-  ESP_LOGI(TAG, "Résolution   : %s", this->resolution_.c_str());
-  ESP_LOGI(TAG, "Format Pixel : %s", this->pixel_format_.c_str());
-  ESP_LOGI(TAG, "Framerate    : %d FPS", this->framerate_);
-  ESP_LOGI(TAG, "Qualité JPEG : %d", this->jpeg_quality_);
-
-  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  ESP_LOGI(TAG, "Mémoire libre: %u octets", (unsigned)free_heap);
-
-  if (free_heap < MIN_FREE_HEAP * 2) {
-    ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
+bool MipiDsiCam::stop_streaming() {
+  if (!this->streaming_) {
+    return true;
   }
-
-  // Le pipeline ESP-Video est géré par le composant esp_video
-  // Nous configurons seulement les paramètres V4L2
-  ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
-
-  // Vérifier que les devices nécessaires sont disponibles
-  bool isp_available = false;
-  bool jpeg_available = false;
-  bool h264_available = false;
-
-  // Tester si l'ISP est disponible
-  int test_fd = -1;
-  if (open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &test_fd)) {
-    isp_available = true;
-    close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ ISP détecté: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ ISP non disponible: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+  
+  esp_cam_ctlr_stop(this->csi_handle_);
+  
+  if (this->sensor_driver_) {
+    this->sensor_driver_->stop_stream();
   }
+  
+  this->streaming_ = false;
+  ESP_LOGI(TAG, "Streaming stopped");
+  return true;
+}
 
-  // Tester si JPEG est disponible
-  test_fd = -1;
-  if (open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &test_fd)) {
-    jpeg_available = true;
-    close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ Encodeur JPEG détecté: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ Encodeur JPEG non disponible: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
+bool MipiDsiCam::capture_frame() {
+  if (!this->streaming_) {
+    return false;
   }
-
-  // Tester si H264 est disponible
-  test_fd = -1;
-  if (open_node_(ESP_VIDEO_H264_DEVICE_NAME, &test_fd)) {
-    h264_available = true;
-    close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ Encodeur H.264 détecté: %s", ESP_VIDEO_H264_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ Encodeur H.264 non disponible: %s", ESP_VIDEO_H264_DEVICE_NAME);
+  
+  bool was_ready = this->frame_ready_;
+  if (was_ready) {
+    this->frame_ready_ = false;
+    uint8_t last_buffer = (this->buffer_index_ + 1) % 2;
+    this->current_frame_buffer_ = this->frame_buffers_[last_buffer];
   }
+  
+  return was_ready;
+}
 
-  // Vérifier qu'au moins un device est disponible
-  if (!isp_available && !jpeg_available && !h264_available) {
-    ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "❌ ERREUR: Aucun device vidéo disponible!");
-    ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "Les devices suivants sont requis:");
-    ESP_LOGE(TAG, "  - ISP: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - JPEG: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - H.264: %s", ESP_VIDEO_H264_DEVICE_NAME);
-    ESP_LOGE(TAG, "");
-    ESP_LOGE(TAG, "Vérifiez votre configuration esp_video:");
-    ESP_LOGE(TAG, "  esp_video:");
-    ESP_LOGE(TAG, "    enable_isp: true    # Requis pour RGB565/YUYV");
-    ESP_LOGE(TAG, "    enable_jpeg: true   # Requis pour JPEG/MJPEG");
-    ESP_LOGE(TAG, "    enable_h264: true   # Requis pour H.264");
-    ESP_LOGE(TAG, "==============================");
-    this->pipeline_started_ = false;
-    this->mark_failed();
+void MipiDsiCam::update_auto_exposure_() {
+  if (!this->auto_exposure_enabled_ || !this->sensor_driver_) {
     return;
   }
-
-  // Configurer l'ISP si disponible et si le format le nécessite
-  if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
-    if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
-      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
-    } else {
-      ESP_LOGI(TAG, "✓ ISP configuré avec succès");
-    }
-  }
-
-  // Configurer l'encodeur JPEG si nécessaire
-  if (wants_jpeg_(this->pixel_format_)) {
-    if (!jpeg_available) {
-      ESP_LOGE(TAG, "❌ Format JPEG demandé mais encodeur JPEG non disponible");
-      ESP_LOGE(TAG, "   Activez enable_jpeg: true dans esp_video");
-      this->pipeline_started_ = false;
-      this->mark_failed();
-      return;
-    }
-    if (!jpeg_apply_quality_(this->jpeg_quality_)) {
-      ESP_LOGW(TAG, "⚠️ Qualité JPEG non appliquée");
-    } else {
-      ESP_LOGI(TAG, "✓ Encodeur JPEG configuré (qualité: %d)", this->jpeg_quality_);
-    }
-  }
-
-  // Configurer l'encodeur H264 si nécessaire
-  if (wants_h264_(this->pixel_format_)) {
-    if (!h264_available) {
-      ESP_LOGE(TAG, "❌ Format H.264 demandé mais encodeur H.264 non disponible");
-      ESP_LOGE(TAG, "   Activez enable_h264: true dans esp_video");
-      this->pipeline_started_ = false;
-      this->mark_failed();
-      return;
-    }
-    (void)h264_apply_basic_params_(this->framerate_);
-    ESP_LOGI(TAG, "✓ Encodeur H.264 configuré");
-  }
-
-  this->pipeline_started_ = true;
-  this->last_health_check_ = millis();
-
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "✅ Configuration caméra prête!");
-  ESP_LOGI(TAG, "   Format: %s", this->pixel_format_.c_str());
-  if (isp_available) ESP_LOGI(TAG, "   ISP: Disponible");
-  if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
-  if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
-  ESP_LOGI(TAG, "==============================");
-}
-
-void MipiDSICamComponent::loop() {
-  if (!this->pipeline_started_) {
-    return;
-  }
-
+  
   uint32_t now = millis();
+  if (now - this->last_ae_update_ < 100) {
+    return;
+  }
+  this->last_ae_update_ = now;
   
-  if (now - this->last_health_check_ >= HEALTH_CHECK_INTERVAL_MS) {
-    this->last_health_check_ = now;
+  uint32_t avg_brightness = this->calculate_brightness_();
+  
+  int32_t brightness_error = (int32_t)this->ae_target_brightness_ - (int32_t)avg_brightness;
+  
+  if (abs(brightness_error) > 10) {
     
-    if (!this->check_pipeline_health_()) {
-      ESP_LOGW(TAG, "Vérification de santé du pipeline a échoué (erreurs: %u)", 
-               (unsigned)this->error_count_);
-      
-      if (this->error_count_ > 5) {
-        ESP_LOGE(TAG, "Trop d'erreurs détectées, nettoyage du pipeline...");
-        this->cleanup_pipeline_();
-        this->mark_failed();
+    if (brightness_error > 0) {
+      // Image trop sombre
+      if (this->current_exposure_ < 0xF00) {
+        this->current_exposure_ += 0x40;
+      } else if (this->current_gain_index_ < 120) {
+        this->current_gain_index_ += 2;
       }
     } else {
-      if (this->error_count_ > 0) {
-        this->error_count_--;
+      // Image trop lumineuse
+      if (this->current_exposure_ > 0x200) {
+        this->current_exposure_ -= 0x40;
+      } else if (this->current_gain_index_ > 0) {
+        this->current_gain_index_ -= 2;
       }
     }
+    
+    this->sensor_driver_->set_exposure(this->current_exposure_);
+    this->sensor_driver_->set_gain(this->current_gain_index_);
+    
+    ESP_LOGV(TAG, "🔆 AE: brightness=%u target=%u → exp=0x%04X gain=%u",
+             avg_brightness, this->ae_target_brightness_,
+             this->current_exposure_, this->current_gain_index_);
   }
 }
 
-void MipiDSICamComponent::dump_config() {
-  ESP_LOGCONFIG(TAG, "MIPI DSI Camera:");
-  ESP_LOGCONFIG(TAG, "  Capteur: %s", this->sensor_name_.c_str());
-  ESP_LOGCONFIG(TAG, "  Résolution: %s", this->resolution_.c_str());
-  ESP_LOGCONFIG(TAG, "  Format: %s", this->pixel_format_.c_str());
-  ESP_LOGCONFIG(TAG, "  FPS: %d", this->framerate_);
-  ESP_LOGCONFIG(TAG, "  État: %s", this->pipeline_started_ ? "ACTIF" : "INACTIF");
-  ESP_LOGCONFIG(TAG, "  Snapshots: %u", (unsigned)this->snapshot_count_);
-}
-
-bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
-  if (!this->pipeline_started_) {
-    ESP_LOGE(TAG, "Pipeline non démarré, impossible de capturer");
-    return false;
-  }
-
-  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  if (free_heap < MIN_FREE_HEAP + MAX_FRAME_SIZE) {
-    ESP_LOGE(TAG, "Mémoire insuffisante pour capturer (%u octets libres)", (unsigned)free_heap);
-    this->error_count_++;
-    return false;
-  }
-
-  const char *dev = wants_jpeg_(this->pixel_format_) ? 
-                    ESP_VIDEO_JPEG_DEVICE_NAME : 
-                    ESP_VIDEO_ISP1_DEVICE_NAME;
-  
-  ESP_LOGI(TAG, "📸 Capture: %s → %s", dev, path.c_str());
-
-  int fd = open(dev, O_RDWR | O_NONBLOCK);
-  if (fd < 0) {
-    ESP_LOGE(TAG, "open(%s) a échoué: errno=%d (%s)", dev, errno, strerror(errno));
-    this->error_count_++;
-    return false;
-  }
-
-  struct v4l2_format fmt;
-  memset(&fmt, 0, sizeof(fmt));
-  fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  
-  size_t buffer_size = MAX_FRAME_SIZE;
-  if (ioctl(fd, VIDIOC_G_FMT, &fmt) >= 0 && fmt.fmt.pix.sizeimage > 0) {
-    buffer_size = fmt.fmt.pix.sizeimage;
-  }
-
-  if (buffer_size > MAX_FRAME_SIZE) {
-    buffer_size = MAX_FRAME_SIZE;
-  }
-
-  uint8_t *buffer = (uint8_t*)heap_caps_malloc(buffer_size, MALLOC_CAP_8BIT);
-  if (!buffer) {
-    ESP_LOGE(TAG, "Échec allocation mémoire (%u octets)", (unsigned)buffer_size);
-    close(fd);
-    this->error_count_++;
-    return false;
-  }
-
-  ssize_t bytes_read = read(fd, buffer, buffer_size);
-  close(fd);
-
-  if (bytes_read <= 0) {
-    ESP_LOGE(TAG, "read(%s) a échoué: errno=%d (%s)", dev, errno, strerror(errno));
-    heap_caps_free(buffer);
-    this->error_count_++;
-    return false;
+uint32_t MipiDsiCam::calculate_brightness_() {
+  if (!this->current_frame_buffer_) {
+    return 128;
   }
   
-  ESP_LOGI(TAG, "Lu %d octets depuis le device", (int)bytes_read);
-
-  std::string dir = path.substr(0, path.find_last_of('/'));
-  if (!dir.empty()) {
-    struct stat st;
-    if (stat(dir.c_str(), &st) != 0) {
-      mkdir(dir.c_str(), 0755);
+  uint32_t sum = 0;
+  uint32_t sample_count = 0;
+  
+  uint32_t center_offset = (this->height_ / 2) * this->width_ * 2 + (this->width_ / 2) * 2;
+  
+  for (int i = 0; i < 100; i++) {
+    uint32_t offset = center_offset + (i * 200);
+    if (offset + 1 < this->frame_buffer_size_) {
+      uint16_t pixel = (this->current_frame_buffer_[offset + 1] << 8) | 
+                       this->current_frame_buffer_[offset];
+      
+      uint8_t r = (pixel >> 11) & 0x1F;
+      uint8_t g = (pixel >> 5) & 0x3F;
+      uint8_t b = pixel & 0x1F;
+      
+      uint32_t brightness = (r * 8 * 299 + g * 4 * 587 + b * 8 * 114) / 1000;
+      
+      sum += brightness;
+      sample_count++;
     }
   }
-
-  FILE *f = fopen(path.c_str(), "wb");
-  if (!f) {
-    ESP_LOGE(TAG, "fopen(%s) pour écriture a échoué: %s", path.c_str(), strerror(errno));
-    heap_caps_free(buffer);
-    this->error_count_++;
-    return false;
-  }
-
-  size_t written = fwrite(buffer, 1, bytes_read, f);
-  fclose(f);
-  heap_caps_free(buffer);
-
-  if (written != (size_t)bytes_read) {
-    ESP_LOGW(TAG, "Écriture incomplète (%u / %u octets)", (unsigned)written, (unsigned)bytes_read);
-    this->error_count_++;
-    return false;
-  }
-
-  this->snapshot_count_++;
-  ESP_LOGI(TAG, "✅ Snapshot #%u enregistré: %s (%u octets)", 
-           (unsigned)this->snapshot_count_, path.c_str(), (unsigned)written);
   
-  return true;
+  return sample_count > 0 ? (sum / sample_count) : 128;
+}
+
+void MipiDsiCam::loop() {
+  if (this->streaming_) {
+    // Mise à jour Auto Exposure
+    this->update_auto_exposure_();
+    
+    static uint32_t ready_count = 0;
+    static uint32_t not_ready_count = 0;
+    
+    if (this->frame_ready_) {
+      ready_count++;
+    } else {
+      not_ready_count++;
+    }
+    
+    uint32_t now = millis();
+    if (now - this->last_frame_log_time_ >= 3000) {
+      float sensor_fps = this->total_frames_received_ / 3.0f;
+      float ready_rate = (float)ready_count / (float)(ready_count + not_ready_count) * 100.0f;
+      
+      ESP_LOGI(TAG, "📸 FPS: %.1f | frame_ready: %.1f%% | exp:0x%04X gain:%u", 
+               sensor_fps, ready_rate, this->current_exposure_, this->current_gain_index_);
+      
+      this->total_frames_received_ = 0;
+      this->last_frame_log_time_ = now;
+      ready_count = 0;
+      not_ready_count = 0;
+    }
+  }
+}
+
+void MipiDsiCam::dump_config() {
+  ESP_LOGCONFIG(TAG, "MIPI Camera:");
+  if (this->sensor_driver_) {
+    ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_driver_->get_name());
+    ESP_LOGCONFIG(TAG, "  PID: 0x%04X", this->sensor_driver_->get_pid());
+  } else {
+    ESP_LOGCONFIG(TAG, "  Sensor: %s (driver not loaded)", this->sensor_type_.c_str());
+  }
+  ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
+  ESP_LOGCONFIG(TAG, "  Format: RGB565");
+  ESP_LOGCONFIG(TAG, "  Lanes: %u", this->lane_count_);
+  ESP_LOGCONFIG(TAG, "  Bayer: %u", this->bayer_pattern_);
+  
+  if (this->has_external_clock()) {
+    ESP_LOGCONFIG(TAG, "  External Clock: GPIO%d @ %u Hz", 
+                  this->external_clock_pin_, this->external_clock_frequency_);
+  } else {
+    ESP_LOGCONFIG(TAG, "  External Clock: None (using internal clock)");
+  }
+  
+  ESP_LOGCONFIG(TAG, "  Auto Exposure: %s", this->auto_exposure_enabled_ ? "ON" : "OFF");
+  ESP_LOGCONFIG(TAG, "  AE Target: %u", this->ae_target_brightness_);
+  ESP_LOGCONFIG(TAG, "  Streaming: %s", this->streaming_ ? "YES" : "NO");
+}
+
+// Méthodes publiques pour contrôle
+void MipiDsiCam::set_auto_exposure(bool enabled) {
+  this->auto_exposure_enabled_ = enabled;
+  ESP_LOGI(TAG, "Auto Exposure: %s", enabled ? "ENABLED" : "DISABLED");
+}
+
+void MipiDsiCam::set_ae_target_brightness(uint8_t target) {
+  this->ae_target_brightness_ = target;
+  ESP_LOGI(TAG, "AE target brightness: %u", target);
+}
+
+void MipiDsiCam::set_manual_exposure(uint16_t exposure) {
+  this->current_exposure_ = exposure;
+  if (this->sensor_driver_) {
+    this->sensor_driver_->set_exposure(exposure);
+    ESP_LOGI(TAG, "Manual exposure: 0x%04X", exposure);
+  }
+}
+
+void MipiDsiCam::set_manual_gain(uint8_t gain_index) {
+  this->current_gain_index_ = gain_index;
+  if (this->sensor_driver_) {
+    this->sensor_driver_->set_gain(gain_index);
+    ESP_LOGI(TAG, "Manual gain: %u", gain_index);
+  }
+}
+
+void MipiDsiCam::set_white_balance_gains(float red, float green, float blue) {
+  this->wb_red_gain_ = red;
+  this->wb_green_gain_ = green;
+  this->wb_blue_gain_ = blue;
+  
+  // Pour les capteurs supportant la balance des blancs au niveau registre
+  if (this->sensor_driver_ && (this->sensor_type_ == "sc202cs" || this->sensor_type_ == "sc2336")) {
+    // Appeler la méthode du driver si disponible
+    ESP_LOGI(TAG, "WB gains: R=%.2f G=%.2f B=%.2f (logiciel uniquement)", red, green, blue);
+  } else {
+    ESP_LOGI(TAG, "WB gains: R=%.2f G=%.2f B=%.2f", red, green, blue);
+  }
+}
+
+void MipiDsiCam::adjust_exposure(uint16_t exposure_value) {
+  if (!this->sensor_driver_) {
+    ESP_LOGE(TAG, "No sensor driver");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Adjusting exposure to: 0x%04X", exposure_value);
+  esp_err_t ret = this->sensor_driver_->set_exposure(exposure_value);
+  
+  if (ret == ESP_OK) {
+    this->current_exposure_ = exposure_value;
+    ESP_LOGI(TAG, "✅ Exposure adjusted successfully");
+  } else {
+    ESP_LOGE(TAG, "❌ Failed to adjust exposure");
+  }
+}
+
+void MipiDsiCam::adjust_gain(uint8_t gain_index) {
+  if (!this->sensor_driver_) {
+    ESP_LOGE(TAG, "No sensor driver");
+    return;
+  }
+  
+  ESP_LOGI(TAG, "Adjusting gain to index: %u", gain_index);
+  esp_err_t ret = this->sensor_driver_->set_gain(gain_index);
+  
+  if (ret == ESP_OK) {
+    this->current_gain_index_ = gain_index;
+    ESP_LOGI(TAG, "✅ Gain adjusted successfully");
+  } else {
+    ESP_LOGE(TAG, "❌ Failed to adjust gain");
+  }
+}
+
+void MipiDsiCam::set_brightness_level(uint8_t level) {
+  if (level > 10) level = 10;
+  
+  uint16_t exposure = 0x400 + (level * 0x0B0);
+  uint8_t gain = level * 6;
+  
+  ESP_LOGI(TAG, "🔆 Setting brightness level %u: exposure=0x%04X, gain=%u", 
+           level, exposure, gain);
+  
+  adjust_exposure(exposure);
+  delay(50);
+  adjust_gain(gain);
 }
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 
-
-
-
+#endif  // USE_ESP32_VARIANT_ESP32P4

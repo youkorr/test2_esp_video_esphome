@@ -2,14 +2,15 @@
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
 Support complet H264 + JPEG avec dépendances ESP-IDF
 
-Ce composant initialise le pipeline vidéo ESP-Video en appelant esp_video_init().
+Ce composant active les flags de compilation pour ESP-Video.
+La configuration matérielle (I2C, capteurs) est gérée par les composants
+standard ESPHome (i2c) et mipi_dsi_cam.
 """
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID, CONF_FREQUENCY
+from esphome.const import CONF_ID
 from esphome.core import CORE
-from esphome import pins
 import os
 import logging
 
@@ -20,17 +21,11 @@ AUTO_LOAD = []
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
 ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
 
-# Configuration
+# Configuration optionnelle pour personnalisation
 CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
-CONF_I2C_SDA = "i2c_sda"
-CONF_I2C_SCL = "i2c_scl"
-CONF_I2C_PORT = "i2c_port"
-CONF_I2C_FREQUENCY = "i2c_frequency"
-CONF_RESET_PIN = "reset_pin"
-CONF_PWDN_PIN = "pwdn_pin"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -48,14 +43,6 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-        # Configuration I2C pour SCCB (camera sensor)
-        cv.Optional(CONF_I2C_SDA): pins.gpio_input_pin_schema,
-        cv.Optional(CONF_I2C_SCL): pins.gpio_input_pin_schema,
-        cv.Optional(CONF_I2C_PORT, default=0): cv.int_range(min=0, max=1),
-        cv.Optional(CONF_I2C_FREQUENCY, default=400000): cv.int_range(min=100000, max=1000000),
-        # Pins de contrôle capteur
-        cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
-        cv.Optional(CONF_PWDN_PIN): pins.gpio_output_pin_schema,
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -64,23 +51,6 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-
-    # Configuration I2C
-    if CONF_I2C_SDA in config and CONF_I2C_SCL in config:
-        sda_pin = await cg.gpio_pin_expression(config[CONF_I2C_SDA])
-        scl_pin = await cg.gpio_pin_expression(config[CONF_I2C_SCL])
-        cg.add(var.set_i2c_pins(sda_pin.number, scl_pin.number))
-        cg.add(var.set_i2c_port(config[CONF_I2C_PORT]))
-        cg.add(var.set_i2c_frequency(config[CONF_I2C_FREQUENCY]))
-
-    # Pins de contrôle capteur
-    if CONF_RESET_PIN in config:
-        reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
-        cg.add(var.set_reset_pin(reset_pin.number))
-
-    if CONF_PWDN_PIN in config:
-        pwdn_pin = await cg.gpio_pin_expression(config[CONF_PWDN_PIN])
-        cg.add(var.set_pwdn_pin(pwdn_pin.number))
 
     # -----------------------------------------------------------------------
     # Vérification du framework

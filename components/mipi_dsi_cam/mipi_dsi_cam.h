@@ -1,119 +1,170 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/core/automation.h"
+#include "esphome/core/hal.h"
+#include "esphome/components/i2c/i2c.h"
 #include <string>
-#include <vector>
 
-// Définition du type ISP config basée sur le code source ESP-Video
-#ifndef ESP_VIDEO_ISP_CONFIG_DEFINED
-#define ESP_VIDEO_ISP_CONFIG_DEFINED
-
-typedef struct {
-    const char *isp_dev;
-    const char *cam_dev;
-    void *ipa_config;
-} esp_video_isp_config_t;
-
+#ifdef USE_ESP32_VARIANT_ESP32P4
+extern "C" {
+  #include "esp_cam_ctlr.h"
+  #include "esp_cam_ctlr_csi.h"
+  #include "driver/isp.h"
+  #include "esp_ldo_regulator.h"
+}
 #endif
 
 namespace esphome {
 namespace mipi_dsi_cam {
 
-class MipiDSICamComponent : public Component {
+enum PixelFormat {
+  PIXEL_FORMAT_RGB565 = 0,
+  PIXEL_FORMAT_YUV422 = 1,
+  PIXEL_FORMAT_RAW8 = 2,
+};
+
+class ISensorDriver {
+public:
+  virtual ~ISensorDriver() = default;
+  
+  virtual const char* get_name() const = 0;
+  virtual uint16_t get_pid() const = 0;
+  virtual uint8_t get_i2c_address() const = 0;
+  virtual uint8_t get_lane_count() const = 0;
+  virtual uint8_t get_bayer_pattern() const = 0;
+  virtual uint16_t get_lane_bitrate_mbps() const = 0;
+  virtual uint16_t get_width() const = 0;
+  virtual uint16_t get_height() const = 0;
+  virtual uint8_t get_fps() const = 0;
+  
+  virtual esp_err_t init() = 0;
+  virtual esp_err_t read_id(uint16_t* pid) = 0;
+  virtual esp_err_t start_stream() = 0;
+  virtual esp_err_t stop_stream() = 0;
+  virtual esp_err_t set_gain(uint32_t gain_index) = 0;
+  virtual esp_err_t set_exposure(uint32_t exposure) = 0;
+  virtual esp_err_t write_register(uint16_t reg, uint8_t value) = 0;
+  virtual esp_err_t read_register(uint16_t reg, uint8_t* value) = 0;
+};
+
+class MipiDsiCam : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
   void loop() override;
-  float get_setup_priority() const override { return setup_priority::DATA; }
   void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::DATA; }
 
-  void set_sensor_type(const std::string &s) { sensor_name_ = s; }
-  void set_i2c_id(int id) { i2c_id_ = id; i2c_bus_name_.clear(); }
-  void set_i2c_id(const std::string &bus_name) {
-    i2c_bus_name_ = bus_name;
-    char *end;
-    long val = strtol(bus_name.c_str(), &end, 10);
-    if (end != bus_name.c_str() && *end == '\0') {
-      i2c_id_ = (int)val;
-    } else {
-      i2c_id_ = 0;
-    }
-  }
-  void set_lane(int l) { lane_ = l; }
-  void set_xclk_pin(const std::string &p) { xclk_pin_ = p; }
-  void set_xclk_freq(int f) { xclk_freq_ = f; }
-  void set_sensor_addr(int a) { sensor_addr_ = a; }
-  void set_resolution(const std::string &r) { resolution_ = r; }
-  void set_pixel_format(const std::string &f) { pixel_format_ = f; }
-  void set_framerate(int f) { framerate_ = f; }
-  void set_jpeg_quality(int q) { jpeg_quality_ = q; }
+  void set_name(const std::string &name) { this->name_ = name; }
+  void set_external_clock_pin(int8_t pin) { this->external_clock_pin_ = pin; }
+  void set_external_clock_frequency(uint32_t freq) { this->external_clock_frequency_ = freq; }
+  void set_reset_pin(GPIOPin *pin) { this->reset_pin_ = pin; }
+  void set_sensor_type(const std::string &type) { this->sensor_type_ = type; }
+  void set_sensor_address(uint8_t addr) { this->sensor_address_ = addr; }
+  void set_lane_count(uint8_t lanes) { this->lane_count_ = lanes; }
+  void set_bayer_pattern(uint8_t pattern) { this->bayer_pattern_ = pattern; }
+  void set_lane_bitrate(uint16_t mbps) { this->lane_bitrate_mbps_ = mbps; }
+  void set_resolution(uint16_t w, uint16_t h) { this->width_ = w; this->height_ = h; }
+  void set_pixel_format(PixelFormat format) { this->pixel_format_ = format; }
+  void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
+  void set_framerate(uint8_t fps) { this->framerate_ = fps; }
 
-  bool capture_snapshot_to_file(const std::string &path);
-  bool is_pipeline_ready() const { return pipeline_started_; }
+  bool capture_frame();
+  bool start_streaming();
+  bool stop_streaming();
+  bool is_streaming() const { return this->streaming_; }
+  
+  uint8_t* get_image_data() { return this->current_frame_buffer_; }
+  size_t get_image_size() const { return this->frame_buffer_size_; }
+  uint16_t get_image_width() const { return this->width_; }
+  uint16_t get_image_height() const { return this->height_; }
+  
+  bool has_external_clock() const { return this->external_clock_pin_ >= 0; }
 
-  // Stubs pour lvgl_camera_display
-  bool is_streaming() const { return pipeline_started_; }
-  bool start_streaming() { return pipeline_started_; }
-  void stop_streaming() { /* Le pipeline reste actif */ }
-  bool capture_frame() { return true; }
-  uint8_t* get_image_data() { return nullptr; }
-  uint16_t get_image_width() const { return 0; }
-  uint16_t get_image_height() const { return 0; }
-  size_t get_image_size() const { return 0; }
+  // Auto Exposure et White Balance
+  void set_auto_exposure(bool enabled);
+  void set_ae_target_brightness(uint8_t target);
+  void set_manual_exposure(uint16_t exposure);
+  void set_manual_gain(uint8_t gain_index);
+  void set_white_balance_gains(float red, float green, float blue);
+  void adjust_exposure(uint16_t exposure_value);
+  void adjust_gain(uint8_t gain_index);
+  void set_brightness_level(uint8_t level);
 
  protected:
-  std::string sensor_name_{"sc202cs"};
-  int i2c_id_{0};
-  std::string i2c_bus_name_;
-  int lane_{1};
-  std::string xclk_pin_{"GPIO36"};
-  int xclk_freq_{24000000};
-  int sensor_addr_{0x36};
-  std::string resolution_{"720P"};
-  std::string pixel_format_{"JPEG"};
-  int framerate_{30};
-  int jpeg_quality_{10};
+  int8_t external_clock_pin_{-1};
+  uint32_t external_clock_frequency_{24000000};
+  GPIOPin *reset_pin_{nullptr};
+  
+  std::string sensor_type_{""};
+  uint8_t sensor_address_{0x36};
+  uint8_t lane_count_{1};
+  uint8_t bayer_pattern_{0};
+  uint16_t lane_bitrate_mbps_{800};
+  uint16_t width_{1280};
+  uint16_t height_{720};
+  
+  std::string name_{"MIPI Camera"};
+  PixelFormat pixel_format_{PIXEL_FORMAT_RGB565};
+  uint8_t jpeg_quality_{10};
+  uint8_t framerate_{30};
 
-  // Tous en pointeurs void* pour éviter les types incomplets
-  void *sensor_dev_{nullptr};
-  void *init_cfg_{nullptr};
-  esp_video_isp_config_t isp_cfg_{};
-  bool pipeline_started_{false};
+  bool initialized_{false};
+  bool streaming_{false};
+  bool frame_ready_{false};
+  
+  uint32_t total_frames_received_{0};
+  uint32_t last_frame_log_time_{0};
+  
+  uint8_t *frame_buffers_[2]{nullptr, nullptr};
+  uint8_t *current_frame_buffer_{nullptr};
+  size_t frame_buffer_size_{0};
+  uint8_t buffer_index_{0};
+  
+  ISensorDriver *sensor_driver_{nullptr};
 
-  uint32_t last_health_check_{0};
-  uint32_t snapshot_count_{0};
-  uint32_t error_count_{0};
-
-  bool check_pipeline_health_();
-  void cleanup_pipeline_();
-};
-
-using MipiDsiCam = MipiDSICamComponent;
-
-template<typename... Ts>
-class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamComponent> {
- public:
-  TEMPLATABLE_VALUE(std::string, filename)
-
-  void play(Ts... x) override {
-    auto filename = this->filename_.value(x...);
-    if (!this->parent_->capture_snapshot_to_file(filename)) {
-      ESP_LOGE("mipi_dsi_cam", "Échec de la capture snapshot vers: %s", filename.c_str());
-    }
-  }
+  // Auto Exposure
+  bool auto_exposure_enabled_{false};
+  uint16_t current_exposure_{0x9C0};
+  uint8_t current_gain_index_{20};
+  uint32_t ae_target_brightness_{128};
+  uint32_t last_ae_update_{0};
+  
+  // White Balance correction
+  float wb_red_gain_{1.3f};
+  float wb_green_gain_{0.9f};
+  float wb_blue_gain_{1.1f};
+  
+#ifdef USE_ESP32_VARIANT_ESP32P4
+  esp_cam_ctlr_handle_t csi_handle_{nullptr};
+  isp_proc_handle_t isp_handle_{nullptr};
+  esp_ldo_channel_handle_t ldo_handle_{nullptr};
+  isp_awb_ctlr_t awb_ctlr_{nullptr};
+  
+  bool create_sensor_driver_();
+  bool init_sensor_();
+  bool init_external_clock_();
+  bool init_ldo_();
+  bool init_csi_();
+  bool init_isp_();
+  bool allocate_buffer_();
+  
+  void configure_white_balance_();
+  void update_auto_exposure_();
+  uint32_t calculate_brightness_();
+  
+  static bool IRAM_ATTR on_csi_new_frame_(
+    esp_cam_ctlr_handle_t handle,
+    esp_cam_ctlr_trans_t *trans,
+    void *user_data
+  );
+  
+  static bool IRAM_ATTR on_csi_frame_done_(
+    esp_cam_ctlr_handle_t handle,
+    esp_cam_ctlr_trans_t *trans,
+    void *user_data
+  );
+#endif
 };
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
-
-
-
-
-
-
-
-
-
-
-
-
