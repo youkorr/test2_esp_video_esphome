@@ -44,7 +44,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
     })
     .extend(cv.COMPONENT_SCHEMA)
-    .extend(i2c.i2c_device_schema(None)),  # Ajouter le schéma I2C device
+    .extend(i2c.i2c_device_schema(0x00)),  # Adresse 0x00 par défaut (non utilisée)
     validate_esp_video_config
 )
 
