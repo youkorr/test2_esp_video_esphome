@@ -15,6 +15,7 @@ extern "C" {
 
 #define ISP_AWB_REGIONS 1                                         /*!< Auto white balance regions */
 #define ISP_AE_REGIONS  (ISP_AE_BLOCK_X_NUM * ISP_AE_BLOCK_Y_NUM) /*!< Auto exposure regions */
+#define ISP_AF_WINDOW_NUM 3                                       /*!< Auto focus window number */
 
 /**
  * @brief ISP statistics flags.
@@ -23,6 +24,7 @@ extern "C" {
 #define IPA_STATS_FLAGS_AE      (1 << 1) /*!< ISP statistics has auto exposure */
 #define IPA_STATS_FLAGS_HIST    (1 << 2) /*!< ISP statistics has histogram */
 #define IPA_STATS_FLAGS_SHARPEN (1 << 3) /*!< ISP statistics has sharpen */
+#define IPA_STATS_FLAGS_AF      (1 << 4) /*!< ISP statistics has auto focus */
 
 /**
  * @brief IPA meta data flags.
@@ -41,8 +43,19 @@ extern "C" {
 #define IPA_METADATA_FLAGS_ST    (1 << 11) /*!< Meta data has saturation */
 #define IPA_METADATA_FLAGS_HUE   (1 << 12) /*!< Meta data has hue */
 #define IPA_METADATA_FLAGS_DM    (1 << 13) /*!< Meta data has demosaic */
+#define IPA_METADATA_FLAGS_AWB   (1 << 14) /*!< Meta data has AWB range */
+#define IPA_METADATA_FLAGS_SR    (1 << 15) /*!< Meta data has statistics region */
+#define IPA_METADATA_FLAGS_AF    (1 << 16) /*!< Meta data has auto focus */
+#define IPA_METADATA_FLAGS_FP    (1 << 17) /*!< Meta data has focus position */
+#define IPA_METADATA_FLAGS_AETL  (1 << 18) /*!< Meta data has AE target level */
+#define IPA_METADATA_FLAGS_LSC   (1 << 19) /*!< Meta data has LSC (Lens Shading Correction) */
 
 struct esp_ipa;
+
+/**
+ * @brief Camera sensor focus information (forward declaration).
+ */
+typedef struct esp_ipa_sensor_focus esp_ipa_sensor_focus_t;
 
 /**
  * @brief Camera sensor information.
@@ -60,6 +73,13 @@ typedef struct esp_ipa_sensor {
     float min_gain;  /*!< Minimum gain */
     float cur_gain;  /*!< Current gain */
     float step_gain; /*!< Step gain; if step_gain == 0.0, step size is uneven */
+
+    int32_t min_ae_target_level;  /*!< Minimum AE target level */
+    int32_t max_ae_target_level;  /*!< Maximum AE target level */
+    int32_t step_ae_target_level; /*!< Step AE target level */
+    int32_t cur_ae_target_level;  /*!< Current AE target level */
+
+    esp_ipa_sensor_focus_t *focus_info; /*!< Pointer to focus information (optional) */
 } esp_ipa_sensor_t;
 
 /**
@@ -94,6 +114,14 @@ typedef struct esp_ipa_stats_sharpen {
 } esp_ipa_stats_sharpen_t;
 
 /**
+ * @brief ISP auto focus statistics.
+ */
+typedef struct esp_ipa_stats_af {
+    uint32_t definition; /*!< AF definition value (sharpness metric) */
+    uint32_t luminance;  /*!< AF window luminance */
+} esp_ipa_stats_af_t;
+
+/**
  * @brief ISP statistics for IPA.
  */
 typedef struct esp_ipa_stats {
@@ -116,6 +144,10 @@ typedef struct esp_ipa_stats {
     /*!< ISP sharpen statistics */
 
     esp_ipa_stats_sharpen_t sharpen_stats;
+
+    /*!< ISP auto focus statistics */
+
+    esp_ipa_stats_af_t af_stats[ISP_AF_WINDOW_NUM];
 } esp_ipa_stats_t;
 
 /**
@@ -160,6 +192,47 @@ typedef struct esp_ipa_demosaic {
 } esp_ipa_demosaic_t;
 
 /**
+ * @brief AWB range configuration.
+ */
+typedef struct esp_ipa_awb_range {
+    uint32_t green_max; /*!< Maximum green value */
+    uint32_t green_min; /*!< Minimum green value */
+    uint32_t rg_max;    /*!< Maximum red/green ratio */
+    uint32_t rg_min;    /*!< Minimum red/green ratio */
+    uint32_t bg_max;    /*!< Maximum blue/green ratio */
+    uint32_t bg_min;    /*!< Minimum blue/green ratio */
+} esp_ipa_awb_range_t;
+
+/**
+ * @brief Statistics region.
+ */
+typedef struct esp_ipa_region {
+    uint32_t left;   /*!< Left coordinate */
+    uint32_t top;    /*!< Top coordinate */
+    uint32_t width;  /*!< Width */
+    uint32_t height; /*!< Height */
+} esp_ipa_region_t;
+
+/**
+ * @brief Auto focus configuration.
+ */
+typedef struct esp_ipa_af {
+    uint8_t edge_thresh;                    /*!< Edge threshold */
+    isp_window_t windows[ISP_AF_WINDOW_NUM]; /*!< AF windows */
+} esp_ipa_af_t;
+
+/**
+ * @brief LSC (Lens Shading Correction) configuration.
+ */
+typedef struct esp_ipa_lsc {
+    uint8_t *gain_r;              /*!< Red gain array */
+    uint8_t *gain_gr;             /*!< Green-red gain array */
+    uint8_t *gain_gb;             /*!< Green-blue gain array */
+    uint8_t *gain_b;              /*!< Blue gain array */
+    uint32_t lsc_gain_array_size; /*!< Size of gain arrays */
+} esp_ipa_lsc_t;
+
+/**
  * @brief IPA meta data, these data are calculated by IPA and configured to ISP hardware
  */
 typedef struct esp_ipa_metadata {
@@ -187,6 +260,13 @@ typedef struct esp_ipa_metadata {
     uint32_t contrast;   /*!< Color contrast */
     uint32_t saturation; /*!< Color saturation */
     uint32_t hue;        /*!< Color hue */
+
+    esp_ipa_awb_range_t awb;      /*!< AWB range configuration */
+    esp_ipa_region_t stats_region; /*!< Statistics region */
+    esp_ipa_af_t af;              /*!< Auto focus configuration */
+    int32_t ae_target_level;      /*!< AE target level */
+    int32_t focus_pos;            /*!< Focus position */
+    esp_ipa_lsc_t lsc;            /*!< LSC configuration */
 } esp_ipa_metadata_t;
 
 /**
