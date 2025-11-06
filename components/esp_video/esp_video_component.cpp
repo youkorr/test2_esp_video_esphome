@@ -1,6 +1,14 @@
 #include "esp_video_component.h"
+#include "i2c_helper.h"
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
+
+// Headers ESP-Video
+extern "C" {
+#include "esp_video_init.h"
+#include "esp_video_device.h"
+#include "driver/i2c_master.h"
+}
 
 namespace esphome {
 namespace esp_video {
@@ -59,25 +67,64 @@ void ESPVideoComponent::setup() {
     ESP_LOGW(TAG, "    Considérez réduire la résolution ou la qualité");
   }
 
-  ESP_LOGI(TAG, "Configuration matérielle:");
-  ESP_LOGI(TAG, "  - Bus I2C: Géré par le composant 'i2c' d'ESPHome");
-  ESP_LOGI(TAG, "  - Pipeline caméra: Géré par le composant 'mipi_dsi_cam'");
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "Ce composant fournit:");
-  ESP_LOGI(TAG, "  - Flags de compilation ESP-Video");
-  ESP_LOGI(TAG, "  - Headers et bibliothèques ESP-IDF");
-  ESP_LOGI(TAG, "  - Support des encodeurs matériels (H.264/JPEG)");
+  // Initialiser ESP-Video
+  ESP_LOGI(TAG, "----------------------------------------");
+  ESP_LOGI(TAG, "Initialisation ESP-Video...");
+
+#ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
+  if (this->i2c_bus_ == nullptr) {
+    ESP_LOGE(TAG, "❌ Bus I2C non configuré!");
+    this->mark_failed();
+    return;
+  }
+
+  // Obtenir le handle I2C du bus ESPHome via le helper
+  i2c_master_bus_handle_t i2c_handle = get_i2c_bus_handle(this->i2c_bus_);
+
+  if (i2c_handle == nullptr) {
+    ESP_LOGE(TAG, "❌ Impossible d'obtenir le handle I2C!");
+    ESP_LOGE(TAG, "Vérifiez que le bus I2C est correctement configuré");
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "✓ Handle I2C obtenu du bus ESPHome");
+
+  // Configuration CSI pour esp_video_init
+  // IMPORTANT: init_sccb = false car l'I2C est déjà initialisé par ESPHome
+  esp_video_init_csi_config_t csi_config = {};
+  csi_config.sccb_config.init_sccb = false;  // N'initialise PAS l'I2C
+  csi_config.sccb_config.i2c_handle = i2c_handle;  // Utilise le handle existant
+  csi_config.sccb_config.freq = 400000;  // Fréquence I2C
+  csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
+  csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
+
+  esp_video_init_config_t video_config = {};
+  video_config.csi = &csi_config;
+
+  ESP_LOGI(TAG, "Appel esp_video_init()...");
+  esp_err_t ret = esp_video_init(&video_config);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo créés");
+#else
+  ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");
+#endif
 
   this->initialized_ = true;
 
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "✅ ESP-Video prêt");
+  ESP_LOGI(TAG, "Les devices /dev/video* sont disponibles");
   ESP_LOGI(TAG, "========================================");
 }
 
 void ESPVideoComponent::loop() {
   // Rien à faire dans la boucle principale
-  // Les composants utilisant ESP-Video gèrent leur propre boucle
 }
 
 void ESPVideoComponent::dump_config() {
@@ -88,6 +135,12 @@ void ESPVideoComponent::dump_config() {
 #endif
 
   ESP_LOGCONFIG(TAG, "  État: %s", this->initialized_ ? "Prêt" : "Non initialisé");
+
+  if (this->i2c_bus_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Bus I2C: Configuré");
+  } else {
+    ESP_LOGCONFIG(TAG, "  Bus I2C: Non configuré");
+  }
 
   ESP_LOGCONFIG(TAG, "  Encodeurs:");
 #ifdef ESP_VIDEO_H264_ENABLED

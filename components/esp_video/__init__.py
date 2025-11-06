@@ -2,30 +2,30 @@
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
 Support complet H264 + JPEG avec dépendances ESP-IDF
 
-Ce composant active les flags de compilation pour ESP-Video.
-La configuration matérielle (I2C, capteurs) est gérée par les composants
-standard ESPHome (i2c) et mipi_dsi_cam.
+Ce composant initialise ESP-Video en appelant esp_video_init() avec le handle I2C.
 """
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
+from esphome.components import i2c
 from esphome.const import CONF_ID
 from esphome.core import CORE
 import os
 import logging
 
 CODEOWNERS = ["@youkorr"]
-DEPENDENCIES = ["esp32"]
+DEPENDENCIES = ["i2c", "esp32"]
 AUTO_LOAD = []
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
 ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
 
-# Configuration optionnelle pour personnalisation
+# Configuration
 CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
+CONF_I2C_BUS = "i2c_bus"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -43,6 +43,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
+        cv.Required(CONF_I2C_BUS): cv.use_id(i2c.I2CBus),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -51,6 +52,10 @@ CONFIG_SCHEMA = cv.All(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    # Référence au bus I2C
+    i2c_bus = await cg.get_variable(config[CONF_I2C_BUS])
+    cg.add(var.set_i2c_bus(i2c_bus))
 
     # -----------------------------------------------------------------------
     # Vérification du framework
