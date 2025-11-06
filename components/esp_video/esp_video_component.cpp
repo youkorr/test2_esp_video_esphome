@@ -80,9 +80,10 @@ void ESPVideoComponent::setup() {
 
   esp_video_init_csi_config_t csi_config = {};
   csi_config.sccb_config.init_sccb = true;  // esp_video créera son propre bus I2C
-  csi_config.sccb_config.i2c_handle = nullptr;  // Pas de handle externe
-  csi_config.sccb_config.sda_io_num = static_cast<gpio_num_t>(this->sda_pin_);
-  csi_config.sccb_config.scl_io_num = static_cast<gpio_num_t>(this->scl_pin_);
+  // Utiliser i2c_config (union) car init_sccb = true
+  csi_config.sccb_config.i2c_config.port = 0;  // Port I2C 0
+  csi_config.sccb_config.i2c_config.sda_pin = static_cast<gpio_num_t>(this->sda_pin_);
+  csi_config.sccb_config.i2c_config.scl_pin = static_cast<gpio_num_t>(this->scl_pin_);
   csi_config.sccb_config.freq = this->i2c_frequency_;  // Fréquence I2C
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
