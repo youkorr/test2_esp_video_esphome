@@ -44,14 +44,28 @@ class ESPVideoComponent : public Component {
     this->use_ldo_ = true;
   }
 
+  // Setters pour External Clock (XCLK)
+  void set_external_clock_pin(uint8_t pin) {
+    this->external_clock_pin_ = pin;
+    this->has_external_clock_ = true;
+  }
+  void set_external_clock_frequency(uint32_t freq) {
+    this->external_clock_frequency_ = freq;
+  }
+
   // Setters pour pins reset/powerdown
   void set_reset_pin(int8_t pin) { this->reset_pin_ = pin; }
   void set_pwdn_pin(int8_t pin) { this->pwdn_pin_ = pin; }
 
   // Getters
   uint8_t get_sensor_address() const { return this->sensor_address_; }
+  bool has_external_clock() const { return this->has_external_clock_; }
 
  protected:
+  // Méthodes d'initialisation étape par étape
+  bool init_external_clock_();
+  bool init_ldo_();
+
   bool initialized_{false};
 
   // Configuration I2C
@@ -65,6 +79,12 @@ class ESPVideoComponent : public Component {
   bool use_ldo_{false};
   float ldo_voltage_{0.0f};
   uint8_t ldo_channel_{0};
+  void *ldo_handle_{nullptr};   // esp_ldo_channel_handle_t
+
+  // Configuration External Clock (XCLK)
+  bool has_external_clock_{false};
+  uint8_t external_clock_pin_{0};
+  uint32_t external_clock_frequency_{24000000};  // 24MHz par défaut
 
   // Pins optionnels
   int8_t reset_pin_{-1};

@@ -35,6 +35,10 @@ CONF_SENSOR_ADDRESS = "sensor_address"
 CONF_LDO_VOLTAGE = "ldo_voltage"
 CONF_LDO_CHANNEL = "ldo_channel"
 
+# Configuration External Clock (XCLK) pour le capteur
+CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
+CONF_EXTERNAL_CLOCK_FREQUENCY = "external_clock_frequency"
+
 # Pins Reset/PowerDown
 CONF_RESET_PIN = "reset_pin"
 CONF_PWDN_PIN = "pwdn_pin"
@@ -67,6 +71,10 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_LDO_VOLTAGE): cv.voltage,
         cv.Optional(CONF_LDO_CHANNEL): cv.int_range(min=0, max=3),
 
+        # Configuration External Clock (XCLK) optionnelle
+        cv.Optional(CONF_EXTERNAL_CLOCK_PIN): pins.gpio_output_pin_schema,
+        cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=24000000): cv.int_range(min=1000000, max=40000000),
+
         # Pins optionnels
         cv.Optional(CONF_RESET_PIN, default=-1): pins.gpio_output_pin_schema,
         cv.Optional(CONF_PWDN_PIN, default=-1): pins.gpio_output_pin_schema,
@@ -98,6 +106,13 @@ async def to_code(config):
     if CONF_LDO_CHANNEL in config:
         cg.add(var.set_ldo_channel(config[CONF_LDO_CHANNEL]))
         logging.info(f"[ESP-Video] LDO canal: {config[CONF_LDO_CHANNEL]}")
+
+    # Configuration External Clock (XCLK) si fournie
+    if CONF_EXTERNAL_CLOCK_PIN in config:
+        xclk_pin = await cg.gpio_pin_expression(config[CONF_EXTERNAL_CLOCK_PIN])
+        cg.add(var.set_external_clock_pin(xclk_pin))
+        cg.add(var.set_external_clock_frequency(config[CONF_EXTERNAL_CLOCK_FREQUENCY]))
+        logging.info(f"[ESP-Video] External clock: GPIO{xclk_pin} @ {config[CONF_EXTERNAL_CLOCK_FREQUENCY]} Hz")
 
     # Pins Reset/PowerDown
     if config[CONF_RESET_PIN] != -1:

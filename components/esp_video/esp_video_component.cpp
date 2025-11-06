@@ -7,6 +7,7 @@ extern "C" {
 #include "esp_video_init.h"
 #include "driver/gpio.h"
 #include "esp_ldo_regulator.h"
+#include "driver/ledc.h"
 }
 
 namespace esphome {
@@ -66,26 +67,23 @@ void ESPVideoComponent::setup() {
     ESP_LOGW(TAG, "    Considérez réduire la résolution ou la qualité");
   }
 
+  // Initialiser l'external clock si configuré
+  if (this->has_external_clock()) {
+    if (!this->init_external_clock_()) {
+      ESP_LOGE(TAG, "❌ Échec initialisation external clock");
+      this->mark_failed();
+      return;
+    }
+  } else {
+    ESP_LOGI(TAG, "Pas d'external clock - le capteur doit utiliser son horloge interne");
+  }
+
   // Initialiser le régulateur LDO si configuré
   if (this->use_ldo_) {
-    ESP_LOGI(TAG, "Configuration LDO: %.1fV sur canal %d", this->ldo_voltage_, this->ldo_channel_);
-
-    esp_ldo_channel_handle_t ldo_handle = NULL;
-    esp_ldo_channel_config_t ldo_config = {
-      .chan_id = this->ldo_channel_,
-      .voltage_mv = static_cast<int>(this->ldo_voltage_ * 1000),  // Convertir V en mV
-      .flags = {
-        .adjustable_range_mv = 500,  // Plage d'ajustement de ±500mV
-      },
-    };
-
-    esp_err_t ldo_ret = esp_ldo_acquire_channel(&ldo_config, &ldo_handle);
-    if (ldo_ret != ESP_OK) {
-      ESP_LOGW(TAG, "⚠️  Échec de la configuration LDO: 0x%x (%s)", ldo_ret, esp_err_to_name(ldo_ret));
-      ESP_LOGW(TAG, "    Continuons sans LDO...");
-    } else {
-      ESP_LOGI(TAG, "✓ LDO configuré avec succès");
-      // Note: Le handle LDO reste actif pendant toute la durée de vie du composant
+    if (!this->init_ldo_()) {
+      ESP_LOGE(TAG, "❌ Échec initialisation LDO");
+      this->mark_failed();
+      return;
     }
   }
 
@@ -188,6 +186,64 @@ void ESPVideoComponent::dump_config() {
   // Afficher l'utilisation mémoire actuelle
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   ESP_LOGCONFIG(TAG, "  Mémoire libre: %u octets", (unsigned)free_heap);
+}
+
+// Initialiser l'horloge externe (XCLK) pour le capteur via LEDC
+bool ESPVideoComponent::init_external_clock_() {
+  ESP_LOGI(TAG, "Initialisation external clock sur GPIO%d @ %u Hz",
+           this->external_clock_pin_, this->external_clock_frequency_);
+
+  // Configuration du timer LEDC
+  ledc_timer_config_t ledc_timer = {};
+  ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
+  ledc_timer.duty_resolution = LEDC_TIMER_1_BIT;  // 50% duty cycle
+  ledc_timer.timer_num = LEDC_TIMER_0;
+  ledc_timer.freq_hz = this->external_clock_frequency_;
+  ledc_timer.clk_cfg = LEDC_AUTO_CLK;
+
+  esp_err_t ret = ledc_timer_config(&ledc_timer);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Échec configuration LEDC timer: 0x%x (%s)", ret, esp_err_to_name(ret));
+    return false;
+  }
+
+  // Configuration du canal LEDC
+  ledc_channel_config_t ledc_channel = {};
+  ledc_channel.gpio_num = this->external_clock_pin_;
+  ledc_channel.speed_mode = LEDC_LOW_SPEED_MODE;
+  ledc_channel.channel = LEDC_CHANNEL_0;
+  ledc_channel.intr_type = LEDC_INTR_DISABLE;
+  ledc_channel.timer_sel = LEDC_TIMER_0;
+  ledc_channel.duty = 1;  // 50% duty cycle avec résolution 1-bit
+  ledc_channel.hpoint = 0;
+
+  ret = ledc_channel_config(&ledc_channel);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Échec configuration LEDC channel: 0x%x (%s)", ret, esp_err_to_name(ret));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ External clock initialisé");
+  return true;
+}
+
+// Initialiser le régulateur LDO
+bool ESPVideoComponent::init_ldo_() {
+  ESP_LOGI(TAG, "Configuration LDO: %.1fV sur canal %d", this->ldo_voltage_, this->ldo_channel_);
+
+  esp_ldo_channel_config_t ldo_config = {};
+  ldo_config.chan_id = this->ldo_channel_;
+  ldo_config.voltage_mv = static_cast<int>(this->ldo_voltage_ * 1000);  // Convertir V en mV
+  ldo_config.flags.adjustable_range_mv = 500;  // Plage d'ajustement de ±500mV
+
+  esp_err_t ret = esp_ldo_acquire_channel(&ldo_config, (esp_ldo_channel_handle_t *)&this->ldo_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Échec configuration LDO: 0x%x (%s)", ret, esp_err_to_name(ret));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ LDO configuré avec succès");
+  return true;
 }
 
 }  // namespace esp_video
