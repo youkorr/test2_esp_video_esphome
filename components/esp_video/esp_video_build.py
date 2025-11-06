@@ -151,14 +151,21 @@ else:
 # Ajouter toutes les sources à la compilation
 # ========================================================================
 if sources_to_add:
-    # Créer une bibliothèque statique avec toutes les sources ESP-Video
-    lib = env.BuildLibrary(
-        os.path.join("$BUILD_DIR", "esp_video_full"),
-        sources_to_add
+    # Compiler chaque fichier source en objet
+    objects = []
+    for src_file in sources_to_add:
+        # Compiler le fichier source en .o
+        obj = env.Object(src_file)
+        objects.extend(obj)
+
+    # Créer une bibliothèque statique avec les objets compilés
+    lib = env.StaticLibrary(
+        os.path.join("$BUILD_DIR", "libesp_video_full"),
+        objects
     )
 
     # Ajouter la bibliothèque au linkage
-    env.Append(LIBS=[lib])
+    env.Prepend(LIBS=[lib])
 
     print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
 else:
