@@ -13,7 +13,7 @@ namespace mipi_dsi_cam {
 
 static const char *const TAG = "mipi_dsi_cam";
 
-void MipiDsiCam::setup() {
+void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "Init MIPI Camera");
   ESP_LOGI(TAG, "  Sensor type: %s", this->sensor_type_.c_str());
   
@@ -75,7 +75,7 @@ void MipiDsiCam::setup() {
   ESP_LOGI(TAG, "Camera ready (%ux%u) with Auto Exposure", this->width_, this->height_);
 }
 
-bool MipiDsiCam::create_sensor_driver_() {
+bool MipiDSICamComponent::create_sensor_driver_() {
   ESP_LOGI(TAG, "Creating driver for: %s", this->sensor_type_.c_str());
   
   this->sensor_driver_ = create_sensor_driver(this->sensor_type_, this);
@@ -89,7 +89,7 @@ bool MipiDsiCam::create_sensor_driver_() {
   return true;
 }
 
-bool MipiDsiCam::init_sensor_() {
+bool MipiDSICamComponent::init_sensor_() {
   if (!this->sensor_driver_) {
     ESP_LOGE(TAG, "No sensor driver");
     return false;
@@ -137,7 +137,7 @@ bool MipiDsiCam::init_sensor_() {
   return true;
 }
 
-bool MipiDsiCam::init_external_clock_() {
+bool MipiDSICamComponent::init_external_clock_() {
   ESP_LOGI(TAG, "Init external clock on GPIO%d @ %u Hz", 
            this->external_clock_pin_, this->external_clock_frequency_);
   
@@ -173,7 +173,7 @@ bool MipiDsiCam::init_external_clock_() {
   return true;
 }
 
-bool MipiDsiCam::init_ldo_() {
+bool MipiDSICamComponent::init_ldo_() {
   ESP_LOGI(TAG, "Init LDO MIPI");
   
   esp_ldo_channel_config_t ldo_config = {
@@ -191,7 +191,7 @@ bool MipiDsiCam::init_ldo_() {
   return true;
 }
 
-bool MipiDsiCam::init_csi_() {
+bool MipiDSICamComponent::init_csi_() {
   ESP_LOGI(TAG, "Init MIPI-CSI");
   
   esp_cam_ctlr_csi_config_t csi_config = {};
@@ -213,8 +213,8 @@ bool MipiDsiCam::init_csi_() {
   }
   
   esp_cam_ctlr_evt_cbs_t callbacks = {
-    .on_get_new_trans = MipiDsiCam::on_csi_new_frame_,
-    .on_trans_finished = MipiDsiCam::on_csi_frame_done_,
+    .on_get_new_trans = MipiDSICamComponent::on_csi_new_frame_,
+    .on_trans_finished = MipiDSICamComponent::on_csi_frame_done_,
   };
   
   ret = esp_cam_ctlr_register_event_callbacks(this->csi_handle_, &callbacks, this);
@@ -233,7 +233,7 @@ bool MipiDsiCam::init_csi_() {
   return true;
 }
 
-bool MipiDsiCam::init_isp_() {
+bool MipiDSICamComponent::init_isp_() {
   ESP_LOGI(TAG, "Init ISP");
   
   uint32_t isp_clock_hz = 120000000;
@@ -271,7 +271,7 @@ bool MipiDsiCam::init_isp_() {
   return true;
 }
 
-void MipiDsiCam::configure_white_balance_() {
+void MipiDSICamComponent::configure_white_balance_() {
   if (!this->isp_handle_) return;
   
   // OV5647 et SC202CS ont des problèmes avec AWB matériel sur ESP32-P4
@@ -301,7 +301,7 @@ void MipiDsiCam::configure_white_balance_() {
   }
 }
 
-bool MipiDsiCam::allocate_buffer_() {
+bool MipiDSICamComponent::allocate_buffer_() {
   this->frame_buffer_size_ = this->width_ * this->height_ * 2;
   
   this->frame_buffers_[0] = (uint8_t*)heap_caps_aligned_alloc(
@@ -323,7 +323,7 @@ bool MipiDsiCam::allocate_buffer_() {
   return true;
 }
 
-bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
+bool IRAM_ATTR MipiDSICamComponent::on_csi_new_frame_(
   esp_cam_ctlr_handle_t handle,
   esp_cam_ctlr_trans_t *trans,
   void *user_data
@@ -334,7 +334,7 @@ bool IRAM_ATTR MipiDsiCam::on_csi_new_frame_(
   return false;
 }
 
-bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
+bool IRAM_ATTR MipiDSICamComponent::on_csi_frame_done_(
   esp_cam_ctlr_handle_t handle,
   esp_cam_ctlr_trans_t *trans,
   void *user_data
@@ -350,7 +350,7 @@ bool IRAM_ATTR MipiDsiCam::on_csi_frame_done_(
   return false;
 }
 
-bool MipiDsiCam::start_streaming() {
+bool MipiDSICamComponent::start_streaming() {
   if (!this->initialized_ || this->streaming_) {
     return false;
   }
@@ -380,7 +380,7 @@ bool MipiDsiCam::start_streaming() {
   return true;
 }
 
-bool MipiDsiCam::stop_streaming() {
+bool MipiDSICamComponent::stop_streaming() {
   if (!this->streaming_) {
     return true;
   }
@@ -396,7 +396,7 @@ bool MipiDsiCam::stop_streaming() {
   return true;
 }
 
-bool MipiDsiCam::capture_frame() {
+bool MipiDSICamComponent::capture_frame() {
   if (!this->streaming_) {
     return false;
   }
@@ -411,7 +411,7 @@ bool MipiDsiCam::capture_frame() {
   return was_ready;
 }
 
-void MipiDsiCam::update_auto_exposure_() {
+void MipiDSICamComponent::update_auto_exposure_() {
   if (!this->auto_exposure_enabled_ || !this->sensor_driver_) {
     return;
   }
@@ -453,7 +453,7 @@ void MipiDsiCam::update_auto_exposure_() {
   }
 }
 
-uint32_t MipiDsiCam::calculate_brightness_() {
+uint32_t MipiDSICamComponent::calculate_brightness_() {
   if (!this->current_frame_buffer_) {
     return 128;
   }
@@ -483,7 +483,7 @@ uint32_t MipiDsiCam::calculate_brightness_() {
   return sample_count > 0 ? (sum / sample_count) : 128;
 }
 
-void MipiDsiCam::loop() {
+void MipiDSICamComponent::loop() {
   if (this->streaming_) {
     // Mise à jour Auto Exposure
     this->update_auto_exposure_();
@@ -513,7 +513,7 @@ void MipiDsiCam::loop() {
   }
 }
 
-void MipiDsiCam::dump_config() {
+void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI Camera:");
   if (this->sensor_driver_) {
     ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_driver_->get_name());
@@ -539,17 +539,17 @@ void MipiDsiCam::dump_config() {
 }
 
 // Méthodes publiques pour contrôle
-void MipiDsiCam::set_auto_exposure(bool enabled) {
+void MipiDSICamComponent::set_auto_exposure(bool enabled) {
   this->auto_exposure_enabled_ = enabled;
   ESP_LOGI(TAG, "Auto Exposure: %s", enabled ? "ENABLED" : "DISABLED");
 }
 
-void MipiDsiCam::set_ae_target_brightness(uint8_t target) {
+void MipiDSICamComponent::set_ae_target_brightness(uint8_t target) {
   this->ae_target_brightness_ = target;
   ESP_LOGI(TAG, "AE target brightness: %u", target);
 }
 
-void MipiDsiCam::set_manual_exposure(uint16_t exposure) {
+void MipiDSICamComponent::set_manual_exposure(uint16_t exposure) {
   this->current_exposure_ = exposure;
   if (this->sensor_driver_) {
     this->sensor_driver_->set_exposure(exposure);
@@ -557,7 +557,7 @@ void MipiDsiCam::set_manual_exposure(uint16_t exposure) {
   }
 }
 
-void MipiDsiCam::set_manual_gain(uint8_t gain_index) {
+void MipiDSICamComponent::set_manual_gain(uint8_t gain_index) {
   this->current_gain_index_ = gain_index;
   if (this->sensor_driver_) {
     this->sensor_driver_->set_gain(gain_index);
@@ -565,7 +565,7 @@ void MipiDsiCam::set_manual_gain(uint8_t gain_index) {
   }
 }
 
-void MipiDsiCam::set_white_balance_gains(float red, float green, float blue) {
+void MipiDSICamComponent::set_white_balance_gains(float red, float green, float blue) {
   this->wb_red_gain_ = red;
   this->wb_green_gain_ = green;
   this->wb_blue_gain_ = blue;
@@ -579,7 +579,7 @@ void MipiDsiCam::set_white_balance_gains(float red, float green, float blue) {
   }
 }
 
-void MipiDsiCam::adjust_exposure(uint16_t exposure_value) {
+void MipiDSICamComponent::adjust_exposure(uint16_t exposure_value) {
   if (!this->sensor_driver_) {
     ESP_LOGE(TAG, "No sensor driver");
     return;
@@ -596,7 +596,7 @@ void MipiDsiCam::adjust_exposure(uint16_t exposure_value) {
   }
 }
 
-void MipiDsiCam::adjust_gain(uint8_t gain_index) {
+void MipiDSICamComponent::adjust_gain(uint8_t gain_index) {
   if (!this->sensor_driver_) {
     ESP_LOGE(TAG, "No sensor driver");
     return;
@@ -613,7 +613,7 @@ void MipiDsiCam::adjust_gain(uint8_t gain_index) {
   }
 }
 
-void MipiDsiCam::set_brightness_level(uint8_t level) {
+void MipiDSICamComponent::set_brightness_level(uint8_t level) {
   if (level > 10) level = 10;
   
   uint16_t exposure = 0x400 + (level * 0x0B0);

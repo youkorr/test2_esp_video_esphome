@@ -47,7 +47,7 @@ public:
   virtual esp_err_t read_register(uint16_t reg, uint8_t* value) = 0;
 };
 
-class MipiDsiCam : public Component, public i2c::I2CDevice {
+class MipiDSICamComponent : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
   void loop() override;
@@ -165,6 +165,9 @@ class MipiDsiCam : public Component, public i2c::I2CDevice {
   );
 #endif
 };
+
+// Alias pour compatibilité
+using MipiDsiCam = MipiDSICamComponent;
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome

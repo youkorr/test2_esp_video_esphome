@@ -14,7 +14,8 @@ DEPENDENCIES = ["i2c", "esp32"]
 MULTI_CONF = True
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
-MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDsiCam", cg.Component, i2c.I2CDevice)
+MipiDSICamComponent = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component, i2c.I2CDevice)
+MipiDsiCam = MipiDSICamComponent  # Alias pour compatibilité
 
 CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"
 CONF_RESET_PIN = "reset_pin"
