@@ -58,7 +58,21 @@ esp_cam_sensor_sources = [
     "sensor/sc202cs/sc202cs.c",
 ]
 
+# Ajouter les chemins d'include pour les sensors (private_include)
+esp_cam_sensor_includes = [
+    "sensor/ov5647/private_include",
+    "sensor/sc202cs/include/private_include",
+]
+
 if os.path.exists(esp_cam_sensor_dir):
+    # Ajouter les chemins d'include
+    for inc in esp_cam_sensor_includes:
+        inc_path = os.path.join(esp_cam_sensor_dir, inc)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+            print(f"[ESP-Video Build] 📁 Include sensor ajouté: {inc_path}")
+
+    # Compiler les sources
     for src in esp_cam_sensor_sources:
         src_path = os.path.join(esp_cam_sensor_dir, src)
         if os.path.exists(src_path):
