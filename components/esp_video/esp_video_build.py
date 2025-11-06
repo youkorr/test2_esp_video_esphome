@@ -51,6 +51,7 @@ esp_cam_sensor_sources = [
     "src/esp_cam_sensor.c",
     "src/esp_cam_motor.c",
     "src/esp_cam_sensor_xclk.c",
+    "src/esp_cam_sensor_detect_stubs.c",  # Linker symbols for sensor auto-detection
     "src/driver_spi/spi_slave.c",
     "src/driver_cam/esp_cam_ctlr_spi_cam.c",
     "sensor/ov5647/ov5647.c",
@@ -120,6 +121,24 @@ if os.path.exists(esp_sccb_intf_dir):
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[ESP-Video Build] + esp_sccb_intf/{src}")
+
+# ========================================================================
+# Configuration de la bibliothèque précompilée esp_ipa
+# ========================================================================
+# Ajouter le chemin vers la bibliothèque esp_ipa
+esp_ipa_lib_dir = os.path.join(esp_ipa_dir, "lib/esp32p4")
+if os.path.exists(esp_ipa_lib_dir):
+    esp_ipa_lib_path = os.path.join(esp_ipa_lib_dir, "libesp_ipa.a")
+    if os.path.exists(esp_ipa_lib_path):
+        # Ajouter le chemin de recherche de bibliothèque
+        env.Append(LIBPATH=[esp_ipa_lib_dir])
+        # Ajouter la bibliothèque à lier
+        env.Append(LIBS=["esp_ipa"])
+        print(f"[ESP-Video Build] ✓ Bibliothèque esp_ipa ajoutée: {esp_ipa_lib_path}")
+    else:
+        print(f"[ESP-Video Build] ⚠️ libesp_ipa.a introuvable dans {esp_ipa_lib_dir}")
+else:
+    print(f"[ESP-Video Build] ⚠️ Répertoire esp_ipa/lib/esp32p4 introuvable")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
