@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/hal.h"
+#include "esphome/components/i2c/i2c.h"
 #include <string>
 #include <mutex>
 
@@ -42,10 +43,19 @@ class MipiDSICamComponent : public Component {
     return setup_priority::DATA;
   }
 
-  // Configuration
+  // Configuration I2C et sensor
+  void set_i2c_bus(i2c::I2CBus *bus) { this->i2c_bus_ = bus; }
+  void set_sensor(const std::string &sensor) { this->sensor_ = sensor; }
+  void set_external_clock_pin(uint8_t pin) { this->external_clock_pin_ = pin; }
+  void set_frequency(uint32_t freq) { this->frequency_ = freq; }
+
+  // Configuration résolution/format
   void set_resolution(const std::string &res) { this->resolution_ = res; }
   void set_pixel_format(const std::string &fmt) { this->pixel_format_ = fmt; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
+  void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
+
+  // Configuration PPA
   void set_mirror_x(bool mirror) { this->mirror_x_ = mirror; }
   void set_mirror_y(bool mirror) { this->mirror_y_ = mirror; }
   void set_rotation(int angle) { this->rotation_angle_ = angle; }
@@ -61,10 +71,19 @@ class MipiDSICamComponent : public Component {
   uint16_t get_image_height() const { return this->height_; }
 
  protected:
-  // Configuration
+  // Configuration I2C et sensor
+  i2c::I2CBus *i2c_bus_{nullptr};
+  std::string sensor_{"sc202cs"};
+  uint8_t external_clock_pin_{36};
+  uint32_t frequency_{24000000};
+
+  // Configuration résolution/format
   std::string resolution_{"720P"};
   std::string pixel_format_{"RGB565"};
   uint8_t framerate_{30};
+  uint8_t jpeg_quality_{10};
+
+  // Configuration PPA
   bool mirror_x_{true};     // Mirror horizontal (comme la demo M5Stack)
   bool mirror_y_{false};
   int rotation_angle_{0};   // 0, 90, 180, 270

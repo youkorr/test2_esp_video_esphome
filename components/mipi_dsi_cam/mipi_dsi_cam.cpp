@@ -22,9 +22,12 @@ void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "========================================");
 
   ESP_LOGI(TAG, "Configuration:");
+  ESP_LOGI(TAG, "  Sensor: %s", this->sensor_.c_str());
+  ESP_LOGI(TAG, "  External Clock: GPIO%d @ %u Hz", this->external_clock_pin_, this->frequency_);
   ESP_LOGI(TAG, "  Résolution: %s", this->resolution_.c_str());
   ESP_LOGI(TAG, "  Format: %s", this->pixel_format_.c_str());
   ESP_LOGI(TAG, "  FPS: %d", this->framerate_);
+  ESP_LOGI(TAG, "  JPEG Quality: %d", this->jpeg_quality_);
   ESP_LOGI(TAG, "  Mirror X: %s", this->mirror_x_ ? "Oui" : "Non");
   ESP_LOGI(TAG, "  Mirror Y: %s", this->mirror_y_ ? "Oui" : "Non");
   ESP_LOGI(TAG, "  Rotation: %d°", this->rotation_angle_);
@@ -445,10 +448,13 @@ ppa_srm_rotation_angle_t MipiDSICamComponent::map_rotation_(int angle) {
 
 void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI CSI Camera:");
+  ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_.c_str());
+  ESP_LOGCONFIG(TAG, "  External Clock: GPIO%d @ %u Hz", this->external_clock_pin_, this->frequency_);
   ESP_LOGCONFIG(TAG, "  Résolution: %s (%dx%d)",
                 this->resolution_.c_str(), this->width_, this->height_);
   ESP_LOGCONFIG(TAG, "  Format: %s", this->pixel_format_.c_str());
   ESP_LOGCONFIG(TAG, "  FPS: %d", this->framerate_);
+  ESP_LOGCONFIG(TAG, "  JPEG Quality: %d", this->jpeg_quality_);
   ESP_LOGCONFIG(TAG, "  Mirror X: %s", this->mirror_x_ ? "Oui" : "Non");
   ESP_LOGCONFIG(TAG, "  Mirror Y: %s", this->mirror_y_ ? "Oui" : "Non");
   ESP_LOGCONFIG(TAG, "  Rotation: %d°", this->rotation_angle_);
