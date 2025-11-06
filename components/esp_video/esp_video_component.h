@@ -1,21 +1,24 @@
 #pragma once
 
 #include "esphome/core/component.h"
+#include "esphome/components/i2c/i2c.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace esp_video {
 
+// Forward declaration de l'adaptateur
+struct ESPHomeI2CSCCBAdapter;
+
 /**
  * @brief Composant ESPHome pour ESP-Video d'Espressif
  *
  * Ce composant initialise ESP-Video en appelant esp_video_init()
- * SANS initialiser SCCB (init_sccb = false).
+ * avec un adaptateur I2C-SCCB qui utilise le bus I2C d'ESPHome.
  *
- * La communication I2C avec le capteur est gérée par mipi_dsi_cam
- * via son héritage de i2c::I2CDevice.
+ * Hérite de i2c::I2CDevice pour accéder au bus I2C configuré en YAML.
  */
-class ESPVideoComponent : public Component {
+class ESPVideoComponent : public Component, public i2c::I2CDevice {
  public:
   void setup() override;
   void loop() override;
@@ -28,6 +31,7 @@ class ESPVideoComponent : public Component {
 
  protected:
   bool initialized_{false};
+  ESPHomeI2CSCCBAdapter *sccb_adapter_{nullptr};
 };
 
 }  // namespace esp_video
