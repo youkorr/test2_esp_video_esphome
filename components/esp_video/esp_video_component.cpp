@@ -1,5 +1,4 @@
 #include "esp_video_component.h"
-#include "i2c_helper.h"
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 
@@ -7,7 +6,6 @@
 extern "C" {
 #include "esp_video_init.h"
 #include "esp_video_device.h"
-#include "driver/i2c_master.h"
 }
 
 namespace esphome {
@@ -72,43 +70,27 @@ void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "Initialisation ESP-Video...");
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
-  // Obtenir le handle I2C du bus ESPHome
-  // IMPORTANT: Utiliser le bus I2C d'ESPHome au lieu d'en créer un nouveau
-  // pour éviter les conflits matériels (init_sccb = false)
-
-  i2c::I2CBus *i2c_bus = this->bus_;
-  if (i2c_bus == nullptr) {
-    ESP_LOGE(TAG, "❌ Bus I2C non configuré - impossible d'initialiser ESP-Video");
-    this->mark_failed();
-    return;
-  }
-
-  i2c_master_bus_handle_t i2c_handle = get_i2c_bus_handle(i2c_bus);
-  if (i2c_handle == nullptr) {
-    ESP_LOGE(TAG, "❌ Impossible d'obtenir le handle I2C du bus ESPHome");
-    this->mark_failed();
-    return;
-  }
-
+  // Configuration CSI pour esp_video_init
+  // esp_video créera son propre bus I2C (init_sccb = true)
   ESP_LOGI(TAG, "Configuration I2C pour ESP-Video:");
-  ESP_LOGI(TAG, "  Utilise le bus I2C d'ESPHome (handle: %p)", i2c_handle);
+  ESP_LOGI(TAG, "  SDA: GPIO%d, SCL: GPIO%d, Freq: %u Hz",
+           this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
 
   esp_video_init_csi_config_t csi_config = {};
+  csi_config.sccb_config.init_sccb = true;  // esp_video créera son propre bus I2C
 
-  // CRITIQUE: init_sccb = false pour utiliser le bus I2C existant d'ESPHome
-  csi_config.sccb_config.init_sccb = false;
-
-  // Utiliser i2c_handle (union) car init_sccb = false
-  csi_config.sccb_config.i2c_handle = i2c_handle;
-  csi_config.sccb_config.freq = 400000;  // Fréquence I2C (400kHz)
-
+  // Utiliser i2c_config (union) car init_sccb = true
+  csi_config.sccb_config.i2c_config.port = 0;  // Port I2C 0
+  csi_config.sccb_config.i2c_config.sda_pin = static_cast<gpio_num_t>(this->sda_pin_);
+  csi_config.sccb_config.i2c_config.scl_pin = static_cast<gpio_num_t>(this->scl_pin_);
+  csi_config.sccb_config.freq = this->i2c_frequency_;  // Fréquence I2C
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
 
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
-  ESP_LOGI(TAG, "Appel esp_video_init() avec bus I2C ESPHome...");
+  ESP_LOGI(TAG, "Appel esp_video_init()...");
   esp_err_t ret = esp_video_init(&video_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
@@ -142,11 +124,10 @@ void ESPVideoComponent::dump_config() {
 
   ESP_LOGCONFIG(TAG, "  État: %s", this->initialized_ ? "Prêt" : "Non initialisé");
 
-  if (this->bus_ != nullptr) {
-    ESP_LOGCONFIG(TAG, "  Bus I2C: Configuré (via ESPHome)");
-  } else {
-    ESP_LOGCONFIG(TAG, "  Bus I2C: Non configuré");
-  }
+  ESP_LOGCONFIG(TAG, "  Configuration I2C:");
+  ESP_LOGCONFIG(TAG, "    SDA: GPIO%d", this->sda_pin_);
+  ESP_LOGCONFIG(TAG, "    SCL: GPIO%d", this->scl_pin_);
+  ESP_LOGCONFIG(TAG, "    Fréquence: %u Hz", this->i2c_frequency_);
 
   ESP_LOGCONFIG(TAG, "  Encodeurs:");
 #ifdef ESP_VIDEO_H264_ENABLED
