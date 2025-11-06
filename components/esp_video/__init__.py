@@ -219,19 +219,11 @@ async def to_code(config):
     # Compilation des sources via script PlatformIO
     # -----------------------------------------------------------------------
     # Les sources C/C++ de tous les composants (esp_video, esp_cam_sensor,
-    # esp_h264, esp_ipa, esp_sccb_intf) sont compilées via le script
-    # esp_video_build.py qui est exécuté pendant la phase de build PlatformIO.
-
-    # Ajouter la bibliothèque précompilée esp_ipa
-    variant = CORE.data.get("esp32", {}).get("variant", "esp32p4")
-    if not variant:
-        variant = "esp32p4"
-
-    lib_path = os.path.join(esp_ipa_dir, f"lib/{variant}")
-    if os.path.exists(lib_path):
-        cg.add_build_flag(f"-L{lib_path}")
-        cg.add_build_flag("-lesp_ipa")
-        logging.info(f"[ESP-Video] Bibliothèque précompilée esp_ipa ajoutée pour {variant}")
+    # esp_h264, esp_ipa, esp_sccb_intf) ET la bibliothèque précompilée esp_ipa
+    # sont gérées par le script esp_video_build.py qui s'exécute pendant la
+    # phase de build PlatformIO.
+    #
+    # Ne pas ajouter de sources ou bibliothèques ici pour éviter la double compilation.
 
     # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité
