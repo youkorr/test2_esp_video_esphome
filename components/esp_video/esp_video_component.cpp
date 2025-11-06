@@ -6,6 +6,7 @@
 extern "C" {
 #include "esp_video_init.h"
 #include "driver/gpio.h"
+#include "esp_ldo_regulator.h"
 }
 
 namespace esphome {
@@ -65,28 +66,56 @@ void ESPVideoComponent::setup() {
     ESP_LOGW(TAG, "    Considérez réduire la résolution ou la qualité");
   }
 
+  // Initialiser le régulateur LDO si configuré
+  if (this->use_ldo_) {
+    ESP_LOGI(TAG, "Configuration LDO: %.1fV sur canal %d", this->ldo_voltage_, this->ldo_channel_);
+
+    esp_ldo_channel_handle_t ldo_handle = NULL;
+    esp_ldo_channel_config_t ldo_config = {
+      .chan_id = this->ldo_channel_,
+      .voltage_mv = static_cast<int>(this->ldo_voltage_ * 1000),  // Convertir V en mV
+      .flags = {
+        .adjustable_range_mv = 500,  // Plage d'ajustement de ±500mV
+      },
+    };
+
+    esp_err_t ldo_ret = esp_ldo_acquire_channel(&ldo_config, &ldo_handle);
+    if (ldo_ret != ESP_OK) {
+      ESP_LOGW(TAG, "⚠️  Échec de la configuration LDO: 0x%x (%s)", ldo_ret, esp_err_to_name(ldo_ret));
+      ESP_LOGW(TAG, "    Continuons sans LDO...");
+    } else {
+      ESP_LOGI(TAG, "✓ LDO configuré avec succès");
+      // Note: Le handle LDO reste actif pendant toute la durée de vie du composant
+    }
+  }
+
   // Initialiser le pipeline ESP-Video avec configuration MIPI-CSI
   ESP_LOGI(TAG, "Initialisation du pipeline ESP-Video...");
+  ESP_LOGI(TAG, "Configuration I2C:");
+  ESP_LOGI(TAG, "  Port: %d", this->i2c_port_);
+  ESP_LOGI(TAG, "  SDA: GPIO%d", this->i2c_sda_pin_);
+  ESP_LOGI(TAG, "  SCL: GPIO%d", this->i2c_scl_pin_);
+  ESP_LOGI(TAG, "  Fréquence: %u Hz", this->i2c_frequency_);
+  ESP_LOGI(TAG, "  Adresse capteur: 0x%02X", this->sensor_address_);
 
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
   // Configuration SCCB (I2C pour le capteur de caméra)
-  // Note: Ces valeurs sont des défauts raisonnables pour ESP32-P4 avec SC202CS
-  // Ajustez-les si nécessaire selon votre configuration matérielle
-  static const esp_video_init_csi_config_t csi_config = {
+  // Utilise les valeurs configurées dans le YAML
+  const esp_video_init_csi_config_t csi_config = {
     .sccb_config = {
       .init_sccb = true,
       .i2c_config = {
-        .port = 0,           // I2C port 0
-        .scl_pin = GPIO_NUM_8,  // SCL par défaut pour ESP32-P4
-        .sda_pin = GPIO_NUM_7,  // SDA par défaut pour ESP32-P4
+        .port = this->i2c_port_,
+        .scl_pin = static_cast<gpio_num_t>(this->i2c_scl_pin_),
+        .sda_pin = static_cast<gpio_num_t>(this->i2c_sda_pin_),
       },
-      .freq = 100000,      // 100kHz I2C frequency
+      .freq = this->i2c_frequency_,
     },
-    .reset_pin = GPIO_NUM_NC,  // Pas de reset pin (-1)
-    .pwdn_pin = GPIO_NUM_NC,   // Pas de power-down pin (-1)
+    .reset_pin = (this->reset_pin_ >= 0) ? static_cast<gpio_num_t>(this->reset_pin_) : GPIO_NUM_NC,
+    .pwdn_pin = (this->pwdn_pin_ >= 0) ? static_cast<gpio_num_t>(this->pwdn_pin_) : GPIO_NUM_NC,
   };
 
-  static const esp_video_init_config_t video_config = {
+  const esp_video_init_config_t video_config = {
     .csi = &csi_config,
 #if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
     .jpeg = nullptr,  // Laisser le driver JPEG gérer son propre handle
