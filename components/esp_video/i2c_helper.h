@@ -13,27 +13,25 @@ namespace esp_video {
  *
  * Cette fonction accède au membre bus_ du I2CBus ESP-IDF pour obtenir
  * le handle i2c_master_bus_handle_t nécessaire à esp_video_init().
+ *
+ * Note: Cette approche utilise la connaissance du layout interne de la classe
+ * I2CBus d'ESPHome pour ESP-IDF. Le handle est le premier membre de la classe.
  */
 inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
   if (bus == nullptr) {
     return nullptr;
   }
 
-  // Cast vers IDFI2CBus pour accéder aux membres ESP-IDF
-  auto *idf_bus = static_cast<i2c::IDFI2CBus *>(bus);
-  if (idf_bus == nullptr) {
-    return nullptr;
-  }
-
-  // Accès au handle via un pointeur vers le membre bus_
-  // Note: Cette approche fonctionne car bus_ est le premier membre de IDFI2CBus
-  // Si l'API ESPHome change, il faudra adapter cette fonction
-  struct IDFI2CBusInternal {
+  // Structure interne qui correspond au layout de la classe I2CBus ESP-IDF
+  // Le handle i2c_master_bus_handle_t est le premier membre de la classe
+  struct I2CBusInternal {
     i2c_master_bus_handle_t bus_;
-    // ... autres membres
+    // ... autres membres que nous n'avons pas besoin d'accéder
   };
 
-  auto *internal = reinterpret_cast<IDFI2CBusInternal *>(idf_bus);
+  // Accès direct au handle via reinterpret_cast
+  // Cela fonctionne car bus_ est garanti être le premier membre
+  auto *internal = reinterpret_cast<I2CBusInternal *>(bus);
   return internal->bus_;
 }
 
