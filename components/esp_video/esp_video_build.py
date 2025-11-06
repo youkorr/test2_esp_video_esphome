@@ -33,7 +33,8 @@ esp_video_sources = [
     "src/device/esp_video_h264_device.c",
     "src/device/esp_video_jpeg_device.c",
     "src/device/esp_video_isp_device.c",
-    "src/esp_video_isp_pipeline.c",
+    # ISP pipeline controller disabled - causes NULL pointer crash without esp_ipa library
+    # "src/esp_video_isp_pipeline.c",
     "src/esp_video_sensor_stubs.c",  # Stub definitions for sensor detection arrays
 ]
 
