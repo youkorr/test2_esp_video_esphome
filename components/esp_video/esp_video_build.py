@@ -67,15 +67,19 @@ if os.path.exists(esp_cam_sensor_dir):
 # ========================================================================
 # Sources esp_h264
 # ========================================================================
+# NOTE: Les sources software (sw/src/*_sw*.c) nécessitent des bibliothèques
+# externes (OpenH264, h264bsd) qui ne sont pas incluses. Ces sources sont
+# donc exclues de la compilation. Seul le support matériel (hardware) est activé.
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
     "port/src/esp_h264_alloc.c",
     "port/src/esp_h264_alloc_less_than_5_3.c",
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    "sw/src/esp_h264_enc_sw_param.c",
-    "sw/src/esp_h264_dec_sw.c",
-    "sw/src/esp_h264_enc_single_sw.c",
+    # Sources logicielles exclues (dépendances externes manquantes):
+    # "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
+    # "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
+    # "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
     "interface/include/src/esp_h264_enc_dual.c",
