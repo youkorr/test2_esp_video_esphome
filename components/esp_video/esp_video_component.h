@@ -1,24 +1,20 @@
 #pragma once
 
 #include "esphome/core/component.h"
-#include "esphome/components/i2c/i2c.h"
 #include "esphome/core/log.h"
 
 namespace esphome {
 namespace esp_video {
 
-// Forward declaration de l'adaptateur
-struct ESPHomeI2CSCCBAdapter;
-
 /**
  * @brief Composant ESPHome pour ESP-Video d'Espressif
  *
  * Ce composant initialise ESP-Video en appelant esp_video_init()
- * avec un adaptateur I2C-SCCB qui utilise le bus I2C d'ESPHome.
+ * avec init_sccb=true pour créer son propre bus I2C.
  *
- * Hérite de i2c::I2CDevice pour accéder au bus I2C configuré en YAML.
+ * Note: ESP-IDF permet plusieurs handles I2C sur mêmes GPIO si non utilisés simultanément.
  */
-class ESPVideoComponent : public Component, public i2c::I2CDevice {
+class ESPVideoComponent : public Component {
  public:
   void setup() override;
   void loop() override;
@@ -29,9 +25,16 @@ class ESPVideoComponent : public Component, public i2c::I2CDevice {
     return setup_priority::HARDWARE;
   }
 
+  // Setters pour configuration I2C
+  void set_sda_pin(uint8_t pin) { this->sda_pin_ = pin; }
+  void set_scl_pin(uint8_t pin) { this->scl_pin_ = pin; }
+  void set_i2c_frequency(uint32_t freq) { this->i2c_frequency_ = freq; }
+
  protected:
   bool initialized_{false};
-  ESPHomeI2CSCCBAdapter *sccb_adapter_{nullptr};
+  uint8_t sda_pin_{31};
+  uint8_t scl_pin_{32};
+  uint32_t i2c_frequency_{400000};
 };
 
 }  // namespace esp_video
