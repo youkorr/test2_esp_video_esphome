@@ -18,14 +18,13 @@ DEPENDENCIES = ["i2c", "esp32"]
 AUTO_LOAD = []
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
-ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
+ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component, i2c.I2CDevice)
 
 # Configuration
 CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
-CONF_I2C_BUS = "i2c_bus"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -43,8 +42,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-        cv.Required(CONF_I2C_BUS): cv.use_id(i2c.I2CBus),
-    }).extend(cv.COMPONENT_SCHEMA),
+    })
+    .extend(cv.COMPONENT_SCHEMA)
+    .extend(i2c.i2c_device_schema(None)),  # Ajouter le schéma I2C device
     validate_esp_video_config
 )
 
@@ -53,23 +53,10 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Référence au bus I2C
-    i2c_bus = await cg.get_variable(config[CONF_I2C_BUS])
-    cg.add(var.set_i2c_bus(i2c_bus))
+    # Enregistrer comme I2C device - ESPHome gère automatiquement le bus I2C
+    await i2c.register_i2c_device(var, config)
 
-    # Récupérer les pins SDA/SCL du bus I2C
-    # Note: Ces informations ne sont pas facilement accessibles depuis Python,
-    # donc nous utilisons les pins par défaut pour ESP32-P4 (GPIO31/GPIO32)
-    # Si votre bus I2C utilise d'autres pins, vous devrez les spécifier manuellement
-    sda_pin = 31  # Défaut pour ESP32-P4
-    scl_pin = 32  # Défaut pour ESP32-P4
-    i2c_freq = 400000  # 400kHz par défaut
-
-    cg.add(var.set_sda_pin(sda_pin))
-    cg.add(var.set_scl_pin(scl_pin))
-    cg.add(var.set_i2c_frequency(i2c_freq))
-
-    logging.info(f"[ESP-Video] Configuration I2C: SDA=GPIO{sda_pin}, SCL=GPIO{scl_pin}, Freq={i2c_freq}Hz")
+    logging.info("[ESP-Video] Enregistré comme I2C device - utilise le bus I2C d'ESPHome")
 
     # -----------------------------------------------------------------------
     # Vérification du framework
