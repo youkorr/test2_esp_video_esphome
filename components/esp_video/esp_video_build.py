@@ -69,10 +69,11 @@ if os.path.exists(esp_cam_sensor_dir):
 # ========================================================================
 # NOTE: Les sources software (sw/src/*_sw*.c) nécessitent des bibliothèques
 # externes (OpenH264, tinyh264) fournies dans sw/libs/openh264_inc et sw/libs/tinyh264_inc
+# NOTE: esp_h264_alloc_less_than_5_3.c est exclu car nous utilisons ESP-IDF >= 5.3
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
     "port/src/esp_h264_alloc.c",
-    "port/src/esp_h264_alloc_less_than_5_3.c",
+    # "port/src/esp_h264_alloc_less_than_5_3.c",  # Exclu: pour ESP-IDF < 5.3 seulement
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
     # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/):
