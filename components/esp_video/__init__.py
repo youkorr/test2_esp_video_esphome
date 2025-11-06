@@ -117,7 +117,7 @@ async def to_code(config):
     # esp_h264
     esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
     if os.path.exists(esp_h264_dir):
-        for inc in ["interface/include", "port/include", "sw/include"]:
+        for inc in ["interface/include", "port/include", "sw/include", "hw/include"]:
             inc_path = os.path.join(esp_h264_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
