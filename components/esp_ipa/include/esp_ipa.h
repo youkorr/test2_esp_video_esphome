@@ -29,6 +29,17 @@ typedef esp_ipa_pipeline_t *esp_ipa_pipeline_handle_t;
 void esp_ipa_pipeline_set_log(bool enable);
 
 /**
+ * @brief Get IPA configuration for a specific camera device.
+ *
+ * @param cam_name  Camera device name
+ *
+ * @return
+ *      - Pointer to IPA configuration if found
+ *      - NULL if not found
+ */
+const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name);
+
+/**
  * @brief Print image process algorithm pipeline information.
  *
  * @param handle    Image process algorithm pipeline object handle
@@ -42,6 +53,8 @@ esp_err_t esp_ipa_pipeline_print(esp_ipa_pipeline_handle_t handle);
 /**
  * @brief Create image process algorithm pipeline.
  *
+ * @param ipa_nums  Number of IPAs
+ * @param ipa_names Array of IPA names
  * @param handle    Image process algorithm pipeline object handle
  *
  * @return
@@ -49,6 +62,24 @@ esp_err_t esp_ipa_pipeline_print(esp_ipa_pipeline_handle_t handle);
  *      - Others if failed
  */
 esp_err_t esp_ipa_pipeline_create(uint8_t ipa_nums, const char **ipa_names, esp_ipa_pipeline_handle_t *handle);
+
+/**
+ * @brief Create image process algorithm pipeline from configuration.
+ *
+ * @param config    IPA configuration
+ * @param handle    Image process algorithm pipeline object handle
+ *
+ * @return
+ *      - ESP_OK on success
+ *      - Others if failed
+ */
+static inline esp_err_t esp_ipa_pipeline_create_from_config(const esp_ipa_config_t *config, esp_ipa_pipeline_handle_t *handle)
+{
+    if (!config) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return esp_ipa_pipeline_create(config->ipa_nums, config->ipa_names, handle);
+}
 
 /**
  * @brief Initialize image process algorithm pipeline and get initialization ISP/Camera parameters,

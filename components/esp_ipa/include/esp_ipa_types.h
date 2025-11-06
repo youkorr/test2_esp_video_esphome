@@ -228,6 +228,14 @@ typedef struct esp_ipa {
 } esp_ipa_t;
 
 /**
+ * @brief Image process algorithm configuration
+ */
+typedef struct esp_ipa_config {
+    uint8_t ipa_nums;       /*!< Number of IPAs */
+    const char **ipa_names; /*!< Array of IPA names */
+} esp_ipa_config_t;
+
+/**
  * @brief Image process algorithm pipeline object
  */
 typedef struct esp_ipa_pipeline {

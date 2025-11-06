@@ -1270,7 +1270,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     isp = calloc(1, sizeof(esp_video_isp_t));
     ESP_RETURN_ON_FALSE(isp, ESP_ERR_NO_MEM, TAG, "failed to malloc isp");
 
-    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create(config->ipa_config, &isp->ipa_pipeline),
+    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create_from_config(config->ipa_config, &isp->ipa_pipeline),
                       fail_0, TAG, "failed to create IPA pipeline");
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
