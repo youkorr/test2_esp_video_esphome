@@ -422,12 +422,15 @@ bool MipiDSICamComponent::parse_resolution_(const std::string &res, uint16_t &w,
   // Parse format "WIDTHxHEIGHT"
   size_t pos = res.find('x');
   if (pos != std::string::npos) {
-    try {
-      w = std::stoi(res.substr(0, pos));
-      h = std::stoi(res.substr(pos + 1));
+    // Utiliser atoi au lieu de stoi (pas d'exceptions)
+    int width_val = atoi(res.substr(0, pos).c_str());
+    int height_val = atoi(res.substr(pos + 1).c_str());
+
+    // Valider les valeurs
+    if (width_val > 0 && height_val > 0 && width_val <= 4096 && height_val <= 4096) {
+      w = static_cast<uint16_t>(width_val);
+      h = static_cast<uint16_t>(height_val);
       return true;
-    } catch (...) {
-      return false;
     }
   }
 
