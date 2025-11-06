@@ -57,6 +57,20 @@ async def to_code(config):
     i2c_bus = await cg.get_variable(config[CONF_I2C_BUS])
     cg.add(var.set_i2c_bus(i2c_bus))
 
+    # Récupérer les pins SDA/SCL du bus I2C
+    # Note: Ces informations ne sont pas facilement accessibles depuis Python,
+    # donc nous utilisons les pins par défaut pour ESP32-P4 (GPIO31/GPIO32)
+    # Si votre bus I2C utilise d'autres pins, vous devrez les spécifier manuellement
+    sda_pin = 31  # Défaut pour ESP32-P4
+    scl_pin = 32  # Défaut pour ESP32-P4
+    i2c_freq = 400000  # 400kHz par défaut
+
+    cg.add(var.set_sda_pin(sda_pin))
+    cg.add(var.set_scl_pin(scl_pin))
+    cg.add(var.set_i2c_frequency(i2c_freq))
+
+    logging.info(f"[ESP-Video] Configuration I2C: SDA=GPIO{sda_pin}, SCL=GPIO{scl_pin}, Freq={i2c_freq}Hz")
+
     # -----------------------------------------------------------------------
     # Vérification du framework
     # -----------------------------------------------------------------------
