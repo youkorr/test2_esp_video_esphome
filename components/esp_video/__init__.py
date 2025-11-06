@@ -36,7 +36,7 @@ CONFIG_SCHEMA = cv.All(
         cv.GenerateID(): cv.declare_id(ESPVideoComponent),
         cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
-        cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_ISP, default=False): cv.boolean,  # Disabled by default - requires full esp_ipa library
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
