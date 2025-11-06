@@ -84,10 +84,14 @@ async def to_code(config):
     # -----------------------------------------------------------------------
     # Ajout des includes ESP-Video
     # -----------------------------------------------------------------------
+    # NOTE IMPORTANTE: Les sous-répertoires include/linux et include/sys ne doivent
+    # PAS être ajoutés comme chemins d'include séparés car les sources utilisent
+    # #include "linux/videodev2.h" et #include "sys/mman.h", ce qui nécessite que
+    # seul le répertoire parent 'include' soit dans le path.
+    # Si on ajoutait include/linux, le compilateur chercherait linux/videodev2.h
+    # dans include/linux/linux/videodev2.h qui n'existe pas.
     include_dirs = [
-        "include",
-        "include/linux",
-        "include/sys",
+        "include",          # Contient linux/ et sys/ comme sous-répertoires
         "src",
         "src/device",
         "private_include",
