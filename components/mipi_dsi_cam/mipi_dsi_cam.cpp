@@ -18,13 +18,16 @@ static const char *const TAG = "mipi_dsi_cam";
 
 void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "========================================");
-  ESP_LOGI(TAG, "  MIPI CSI Camera Setup (V4L2 API)");
+  ESP_LOGI(TAG, "  MIPI CSI Camera Setup (V4L2 + PPA)");
   ESP_LOGI(TAG, "========================================");
 
   ESP_LOGI(TAG, "Configuration:");
   ESP_LOGI(TAG, "  Résolution: %s", this->resolution_.c_str());
   ESP_LOGI(TAG, "  Format: %s", this->pixel_format_.c_str());
   ESP_LOGI(TAG, "  FPS: %d", this->framerate_);
+  ESP_LOGI(TAG, "  Mirror X: %s", this->mirror_x_ ? "Oui" : "Non");
+  ESP_LOGI(TAG, "  Mirror Y: %s", this->mirror_y_ ? "Oui" : "Non");
+  ESP_LOGI(TAG, "  Rotation: %d°", this->rotation_angle_);
 
   // Parse resolution
   if (!this->parse_resolution_(this->resolution_, this->width_, this->height_)) {
@@ -64,6 +67,13 @@ void MipiDSICamComponent::setup() {
   // Setup buffers
   if (!this->setup_buffers_()) {
     ESP_LOGE(TAG, "❌ Échec configuration buffers");
+    this->mark_failed();
+    return;
+  }
+
+  // Setup PPA (Pixel Processing Accelerator)
+  if (!this->setup_ppa_()) {
+    ESP_LOGE(TAG, "❌ Échec configuration PPA");
     this->mark_failed();
     return;
   }
@@ -214,6 +224,41 @@ bool MipiDSICamComponent::setup_buffers_() {
   return true;
 }
 
+bool MipiDSICamComponent::setup_ppa_() {
+  ESP_LOGI(TAG, "Configuration PPA...");
+
+  // Allouer buffer de sortie dans SPIRAM avec capacité DMA
+  this->output_buffer_size_ = this->frame_size_;
+  this->output_buffer_ = (uint8_t*)heap_caps_calloc(
+    this->output_buffer_size_, 1,
+    MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM
+  );
+
+  if (this->output_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "❌ Échec allocation buffer sortie (%u octets)", (unsigned)this->output_buffer_size_);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "  Buffer sortie: %u octets (DMA+SPIRAM)", (unsigned)this->output_buffer_size_);
+
+  // Configuration PPA
+  ppa_client_config_t ppa_config = {
+    .oper_type = PPA_OPERATION_SRM,  // Scale, Rotate, Mirror
+    .max_pending_trans_num = 1,
+  };
+
+  esp_err_t ret = ppa_register_client(&ppa_config, &this->ppa_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ ppa_register_client failed: %d", ret);
+    heap_caps_free(this->output_buffer_);
+    this->output_buffer_ = nullptr;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ PPA configuré (SRM mode)");
+  return true;
+}
+
 bool MipiDSICamComponent::start_stream_() {
   ESP_LOGI(TAG, "Démarrage streaming...");
 
@@ -283,7 +328,7 @@ bool MipiDSICamComponent::is_streaming() const {
 bool MipiDSICamComponent::capture_frame() {
   std::lock_guard<std::mutex> lock(this->camera_mutex_);
 
-  if (!this->streaming_ || this->video_fd_ < 0) {
+  if (!this->streaming_ || this->video_fd_ < 0 || this->ppa_handle_ == nullptr) {
     return false;
   }
 
@@ -300,8 +345,41 @@ bool MipiDSICamComponent::capture_frame() {
     return false;
   }
 
-  // Pointer vers les données de la frame
-  this->current_frame_ = this->buffers_[buf.index];
+  // Traiter l'image avec le PPA (Scale, Rotate, Mirror)
+  ppa_srm_oper_config_t srm_config = {
+    .in = {
+      .buffer = this->buffers_[buf.index],
+      .pic_w = this->width_,
+      .pic_h = this->height_,
+      .block_w = this->width_,
+      .block_h = this->height_,
+      .block_offset_x = 0,
+      .block_offset_y = 0,
+      .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+    },
+    .out = {
+      .buffer = this->output_buffer_,
+      .buffer_size = this->output_buffer_size_,
+      .pic_w = this->width_,
+      .pic_h = this->height_,
+      .block_offset_x = 0,
+      .block_offset_y = 0,
+      .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+    },
+    .rotation_angle = this->map_rotation_(this->rotation_angle_),
+    .scale_x = 1.0f,
+    .scale_y = 1.0f,
+    .mirror_x = this->mirror_x_,
+    .mirror_y = this->mirror_y_,
+    .rgb_swap = false,
+    .byte_swap = false,
+    .mode = PPA_TRANS_MODE_BLOCKING,  // Bloquant pour éviter des problèmes de synchronisation
+  };
+
+  esp_err_t ret = ppa_do_scale_rotate_mirror(this->ppa_handle_, &srm_config);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "ppa_do_scale_rotate_mirror failed: %d", ret);
+  }
 
   // Requeue buffer (rend le buffer au driver)
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
@@ -309,12 +387,13 @@ bool MipiDSICamComponent::capture_frame() {
     return false;
   }
 
-  return true;
+  return (ret == ESP_OK);
 }
 
 uint8_t* MipiDSICamComponent::get_image_data() {
   std::lock_guard<std::mutex> lock(this->camera_mutex_);
-  return this->current_frame_;
+  // Retourne le buffer de sortie PPA (avec mirror/rotation appliquée)
+  return this->output_buffer_;
 }
 
 uint32_t MipiDSICamComponent::map_pixel_format_(const std::string &fmt) {
@@ -352,14 +431,30 @@ bool MipiDSICamComponent::parse_resolution_(const std::string &res, uint16_t &w,
   return false;
 }
 
+ppa_srm_rotation_angle_t MipiDSICamComponent::map_rotation_(int angle) {
+  switch (angle) {
+    case 0:   return PPA_SRM_ROTATION_ANGLE_0;
+    case 90:  return PPA_SRM_ROTATION_ANGLE_90;
+    case 180: return PPA_SRM_ROTATION_ANGLE_180;
+    case 270: return PPA_SRM_ROTATION_ANGLE_270;
+    default:
+      ESP_LOGW(TAG, "Angle de rotation invalide: %d, utilisation 0°", angle);
+      return PPA_SRM_ROTATION_ANGLE_0;
+  }
+}
+
 void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI CSI Camera:");
   ESP_LOGCONFIG(TAG, "  Résolution: %s (%dx%d)",
                 this->resolution_.c_str(), this->width_, this->height_);
   ESP_LOGCONFIG(TAG, "  Format: %s", this->pixel_format_.c_str());
   ESP_LOGCONFIG(TAG, "  FPS: %d", this->framerate_);
+  ESP_LOGCONFIG(TAG, "  Mirror X: %s", this->mirror_x_ ? "Oui" : "Non");
+  ESP_LOGCONFIG(TAG, "  Mirror Y: %s", this->mirror_y_ ? "Oui" : "Non");
+  ESP_LOGCONFIG(TAG, "  Rotation: %d°", this->rotation_angle_);
   ESP_LOGCONFIG(TAG, "  État: %s", this->streaming_ ? "Streaming" : "Arrêté");
   ESP_LOGCONFIG(TAG, "  Device: %s", ESP_VIDEO_MIPI_CSI_DEVICE_NAME);
+  ESP_LOGCONFIG(TAG, "  PPA: %s", this->ppa_handle_ ? "Activé" : "Désactivé");
 }
 
 }  // namespace mipi_dsi_cam

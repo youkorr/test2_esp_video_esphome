@@ -7,6 +7,8 @@
 
 extern "C" {
 #include "linux/videodev2.h"
+#include "driver/ppa.h"
+#include "esp_heap_caps.h"
 }
 
 namespace esphome {
@@ -44,6 +46,9 @@ class MipiDSICamComponent : public Component {
   void set_resolution(const std::string &res) { this->resolution_ = res; }
   void set_pixel_format(const std::string &fmt) { this->pixel_format_ = fmt; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
+  void set_mirror_x(bool mirror) { this->mirror_x_ = mirror; }
+  void set_mirror_y(bool mirror) { this->mirror_y_ = mirror; }
+  void set_rotation(int angle) { this->rotation_angle_ = angle; }
 
   // API pour lvgl_camera_display
   bool start_streaming();
@@ -60,6 +65,9 @@ class MipiDSICamComponent : public Component {
   std::string resolution_{"720P"};
   std::string pixel_format_{"RGB565"};
   uint8_t framerate_{30};
+  bool mirror_x_{true};     // Mirror horizontal (comme la demo M5Stack)
+  bool mirror_y_{false};
+  int rotation_angle_{0};   // 0, 90, 180, 270
 
   // État
   bool initialized_{false};
@@ -73,17 +81,23 @@ class MipiDSICamComponent : public Component {
   uint32_t v4l2_pixelformat_{0};
   size_t frame_size_{0};
 
-  // Buffers mmap
+  // Buffers mmap (entrée V4L2)
   uint8_t* buffers_[VIDEO_BUFFER_COUNT]{nullptr};
-  uint8_t* current_frame_{nullptr};
+
+  // PPA (Pixel Processing Accelerator)
+  ppa_client_handle_t ppa_handle_{nullptr};
+  uint8_t* output_buffer_{nullptr};  // Buffer de sortie PPA (DMA + SPIRAM)
+  size_t output_buffer_size_{0};
 
   // Helpers
   bool open_video_device_();
   bool setup_buffers_();
+  bool setup_ppa_();
   bool start_stream_();
   bool stop_stream_();
   uint32_t map_pixel_format_(const std::string &fmt);
   bool parse_resolution_(const std::string &res, uint16_t &w, uint16_t &h);
+  ppa_srm_rotation_angle_t map_rotation_(int angle);
 };
 
 // Alias pour compatibilité
