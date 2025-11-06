@@ -2,19 +2,19 @@
 Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
 Support complet H264 + JPEG avec dépendances ESP-IDF
 
-Ce composant initialise ESP-Video en appelant esp_video_init() avec le handle I2C.
+Ce composant initialise ESP-Video en utilisant le bus I2C d'ESPHome.
 """
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import i2c
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_I2C_ID
 from esphome.core import CORE
 import os
 import logging
 
 CODEOWNERS = ["@youkorr"]
-DEPENDENCIES = ["esp32"]  # i2c retiré pour éviter conflit d'ordre d'initialisation
+DEPENDENCIES = ["esp32", "i2c"]  # i2c ajouté car nous utilisons le bus I2C ESPHome
 AUTO_LOAD = []
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
@@ -25,9 +25,6 @@ CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
-CONF_SDA_PIN = "sda_pin"
-CONF_SCL_PIN = "scl_pin"
-CONF_I2C_FREQUENCY = "i2c_frequency"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -41,13 +38,11 @@ def validate_esp_video_config(config):
 CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(ESPVideoComponent),
+        cv.Required(CONF_I2C_ID): cv.use_id(i2c.I2CBus),
         cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-        cv.Optional(CONF_SDA_PIN, default=31): cv.int_range(min=0, max=48),
-        cv.Optional(CONF_SCL_PIN, default=32): cv.int_range(min=0, max=48),
-        cv.Optional(CONF_I2C_FREQUENCY, default=400000): cv.int_range(min=100000, max=1000000),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -57,15 +52,13 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Configuration I2C - esp_video créera son propre bus I2C
-    cg.add(var.set_sda_pin(config[CONF_SDA_PIN]))
-    cg.add(var.set_scl_pin(config[CONF_SCL_PIN]))
-    cg.add(var.set_i2c_frequency(config[CONF_I2C_FREQUENCY]))
+    # Récupérer le bus I2C d'ESPHome
+    i2c_bus = await cg.get_variable(config[CONF_I2C_ID])
+    cg.add(var.set_i2c_bus(i2c_bus))
 
-    logging.info(f"[ESP-Video] Configuration I2C: SDA=GPIO{config[CONF_SDA_PIN]}, "
-                 f"SCL=GPIO{config[CONF_SCL_PIN]}, Freq={config[CONF_I2C_FREQUENCY]}Hz")
-    logging.info("[ESP-Video] esp_video créera son propre bus I2C (init_sccb=true)")
-    logging.info("[ESP-Video] Note: ESP-IDF permet plusieurs handles I2C sur mêmes GPIO")
+    logging.info(f"[ESP-Video] Configuration I2C: Utilise le bus ESPHome '{config[CONF_I2C_ID]}'")
+    logging.info("[ESP-Video] esp_video utilisera le bus I2C ESPHome (init_sccb=false)")
+    logging.info("[ESP-Video] Avantage: Partage propre du bus I2C, pas de conflit")
 
     # -----------------------------------------------------------------------
     # Vérification du framework

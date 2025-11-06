@@ -1,4 +1,5 @@
 #include "esp_video_component.h"
+#include "i2c_helper.h"
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 
@@ -70,24 +71,35 @@ void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "Initialisation ESP-Video...");
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
-  // esp_video crée son propre bus I2C pour initialiser le capteur MIPI-CSI
-  // IMPORTANT: esp_video s'initialise AVANT i2c component (priorité 1100 > BUS 1000)
+  // Vérifier que le bus I2C ESPHome est fourni
+  if (this->i2c_bus_ == nullptr) {
+    ESP_LOGE(TAG, "❌ Bus I2C non fourni! Vérifiez la configuration i2c_id");
+    this->mark_failed();
+    return;
+  }
+
+  // Extraire le handle I2C ESP-IDF depuis le bus ESPHome
   ESP_LOGI(TAG, "Configuration esp_video:");
-  ESP_LOGI(TAG, "  init_sccb: true (esp_video crée son bus I2C)");
-  ESP_LOGI(TAG, "  I2C: Port 0, SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
-           this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
-  ESP_LOGI(TAG, "  Setup priority: 1100 (avant I2C BUS:1000)");
+  ESP_LOGI(TAG, "  init_sccb: false (utilise le bus I2C ESPHome)");
+  ESP_LOGI(TAG, "  Setup priority: DATA (après I2C BUS:1000)");
+
+  i2c_master_bus_handle_t i2c_handle = get_i2c_bus_handle(this->i2c_bus_);
+  if (i2c_handle == nullptr) {
+    ESP_LOGE(TAG, "❌ Impossible d'extraire le handle I2C ESP-IDF");
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
 
   esp_video_init_csi_config_t csi_config = {};
 
-  // Initialiser SCCB - esp_video crée son propre bus I2C sur PORT 0
-  csi_config.sccb_config.init_sccb = true;
+  // Ne PAS initialiser SCCB - utiliser le bus I2C ESPHome existant
+  csi_config.sccb_config.init_sccb = false;
 
-  // Utiliser i2c_config (union) car init_sccb = true
-  csi_config.sccb_config.i2c_config.port = 0;  // Port 0 car esp_video s'initialise EN PREMIER
-  csi_config.sccb_config.i2c_config.sda_pin = static_cast<gpio_num_t>(this->sda_pin_);
-  csi_config.sccb_config.i2c_config.scl_pin = static_cast<gpio_num_t>(this->scl_pin_);
-  csi_config.sccb_config.freq = this->i2c_frequency_;
+  // Utiliser i2c_handle (union) car init_sccb = false
+  csi_config.sccb_config.i2c_handle = i2c_handle;
+  csi_config.sccb_config.freq = 400000;  // Fréquence I2C
 
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
@@ -95,7 +107,7 @@ void ESPVideoComponent::setup() {
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
-  ESP_LOGI(TAG, "Appel esp_video_init() avec I2C port 0 (premier à s'initialiser)...");
+  ESP_LOGI(TAG, "Appel esp_video_init() avec handle I2C ESPHome...");
   esp_err_t ret = esp_video_init(&video_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
@@ -103,7 +115,7 @@ void ESPVideoComponent::setup() {
     return;
   }
 
-  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Bus I2C port 0 créé, devices vidéo prêts");
+  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo prêts (bus I2C partagé)");
 #else
   ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");
 #endif
@@ -128,8 +140,7 @@ void ESPVideoComponent::dump_config() {
 #endif
 
   ESP_LOGCONFIG(TAG, "  État: %s", this->initialized_ ? "Prêt" : "Non initialisé");
-  ESP_LOGCONFIG(TAG, "  I2C: SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
-                this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
+  ESP_LOGCONFIG(TAG, "  I2C: Bus ESPHome partagé (%p)", this->i2c_bus_);
 
   ESP_LOGCONFIG(TAG, "  Encodeurs:");
 #ifdef ESP_VIDEO_H264_ENABLED
