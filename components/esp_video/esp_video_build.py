@@ -34,6 +34,7 @@ esp_video_sources = [
     "src/device/esp_video_jpeg_device.c",
     "src/device/esp_video_isp_device.c",
     "src/esp_video_isp_pipeline.c",
+    "src/esp_video_isp_stubs.c",
 ]
 
 for src in esp_video_sources:
