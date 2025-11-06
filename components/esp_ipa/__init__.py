@@ -23,24 +23,6 @@ async def to_code(config):
     if os.path.exists(inc_path):
         cg.add_build_flag(f"-I{inc_path}")
 
-    # Ajouter la source version.c
-    src_path = os.path.join(component_dir, "src/version.c")
-    if os.path.exists(src_path):
-        cg.add_library(src_path)
-
-    # Ajouter la bibliothèque précompilée
-    # Détecter la variante ESP32 (esp32p4 par défaut)
-    variant = CORE.data.get("esp32", {}).get("variant", "esp32p4")
-    if not variant:
-        variant = "esp32p4"
-
-    lib_path = os.path.join(component_dir, f"lib/{variant}")
-
-    if os.path.exists(lib_path):
-        # Ajouter le chemin de la bibliothèque
-        cg.add_build_flag(f"-L{lib_path}")
-        # Linker la bibliothèque
-        cg.add_build_flag("-lesp_ipa")
-    else:
-        import logging
-        logging.warning(f"[esp_ipa] Bibliothèque précompilée non trouvée pour {variant}")
+    # NOTE: Les sources (version.c) et la bibliothèque précompilée (libesp_ipa.a)
+    # sont gérées par esp_video_build.py (script PlatformIO)
+    # Ne pas utiliser cg.add_library() ici pour éviter la double compilation
