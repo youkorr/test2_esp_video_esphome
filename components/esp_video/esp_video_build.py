@@ -101,10 +101,17 @@ if os.path.exists(esp_h264_dir):
 # Sources esp_ipa
 # ========================================================================
 esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
-esp_ipa_src = os.path.join(esp_ipa_dir, "src/version.c")
-if os.path.exists(esp_ipa_src):
-    sources_to_add.append(esp_ipa_src)
-    print(f"[ESP-Video Build] + esp_ipa/src/version.c")
+esp_ipa_sources = [
+    "src/version.c",
+    "src/esp_ipa_detect_stubs.c",  # Linker symbols for IPA auto-detection
+]
+
+if os.path.exists(esp_ipa_dir):
+    for src in esp_ipa_sources:
+        src_path = os.path.join(esp_ipa_dir, src)
+        if os.path.exists(src_path):
+            sources_to_add.append(src_path)
+            print(f"[ESP-Video Build] + esp_ipa/{src}")
 
 # ========================================================================
 # Sources esp_sccb_intf
