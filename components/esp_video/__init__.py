@@ -47,8 +47,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
         cv.Required(CONF_I2C_BUS): cv.use_id(i2c.I2CBus),
-        cv.Required(CONF_SDA_PIN): cv.int_range(min=0, max=48),
-        cv.Required(CONF_SCL_PIN): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_SDA_PIN, default=31): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_SCL_PIN, default=32): cv.int_range(min=0, max=48),
         cv.Optional(CONF_I2C_FREQUENCY, default=400000): cv.int_range(min=100000, max=1000000),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
