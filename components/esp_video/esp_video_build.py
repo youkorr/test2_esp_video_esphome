@@ -77,6 +77,7 @@ esp_h264_sources = [
     # "sw/src/esp_h264_enc_sw_param.c",
     # "sw/src/esp_h264_dec_sw.c",
     # "sw/src/esp_h264_enc_single_sw.c",
+    "hw/src/esp_h264_enc_single_hw.c",  # Hardware encoder stub implementation
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
     "interface/include/src/esp_h264_enc_dual.c",
