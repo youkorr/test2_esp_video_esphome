@@ -76,7 +76,7 @@ void ESPVideoComponent::setup() {
   // IMPORTANT: Utiliser le bus I2C d'ESPHome au lieu d'en créer un nouveau
   // pour éviter les conflits matériels (init_sccb = false)
 
-  i2c::I2CBus *i2c_bus = this->parent_;
+  i2c::I2CBus *i2c_bus = this->bus_;
   if (i2c_bus == nullptr) {
     ESP_LOGE(TAG, "❌ Bus I2C non configuré - impossible d'initialiser ESP-Video");
     this->mark_failed();
@@ -142,7 +142,7 @@ void ESPVideoComponent::dump_config() {
 
   ESP_LOGCONFIG(TAG, "  État: %s", this->initialized_ ? "Prêt" : "Non initialisé");
 
-  if (this->parent_ != nullptr) {
+  if (this->bus_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Bus I2C: Configuré (via ESPHome)");
   } else {
     ESP_LOGCONFIG(TAG, "  Bus I2C: Non configuré");
