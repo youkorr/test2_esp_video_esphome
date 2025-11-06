@@ -19,18 +19,35 @@
  *
  * We create a contiguous array and make the _start and _end symbols point to
  * the first element and one-past-the-last element.
+ *
+ * NOTE: Pour utiliser un capteur avec une adresse I2C différente, modifiez
+ *       le champ .sccb_addr ci-dessous:
+ *       - SC202CS: 0x36 (par défaut)
+ *       - OV5647: 0x36
+ *       - Autres capteurs: consultez la datasheet
+ *
+ * Pour ajouter plusieurs capteurs à détecter automatiquement, décommentez
+ * les entrées supplémentaires ci-dessous.
  */
 
-// Forward declaration of SC202CS detection function from sc202cs.c
+// Forward declarations of sensor detection functions
 extern esp_cam_sensor_device_t *sc202cs_detect(void *config);
+// extern esp_cam_sensor_device_t *ov5647_detect(void *config);  // Décommentez si disponible
 
 // Sensor detection array
 // Must be non-static so the linker can create the symbols
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
     .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = 0x36,  // SC202CS default I2C address
+    .sccb_addr = 0x36,  // SC202CS default I2C address - MODIFIEZ ICI si nécessaire
     .detect = sc202cs_detect,
 };
+
+// Pour détecter plusieurs capteurs, décommentez et ajustez:
+// static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_1 = {
+//     .port = ESP_CAM_SENSOR_MIPI_CSI,
+//     .sccb_addr = 0x36,  // OV5647 address
+//     .detect = ov5647_detect,
+// };
 
 // End marker - placed right after start in memory
 // The iteration logic uses pointer comparison: p < &end
