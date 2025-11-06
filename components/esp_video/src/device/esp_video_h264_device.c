@@ -11,9 +11,9 @@
 #include "esp_log.h"
 #include "esp_attr.h"
 #include "esp_private/esp_cache_private.h"
-#include ".../esp_h264/hw/include/esp_h264_enc_single_hw.h"
-#include ".../esp_h264/sw/include/esp_h264_enc_single_sw.h"
-#include ".../esp_h264/interface/include/esp_h264_enc_single.h"
+#include "esp_h264_enc_single_hw.h"
+#include "esp_h264_enc_single_sw.h"
+#include "esp_h264_enc_single.h"
 
 #include "esp_video.h"
 #include "esp_video_device_internal.h"
