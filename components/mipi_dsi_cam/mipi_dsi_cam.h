@@ -61,6 +61,7 @@ class MipiDSICamComponent : public Component {
   void set_rotation(int angle) { this->rotation_angle_ = angle; }
 
   // API pour lvgl_camera_display
+  bool is_pipeline_ready() const { return this->initialized_; }
   bool start_streaming();
   bool stop_streaming();
   bool is_streaming() const;
