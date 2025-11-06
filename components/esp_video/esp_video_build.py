@@ -32,8 +32,11 @@ esp_video_sources = [
     "src/device/esp_video_csi_device.c",
     "src/device/esp_video_h264_device.c",
     "src/device/esp_video_jpeg_device.c",
+    # ISP device and pipeline disabled - causes NULL pointer crash without full esp_ipa library
     "src/device/esp_video_isp_device.c",
     "src/esp_video_isp_pipeline.c",
+    "src/esp_video_sensor_stubs.c",
+    "src/esp_video_isp_stubs.c",# Stub definitions for sensor detection arrays
 ]
 
 for src in esp_video_sources:
@@ -69,12 +72,14 @@ if os.path.exists(esp_cam_sensor_dir):
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
     "port/src/esp_h264_alloc.c",
-    "port/src/esp_h264_alloc_less_than_5_3.c",
+    # "port/src/esp_h264_alloc_less_than_5_3.c",  # Only for ESP-IDF < 5.3
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    "sw/src/esp_h264_enc_sw_param.c",
-    "sw/src/esp_h264_dec_sw.c",
-    "sw/src/esp_h264_enc_single_sw.c",
+    # Software encoder/decoder sources excluded - require OpenH264 library
+    # "sw/src/esp_h264_enc_sw_param.c",
+    # "sw/src/esp_h264_dec_sw.c",
+    # "sw/src/esp_h264_enc_single_sw.c",
+    "hw/src/esp_h264_enc_single_hw.c",  # Hardware encoder stub implementation
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
     "interface/include/src/esp_h264_enc_dual.c",
@@ -131,5 +136,16 @@ if sources_to_add:
     env.Append(PIOBUILDFILES=objects)
 
     print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
+
+    # ========================================================================
+    # Linker l'esp_ipa library
+    # ========================================================================
+    esp_ipa_lib = os.path.join(parent_components_dir, "esp_ipa/lib/esp32p4/libesp_ipa.a")
+    if os.path.exists(esp_ipa_lib):
+        # Add the library to be linked
+        env.Append(LIBS=[File(esp_ipa_lib)])
+        print(f"[ESP-Video Build] ✓ Bibliothèque esp_ipa ajoutée: {esp_ipa_lib}")
+    else:
+        print(f"[ESP-Video Build] ⚠️ Bibliothèque esp_ipa non trouvée: {esp_ipa_lib}")
 else:
     print("[ESP-Video Build] ⚠️ Aucune source trouvée!")

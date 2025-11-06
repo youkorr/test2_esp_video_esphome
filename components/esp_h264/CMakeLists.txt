@@ -8,6 +8,7 @@ set(component_srcs
     "sw/src/esp_h264_enc_sw_param.c"
     "sw/src/esp_h264_dec_sw.c"
     "sw/src/esp_h264_enc_single_sw.c"
+    "hw/src/esp_h264_enc_single_hw.c"
     "interface/include/src/esp_h264_enc_param.c"
     "interface/include/src/esp_h264_enc_param_hw.c"
     "interface/include/src/esp_h264_enc_dual.c"
@@ -21,6 +22,7 @@ set(component_include_dirs
     "interface/include"
     "port/include"
     "sw/include"
+    "hw/include"
 )
 
 set(component_requires

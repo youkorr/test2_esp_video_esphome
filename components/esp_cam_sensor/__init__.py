@@ -43,18 +43,5 @@ async def to_code(config):
         if os.path.exists(inc_path):
             cg.add_build_flag(f"-I{inc_path}")
 
-    # Ajouter les sources
-    sources = [
-        "src/esp_cam_sensor.c",
-        "src/esp_cam_motor.c",
-        "src/esp_cam_sensor_xclk.c",
-        "src/driver_spi/spi_slave.c",
-        "src/driver_cam/esp_cam_ctlr_spi_cam.c",
-        "sensor/ov5647/ov5647.c",
-        "sensor/sc202cs/sc202cs.c",
-    ]
-
-    for src in sources:
-        src_path = os.path.join(component_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
+    # NOTE: Les sources sont compilées par esp_video_build.py (script PlatformIO)
+    # Ne pas utiliser cg.add_library() ici pour éviter la double compilation

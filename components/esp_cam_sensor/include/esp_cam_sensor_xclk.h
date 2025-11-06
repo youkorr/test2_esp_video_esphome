@@ -35,6 +35,9 @@ typedef enum {
 #if CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER
     ESP_CAM_SENSOR_XCLK_ESP_CLOCK_ROUTER = 1,
 #endif
+#if !CONFIG_CAMERA_XCLK_USE_LEDC && !CONFIG_CAMERA_XCLK_USE_ESP_CLOCK_ROUTER
+    ESP_CAM_SENSOR_XCLK_NONE = 0,  // Fallback when no xclk source is configured
+#endif
 } esp_cam_sensor_xclk_source_t;
 
 /**

@@ -29,13 +29,5 @@ async def to_code(config):
         if os.path.exists(inc_path):
             cg.add_build_flag(f"-I{inc_path}")
 
-    # Ajouter les sources
-    sources = [
-        "src/sccb.c",
-        "sccb_i2c/src/sccb_i2c.c",
-    ]
-
-    for src in sources:
-        src_path = os.path.join(component_dir, src)
-        if os.path.exists(src_path):
-            cg.add_library(src_path)
+    # NOTE: Les sources sont compilées par esp_video_build.py (script PlatformIO)
+    # Ne pas utiliser cg.add_library() ici pour éviter la double compilation

@@ -36,7 +36,7 @@ CONFIG_SCHEMA = cv.All(
         cv.GenerateID(): cv.declare_id(ESPVideoComponent),
         cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
-        cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_ISP, default=False): cv.boolean,  # Disabled by default - requires full esp_ipa library
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
@@ -107,7 +107,8 @@ async def to_code(config):
     # esp_cam_sensor
     esp_cam_sensor_dir = os.path.join(parent_components_dir, "esp_cam_sensor")
     if os.path.exists(esp_cam_sensor_dir):
-        for inc in ["include", "sensor/ov5647/include", "sensor/sc202cs/include",
+        for inc in ["include", "sensor/ov5647/include", "sensor/ov5647/private_include",
+                    "sensor/sc202cs/include", "sensor/sc202cs/include/private_include",
                     "src", "src/driver_spi", "src/driver_cam"]:
             inc_path = os.path.join(esp_cam_sensor_dir, inc)
             if os.path.exists(inc_path):
@@ -117,7 +118,7 @@ async def to_code(config):
     # esp_h264
     esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
     if os.path.exists(esp_h264_dir):
-        for inc in ["interface/include", "port/include", "sw/include"]:
+        for inc in ["interface/include", "port/include", "port/inc", "sw/include", "hw/include"]:
             inc_path = os.path.join(esp_h264_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
@@ -156,12 +157,23 @@ async def to_code(config):
         "-DCONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE=1",
         "-DCONFIG_IDF_TARGET_ESP32P4=1",
         "-DCONFIG_SOC_I2C_SUPPORTED=1",
+        "-DCONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT=1000",  # SCCB transaction timeout in ms
     ])
 
     # Capteur de caméra SC202CS (activé par défaut pour mipi_dsi_cam)
     flags.extend([
         "-DCONFIG_CAMERA_SC202CS=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
+        "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=63",
+        "-DCONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT=0",
+        "-DCONFIG_CAMERA_SC202CS_MAX_SUPPORT=2",
+        "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=1",
+    ])
+
+    # Capteur de caméra OV5647
+    flags.extend([
+        "-DCONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=0",
+        "-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT=0",
     ])
 
     # ISP (Image Signal Processor)
@@ -169,7 +181,9 @@ async def to_code(config):
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
-            "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+            # Disable ISP pipeline controller to prevent background task crashes
+            # "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+            "-DESP_VIDEO_ISP_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_ISP_ENABLED", "1")
 
@@ -177,9 +191,13 @@ async def to_code(config):
     if config[CONF_USE_HEAP_ALLOCATOR]:
         flags.append("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
 
-    # Encodeur H.264 (CORRIGÉ: utilise H264_VIDEO_DEVICE, pas HW_H264_VIDEO_DEVICE)
+    # Encodeur H.264 matériel
     if config[CONF_ENABLE_H264]:
-        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1")
+        flags.extend([
+            "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
+            "-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",  # Required for device creation
+            "-DESP_VIDEO_H264_ENABLED=1",
+        ])
         cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
 
     # Encodeur JPEG (CORRIGÉ: utilise JPEG_VIDEO_DEVICE, pas HW_JPEG)
@@ -187,6 +205,7 @@ async def to_code(config):
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",  # Pour esp_driver_jpeg
+            "-DESP_VIDEO_JPEG_ENABLED=1",
         ])
         cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
@@ -200,19 +219,11 @@ async def to_code(config):
     # Compilation des sources via script PlatformIO
     # -----------------------------------------------------------------------
     # Les sources C/C++ de tous les composants (esp_video, esp_cam_sensor,
-    # esp_h264, esp_ipa, esp_sccb_intf) sont compilées via le script
-    # esp_video_build.py qui est exécuté pendant la phase de build PlatformIO.
-
-    # Ajouter la bibliothèque précompilée esp_ipa
-    variant = CORE.data.get("esp32", {}).get("variant", "esp32p4")
-    if not variant:
-        variant = "esp32p4"
-
-    lib_path = os.path.join(esp_ipa_dir, f"lib/{variant}")
-    if os.path.exists(lib_path):
-        cg.add_build_flag(f"-L{lib_path}")
-        cg.add_build_flag("-lesp_ipa")
-        logging.info(f"[ESP-Video] Bibliothèque précompilée esp_ipa ajoutée pour {variant}")
+    # esp_h264, esp_ipa, esp_sccb_intf) ET la bibliothèque précompilée esp_ipa
+    # sont gérées par le script esp_video_build.py qui s'exécute pendant la
+    # phase de build PlatformIO.
+    #
+    # Ne pas ajouter de sources ou bibliothèques ici pour éviter la double compilation.
 
     # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité

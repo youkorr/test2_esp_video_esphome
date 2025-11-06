@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "driver/gpio.h"
+#include "hal/gpio_types.h"
 #include "esp_heap_caps.h"
 
 #include <string.h>
@@ -104,7 +105,9 @@ static uint32_t map_pixfmt_fourcc_(const std::string &fmt) {
 
 static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_s, int fps) {
   int fd = -1;
-  if (!open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &fd)) return false;
+  // CORRECTION: Utiliser la caméra CSI (/dev/video0), pas l'ISP (/dev/video20)
+  // Comme dans la démo M5Stack Tab5
+  if (!open_node_(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, &fd)) return false;
 
   uint32_t w = 0, h = 0;
   if (!map_resolution_(res_s, w, h)) {
@@ -125,7 +128,7 @@ static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_
     close_fd_(fd);
     return false;
   }
-  ESP_LOGI(TAG, "ISP S_FMT: %ux%u FOURCC=0x%08X", fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
+  ESP_LOGI(TAG, "Camera CSI S_FMT: %ux%u FOURCC=0x%08X", fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
 
   if (fps > 0) {
     struct v4l2_streamparm parm;
@@ -137,7 +140,7 @@ static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_
     if (safe_ioctl_(fd, VIDIOC_S_PARM, &parm, "VIDIOC_S_PARM") < 0) {
       ESP_LOGW(TAG, "Impossible d'appliquer FPS=%d", fps);
     } else {
-      ESP_LOGI(TAG, "ISP S_PARM: FPS=%d", fps);
+      ESP_LOGI(TAG, "Camera CSI S_PARM: FPS=%d", fps);
     }
   }
 
@@ -215,26 +218,48 @@ void MipiDSICamComponent::setup() {
     ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
   }
 
-  // Le pipeline ESP-Video est géré par le composant esp_video
-  // Nous configurons seulement les paramètres V4L2
-  ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
+  // Initialiser le framework ESP-Video pour créer les devices /dev/video*
+  ESP_LOGI(TAG, "Initialisation du framework ESP-Video...");
+
+  // Configuration MIPI CSI avec I2C pour le capteur
+  esp_video_init_csi_config_t csi_config = {};
+  csi_config.sccb_config.init_sccb = true;
+  csi_config.sccb_config.i2c_config.port = 0;  // I2C0
+  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_32;  // SCL pin from your config
+  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_31;  // SDA pin from your config
+  csi_config.sccb_config.freq = 400000;  // 400 kHz I2C
+  csi_config.reset_pin = GPIO_NUM_NC;  // Pas de reset pin
+  csi_config.pwdn_pin = GPIO_NUM_NC;   // Pas de power down pin
+
+  esp_video_init_config_t video_config = {};
+  video_config.csi = &csi_config;
+
+  esp_err_t err = esp_video_init(&video_config);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "❌ esp_video_init() a échoué: %s (0x%x)", esp_err_to_name(err), err);
+    this->pipeline_started_ = false;
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "✓ Framework ESP-Video initialisé avec succès");
 
   // Vérifier que les devices nécessaires sont disponibles
-  bool isp_available = false;
+  bool csi_available = false;
   bool jpeg_available = false;
   bool h264_available = false;
 
-  // Tester si l'ISP est disponible
+  // Tester si la caméra CSI est disponible (REQUIS)
   int test_fd = -1;
-  if (open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &test_fd)) {
-    isp_available = true;
+  if (open_node_(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, &test_fd)) {
+    csi_available = true;
     close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ ISP détecté: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+    ESP_LOGI(TAG, "✓ Caméra CSI détectée: %s", ESP_VIDEO_MIPI_CSI_DEVICE_NAME);
   } else {
-    ESP_LOGW(TAG, "✗ ISP non disponible: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+    ESP_LOGW(TAG, "✗ Caméra CSI non disponible: %s", ESP_VIDEO_MIPI_CSI_DEVICE_NAME);
   }
 
-  // Tester si JPEG est disponible
+  // Tester si JPEG est disponible (OPTIONNEL)
   test_fd = -1;
   if (open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &test_fd)) {
     jpeg_available = true;
@@ -244,7 +269,7 @@ void MipiDSICamComponent::setup() {
     ESP_LOGW(TAG, "✗ Encodeur JPEG non disponible: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
   }
 
-  // Tester si H264 est disponible
+  // Tester si H264 est disponible (OPTIONNEL)
   test_fd = -1;
   if (open_node_(ESP_VIDEO_H264_DEVICE_NAME, &test_fd)) {
     h264_available = true;
@@ -254,33 +279,30 @@ void MipiDSICamComponent::setup() {
     ESP_LOGW(TAG, "✗ Encodeur H.264 non disponible: %s", ESP_VIDEO_H264_DEVICE_NAME);
   }
 
-  // Vérifier qu'au moins un device est disponible
-  if (!isp_available && !jpeg_available && !h264_available) {
+  // Vérifier que la caméra CSI est disponible (CRITIQUE)
+  if (!csi_available) {
     ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "❌ ERREUR: Aucun device vidéo disponible!");
+    ESP_LOGE(TAG, "❌ ERREUR: Caméra CSI non disponible!");
     ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "Les devices suivants sont requis:");
-    ESP_LOGE(TAG, "  - ISP: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - JPEG: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - H.264: %s", ESP_VIDEO_H264_DEVICE_NAME);
+    ESP_LOGE(TAG, "Le device caméra est requis:");
+    ESP_LOGE(TAG, "  - Caméra CSI: %s", ESP_VIDEO_MIPI_CSI_DEVICE_NAME);
     ESP_LOGE(TAG, "");
-    ESP_LOGE(TAG, "Vérifiez votre configuration esp_video:");
-    ESP_LOGE(TAG, "  esp_video:");
-    ESP_LOGE(TAG, "    enable_isp: true    # Requis pour RGB565/YUYV");
-    ESP_LOGE(TAG, "    enable_jpeg: true   # Requis pour JPEG/MJPEG");
-    ESP_LOGE(TAG, "    enable_h264: true   # Requis pour H.264");
+    ESP_LOGE(TAG, "Devices optionnels:");
+    ESP_LOGE(TAG, "  - JPEG: %s %s", ESP_VIDEO_JPEG_DEVICE_NAME, jpeg_available ? "✓" : "✗");
+    ESP_LOGE(TAG, "  - H.264: %s %s", ESP_VIDEO_H264_DEVICE_NAME, h264_available ? "✓" : "✗");
     ESP_LOGE(TAG, "==============================");
     this->pipeline_started_ = false;
     this->mark_failed();
     return;
   }
 
-  // Configurer l'ISP si disponible et si le format le nécessite
-  if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
+  // Configurer la caméra CSI (format/résolution/FPS)
+  // Note: isp_apply_fmt_fps_() utilise maintenant /dev/video0 (caméra CSI)
+  if (csi_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
     if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
-      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
+      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur caméra CSI a échoué");
     } else {
-      ESP_LOGI(TAG, "✓ ISP configuré avec succès");
+      ESP_LOGI(TAG, "✓ Caméra CSI configurée avec succès");
     }
   }
 
@@ -319,7 +341,7 @@ void MipiDSICamComponent::setup() {
   ESP_LOGI(TAG, "==============================");
   ESP_LOGI(TAG, "✅ Configuration caméra prête!");
   ESP_LOGI(TAG, "   Format: %s", this->pixel_format_.c_str());
-  if (isp_available) ESP_LOGI(TAG, "   ISP: Disponible");
+  ESP_LOGI(TAG, "   CSI: Disponible");
   if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
   if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
   ESP_LOGI(TAG, "==============================");
@@ -375,9 +397,11 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  const char *dev = wants_jpeg_(this->pixel_format_) ? 
-                    ESP_VIDEO_JPEG_DEVICE_NAME : 
-                    ESP_VIDEO_ISP1_DEVICE_NAME;
+  // CORRECTION: Utiliser la caméra CSI pour la capture, pas l'ISP
+  // Comme dans la démo M5Stack Tab5
+  const char *dev = wants_jpeg_(this->pixel_format_) ?
+                    ESP_VIDEO_JPEG_DEVICE_NAME :
+                    ESP_VIDEO_MIPI_CSI_DEVICE_NAME;
   
   ESP_LOGI(TAG, "📸 Capture: %s → %s", dev, path.c_str());
 
