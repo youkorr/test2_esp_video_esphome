@@ -60,8 +60,7 @@ async def to_code(config):
     # -----------------------------------------------------------------------
     # Vérification du framework
     # -----------------------------------------------------------------------
-    framework = CORE.data.get("esp-idf")
-    if not framework:
+    if not CORE.using_esp_idf:
         raise cv.Invalid(
             "ESP-Video nécessite le framework esp-idf. "
             "Ajoutez 'framework: type: esp-idf' dans votre configuration."
