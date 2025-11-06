@@ -73,17 +73,17 @@ void ESPVideoComponent::setup() {
   // esp_video crée son propre bus I2C pour initialiser le capteur MIPI-CSI
   ESP_LOGI(TAG, "Configuration esp_video:");
   ESP_LOGI(TAG, "  init_sccb: true (esp_video crée son bus I2C)");
-  ESP_LOGI(TAG, "  I2C: SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
+  ESP_LOGI(TAG, "  I2C: Port 1, SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
            this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
-  ESP_LOGI(TAG, "  Note: ESP-IDF permet plusieurs handles I2C sur mêmes GPIO");
+  ESP_LOGI(TAG, "  Note: Port I2C 1 pour éviter conflit avec ESPHome (port 0)");
 
   esp_video_init_csi_config_t csi_config = {};
 
-  // Initialiser SCCB - esp_video crée son propre bus I2C
+  // Initialiser SCCB - esp_video crée son propre bus I2C sur PORT 1
   csi_config.sccb_config.init_sccb = true;
 
   // Utiliser i2c_config (union) car init_sccb = true
-  csi_config.sccb_config.i2c_config.port = 0;
+  csi_config.sccb_config.i2c_config.port = 1;  // PORT 1 au lieu de 0!
   csi_config.sccb_config.i2c_config.sda_pin = static_cast<gpio_num_t>(this->sda_pin_);
   csi_config.sccb_config.i2c_config.scl_pin = static_cast<gpio_num_t>(this->scl_pin_);
   csi_config.sccb_config.freq = this->i2c_frequency_;
@@ -94,7 +94,7 @@ void ESPVideoComponent::setup() {
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
-  ESP_LOGI(TAG, "Appel esp_video_init() avec initialisation I2C...");
+  ESP_LOGI(TAG, "Appel esp_video_init() avec I2C port 1...");
   esp_err_t ret = esp_video_init(&video_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
@@ -102,7 +102,7 @@ void ESPVideoComponent::setup() {
     return;
   }
 
-  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Bus I2C créé et devices vidéo prêts");
+  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Bus I2C port 1 créé, devices vidéo prêts");
 #else
   ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");
 #endif
