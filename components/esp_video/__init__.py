@@ -75,9 +75,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_EXTERNAL_CLOCK_PIN): pins.gpio_output_pin_schema,
         cv.Optional(CONF_EXTERNAL_CLOCK_FREQUENCY, default=24000000): cv.int_range(min=1000000, max=40000000),
 
-        # Pins optionnels
-        cv.Optional(CONF_RESET_PIN, default=-1): pins.gpio_output_pin_schema,
-        cv.Optional(CONF_PWDN_PIN, default=-1): pins.gpio_output_pin_schema,
+        # Pins optionnels (sans valeur par défaut pour éviter la validation avec -1)
+        cv.Optional(CONF_RESET_PIN): pins.gpio_output_pin_schema,
+        cv.Optional(CONF_PWDN_PIN): pins.gpio_output_pin_schema,
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -114,12 +114,12 @@ async def to_code(config):
         cg.add(var.set_external_clock_frequency(config[CONF_EXTERNAL_CLOCK_FREQUENCY]))
         logging.info(f"[ESP-Video] External clock: GPIO{xclk_pin} @ {config[CONF_EXTERNAL_CLOCK_FREQUENCY]} Hz")
 
-    # Pins Reset/PowerDown
-    if config[CONF_RESET_PIN] != -1:
+    # Pins Reset/PowerDown (seulement si configurés)
+    if CONF_RESET_PIN in config:
         reset_pin = await cg.gpio_pin_expression(config[CONF_RESET_PIN])
         cg.add(var.set_reset_pin(reset_pin))
 
-    if config[CONF_PWDN_PIN] != -1:
+    if CONF_PWDN_PIN in config:
         pwdn_pin = await cg.gpio_pin_expression(config[CONF_PWDN_PIN])
         cg.add(var.set_pwdn_pin(pwdn_pin))
 
