@@ -33,11 +33,23 @@ CONF_MIRROR_X = "mirror_x"
 CONF_MIRROR_Y = "mirror_y"
 CONF_ROTATION = "rotation"
 
+def validate_gpio_pin(value):
+    """Valide un pin GPIO - accepte GPIO36 ou 36"""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        # Accepter format "GPIO36" ou "36"
+        value_upper = value.upper()
+        if value_upper.startswith("GPIO"):
+            return int(value_upper[4:])
+        return int(value)
+    return cv.int_(value)
+
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(MipiDSICamComponent),
     cv.Required(CONF_I2C_ID): cv.use_id(i2c.I2CBus),
     cv.Required(CONF_SENSOR): cv.string,
-    cv.Required(CONF_EXTERNAL_CLOCK_PIN): cv.All(cv.int_, cv.only_on_esp32),
+    cv.Required(CONF_EXTERNAL_CLOCK_PIN): cv.All(validate_gpio_pin, cv.int_range(min=0, max=48)),
     cv.Optional(CONF_FREQUENCY, default=24000000): cv.int_range(min=1000000, max=40000000),
     cv.Optional(CONF_RESOLUTION, default="720P"): cv.string,
     cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.string,
@@ -57,6 +69,7 @@ async def to_code(config):
     i2c_bus = await cg.get_variable(config[CONF_I2C_ID])
     cg.add(var.set_i2c_bus(i2c_bus))
     cg.add(var.set_sensor(config[CONF_SENSOR]))
+    # External clock pin - déjà converti en int par validate_gpio_pin
     cg.add(var.set_external_clock_pin(config[CONF_EXTERNAL_CLOCK_PIN]))
     cg.add(var.set_frequency(config[CONF_FREQUENCY]))
 
