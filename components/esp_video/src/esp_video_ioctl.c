@@ -9,7 +9,6 @@
 #include <sys/lock.h>
 #include "esp_heap_caps.h"
 #include "esp_video.h"
-#include "esp_video_version.h" 
 #include "esp_video_vfs.h"
 #include "esp_video_ioctl_internal.h"
 
