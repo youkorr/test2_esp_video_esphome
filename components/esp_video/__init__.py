@@ -25,6 +25,9 @@ CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
+CONF_SDA_PIN = "sda_pin"
+CONF_SCL_PIN = "scl_pin"
+CONF_I2C_FREQUENCY = "i2c_frequency"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -42,6 +45,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
+        cv.Optional(CONF_SDA_PIN, default=31): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_SCL_PIN, default=32): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_I2C_FREQUENCY, default=400000): cv.int_range(min=100000, max=1000000),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -51,9 +57,15 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    logging.info("[ESP-Video] Configuration:")
-    logging.info("[ESP-Video]   init_sccb: false (pas d'initialisation I2C)")
-    logging.info("[ESP-Video]   mipi_dsi_cam gère la communication I2C avec le capteur")
+    # Configuration I2C - esp_video créera son propre bus I2C
+    cg.add(var.set_sda_pin(config[CONF_SDA_PIN]))
+    cg.add(var.set_scl_pin(config[CONF_SCL_PIN]))
+    cg.add(var.set_i2c_frequency(config[CONF_I2C_FREQUENCY]))
+
+    logging.info(f"[ESP-Video] Configuration I2C: SDA=GPIO{config[CONF_SDA_PIN]}, "
+                 f"SCL=GPIO{config[CONF_SCL_PIN]}, Freq={config[CONF_I2C_FREQUENCY]}Hz")
+    logging.info("[ESP-Video] esp_video créera son propre bus I2C (init_sccb=true)")
+    logging.info("[ESP-Video] IMPORTANT: mipi_dsi_cam ne doit PAS hériter de i2c::I2CDevice")
 
     # -----------------------------------------------------------------------
     # Vérification du framework

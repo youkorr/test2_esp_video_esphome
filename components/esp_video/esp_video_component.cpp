@@ -70,17 +70,22 @@ void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "Initialisation ESP-Video...");
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
-  // Ne PAS initialiser SCCB - mipi_dsi_cam gère l'I2C avec le capteur
-  // esp_video ne fait que créer les devices vidéo (/dev/video*)
+  // esp_video crée son propre bus I2C pour initialiser le capteur MIPI-CSI
   ESP_LOGI(TAG, "Configuration esp_video:");
-  ESP_LOGI(TAG, "  init_sccb: false (mipi_dsi_cam gère l'I2C)");
+  ESP_LOGI(TAG, "  init_sccb: true (esp_video crée son bus I2C)");
+  ESP_LOGI(TAG, "  I2C: SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
+           this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
 
   esp_video_init_csi_config_t csi_config = {};
 
-  // Ne PAS initialiser SCCB - mipi_dsi_cam communique déjà avec le capteur via I2C
-  csi_config.sccb_config.init_sccb = false;
-  csi_config.sccb_config.i2c_handle = nullptr;  // Pas de handle I2C nécessaire
-  csi_config.sccb_config.freq = 0;  // Pas utilisé
+  // Initialiser SCCB - esp_video crée son propre bus I2C
+  csi_config.sccb_config.init_sccb = true;
+
+  // Utiliser i2c_config (union) car init_sccb = true
+  csi_config.sccb_config.i2c_config.port = 0;
+  csi_config.sccb_config.i2c_config.sda_pin = static_cast<gpio_num_t>(this->sda_pin_);
+  csi_config.sccb_config.i2c_config.scl_pin = static_cast<gpio_num_t>(this->scl_pin_);
+  csi_config.sccb_config.freq = this->i2c_frequency_;
 
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
@@ -88,7 +93,7 @@ void ESPVideoComponent::setup() {
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
-  ESP_LOGI(TAG, "Appel esp_video_init() sans initialisation SCCB...");
+  ESP_LOGI(TAG, "Appel esp_video_init() avec initialisation I2C...");
   esp_err_t ret = esp_video_init(&video_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
@@ -96,7 +101,7 @@ void ESPVideoComponent::setup() {
     return;
   }
 
-  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo créés");
+  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Bus I2C créé et devices vidéo prêts");
 #else
   ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");
 #endif
@@ -121,7 +126,8 @@ void ESPVideoComponent::dump_config() {
 #endif
 
   ESP_LOGCONFIG(TAG, "  État: %s", this->initialized_ ? "Prêt" : "Non initialisé");
-  ESP_LOGCONFIG(TAG, "  SCCB: Non initialisé (géré par mipi_dsi_cam)");
+  ESP_LOGCONFIG(TAG, "  I2C: SDA=GPIO%d, SCL=GPIO%d, Freq=%u Hz",
+                this->sda_pin_, this->scl_pin_, this->i2c_frequency_);
 
   ESP_LOGCONFIG(TAG, "  Encodeurs:");
 #ifdef ESP_VIDEO_H264_ENABLED
