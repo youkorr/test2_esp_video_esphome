@@ -14,7 +14,7 @@ import os
 import logging
 
 CODEOWNERS = ["@youkorr"]
-DEPENDENCIES = ["i2c", "esp32"]
+DEPENDENCIES = ["esp32"]  # i2c retiré pour éviter conflit d'ordre d'initialisation
 AUTO_LOAD = []
 
 esp_video_ns = cg.esphome_ns.namespace("esp_video")
