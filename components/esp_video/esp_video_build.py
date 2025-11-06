@@ -68,7 +68,7 @@ if os.path.exists(esp_cam_sensor_dir):
 # Sources esp_h264
 # ========================================================================
 # NOTE: Les sources software (sw/src/*_sw*.c) nécessitent des bibliothèques
-# externes (OpenH264, h264bsd) fournies dans sw/libs/openh264_inc et sw/libs/h264bsd_inc
+# externes (OpenH264, tinyh264) fournies dans sw/libs/openh264_inc et sw/libs/tinyh264_inc
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
     "port/src/esp_h264_alloc.c",
