@@ -454,6 +454,165 @@ ppa_srm_rotation_angle_t MipiDSICamComponent::map_rotation_(int angle) {
   }
 }
 
+// Tâche FreeRTOS dédiée pour la capture haute performance (comme M5Stack demo)
+void camera_task_function(void* arg) {
+  MipiDSICamComponent* camera = static_cast<MipiDSICamComponent*>(arg);
+
+  ESP_LOGI(TAG, "🎬 Camera task démarrée sur Core %d", xPortGetCoreID());
+  ESP_LOGI(TAG, "   Priority: %d", uxTaskPriorityGet(nullptr));
+
+  uint32_t last_fps_log = 0;
+
+  while (camera->task_running_) {
+    if (!camera->streaming_ || camera->video_fd_ < 0 || camera->ppa_handle_ == nullptr) {
+      vTaskDelay(pdMS_TO_TICKS(100));
+      continue;
+    }
+
+    // DQBUF - Récupérer frame du driver
+    struct v4l2_buffer buf;
+    memset(&buf, 0, sizeof(buf));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+
+    if (ioctl(camera->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
+      if (errno != EAGAIN) {
+        ESP_LOGE(TAG, "VIDIOC_DQBUF failed: errno=%d", errno);
+      }
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+
+    // PPA - Scale/Rotate/Mirror
+    ppa_srm_oper_config_t srm_config = {
+      .in = {
+        .buffer = camera->buffers_[buf.index],
+        .pic_w = camera->width_,
+        .pic_h = camera->height_,
+        .block_w = camera->width_,
+        .block_h = camera->height_,
+        .block_offset_x = 0,
+        .block_offset_y = 0,
+        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+      },
+      .out = {
+        .buffer = camera->output_buffer_,
+        .buffer_size = camera->output_buffer_size_,
+        .pic_w = camera->width_,
+        .pic_h = camera->height_,
+        .block_offset_x = 0,
+        .block_offset_y = 0,
+        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+      },
+      .rotation_angle = camera->map_rotation_(camera->rotation_angle_),
+      .scale_x = 1.0f,
+      .scale_y = 1.0f,
+      .mirror_x = camera->mirror_x_,
+      .mirror_y = camera->mirror_y_,
+      .rgb_swap = false,
+      .byte_swap = false,
+      .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    esp_err_t ret = ppa_do_scale_rotate_mirror(camera->ppa_handle_, &srm_config);
+    if (ret == ESP_OK && camera->canvas_ != nullptr) {
+      // Mettre à jour le canvas LVGL directement (comme M5Stack demo)
+      lv_canvas_set_buffer(camera->canvas_, camera->output_buffer_,
+                          camera->width_, camera->height_, LV_IMG_CF_TRUE_COLOR);
+
+      camera->frame_count_++;
+
+      // Logger FPS toutes les 100 frames
+      if (camera->frame_count_ % 100 == 0) {
+        uint32_t now = millis();
+        if (last_fps_log > 0) {
+          float elapsed = (now - last_fps_log) / 1000.0f;
+          float fps = 100.0f / elapsed;
+          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f", camera->frame_count_, fps);
+        }
+        last_fps_log = now;
+      }
+    }
+
+    // QBUF - Retourner buffer au driver
+    ioctl(camera->video_fd_, VIDIOC_QBUF, &buf);
+
+    // Délai court comme M5Stack (10ms)
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+
+  ESP_LOGI(TAG, "🛑 Camera task arrêtée");
+  camera->camera_task_handle_ = nullptr;
+  vTaskDelete(nullptr);
+}
+
+bool MipiDSICamComponent::start_camera_task(lv_obj_t* canvas) {
+  if (this->camera_task_handle_ != nullptr) {
+    ESP_LOGW(TAG, "Camera task déjà démarrée");
+    return false;
+  }
+
+  if (canvas == nullptr) {
+    ESP_LOGE(TAG, "Canvas null - impossible de démarrer task");
+    return false;
+  }
+
+  this->canvas_ = canvas;
+  this->task_running_ = true;
+  this->frame_count_ = 0;
+  this->last_fps_time_ = 0;
+
+  // Démarrer streaming si pas déjà fait
+  if (!this->streaming_) {
+    if (!this->start_streaming()) {
+      ESP_LOGE(TAG, "Échec démarrage streaming");
+      return false;
+    }
+  }
+
+  // Créer tâche FreeRTOS sur Core 1 avec priorité 5 (comme M5Stack demo)
+  BaseType_t result = xTaskCreatePinnedToCore(
+    camera_task_function,           // Function
+    "camera_task",                  // Name
+    8 * 1024,                       // Stack size (8KB comme M5Stack)
+    this,                           // Parameter
+    5,                              // Priority (5 comme M5Stack)
+    &this->camera_task_handle_,     // Handle
+    1                               // Core 1
+  );
+
+  if (result != pdPASS) {
+    ESP_LOGE(TAG, "❌ Échec création camera task");
+    this->task_running_ = false;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✅ Camera task démarrée (Core 1, Priority 5)");
+  return true;
+}
+
+void MipiDSICamComponent::stop_camera_task() {
+  if (this->camera_task_handle_ == nullptr) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Arrêt camera task...");
+  this->task_running_ = false;
+
+  // Attendre que la tâche se termine (max 2 secondes)
+  for (int i = 0; i < 20 && this->camera_task_handle_ != nullptr; i++) {
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  if (this->camera_task_handle_ != nullptr) {
+    ESP_LOGW(TAG, "Task pas terminée après timeout - force delete");
+    vTaskDelete(this->camera_task_handle_);
+    this->camera_task_handle_ = nullptr;
+  }
+
+  this->canvas_ = nullptr;
+}
+
 void MipiDSICamComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "MIPI CSI Camera:");
   ESP_LOGCONFIG(TAG, "  Sensor: %s", this->sensor_.c_str());

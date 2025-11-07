@@ -10,6 +10,9 @@ extern "C" {
 #include "linux/videodev2.h"
 #include "driver/ppa.h"
 #include "esp_heap_caps.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "lvgl.h"
 }
 
 namespace esphome {
@@ -72,6 +75,13 @@ class MipiDSICamComponent : public Component {
   uint16_t get_image_width() const { return this->width_; }
   uint16_t get_image_height() const { return this->height_; }
 
+  // FreeRTOS task pour capture haute performance (comme M5Stack demo)
+  bool start_camera_task(lv_obj_t* canvas);
+  void stop_camera_task();
+
+  // Friend function pour accès depuis la tâche FreeRTOS
+  friend void camera_task_function(void* arg);
+
  protected:
   // Configuration I2C et sensor
   i2c::I2CBus *i2c_bus_{nullptr};
@@ -95,6 +105,13 @@ class MipiDSICamComponent : public Component {
   bool initialized_{false};
   bool streaming_{false};
   std::mutex camera_mutex_;
+
+  // FreeRTOS task (pour performance optimale comme M5Stack)
+  TaskHandle_t camera_task_handle_{nullptr};
+  lv_obj_t* canvas_{nullptr};
+  bool task_running_{false};
+  uint32_t frame_count_{0};
+  uint32_t last_fps_time_{0};
 
   // V4L2
   int video_fd_{-1};

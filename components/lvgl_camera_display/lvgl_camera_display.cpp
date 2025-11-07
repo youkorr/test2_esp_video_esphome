@@ -25,67 +25,22 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Intervalle pour capture rapide (comme démo M5Stack)
-  // M5Stack utilise 10ms entre frames = ~100 FPS max théorique
-  this->update_interval_ = 10;  // ms (au lieu de 33ms)
-
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
-  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS)",
-           this->update_interval_, 1000 / this->update_interval_);
+  ESP_LOGI(TAG, "   Mode: Tâche FreeRTOS dédiée (comme M5Stack demo)");
+  ESP_LOGI(TAG, "   Canvas sera configuré lors de l'appel configure_canvas()");
 }
 
 void LVGLCameraDisplay::loop() {
-  uint32_t now = millis();
-
-  // Vérifier si c'est le moment de mettre à jour
-  if (now - this->last_update_ < this->update_interval_) {
-    return;
-  }
-
-  this->last_update_ = now;
-
-  // Si la caméra est en streaming, capturer ET mettre à jour le canvas
-  if (this->camera_->is_streaming()) {
-    // PROFILING: Mesurer le temps de capture
-    uint32_t t_start = millis();
-    bool frame_captured = this->camera_->capture_frame();
-    uint32_t t_capture = millis();
-
-    if (frame_captured) {
-      this->update_canvas_();
-      uint32_t t_canvas = millis();
-
-      this->frame_count_++;
-
-      // Logger temps d'exécution toutes les 100 frames
-      if (this->frame_count_ % 100 == 0) {
-        static uint32_t last_time = 0;
-        uint32_t now_time = millis();
-
-        if (last_time > 0) {
-          float elapsed = (now_time - last_time) / 1000.0f;  // secondes
-          float fps = 100.0f / elapsed;
-
-          // Temps moyen par frame
-          uint32_t capture_time = t_capture - t_start;
-          uint32_t canvas_time = t_canvas - t_capture;
-          uint32_t total_time = t_canvas - t_start;
-
-          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f", this->frame_count_, fps);
-          ESP_LOGI(TAG, "⏱️  Temps: capture=%ums, canvas=%ums, total=%ums",
-                   capture_time, canvas_time, total_time);
-        }
-        last_time = now_time;
-      }
-    }
-  }
+  // La capture et mise à jour du canvas sont gérées par la tâche FreeRTOS dédiée
+  // dans mipi_dsi_cam (camera_task_function)
+  // Plus besoin de faire quoi que ce soit ici!
 }
 
 void LVGLCameraDisplay::dump_config() {
   ESP_LOGCONFIG(TAG, "LVGL Camera Display:");
-  ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
-  ESP_LOGCONFIG(TAG, "  FPS cible: ~%d", 1000 / this->update_interval_);
+  ESP_LOGCONFIG(TAG, "  Mode: Tâche FreeRTOS dédiée");
+  ESP_LOGCONFIG(TAG, "  FPS attendu: 25-30 FPS");
   ESP_LOGCONFIG(TAG, "  Canvas configuré: %s", this->canvas_obj_ ? "OUI" : "NON");
 }
 
@@ -131,7 +86,7 @@ void LVGLCameraDisplay::update_canvas_() {
   // et limite le FPS à 3-4 au lieu de 30.
 }
 
-void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
+void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
   ESP_LOGI(TAG, "🎨 Canvas configuré: %p", canvas);
 
@@ -139,6 +94,16 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t w = lv_obj_get_width(canvas);
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Taille canvas: %dx%d", w, h);
+
+    // Démarrer la tâche FreeRTOS dédiée pour capture haute performance
+    if (this->camera_ != nullptr) {
+      ESP_LOGI(TAG, "🚀 Démarrage tâche FreeRTOS caméra...");
+      if (this->camera_->start_camera_task(canvas)) {
+        ESP_LOGI(TAG, "   ✅ Tâche démarrée - FPS optimal attendu (25-30 FPS)");
+      } else {
+        ESP_LOGE(TAG, "   ❌ Échec démarrage tâche caméra");
+      }
+    }
   }
 }
 
