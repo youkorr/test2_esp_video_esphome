@@ -22,6 +22,7 @@ async def to_code(config):
         "include",
         "sensor/ov5647/include",
         "sensor/sc202cs/include",
+        "sensor/ov02c10/include",
     ]
 
     for inc in public_includes:
