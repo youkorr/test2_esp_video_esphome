@@ -13,6 +13,7 @@
  * For PlatformIO/ESPHome, we provide them manually.
  *
  * The IPA pipeline code iterates: for (p = &start; p < &end; ++p)
+ * Therefore we MUST create a contiguous array in memory.
  *
  * Available IPAs in libesp_ipa.a:
  * - AWB: Auto White Balance (Gray World)
@@ -38,41 +39,43 @@ typedef struct esp_ipa_detect {
 } esp_ipa_detect_t;
 
 /**
- * IPA detection array
+ * IPA detection array - MUST be contiguous in memory!
  *
- * The library expects &__esp_ipa_detect_array_start and &__esp_ipa_detect_array_end
- * We create the array and use the first and last+1 elements as those symbols
+ * We create a real array and expose pointers to first and last+1 elements
+ * as the __esp_ipa_detect_array_start and __esp_ipa_detect_array_end symbols.
  */
-esp_ipa_detect_t __esp_ipa_detect_array_start = {
-    .name = "awb_gray_world",
-    .detect = __esp_ipa_detect_fn_awb_gray_world,
+static esp_ipa_detect_t s_esp_ipa_detect_array[] = {
+    {
+        .name = "awb_gray_world",
+        .detect = __esp_ipa_detect_fn_awb_gray_world,
+    },
+    {
+        .name = "agc_threshold",
+        .detect = __esp_ipa_detect_fn_agc_threshold,
+    },
+    {
+        .name = "denoising_gain_feedback",
+        .detect = __esp_ipa_detect_fn_denoising_gain_feedback,
+    },
+    {
+        .name = "sharpen_freq_feedback",
+        .detect = __esp_ipa_detect_fn_sharpen_freq_feedback,
+    },
+    {
+        .name = "gamma_lumma_feedback",
+        .detect = __esp_ipa_detect_fn_gamma_lumma_feedback,
+    },
+    {
+        .name = "cc_linear",
+        .detect = __esp_ipa_detect_fn_cc_linear,
+    },
 };
 
-// Additional IPA entries placed consecutively
-static esp_ipa_detect_t __esp_ipa_entry_1 = {
-    .name = "agc_threshold",
-    .detect = __esp_ipa_detect_fn_agc_threshold,
-};
-
-static esp_ipa_detect_t __esp_ipa_entry_2 = {
-    .name = "denoising_gain_feedback",
-    .detect = __esp_ipa_detect_fn_denoising_gain_feedback,
-};
-
-static esp_ipa_detect_t __esp_ipa_entry_3 = {
-    .name = "sharpen_freq_feedback",
-    .detect = __esp_ipa_detect_fn_sharpen_freq_feedback,
-};
-
-static esp_ipa_detect_t __esp_ipa_entry_4 = {
-    .name = "gamma_lumma_feedback",
-    .detect = __esp_ipa_detect_fn_gamma_lumma_feedback,
-};
-
-static esp_ipa_detect_t __esp_ipa_entry_5 = {
-    .name = "cc_linear",
-    .detect = __esp_ipa_detect_fn_cc_linear,
-};
-
-// End marker
-esp_ipa_detect_t __esp_ipa_detect_array_end;
+/**
+ * Export the array boundaries as the symbols expected by libesp_ipa.a
+ *
+ * The library code does: for (p = &start; p < &end; ++p)
+ * So we need start to point to first element and end to point to one past last.
+ */
+esp_ipa_detect_t *__esp_ipa_detect_array_start = &s_esp_ipa_detect_array[0];
+esp_ipa_detect_t *__esp_ipa_detect_array_end = &s_esp_ipa_detect_array[6];
