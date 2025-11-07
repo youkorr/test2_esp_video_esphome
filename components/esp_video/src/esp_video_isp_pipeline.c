@@ -1278,8 +1278,15 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     isp = calloc(1, sizeof(esp_video_isp_t));
     ESP_RETURN_ON_FALSE(isp, ESP_ERR_NO_MEM, TAG, "failed to malloc isp");
 
+    // Enable IPA debug logging to verify algorithm loading
+    esp_ipa_pipeline_set_log(true);
+
     ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create_from_config(config->ipa_config, &isp->ipa_pipeline),
                       fail_0, TAG, "failed to create IPA pipeline");
+
+    // Print loaded IPA algorithms for verification
+    ESP_LOGI(TAG, "📸 IPA Pipeline created - verifying loaded algorithms:");
+    esp_ipa_pipeline_print(isp->ipa_pipeline);
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
     ESP_GOTO_ON_ERROR(init_isp_dev(config, isp), fail_2, TAG, "failed to initialize ISP device");
@@ -1287,6 +1294,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     metadata.flags = 0;
     ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
                       fail_3, TAG, "failed to initialize IPA pipeline");
+    ESP_LOGI(TAG, "✅ IPA Pipeline initialized successfully");
     config_isp_and_camera(isp, &metadata);
 
     /**
