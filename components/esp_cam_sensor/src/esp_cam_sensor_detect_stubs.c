@@ -32,40 +32,42 @@
 
 // Forward declarations of sensor detection functions
 extern esp_cam_sensor_device_t *sc202cs_detect(void *config);
-// extern esp_cam_sensor_device_t *ov5647_detect(void *config);  // Décommentez si disponible
+extern esp_cam_sensor_device_t *ov5647_detect(void *config);
+extern esp_cam_sensor_device_t *ov02c10_detect(void *config);
 
-// Sensor detection array
-// Must be non-static so the linker can create the symbols
+// Sensor detection array - tous les capteurs compilés
+// L'auto-détection essaiera chaque capteur dans l'ordre jusqu'à trouver celui qui répond
+//
+// TOUS les capteurs sont essayés automatiquement:
+// 1. SC202CS (adresse I2C 0x30)
+// 2. OV5647 (adresse I2C 0x36)
+// 3. OV02C10 (adresse I2C 0x3C)
+//
+// Si vous changez de ESP32-P4 avec un capteur différent, l'auto-détection
+// trouvera automatiquement le bon capteur sans modification du code!
+
+// Utiliser l'attribut section pour garantir que ces structures sont placées consécutivement
+__attribute__((section(".sensor_detect_array"))) __attribute__((used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
     .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = 0x36,  // SC202CS default I2C address - MODIFIEZ ICI si nécessaire
+    .sccb_addr = 0x30,  // SC202CS
     .detect = sc202cs_detect,
 };
 
-// Pour détecter plusieurs capteurs, décommentez et ajustez:
-// static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_1 = {
-//     .port = ESP_CAM_SENSOR_MIPI_CSI,
-//     .sccb_addr = 0x36,  // OV5647 address
-//     .detect = ov5647_detect,
-// };
+__attribute__((section(".sensor_detect_array"))) __attribute__((used))
+static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_1 = {
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = 0x36,  // OV5647
+    .detect = ov5647_detect,
+};
 
-// End marker - placed right after start in memory
-// The iteration logic uses pointer comparison: p < &end
-// So we need this to be at the next memory location
+__attribute__((section(".sensor_detect_array"))) __attribute__((used))
+static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_2 = {
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = 0x3c,  // OV02C10
+    .detect = ov02c10_detect,
+};
+
+// End marker - également dans la même section pour être consécutif
+__attribute__((section(".sensor_detect_array"))) __attribute__((used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
-
-/**
- * @brief Initialize function to set up end marker
- *
- * Since we can't guarantee memory layout without a linker script,
- * we use a constructor to validate the setup.
- */
-__attribute__((constructor))
-static void validate_sensor_detect_array(void) {
-    // In practice, the compiler should place these variables contiguously
-    // since they're defined one after another with no other variables between them.
-    // If this ever fails, we'd need a proper linker script.
-
-    // The end symbol just needs to exist - its value doesn't matter much
-    // as long as it's at a higher address than start
-}
