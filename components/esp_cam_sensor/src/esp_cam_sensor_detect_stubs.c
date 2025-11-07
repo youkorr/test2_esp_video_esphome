@@ -27,25 +27,29 @@
 /**
  * The camera sensor detection array - contiguous structures
  *
- * These must be defined as individual structures (not an array) to match the extern declarations.
- * By defining them sequentially in the same file, the compiler typically places them contiguously
- * in memory, allowing iteration from &start to &end.
+ * We use __attribute__((section(".sensor_detect"), used)) to:
+ * 1. Force the compiler to place all structures contiguously in the same memory section
+ * 2. Prevent the compiler/linker from optimizing them out
+ * This ensures that iteration with pointer arithmetic (++p) works correctly.
  *
  * NOTE: The detect functions take esp_cam_sensor_config_t * but the union expects void *.
  * We cast them to match the expected signature.
  */
+__attribute__((section(".sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .sccb_addr = OV5647_SCCB_ADDR
 };
 
+__attribute__((section(".sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_sc202cs = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .sccb_addr = SC202CS_SCCB_ADDR
 };
 
+__attribute__((section(".sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_ov02c10 = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -56,6 +60,7 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_ov02c10 = {
  * End marker - dummy structure placed after the last sensor entry.
  * The code iterates: for (p = &start; p < &end; ++p)
  */
+__attribute__((section(".sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
