@@ -39,9 +39,17 @@ extern esp_cam_sensor_device_t *ov02c10_detect(void *config);
 // L'auto-détection essaiera chaque capteur dans l'ordre jusqu'à trouver celui qui répond
 //
 // TOUS les capteurs sont essayés automatiquement:
-// 1. SC202CS (adresse I2C 0x30)
-// 2. OV5647 (adresse I2C 0x36)
-// 3. OV02C10 (adresse I2C 0x3C)
+// 1. SC202CS
+// 2. OV5647
+// 3. OV02C10
+//
+// NOTE IMPORTANTE: Tous les capteurs utilisent la MÊME adresse I2C (0x36)!
+// Comment l'auto-détection les différencie?
+// → Chaque fonction detect() lit le registre Chip ID du capteur
+// → SC202CS: Chip ID = 0xCB34
+// → OV5647: Chip ID = 0x5647
+// → OV02C10: Chip ID = 0x2C10
+// → Si le Chip ID correspond → capteur détecté!
 //
 // Si vous changez de ESP32-P4 avec un capteur différent, l'auto-détection
 // trouvera automatiquement le bon capteur sans modification du code!
@@ -50,21 +58,21 @@ extern esp_cam_sensor_device_t *ov02c10_detect(void *config);
 __attribute__((section(".sensor_detect_array"))) __attribute__((used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
     .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = 0x30,  // SC202CS
+    .sccb_addr = 0x36,  // TOUS les capteurs utilisent 0x36!
     .detect = sc202cs_detect,
 };
 
 __attribute__((section(".sensor_detect_array"))) __attribute__((used))
 static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_1 = {
     .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = 0x36,  // OV5647
+    .sccb_addr = 0x36,  // TOUS les capteurs utilisent 0x36!
     .detect = ov5647_detect,
 };
 
 __attribute__((section(".sensor_detect_array"))) __attribute__((used))
 static esp_cam_sensor_detect_fn_t __esp_cam_sensor_entry_2 = {
     .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = 0x3c,  // OV02C10
+    .sccb_addr = 0x36,  // TOUS les capteurs utilisent 0x36!
     .detect = ov02c10_detect,
 };
 
