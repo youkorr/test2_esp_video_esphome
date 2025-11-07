@@ -42,27 +42,13 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* IPA pipeline for SC202CS sensor */
-    static const char *sc202cs_ipa_names[] = {
-        "awb_gray_world",           /* Auto White Balance */
-        "agc_threshold",            /* Auto Gain Control (brightness) */
-        "denoising_gain_feedback",  /* Noise reduction */
-        "sharpen_freq_feedback",    /* Sharpening */
-        "gamma_lumma_feedback",     /* Gamma correction */
-        "cc_linear",                /* Color Correction */
-    };
+    /* TEMPORAIREMENT DÉSACTIVÉ - problème avec detect array linker */
+    /* IPA pipeline causait un crash au boot à cause de sections orphelines */
+    /* TODO: Implémenter alternative pour AE/AWB (contrôles manuels exposition/gain) */
 
-    static const esp_ipa_config_t sc202cs_ipa_config = {
-        .ipa_nums = 6,
-        .ipa_names = sc202cs_ipa_names,
-    };
+    ESP_LOGW(TAG, "⚠️  IPA pipeline DÉSACTIVÉ pour %s (temporaire)", cam_name ? cam_name : "NULL");
+    ESP_LOGW(TAG, "   Image sera sombre - nécessite configuration manuelle exposition/gain");
 
-    /* Check if this is the SC202CS sensor */
-    if (cam_name && strcmp(cam_name, "SC202CS") == 0) {
-        ESP_LOGI(TAG, "📸 IPA config found for %s - enabling AE/AWB pipeline", cam_name);
-        return &sc202cs_ipa_config;
-    }
-
-    ESP_LOGW(TAG, "No IPA config found for camera: %s", cam_name ? cam_name : "NULL");
+    (void)cam_name;
     return NULL;
 }
