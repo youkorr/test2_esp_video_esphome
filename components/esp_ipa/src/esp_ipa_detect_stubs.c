@@ -13,7 +13,7 @@
  * For PlatformIO/ESPHome, we provide them manually.
  *
  * The IPA pipeline code iterates: for (p = &start; p < &end; ++p)
- * Therefore we MUST create a contiguous array in memory.
+ * We use numbered subsections (.esp_ipa_detect.N) to guarantee ordering.
  *
  * Available IPAs in libesp_ipa.a:
  * - AWB: Auto White Balance (Gray World)
@@ -39,43 +39,52 @@ typedef struct esp_ipa_detect {
 } esp_ipa_detect_t;
 
 /**
- * IPA detection array - MUST be contiguous in memory!
+ * IPA detection array using numbered subsections for guaranteed order
  *
- * We create a real array and expose pointers to first and last+1 elements
- * as the __esp_ipa_detect_array_start and __esp_ipa_detect_array_end symbols.
+ * The linker will sort .esp_ipa_detect.0, .esp_ipa_detect.1, etc. in numerical order.
+ * We create __esp_ipa_detect_array_start and __esp_ipa_detect_array_end directly.
  */
-static esp_ipa_detect_t s_esp_ipa_detect_array[] = {
-    {
-        .name = "awb_gray_world",
-        .detect = __esp_ipa_detect_fn_awb_gray_world,
-    },
-    {
-        .name = "agc_threshold",
-        .detect = __esp_ipa_detect_fn_agc_threshold,
-    },
-    {
-        .name = "denoising_gain_feedback",
-        .detect = __esp_ipa_detect_fn_denoising_gain_feedback,
-    },
-    {
-        .name = "sharpen_freq_feedback",
-        .detect = __esp_ipa_detect_fn_sharpen_freq_feedback,
-    },
-    {
-        .name = "gamma_lumma_feedback",
-        .detect = __esp_ipa_detect_fn_gamma_lumma_feedback,
-    },
-    {
-        .name = "cc_linear",
-        .detect = __esp_ipa_detect_fn_cc_linear,
-    },
+
+// Start marker - must be first (subsection .0)
+__attribute__((used, section(".esp_ipa_detect.00000")))
+esp_ipa_detect_t __esp_ipa_detect_array_start = {
+    .name = "awb_gray_world",
+    .detect = __esp_ipa_detect_fn_awb_gray_world,
 };
 
-/**
- * Export the array boundaries as the symbols expected by libesp_ipa.a
- *
- * The library code does: for (p = &start; p < &end; ++p)
- * So we need start to point to first element and end to point to one past last.
- */
-esp_ipa_detect_t *__esp_ipa_detect_array_start = &s_esp_ipa_detect_array[0];
-esp_ipa_detect_t *__esp_ipa_detect_array_end = &s_esp_ipa_detect_array[6];
+__attribute__((used, section(".esp_ipa_detect.00001")))
+static esp_ipa_detect_t esp_ipa_detect_agc_threshold = {
+    .name = "agc_threshold",
+    .detect = __esp_ipa_detect_fn_agc_threshold,
+};
+
+__attribute__((used, section(".esp_ipa_detect.00002")))
+static esp_ipa_detect_t esp_ipa_detect_denoising_gain_feedback = {
+    .name = "denoising_gain_feedback",
+    .detect = __esp_ipa_detect_fn_denoising_gain_feedback,
+};
+
+__attribute__((used, section(".esp_ipa_detect.00003")))
+static esp_ipa_detect_t esp_ipa_detect_sharpen_freq_feedback = {
+    .name = "sharpen_freq_feedback",
+    .detect = __esp_ipa_detect_fn_sharpen_freq_feedback,
+};
+
+__attribute__((used, section(".esp_ipa_detect.00004")))
+static esp_ipa_detect_t esp_ipa_detect_gamma_lumma_feedback = {
+    .name = "gamma_lumma_feedback",
+    .detect = __esp_ipa_detect_fn_gamma_lumma_feedback,
+};
+
+__attribute__((used, section(".esp_ipa_detect.00005")))
+static esp_ipa_detect_t esp_ipa_detect_cc_linear = {
+    .name = "cc_linear",
+    .detect = __esp_ipa_detect_fn_cc_linear,
+};
+
+// End marker - must be last (subsection .99999)
+__attribute__((used, section(".esp_ipa_detect.99999")))
+esp_ipa_detect_t __esp_ipa_detect_array_end = {
+    .name = NULL,
+    .detect = NULL,
+};
