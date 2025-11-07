@@ -155,6 +155,10 @@ async def to_code(config):
     flags.extend([
         "-DCONFIG_CAMERA_SC202CS=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
+        # Optimisation gain pour meilleur rapport signal/bruit
+        "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=16000",  # 16x max (était 63008)
+        "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=1",        # Analog gain (moins de bruit)
+        "-DCONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY=0",        # Pas digital priority
     ])
 
     # ISP (Image Signal Processor)
