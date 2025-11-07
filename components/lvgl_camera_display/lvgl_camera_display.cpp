@@ -32,9 +32,13 @@ void LVGLCameraDisplay::setup() {
 }
 
 void LVGLCameraDisplay::loop() {
-  // La capture et mise à jour du canvas sont gérées par la tâche FreeRTOS dédiée
-  // dans mipi_dsi_cam (camera_task_function)
-  // Plus besoin de faire quoi que ce soit ici!
+  // La CAPTURE est gérée par camera_task dans mipi_dsi_cam,
+  // mais la MISE À JOUR DU CANVAS doit se faire ici (contexte LVGL)
+  // pour éviter le warning "modifying dirty areas in render"
+
+  if (this->camera_ != nullptr) {
+    this->camera_->update_canvas_if_ready();
+  }
 }
 
 void LVGLCameraDisplay::dump_config() {

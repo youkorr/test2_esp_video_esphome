@@ -5,6 +5,7 @@
 #include "esphome/components/i2c/i2c.h"
 #include <string>
 #include <mutex>
+#include <atomic>
 
 extern "C" {
 #include "linux/videodev2.h"
@@ -80,6 +81,9 @@ class MipiDSICamComponent : public Component {
   bool start_camera_task(lv_obj_t* canvas);
   void stop_camera_task();
 
+  // Mise à jour thread-safe du canvas (appeler depuis loop() ou LVGL context)
+  void update_canvas_if_ready();
+
   // Friend function pour accès depuis la tâche FreeRTOS
   friend void camera_task_function(void* arg);
 
@@ -113,6 +117,10 @@ class MipiDSICamComponent : public Component {
   bool task_running_{false};
   uint32_t frame_count_{0};
   uint32_t last_fps_time_{0};
+
+  // Thread-safe canvas update (évite warning LVGL)
+  volatile bool new_frame_ready_{false};
+  std::atomic<uint8_t*> pending_frame_buffer_{nullptr};
 
   // V4L2
   int video_fd_{-1};

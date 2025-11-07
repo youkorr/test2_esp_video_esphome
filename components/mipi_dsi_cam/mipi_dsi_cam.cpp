@@ -823,10 +823,13 @@ void camera_task_function(void* arg) {
     uint32_t t_ppa = millis();
 
     if (ret == ESP_OK && camera->canvas_ != nullptr) {
-      // Mettre à jour le canvas LVGL
-      // Note: lv_canvas_set_buffer() est thread-safe (simple affectation pointeur)
-      lv_canvas_set_buffer(camera->canvas_, camera->output_buffer_,
-                          camera->width_, camera->height_, LV_IMG_CF_TRUE_COLOR);
+      // THREAD-SAFE: Ne PAS appeler lv_canvas_set_buffer() directement ici!
+      // → Cause warning: "detected modifying dirty areas in render"
+      //
+      // Au lieu, on signale qu'un nouveau buffer est prêt.
+      // La mise à jour du canvas se fera dans le contexte LVGL (loop() ou callback)
+      camera->pending_frame_buffer_.store(camera->output_buffer_, std::memory_order_release);
+      camera->new_frame_ready_ = true;
 
       camera->frame_count_++;
     }
@@ -946,6 +949,28 @@ void MipiDSICamComponent::stop_camera_task() {
   }
 
   this->canvas_ = nullptr;
+}
+
+void MipiDSICamComponent::update_canvas_if_ready() {
+  // Vérifier si un nouveau buffer est prêt (thread-safe)
+  if (!this->new_frame_ready_) {
+    return;  // Pas de nouveau buffer
+  }
+
+  // Récupérer le buffer de manière atomique
+  uint8_t* frame_buffer = this->pending_frame_buffer_.load(std::memory_order_acquire);
+
+  if (frame_buffer == nullptr || this->canvas_ == nullptr) {
+    return;
+  }
+
+  // IMPORTANT: Cette fonction DOIT être appelée depuis le contexte LVGL
+  // (loop() ou callback LVGL) pour éviter le warning "modifying dirty areas in render"
+  lv_canvas_set_buffer(this->canvas_, frame_buffer,
+                      this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
+
+  // Réinitialiser le flag (le prochain buffer sera signalé par camera_task)
+  this->new_frame_ready_ = false;
 }
 
 void MipiDSICamComponent::dump_config() {
