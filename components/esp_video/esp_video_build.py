@@ -107,6 +107,25 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
+    # Ajouter les chemins d'include pour les bibliothèques H.264 (OpenH264, h264bsd)
+    h264_lib_includes = [
+        "sw/libs/openh264_inc",   # codec_api.h, codec_app_def.h, codec_def.h
+        "sw/libs/tinyh264_inc",   # h264bsd_decoder.h, basetype.h
+    ]
+
+    for inc in h264_lib_includes:
+        inc_path = os.path.join(esp_h264_dir, inc)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+            print(f"[ESP-Video Build] 📁 Include H.264 lib ajouté: {inc}")
+
+    # Ajouter les bibliothèques statiques OpenH264 et TinyH264
+    h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
+    if os.path.exists(h264_static_libs_dir):
+        env.Append(LIBPATH=[h264_static_libs_dir])
+        env.Append(LIBS=["openh264", "tinyh264"])
+        print(f"[ESP-Video Build] 📚 Bibliothèques H.264 ajoutées: libopenh264.a, libtinyh264.a")
+
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
         if os.path.exists(src_path):
