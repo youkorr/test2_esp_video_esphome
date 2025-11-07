@@ -112,37 +112,10 @@ if os.path.exists(esp_h264_dir):
             print(f"[ESP-Video Build] + esp_h264/{src}")
 
 # ========================================================================
+# NOTE: esp_ipa sources (version.c, esp_ipa_detect_stubs.c) et linking
+# avec libesp_ipa.a sont gérés directement dans __init__.py pour garantir
+# l'ordre correct de compilation et de linking
 # ========================================================================
-# Sources esp_ipa
-# ========================================================================
-# IMPORTANT: On compile les sources pour utiliser notre config IPA custom
-# (5 algorithmes: AWB, sharpen, denoising, gamma, CC - PAS d'AGC)
-esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
-esp_ipa_sources = [
-    "src/version.c",              # Notre config IPA (blanc→blanc, pas de flashes)
-    "src/esp_ipa_detect_stubs.c", # Detection array pour les IPAs
-]
-
-if os.path.exists(esp_ipa_dir):
-    print("[ESP-Video Build] === Compilation sources esp_ipa (config custom) ===")
-    for src in esp_ipa_sources:
-        src_path = os.path.join(esp_ipa_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
-            print(f"[ESP-Video Build] ✓ Compiling esp_ipa/{src}")
-    print("[ESP-Video Build] === esp_ipa sources compiled ===")
-
-    # Linker avec libesp_ipa.a pour les fonctions IPA internes
-    # (esp_ipa_pipeline_process, esp_ipa_pipeline_create, etc.)
-    # Notre version.c compilée ci-dessus fournit la config custom
-    esp_ipa_lib_dir = os.path.join(esp_ipa_dir, "lib/esp32p4")
-    if os.path.exists(esp_ipa_lib_dir):
-        esp_ipa_lib_path = os.path.join(esp_ipa_lib_dir, "libesp_ipa.a")
-        if os.path.exists(esp_ipa_lib_path):
-            env.Append(LIBPATH=[esp_ipa_lib_dir])
-            env.Append(LIBS=["esp_ipa"])
-            print(f"[ESP-Video Build] ✓ Linking libesp_ipa.a (IPA functions)")
-            print(f"[ESP-Video Build]   Note: version.c compiled above provides custom config")
 
 # ========================================================================
 # Sources esp_sccb_intf
