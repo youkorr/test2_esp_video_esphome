@@ -93,10 +93,11 @@ esp_h264_sources = [
     # "port/src/esp_h264_alloc_less_than_5_3.c",  # Exclu: pour ESP-IDF < 5.3 seulement
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/):
-    "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
-    "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
-    "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
+    # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/) - DÉSACTIVÉES
+    # Ces encodeurs/décodeurs logiciels ne sont pas nécessaires pour l'encodeur matériel ESP32-P4
+    # "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
+    # "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
+    # "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
     "interface/include/src/esp_h264_enc_dual.c",
