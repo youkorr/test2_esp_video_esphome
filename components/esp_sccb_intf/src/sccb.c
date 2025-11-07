@@ -14,6 +14,10 @@
 #include "esp_sccb_io_interface.h"
 #include "esp_sccb_intf.h"
 
+#ifndef CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT
+#define CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT 1000  // 1000ms default timeout
+#endif
+
 #define ESP_SCCB_TRANS_DEALY CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT
 
 static const char *TAG = "sccb";

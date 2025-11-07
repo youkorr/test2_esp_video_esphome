@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
+#include <stddef.h>
 #include "esp_ipa_types.h"
 
 /**
