@@ -45,21 +45,25 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* Configuration IPA pour SC202CS - SEULEMENT AWB pour stabilité */
-    /* AGC désactivé temporairement car cause flashes sombre/claire */
+    /* Configuration IPA pour SC202CS - TOUS les IPAs SAUF AGC */
+    /* AGC désactivé car cause flashes, mais on garde tous les autres pour qualité */
     static const char *sc202cs_ipa_names[] = {
-        "awb.gray",        /* Auto White Balance - Gray World */
-        /* "agc.threshold" désactivé - cause clignotements */
+        "awb.gray",                /* Auto White Balance - corrige blanc→vert */
+        "denoising.gain_feedback", /* Réduction bruit - image plus propre */
+        "sharpen.freq_feedback",   /* Netteté - image plus claire */
+        "gamma.lumma_feedback",    /* Gamma - luminosité optimale */
+        "cc.linear",               /* Color Correction - couleurs correctes */
+        /* "agc.threshold" DÉSACTIVÉ - cause flashes */
     };
 
     static const esp_ipa_config_t sc202cs_ipa_config = {
-        .ipa_nums = 1,     /* Seulement 1 IPA: AWB */
+        .ipa_nums = 5,     /* 5 IPAs actifs (tous sauf AGC) */
         .ipa_names = sc202cs_ipa_names,
     };
 
     /* Check if this is the SC202CS sensor */
     if (cam_name && strcmp(cam_name, "SC202CS") == 0) {
-        ESP_LOGI(TAG, "📸 IPA config for %s: AWB only (stable mode)", cam_name);
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CC (no AGC)", cam_name);
         return &sc202cs_ipa_config;
     }
 
