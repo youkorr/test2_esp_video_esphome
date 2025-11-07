@@ -116,6 +116,23 @@ void ESPVideoComponent::setup() {
   }
 
   ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo prêts (bus I2C partagé)");
+
+  // Vérifier si l'ISP pipeline est initialisé
+#ifdef ESP_VIDEO_ISP_ENABLED
+  extern bool esp_video_isp_pipeline_is_initialized(void);
+  bool isp_initialized = esp_video_isp_pipeline_is_initialized();
+  ESP_LOGI(TAG, "🔍 ISP Pipeline status: %s", isp_initialized ? "INITIALIZED ✅" : "NOT INITIALIZED ❌");
+
+  if (!isp_initialized) {
+    ESP_LOGW(TAG, "⚠️  ISP Pipeline NOT initialized despite enable_isp: true");
+    ESP_LOGW(TAG, "   This means IPA algorithms (AWB, sharpen, etc) are NOT active");
+    ESP_LOGW(TAG, "   Image quality will be degraded (blanc→vert, pas net, etc)");
+  } else {
+    ESP_LOGI(TAG, "✅ ISP Pipeline active - IPA algorithms running");
+  }
+#else
+  ESP_LOGW(TAG, "⚠️  ISP not enabled in configuration");
+#endif
 #else
   ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");
 #endif
