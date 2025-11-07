@@ -397,9 +397,12 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 #endif
 
+    ESP_LOGI(TAG, "🔍 Starting sensor detection loop...");
     for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
+        ESP_LOGI(TAG, "  Checking sensor: port=%d, sccb_addr=0x%x", p->port, p->sccb_addr);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
+            ESP_LOGI(TAG, "  → MIPI-CSI sensor detected, initializing...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
@@ -454,7 +457,28 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             }
 #endif
 
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "DEBUG: esp_video_init() reached ISP section");
+            ESP_LOGI(TAG, "  cam_dev=%p", cam_dev);
+            if (cam_dev) {
+                ESP_LOGI(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+                ESP_LOGI(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
+            }
+#ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");
+#else
+            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=0 (NOT DEFINED)");
+#endif
+            ESP_LOGI(TAG, "========================================");
+
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+            ESP_LOGI(TAG, "🔍 ISP Pipeline Controller: ENABLED");
+            ESP_LOGI(TAG, "   cam_dev=%p, cur_format=%p", cam_dev, cam_dev ? cam_dev->cur_format : NULL);
+            if (cam_dev && cam_dev->cur_format) {
+                ESP_LOGI(TAG, "   cur_format->isp_info=%p", cam_dev->cur_format->isp_info);
+                ESP_LOGI(TAG, "   cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+            }
+
             if (cam_dev->cur_format && cam_dev->cur_format->isp_info) {
                 const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(cam_dev->name);
                 if (ipa_config) {
@@ -464,15 +488,21 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                         .ipa_config = ipa_config
                     };
 
+                    ESP_LOGI(TAG, "🚀 Initializing ISP pipeline with IPA...");
                     ret = esp_video_isp_pipeline_init(&isp_config);
                     if (ret != ESP_OK) {
                         ESP_LOGE(TAG, "failed to create ISP pipeline controller");
                         return ret;
                     }
+                    ESP_LOGI(TAG, "✅ ISP pipeline controller initialized successfully!");
                 } else {
                     ESP_LOGW(TAG, "failed to get configuration to initialize ISP controller");
                 }
+            } else {
+                ESP_LOGW(TAG, "❌ Cannot initialize ISP: cur_format or isp_info is NULL");
             }
+#else
+            ESP_LOGW(TAG, "⚠️  ISP Pipeline Controller: DISABLED (CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER not set)");
 #endif
             csi_inited = true;
         }
