@@ -205,6 +205,7 @@ async def to_code(config):
     if config[CONF_ENABLE_H264]:
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
+            "-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",  # Hardware H.264 encoder/decoder for ESP32-P4
             "-DESP_VIDEO_H264_ENABLED=1",  # Pour esp_video_component.cpp
         ])
 
