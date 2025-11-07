@@ -1028,6 +1028,14 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_LOGD(TAG, "  max:     %0.4f", isp->sensor.max_gain);
         ESP_LOGD(TAG, "  step:    %0.4f", isp->sensor.step_gain);
         ESP_LOGD(TAG, "  current: %0.4f", isp->sensor.cur_gain);
+
+        // WORKAROUND SC202CS: Limiter le gain max à 16x
+        // Le sensor retourne parfois des valeurs énormes (63x) qui causent saturation/bruit
+        // Limiter à 16x pour meilleur rapport signal/bruit
+        if (isp->sensor.max_gain > 16.0f) {
+            ESP_LOGW(TAG, "⚠️  Limiting max_gain from %0.4f to 16.0 (SC202CS optimal)", isp->sensor.max_gain);
+            isp->sensor.max_gain = 16.0f;
+        }
     } else {
         ESP_LOGD(TAG, "V4L2_CID_GAIN is not supported");
     }
@@ -1270,8 +1278,15 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     isp = calloc(1, sizeof(esp_video_isp_t));
     ESP_RETURN_ON_FALSE(isp, ESP_ERR_NO_MEM, TAG, "failed to malloc isp");
 
-    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create(config->ipa_config, &isp->ipa_pipeline),
+    // Enable IPA debug logging to verify algorithm loading
+    esp_ipa_pipeline_set_log(true);
+
+    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create_from_config(config->ipa_config, &isp->ipa_pipeline),
                       fail_0, TAG, "failed to create IPA pipeline");
+
+    // Print loaded IPA algorithms for verification
+    ESP_LOGI(TAG, "📸 IPA Pipeline created - verifying loaded algorithms:");
+    esp_ipa_pipeline_print(isp->ipa_pipeline);
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
     ESP_GOTO_ON_ERROR(init_isp_dev(config, isp), fail_2, TAG, "failed to initialize ISP device");
@@ -1279,6 +1294,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     metadata.flags = 0;
     ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
                       fail_3, TAG, "failed to initialize IPA pipeline");
+    ESP_LOGI(TAG, "✅ IPA Pipeline initialized successfully");
     config_isp_and_camera(isp, &metadata);
 
     /**
