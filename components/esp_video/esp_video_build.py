@@ -56,12 +56,14 @@ esp_cam_sensor_sources = [
     "src/driver_cam/esp_cam_ctlr_spi_cam.c",
     "sensor/ov5647/ov5647.c",
     "sensor/sc202cs/sc202cs.c",
+    "sensor/ov02c10/ov02c10.c",
 ]
 
 # Ajouter les chemins d'include pour les sensors (private_include)
 esp_cam_sensor_includes = [
     "sensor/ov5647/private_include",
-    "sensor/sc202cs/include/private_include",
+    "sensor/sc202cs/private_include",
+    "sensor/ov02c10/private_include",
 ]
 
 if os.path.exists(esp_cam_sensor_dir):
