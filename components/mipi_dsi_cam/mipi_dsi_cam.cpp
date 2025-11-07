@@ -638,9 +638,14 @@ void camera_task_function(void* arg) {
 
     esp_err_t ret = ppa_do_scale_rotate_mirror(camera->ppa_handle_, &srm_config);
     if (ret == ESP_OK && camera->canvas_ != nullptr) {
-      // Mettre à jour le canvas LVGL directement (comme M5Stack demo)
+      // IMPORTANT: Verrouiller LVGL avant de modifier le canvas (thread-safety!)
+      lv_lock();
+
+      // Mettre à jour le canvas LVGL
       lv_canvas_set_buffer(camera->canvas_, camera->output_buffer_,
                           camera->width_, camera->height_, LV_IMG_CF_TRUE_COLOR);
+
+      lv_unlock();
 
       camera->frame_count_++;
 
@@ -669,14 +674,16 @@ void camera_task_function(void* arg) {
 }
 
 bool MipiDSICamComponent::start_camera_task(lv_obj_t* canvas) {
-  if (this->camera_task_handle_ != nullptr) {
-    ESP_LOGW(TAG, "Camera task déjà démarrée");
-    return false;
-  }
-
   if (canvas == nullptr) {
     ESP_LOGE(TAG, "Canvas null - impossible de démarrer task");
     return false;
+  }
+
+  // Si la tâche est déjà en cours, mettre à jour le canvas seulement
+  if (this->camera_task_handle_ != nullptr) {
+    ESP_LOGI(TAG, "Camera task déjà active - mise à jour canvas");
+    this->canvas_ = canvas;
+    return true;
   }
 
   this->canvas_ = canvas;
