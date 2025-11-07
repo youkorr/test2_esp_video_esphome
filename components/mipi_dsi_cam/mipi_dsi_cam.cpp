@@ -67,6 +67,12 @@ void MipiDSICamComponent::setup() {
     return;
   }
 
+  // Setup sensor controls (exposition, gain, white balance, etc.)
+  if (!this->setup_sensor_controls_()) {
+    ESP_LOGW(TAG, "⚠️  Échec configuration contrôles capteur - image peut être sombre");
+    // Continue quand même - pas critique
+  }
+
   // Setup buffers
   if (!this->setup_buffers_()) {
     ESP_LOGE(TAG, "❌ Échec configuration buffers");
@@ -218,6 +224,97 @@ bool MipiDSICamComponent::open_video_device_() {
   }
 
   return true;
+}
+
+bool MipiDSICamComponent::setup_sensor_controls_() {
+  ESP_LOGI(TAG, "========================================");
+  ESP_LOGI(TAG, "Configuration contrôles capteur V4L2...");
+  ESP_LOGI(TAG, "========================================");
+
+  bool success = true;
+  struct v4l2_control ctrl;
+
+  // 1. Auto-exposition (CRITIQUE pour luminosité!)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+  ctrl.value = V4L2_EXPOSURE_AUTO;  // Mode automatique
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_EXPOSURE_AUTO failed: errno=%d (%s)", errno, strerror(errno));
+    success = false;
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto-exposition: ACTIVÉE");
+  }
+
+  // 2. Auto-gain (CRITIQUE pour luminosité!)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTOGAIN;
+  ctrl.value = 1;  // Activé
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_AUTOGAIN failed: errno=%d (%s)", errno, strerror(errno));
+    success = false;
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto-gain: ACTIVÉ");
+  }
+
+  // 3. Auto white balance (pour couleurs correctes)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  ctrl.value = 1;  // Activé
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_AUTO_WHITE_BALANCE failed: errno=%d (%s)", errno, strerror(errno));
+    // Non critique
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto white balance: ACTIVÉE");
+  }
+
+  // 4. Luminosité (augmenter si image trop sombre)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_BRIGHTNESS;
+  ctrl.value = 0;  // 0 = défaut, peut être ajusté
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_BRIGHTNESS failed: errno=%d (%s)", errno, strerror(errno));
+    // Non critique
+  } else {
+    ESP_LOGI(TAG, "  ✓ Luminosité: %d (défaut)", ctrl.value);
+  }
+
+  // 5. Contraste
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_CONTRAST;
+  ctrl.value = 0;  // 0 = défaut
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_CONTRAST failed: errno=%d (%s)", errno, strerror(errno));
+    // Non critique
+  } else {
+    ESP_LOGI(TAG, "  ✓ Contraste: %d (défaut)", ctrl.value);
+  }
+
+  // 6. Saturation
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_SATURATION;
+  ctrl.value = 0;  // 0 = défaut
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_SATURATION failed: errno=%d (%s)", errno, strerror(errno));
+    // Non critique
+  } else {
+    ESP_LOGI(TAG, "  ✓ Saturation: %d (défaut)", ctrl.value);
+  }
+
+  ESP_LOGI(TAG, "========================================");
+  if (success) {
+    ESP_LOGI(TAG, "✅ Contrôles capteur configurés");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Certains contrôles non supportés - vérifier capacités capteur");
+  }
+  ESP_LOGI(TAG, "========================================");
+
+  return success;
 }
 
 bool MipiDSICamComponent::setup_buffers_() {

@@ -139,6 +139,7 @@ class MipiDSICamComponent : public Component {
   bool setup_buffers_();
   bool setup_jpeg_decoder_();
   bool setup_ppa_();
+  bool setup_sensor_controls_();
   bool start_stream_();
   bool stop_stream_();
   uint32_t map_pixel_format_(const std::string &fmt);
