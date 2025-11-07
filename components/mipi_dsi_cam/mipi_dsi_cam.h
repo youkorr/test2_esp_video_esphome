@@ -9,6 +9,7 @@
 extern "C" {
 #include "linux/videodev2.h"
 #include "driver/ppa.h"
+#include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -123,6 +124,11 @@ class MipiDSICamComponent : public Component {
   // Buffers mmap (entrée V4L2)
   uint8_t* buffers_[VIDEO_BUFFER_COUNT]{nullptr};
 
+  // JPEG Hardware Decoder (ESP32-P4)
+  jpeg_decoder_handle_t jpeg_handle_{nullptr};
+  uint8_t* jpeg_decode_buffer_{nullptr};  // Buffer RGB565 décodé (DMA + SPIRAM)
+  size_t jpeg_decode_buffer_size_{0};
+
   // PPA (Pixel Processing Accelerator)
   ppa_client_handle_t ppa_handle_{nullptr};
   uint8_t* output_buffer_{nullptr};  // Buffer de sortie PPA (DMA + SPIRAM)
@@ -131,6 +137,7 @@ class MipiDSICamComponent : public Component {
   // Helpers
   bool open_video_device_();
   bool setup_buffers_();
+  bool setup_jpeg_decoder_();
   bool setup_ppa_();
   bool start_stream_();
   bool stop_stream_();

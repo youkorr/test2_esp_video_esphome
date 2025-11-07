@@ -53,7 +53,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_EXTERNAL_CLOCK_PIN): cv.All(validate_gpio_pin, cv.int_range(min=0, max=48)),
     cv.Optional(CONF_FREQUENCY, default=24000000): cv.int_range(min=1000000, max=40000000),
     cv.Optional(CONF_RESOLUTION, default="720P"): cv.string,
-    cv.Optional(CONF_PIXEL_FORMAT, default="RGB565"): cv.string,
+    cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.string,  # JPEG avec décodeur HW = optimal
     cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
     cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=100),
     cv.Optional(CONF_MIRROR_X, default=True): cv.boolean,  # Comme M5Stack demo

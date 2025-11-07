@@ -74,6 +74,17 @@ void MipiDSICamComponent::setup() {
     return;
   }
 
+  // Setup JPEG decoder si format JPEG (CRUCIAL pour décompression!)
+  if (this->v4l2_pixelformat_ == V4L2_PIX_FMT_JPEG || this->v4l2_pixelformat_ == V4L2_PIX_FMT_MJPEG) {
+    if (!this->setup_jpeg_decoder_()) {
+      ESP_LOGE(TAG, "❌ Échec configuration décodeur JPEG");
+      this->mark_failed();
+      return;
+    }
+  } else {
+    ESP_LOGI(TAG, "Format non-JPEG détecté - pas de décodeur JPEG nécessaire");
+  }
+
   // Setup PPA (Pixel Processing Accelerator)
   if (!this->setup_ppa_()) {
     ESP_LOGE(TAG, "❌ Échec configuration PPA");
@@ -265,6 +276,43 @@ bool MipiDSICamComponent::setup_buffers_() {
   return true;
 }
 
+bool MipiDSICamComponent::setup_jpeg_decoder_() {
+  ESP_LOGI(TAG, "Configuration décodeur JPEG matériel...");
+
+  // Allouer buffer pour le RGB565 décodé (même taille que output final)
+  this->jpeg_decode_buffer_size_ = this->width_ * this->height_ * 2;  // RGB565 = 2 bytes/pixel
+  this->jpeg_decode_buffer_ = (uint8_t*)heap_caps_calloc(
+    this->jpeg_decode_buffer_size_, 1,
+    MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM
+  );
+
+  if (this->jpeg_decode_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "❌ Échec allocation buffer décodage JPEG (%u octets)",
+             (unsigned)this->jpeg_decode_buffer_size_);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "  Buffer décodage: %u octets (DMA+SPIRAM)", (unsigned)this->jpeg_decode_buffer_size_);
+
+  // Configuration du décodeur JPEG
+  jpeg_decode_engine_cfg_t decode_eng_cfg = {
+    .timeout_ms = 100,  // Timeout 100ms pour le décodage
+  };
+
+  esp_err_t ret = jpeg_new_decoder_engine(&decode_eng_cfg, &this->jpeg_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ jpeg_new_decoder_engine failed: %d", ret);
+    heap_caps_free(this->jpeg_decode_buffer_);
+    this->jpeg_decode_buffer_ = nullptr;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Décodeur JPEG matériel configuré");
+  ESP_LOGI(TAG, "  Hardware accéléré: DCT, quantization, huffman");
+  ESP_LOGI(TAG, "  Format sortie: RGB565");
+  return true;
+}
+
 bool MipiDSICamComponent::setup_ppa_() {
   ESP_LOGI(TAG, "Configuration PPA...");
 
@@ -441,12 +489,13 @@ uint32_t MipiDSICamComponent::map_pixel_format_(const std::string &fmt) {
   std::string fmt_upper = fmt;
   std::transform(fmt_upper.begin(), fmt_upper.end(), fmt_upper.begin(), ::toupper);
 
+  if (fmt_upper == "JPEG" || fmt_upper == "MJPEG") return V4L2_PIX_FMT_JPEG;
   if (fmt_upper == "RGB565") return V4L2_PIX_FMT_RGB565;
   if (fmt_upper == "YUV422" || fmt_upper == "YUYV") return V4L2_PIX_FMT_YUV422P;
   if (fmt_upper == "RAW8") return V4L2_PIX_FMT_SBGGR8;
 
-  ESP_LOGW(TAG, "Format inconnu '%s', utilisation RGB565", fmt.c_str());
-  return V4L2_PIX_FMT_RGB565;
+  ESP_LOGW(TAG, "Format inconnu '%s', utilisation JPEG", fmt.c_str());
+  return V4L2_PIX_FMT_JPEG;  // Par défaut JPEG pour performance
 }
 
 bool MipiDSICamComponent::parse_resolution_(const std::string &res, uint16_t &w, uint16_t &h) {
@@ -516,10 +565,50 @@ void camera_task_function(void* arg) {
       continue;
     }
 
-    // PPA - Scale/Rotate/Mirror
+    // Buffer source pour PPA (soit JPEG décodé, soit données brutes)
+    uint8_t* source_buffer = camera->buffers_[buf.index];
+
+    // DÉCODAGE JPEG si nécessaire (CRUCIAL pour décompression!)
+    if (camera->jpeg_handle_ != nullptr) {
+      // Configuration du décodage JPEG → RGB565
+      jpeg_decode_cfg_t decode_cfg = {
+        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,  // BGR pour compatibilité ESP32-P4
+      };
+
+      jpeg_decode_picture_info_t pic_info = {};
+
+      // Décoder JPEG compressé → RGB565
+      esp_err_t ret = jpeg_decoder_process(
+        camera->jpeg_handle_,
+        &decode_cfg,
+        camera->buffers_[buf.index],  // JPEG compressé (entrée)
+        buf.bytesused,                // Taille JPEG
+        camera->jpeg_decode_buffer_,  // RGB565 décodé (sortie)
+        camera->jpeg_decode_buffer_size_,
+        &pic_info
+      );
+
+      if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "❌ jpeg_decoder_process failed: %d (bytesused=%u)", ret, buf.bytesused);
+        ioctl(camera->video_fd_, VIDIOC_QBUF, &buf);
+        continue;
+      }
+
+      // Utiliser le buffer décodé pour PPA
+      source_buffer = camera->jpeg_decode_buffer_;
+
+      // Logger info JPEG toutes les 500 frames
+      if (camera->frame_count_ % 500 == 0) {
+        ESP_LOGI(TAG, "📸 JPEG: %ux%u, taille compressée=%u octets",
+                 pic_info.width, pic_info.height, buf.bytesused);
+      }
+    }
+
+    // PPA - Scale/Rotate/Mirror sur données RGB565
     ppa_srm_oper_config_t srm_config = {
       .in = {
-        .buffer = camera->buffers_[buf.index],
+        .buffer = source_buffer,  // RGB565 (décodé ou brut)
         .pic_w = camera->width_,
         .pic_h = camera->height_,
         .block_w = camera->width_,
