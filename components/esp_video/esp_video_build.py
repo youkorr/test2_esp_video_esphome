@@ -112,20 +112,28 @@ if os.path.exists(esp_h264_dir):
             print(f"[ESP-Video Build] + esp_h264/{src}")
 
 # ========================================================================
+# ========================================================================
 # Sources esp_ipa
 # ========================================================================
+# IMPORTANT: On compile les sources pour utiliser notre config IPA custom
+# (5 algorithmes: AWB, sharpen, denoising, gamma, CC - PAS d'AGC)
 esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
 esp_ipa_sources = [
-    "src/version.c",
-    "src/esp_ipa_detect_stubs.c",  # Linker symbols for IPA auto-detection
+    "src/version.c",              # Notre config IPA (blanc→blanc, pas de flashes)
+    "src/esp_ipa_detect_stubs.c", # Detection array pour les IPAs
 ]
 
 if os.path.exists(esp_ipa_dir):
+    print("[ESP-Video Build] === Compilation sources esp_ipa (config custom) ===")
     for src in esp_ipa_sources:
         src_path = os.path.join(esp_ipa_dir, src)
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
-            print(f"[ESP-Video Build] + esp_ipa/{src}")
+            print(f"[ESP-Video Build] ✓ Compiling esp_ipa/{src}")
+
+    # IMPORTANT: NE PAS ajouter libesp_ipa.a ici car elle écraserait nos sources!
+    # La lib sera linkée automatiquement par __init__.py si nécessaire
+    print("[ESP-Video Build] === esp_ipa sources added (lib NOT added to avoid override) ===")
 
 # ========================================================================
 # Sources esp_sccb_intf
@@ -142,35 +150,6 @@ if os.path.exists(esp_sccb_intf_dir):
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[ESP-Video Build] + esp_sccb_intf/{src}")
-
-# ========================================================================
-# Compiler les sources esp_ipa (au lieu d'utiliser la lib précompilée)
-# ========================================================================
-# IMPORTANT: On compile les sources pour utiliser notre config IPA custom
-# (5 algorithmes sans AGC pour éviter les flashes et corriger blanc→vert)
-esp_ipa_sources = [
-    "src/version.c",              # Notre config IPA custom (AWB, sharpen, denoising, gamma, CC - pas AGC)
-    "src/esp_ipa_detect_stubs.c", # Detection array pour les IPAs
-]
-
-if os.path.exists(esp_ipa_dir):
-    print("[ESP-Video Build] Compilation sources esp_ipa (config custom)...")
-    for src in esp_ipa_sources:
-        src_path = os.path.join(esp_ipa_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
-            print(f"[ESP-Video Build] + esp_ipa/{src}")
-
-    # Ajouter la lib précompilée pour les fonctions IPA internes
-    esp_ipa_lib_dir = os.path.join(esp_ipa_dir, "lib/esp32p4")
-    if os.path.exists(esp_ipa_lib_dir):
-        esp_ipa_lib_path = os.path.join(esp_ipa_lib_dir, "libesp_ipa.a")
-        if os.path.exists(esp_ipa_lib_path):
-            env.Append(LIBPATH=[esp_ipa_lib_dir])
-            env.Append(LIBS=["esp_ipa"])
-            print(f"[ESP-Video Build] ✓ Lib esp_ipa (algorithms): {esp_ipa_lib_path}")
-else:
-    print("[ESP-Video Build] ⚠️ Répertoire esp_ipa introuvable")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
