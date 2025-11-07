@@ -411,8 +411,9 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 return ESP_FAIL;
             }
 
-            cfg.reset_pin = config->csi->reset_pin,
-            cfg.pwdn_pin = config->csi->pwdn_pin,
+            cfg.reset_pin = config->csi->reset_pin;
+            cfg.pwdn_pin = config->csi->pwdn_pin;
+            cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
             cam_dev = (*(p->detect))((void *)&cfg);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->csi->sccb_config);
@@ -533,6 +534,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
             cfg.reset_pin = config->dvp->reset_pin,
             cfg.pwdn_pin = config->dvp->pwdn_pin,
+            cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
             cam_dev = (*(p->detect))((void *)&cfg);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->dvp->sccb_config);
@@ -613,6 +615,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
                 cfg.reset_pin = spi_config->reset_pin;
                 cfg.pwdn_pin = spi_config->pwdn_pin;
+                cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
                 cam_dev = (*(p->detect))((void *)&cfg);
                 if (!cam_dev) {
                     destroy_sccb_device(cfg.sccb_handle, sccb_mark, &spi_config->sccb_config);
