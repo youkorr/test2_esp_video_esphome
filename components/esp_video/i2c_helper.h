@@ -43,31 +43,23 @@ inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
   // Structure mémoire de IDFI2CBus (ESP32 32-bit):
   // class IDFI2CBus : public InternalI2CBus, public Component
   //
-  // Layout typique avec héritage multiple:
-  // Offset 0:  vtable (4 bytes)
+  // Avec héritage multiple, il y a 2 vtables!
+  // Offset 0:  vtable #1 pour InternalI2CBus/I2CBus (4 bytes)
   // Offset 4:  I2CBus::scan_results_ (std::vector, 12 bytes)
   // Offset 16: I2CBus::scan_ (1 byte + 3 padding)
-  // Offset 20: Component::component_source_ (4 bytes)
-  // Offset 24: Component::warn_if_blocking_over_ (2 bytes)
-  // Offset 26: Component::component_state_ (1 byte)
-  // Offset 27: Component::pending_enable_loop_ (1 byte)
-  // Offset 28: IDFI2CBus::dev_ (i2c_master_dev_handle_t, 4 bytes)
-  // Offset 32: IDFI2CBus::bus_ (i2c_master_bus_handle_t, 4 bytes) ← Le handle!
+  // Offset 20: vtable #2 pour Component (4 bytes)
+  // Offset 24: Component::component_source_ (4 bytes)
+  // Offset 28: Component::warn_if_blocking_over_ + state + pending (4 bytes)
+  // Offset 32: padding/alignment (4 bytes)
+  // Offset 36: IDFI2CBus::dev_ (i2c_master_dev_handle_t, 4 bytes)
+  // Offset 40: IDFI2CBus::bus_ (i2c_master_bus_handle_t, 4 bytes) ← Le handle!
 
   void **obj_ptr = reinterpret_cast<void**>(bus);
 
-  ESP_LOGI(TAG_I2C_HELPER, "Debug I2CBus - Analyse mémoire complète:");
-  ESP_LOGI(TAG_I2C_HELPER, "  Adresse bus: %p", bus);
+  // Le membre bus_ est à offset 40 = obj_ptr[10]
+  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[10]);
 
-  // Afficher les 12 premiers pointeurs pour identifier le handle
-  for (int i = 0; i < 12; i++) {
-    ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[%d] (offset %d): %p", i, i*4, obj_ptr[i]);
-  }
-
-  // Selon l'analyse du code source ESPHome, bus_ devrait être à offset 32 = obj_ptr[8]
-  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[8]);
-
-  ESP_LOGI(TAG_I2C_HELPER, "  Tentative: obj_ptr[8] (offset 32) = %p", handle);
+  ESP_LOGI(TAG_I2C_HELPER, "Handle I2C extrait (obj_ptr[10], offset 40): %p", handle);
 
   return handle;
 }
