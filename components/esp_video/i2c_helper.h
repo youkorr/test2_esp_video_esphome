@@ -40,27 +40,34 @@ inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
     // i2c_master_bus_handle_t bus_;
   };
 
-  // Essayons de lire directement la mémoire après le vtable et les membres de Component
-  // Selon le code ESPHome, le handle devrait être quelque part dans l'objet
+  // Structure mémoire de IDFI2CBus (ESP32 32-bit):
+  // class IDFI2CBus : public InternalI2CBus, public Component
+  //
+  // Layout typique avec héritage multiple:
+  // Offset 0:  vtable (4 bytes)
+  // Offset 4:  I2CBus::scan_results_ (std::vector, 12 bytes)
+  // Offset 16: I2CBus::scan_ (1 byte + 3 padding)
+  // Offset 20: Component::component_source_ (4 bytes)
+  // Offset 24: Component::warn_if_blocking_over_ (2 bytes)
+  // Offset 26: Component::component_state_ (1 byte)
+  // Offset 27: Component::pending_enable_loop_ (1 byte)
+  // Offset 28: IDFI2CBus::dev_ (i2c_master_dev_handle_t, 4 bytes)
+  // Offset 32: IDFI2CBus::bus_ (i2c_master_bus_handle_t, 4 bytes) ← Le handle!
 
-  // Pour le moment, essayons un offset de 8 bytes (après vtable)
   void **obj_ptr = reinterpret_cast<void**>(bus);
 
-  ESP_LOGI(TAG_I2C_HELPER, "Debug I2CBus:");
+  ESP_LOGI(TAG_I2C_HELPER, "Debug I2CBus - Analyse mémoire complète:");
   ESP_LOGI(TAG_I2C_HELPER, "  Adresse bus: %p", bus);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[0] (vtable): %p", obj_ptr[0]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[1]: %p", obj_ptr[1]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[2]: %p", obj_ptr[2]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[3]: %p", obj_ptr[3]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[4]: %p", obj_ptr[4]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[5]: %p", obj_ptr[5]);
-  ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[6]: %p", obj_ptr[6]);
 
-  // TENTATIVE 2: obj_ptr[2] au lieu de obj_ptr[1]
-  // obj_ptr[1] a causé un crash, essayons obj_ptr[2]
-  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[2]);
+  // Afficher les 12 premiers pointeurs pour identifier le handle
+  for (int i = 0; i < 12; i++) {
+    ESP_LOGI(TAG_I2C_HELPER, "  obj_ptr[%d] (offset %d): %p", i, i*4, obj_ptr[i]);
+  }
 
-  ESP_LOGI(TAG_I2C_HELPER, "  Handle retourné (obj_ptr[2]): %p", handle);
+  // Selon l'analyse du code source ESPHome, bus_ devrait être à offset 32 = obj_ptr[8]
+  i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[8]);
+
+  ESP_LOGI(TAG_I2C_HELPER, "  Tentative: obj_ptr[8] (offset 32) = %p", handle);
 
   return handle;
 }
