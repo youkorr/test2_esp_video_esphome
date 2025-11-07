@@ -30,21 +30,24 @@
  * These must be defined as individual structures (not an array) to match the extern declarations.
  * By defining them sequentially in the same file, the compiler typically places them contiguously
  * in memory, allowing iteration from &start to &end.
+ *
+ * NOTE: The detect functions take esp_cam_sensor_config_t * but the union expects void *.
+ * We cast them to match the expected signature.
  */
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
-    .detect = ov5647_detect,
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .sccb_addr = OV5647_SCCB_ADDR
 };
 
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_sc202cs = {
-    .detect = sc202cs_detect,
+    .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .sccb_addr = SC202CS_SCCB_ADDR
 };
 
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_ov02c10 = {
-    .detect = ov02c10_detect,
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .sccb_addr = OV02C10_SCCB_ADDR
 };
