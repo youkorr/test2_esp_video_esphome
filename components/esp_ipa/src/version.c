@@ -34,6 +34,9 @@ void esp_ipa_print_version(void)
 /**
  * @brief Get IPA configuration for a specific camera device.
  *
+ * SOLUTION M5STACK: Nous créons la config IPA manuellement avec esp_ipa_pipeline_create()
+ * qui prend directement un tableau de noms, évitant complètement le système detect array.
+ *
  * @param cam_name  Camera device name
  *
  * @return
@@ -42,13 +45,23 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* TEMPORAIREMENT DÉSACTIVÉ - problème avec detect array linker */
-    /* IPA pipeline causait un crash au boot à cause de sections orphelines */
-    /* TODO: Implémenter alternative pour AE/AWB (contrôles manuels exposition/gain) */
+    /* Configuration IPA pour SC202CS - Approche M5Stack (sans detect array) */
+    static const char *sc202cs_ipa_names[] = {
+        "awb.gray",        /* Auto White Balance - Gray World */
+        "agc.threshold",   /* Auto Gain Control - Threshold based */
+    };
 
-    ESP_LOGW(TAG, "⚠️  IPA pipeline DÉSACTIVÉ pour %s (temporaire)", cam_name ? cam_name : "NULL");
-    ESP_LOGW(TAG, "   Image sera sombre - nécessite configuration manuelle exposition/gain");
+    static const esp_ipa_config_t sc202cs_ipa_config = {
+        .ipa_nums = 2,
+        .ipa_names = sc202cs_ipa_names,
+    };
 
-    (void)cam_name;
+    /* Check if this is the SC202CS sensor */
+    if (cam_name && strcmp(cam_name, "SC202CS") == 0) {
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+AGC only (M5Stack method)", cam_name);
+        return &sc202cs_ipa_config;
+    }
+
+    ESP_LOGW(TAG, "No IPA config for camera: %s", cam_name ? cam_name : "NULL");
     return NULL;
 }
