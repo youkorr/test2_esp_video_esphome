@@ -22,6 +22,7 @@ async def to_code(config):
         "include",
         "sensor/ov5647/include",
         "sensor/sc202cs/include",
+        "sensor/ov02c10/include",
     ]
 
     for inc in public_includes:
@@ -35,7 +36,8 @@ async def to_code(config):
         "src/driver_spi",
         "src/driver_cam",
         "sensor/ov5647/private_include",
-        "sensor/sc202cs/include/private_include",
+        "sensor/sc202cs/private_include",
+        "sensor/ov02c10/private_include",
     ]
 
     for inc in private_includes:
