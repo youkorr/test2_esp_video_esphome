@@ -59,7 +59,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MIRROR_X, default=True): cv.boolean,  # Comme M5Stack demo
     cv.Optional(CONF_MIRROR_Y, default=False): cv.boolean,
     cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
-    cv.Optional(CONF_AUTO_START, default=False): cv.boolean,  # Ne PAS démarrer automatiquement
+    cv.Optional(CONF_AUTO_START, default=True): cv.boolean,  # Démarrer automatiquement
 }).extend(cv.COMPONENT_SCHEMA)
 
 

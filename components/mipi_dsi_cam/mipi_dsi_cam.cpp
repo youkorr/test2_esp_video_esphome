@@ -233,149 +233,27 @@ bool MipiDSICamComponent::setup_sensor_controls_() {
 
   bool success = true;
   struct v4l2_control ctrl;
-  struct v4l2_ext_controls controls;
-  struct v4l2_ext_control control[1];
-  struct v4l2_query_ext_ctrl qctrl;
 
-  // Approche: Utiliser V4L2_CID_GAIN et V4L2_CID_EXPOSURE avec valeurs fixes
-  // car IPA AGC est désactivé pour éviter les flashes
+  // IMPORTANT: Ne PAS configurer gain/exposition fixes
+  // L'IPA (Image Processing Algorithm) gère automatiquement:
+  // - Auto White Balance (AWB)
+  // - Auto Gain (via algorithmes IPA)
+  // - Auto Exposure (via algorithmes IPA)
+  // - Denoising, Sharpening, Gamma, Color Correction
+  //
+  // Les contrôles V4L2 standards (brightness, contrast, saturation)
+  // ne fonctionnent pas sur SC202CS (errno=22 Invalid argument)
+  // C'est NORMAL - l'ISP pipeline IPA gère tout ça
 
-  // 1. Configurer GAIN fixe à ~4x (compromis luminosité/bruit)
-  memset(&qctrl, 0, sizeof(qctrl));
-  qctrl.id = V4L2_CID_GAIN;
-  if (ioctl(this->video_fd_, VIDIOC_QUERY_EXT_CTRL, &qctrl) == 0) {
-    // Calculer valeur pour 4x gain
-    // Si type INTEGER_MENU, chercher valeur proche de 4x
-    int target_gain_value = qctrl.default_value;
-
-    if (qctrl.type == V4L2_CTRL_TYPE_INTEGER_MENU) {
-      // Essayer d'obtenir une valeur raisonnable dans le menu
-      struct v4l2_querymenu qmenu;
-      qmenu.id = V4L2_CID_GAIN;
-
-      // Essayer index au milieu (compromis)
-      int mid_index = (qctrl.minimum + qctrl.maximum) / 2;
-      qmenu.index = mid_index;
-      if (ioctl(this->video_fd_, VIDIOC_QUERYMENU, &qmenu) == 0) {
-        target_gain_value = qmenu.index;
-        ESP_LOGI(TAG, "  Gain menu: utilisation index %d (mid-range)", mid_index);
-      }
-    }
-
-    memset(&controls, 0, sizeof(controls));
-    memset(control, 0, sizeof(control));
-    controls.ctrl_class = V4L2_CID_USER_CLASS;
-    controls.count = 1;
-    controls.controls = control;
-    control[0].id = V4L2_CID_GAIN;
-    control[0].value = target_gain_value;
-
-    if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
-      ESP_LOGI(TAG, "  ✓ Gain fixe configuré: valeur=%d", target_gain_value);
-    } else {
-      ESP_LOGW(TAG, "  ⚠️  Configuration gain failed: errno=%d", errno);
-    }
-  } else {
-    ESP_LOGW(TAG, "  ⚠️  QUERY V4L2_CID_GAIN failed");
-  }
-
-  // 2. Configurer EXPOSURE fixe à valeur moyenne
-  memset(&qctrl, 0, sizeof(qctrl));
-  qctrl.id = V4L2_CID_EXPOSURE;
-  if (ioctl(this->video_fd_, VIDIOC_QUERY_EXT_CTRL, &qctrl) == 0) {
-    // Utiliser valeur moyenne entre min et max
-    int target_exposure = (qctrl.minimum + qctrl.maximum) / 2;
-
-    memset(&controls, 0, sizeof(controls));
-    memset(control, 0, sizeof(control));
-    controls.ctrl_class = V4L2_CID_CAMERA_CLASS;
-    controls.count = 1;
-    controls.controls = control;
-    control[0].id = V4L2_CID_EXPOSURE;
-    control[0].value = target_exposure;
-
-    if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
-      ESP_LOGI(TAG, "  ✓ Exposition fixe configurée: valeur=%d", target_exposure);
-    } else {
-      ESP_LOGW(TAG, "  ⚠️  Configuration exposition failed: errno=%d", errno);
-    }
-  } else {
-    ESP_LOGW(TAG, "  ⚠️  QUERY V4L2_CID_EXPOSURE failed");
-  }
-
-  // Les contrôles standards V4L2 ne fonctionnent pas sur SC202CS
-  // (déjà testé - tous retournent errno=22)
-  // De plus, on DÉSACTIVE auto-gain/exposure car on utilise valeurs fixes ci-dessus
-
-  // 1. DÉSACTIVER auto-exposition (on utilise exposition fixe)
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_EXPOSURE_AUTO;
-  ctrl.value = V4L2_EXPOSURE_MANUAL;  // Mode MANUEL - pas automatique
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_EXPOSURE_AUTO non supporté (OK, on utilise valeur fixe)");
-  } else {
-    ESP_LOGI(TAG, "  ✓ Auto-exposition: DÉSACTIVÉE (mode manuel)");
-  }
-
-  // 2. DÉSACTIVER auto-gain (on utilise gain fixe)
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_AUTOGAIN;
-  ctrl.value = 0;  // DÉSACTIVÉ - on utilise gain fixe ci-dessus
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_AUTOGAIN non supporté (OK, on utilise valeur fixe)");
-  } else {
-    ESP_LOGI(TAG, "  ✓ Auto-gain: DÉSACTIVÉ (gain fixe utilisé)");
-  }
-
-  // 3. DÉSACTIVER auto white balance V4L2 (on utilise IPA AWB)
-  // On laisse IPA's "awb.gray" gérer le white balance dans le pipeline ISP
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
-  ctrl.value = 0;  // DÉSACTIVÉ - IPA AWB prend le relais
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_AUTO_WHITE_BALANCE non supporté (OK, IPA AWB actif)");
-  } else {
-    ESP_LOGI(TAG, "  ✓ Auto white balance V4L2: DÉSACTIVÉE (IPA AWB actif)");
-  }
-
-  // 4. Luminosité (augmenter si image trop sombre)
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_BRIGHTNESS;
-  ctrl.value = 0;  // 0 = défaut, peut être ajusté
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_BRIGHTNESS failed: errno=%d (%s)", errno, strerror(errno));
-    // Non critique
-  } else {
-    ESP_LOGI(TAG, "  ✓ Luminosité: %d (défaut)", ctrl.value);
-  }
-
-  // 5. Contraste
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_CONTRAST;
-  ctrl.value = 0;  // 0 = défaut
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_CONTRAST failed: errno=%d (%s)", errno, strerror(errno));
-    // Non critique
-  } else {
-    ESP_LOGI(TAG, "  ✓ Contraste: %d (défaut)", ctrl.value);
-  }
-
-  // 6. Saturation
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_SATURATION;
-  ctrl.value = 0;  // 0 = défaut
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_SATURATION failed: errno=%d (%s)", errno, strerror(errno));
-    // Non critique
-  } else {
-    ESP_LOGI(TAG, "  ✓ Saturation: %d (défaut)", ctrl.value);
-  }
+  ESP_LOGI(TAG, "  ✓ Gain/Exposition: gérés par IPA pipeline");
+  ESP_LOGI(TAG, "  ✓ Auto White Balance: IPA 'awb.gray' actif");
+  ESP_LOGI(TAG, "  ✓ Denoising: IPA 'denoising.gain_feedback' actif");
+  ESP_LOGI(TAG, "  ✓ Sharpening: IPA 'sharpen.freq_feedback' actif");
+  ESP_LOGI(TAG, "  ✓ Gamma: IPA 'gamma.lumma_feedback' actif");
+  ESP_LOGI(TAG, "  ✓ Color Correction: IPA 'cc.linear' actif");
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "  Note: Contrôles V4L2 (brightness, contrast, saturation)");
+  ESP_LOGI(TAG, "        non utilisés - ISP pipeline gère tout automatiquement");
 
   ESP_LOGI(TAG, "========================================");
   if (success) {
