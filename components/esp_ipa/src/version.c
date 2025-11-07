@@ -45,20 +45,21 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* Configuration IPA pour SC202CS - Approche M5Stack (sans detect array) */
+    /* Configuration IPA pour SC202CS - SEULEMENT AWB pour stabilité */
+    /* AGC désactivé temporairement car cause flashes sombre/claire */
     static const char *sc202cs_ipa_names[] = {
         "awb.gray",        /* Auto White Balance - Gray World */
-        "agc.threshold",   /* Auto Gain Control - Threshold based */
+        /* "agc.threshold" désactivé - cause clignotements */
     };
 
     static const esp_ipa_config_t sc202cs_ipa_config = {
-        .ipa_nums = 2,
+        .ipa_nums = 1,     /* Seulement 1 IPA: AWB */
         .ipa_names = sc202cs_ipa_names,
     };
 
     /* Check if this is the SC202CS sensor */
     if (cam_name && strcmp(cam_name, "SC202CS") == 0) {
-        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+AGC only (M5Stack method)", cam_name);
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB only (stable mode)", cam_name);
         return &sc202cs_ipa_config;
     }
 
