@@ -160,17 +160,50 @@ bool MipiDSICamComponent::open_video_device_() {
   ESP_LOGI(TAG, "Format configuré: %dx%d, fourcc=0x%08X",
            fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
 
-  // Set framerate
+  // Set framerate - Méthode correcte: lire d'abord, puis modifier
   struct v4l2_streamparm parm;
   memset(&parm, 0, sizeof(parm));
+  parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+  // 1. Lire les paramètres actuels
+  if (ioctl(this->video_fd_, VIDIOC_G_PARM, &parm) < 0) {
+    ESP_LOGW(TAG, "VIDIOC_G_PARM failed: errno=%d (%s)", errno, strerror(errno));
+  } else {
+    ESP_LOGI(TAG, "Paramètres actuels:");
+    ESP_LOGI(TAG, "  Capability: 0x%08X", parm.parm.capture.capability);
+    ESP_LOGI(TAG, "  Capturemode: 0x%08X", parm.parm.capture.capturemode);
+    ESP_LOGI(TAG, "  Timeperframe: %u/%u",
+             parm.parm.capture.timeperframe.numerator,
+             parm.parm.capture.timeperframe.denominator);
+
+    // Vérifier si le framerate variable est supporté
+    if (parm.parm.capture.capability & V4L2_CAP_TIMEPERFRAME) {
+      ESP_LOGI(TAG, "  V4L2_CAP_TIMEPERFRAME: SUPPORTÉ ✓");
+    } else {
+      ESP_LOGW(TAG, "  V4L2_CAP_TIMEPERFRAME: NON SUPPORTÉ");
+    }
+  }
+
+  // 2. Modifier le framerate
   parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   parm.parm.capture.timeperframe.numerator = 1;
   parm.parm.capture.timeperframe.denominator = this->framerate_;
 
+  // 3. Écrire les nouveaux paramètres
   if (ioctl(this->video_fd_, VIDIOC_S_PARM, &parm) < 0) {
-    ESP_LOGW(TAG, "VIDIOC_S_PARM failed, framerate non configuré");
+    ESP_LOGW(TAG, "VIDIOC_S_PARM failed: errno=%d (%s)", errno, strerror(errno));
+    ESP_LOGW(TAG, "  Le driver ne supporte peut-être pas la configuration du framerate");
+    ESP_LOGW(TAG, "  Le framerate sera contrôlé par le sensor (défaut: 30 FPS)");
   } else {
-    ESP_LOGI(TAG, "Framerate configuré: %d FPS", this->framerate_);
+    // Le driver peut avoir ajusté la valeur, relire pour confirmer
+    if (ioctl(this->video_fd_, VIDIOC_G_PARM, &parm) == 0) {
+      uint32_t actual_fps = parm.parm.capture.timeperframe.denominator /
+                            parm.parm.capture.timeperframe.numerator;
+      ESP_LOGI(TAG, "✓ Framerate configuré: %u FPS (demandé: %u FPS)",
+               actual_fps, this->framerate_);
+    } else {
+      ESP_LOGI(TAG, "✓ VIDIOC_S_PARM réussi (demandé: %u FPS)", this->framerate_);
+    }
   }
 
   return true;
