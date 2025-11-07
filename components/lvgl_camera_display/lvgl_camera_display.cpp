@@ -105,7 +105,12 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
+  // Mettre à jour le buffer du canvas
+  // NOTE: lv_canvas_set_buffer ne copie PAS les données - il pointe juste vers le buffer
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+
+  // Invalider uniquement la zone du canvas (pas tout l'écran)
+  // Cela force LVGL à redessiner seulement cette zone lors du prochain cycle
   lv_obj_invalidate(this->canvas_obj_);
 }
 
