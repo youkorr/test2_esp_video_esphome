@@ -47,13 +47,18 @@ void LVGLCameraDisplay::loop() {
 
   // Si la caméra est en streaming, capturer ET mettre à jour le canvas
   if (this->camera_->is_streaming()) {
+    // PROFILING: Mesurer le temps de capture
+    uint32_t t_start = millis();
     bool frame_captured = this->camera_->capture_frame();
+    uint32_t t_capture = millis();
 
     if (frame_captured) {
       this->update_canvas_();
+      uint32_t t_canvas = millis();
+
       this->frame_count_++;
 
-      // Logger FPS réel toutes les 100 frames
+      // Logger temps d'exécution toutes les 100 frames
       if (this->frame_count_ % 100 == 0) {
         static uint32_t last_time = 0;
         uint32_t now_time = millis();
@@ -61,7 +66,15 @@ void LVGLCameraDisplay::loop() {
         if (last_time > 0) {
           float elapsed = (now_time - last_time) / 1000.0f;  // secondes
           float fps = 100.0f / elapsed;
-          ESP_LOGI(TAG, "🎞️ %u frames affichées - FPS moyen: %.2f", this->frame_count_, fps);
+
+          // Temps moyen par frame
+          uint32_t capture_time = t_capture - t_start;
+          uint32_t canvas_time = t_canvas - t_capture;
+          uint32_t total_time = t_canvas - t_start;
+
+          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f", this->frame_count_, fps);
+          ESP_LOGI(TAG, "⏱️  Temps: capture=%ums, canvas=%ums, total=%ums",
+                   capture_time, canvas_time, total_time);
         }
         last_time = now_time;
       }
