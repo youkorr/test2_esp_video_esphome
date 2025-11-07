@@ -26,47 +26,13 @@ static const char *TAG = "esp_ipa";
  *
  * @return None
  */
+
+/**
+ * @brief Print esp-ipa version string.
+ *
+ * @return None
+ */
 void esp_ipa_print_version(void)
 {
     ESP_LOGI(TAG, "ESP-IPA version: %d.%d.%d", ESP_IPA_VER_MAJOR, ESP_IPA_VER_MINOR, ESP_IPA_VER_PATCH);
-}
-
-/**
- * @brief Get IPA configuration for a specific camera device.
- *
- * SOLUTION M5STACK: Nous créons la config IPA manuellement avec esp_ipa_pipeline_create()
- * qui prend directement un tableau de noms, évitant complètement le système detect array.
- *
- * @param cam_name  Camera device name
- *
- * @return
- *      - Pointer to IPA configuration if found
- *      - NULL if not found
- */
-const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
-{
-    /* Configuration IPA pour SC202CS - TOUS les IPAs SAUF AGC */
-    /* AGC désactivé car cause flashes, mais on garde tous les autres pour qualité */
-    static const char *sc202cs_ipa_names[] = {
-        "awb.gray",                /* Auto White Balance - corrige blanc→vert */
-        "denoising.gain_feedback", /* Réduction bruit - image plus propre */
-        "sharpen.freq_feedback",   /* Netteté - image plus claire */
-        "gamma.lumma_feedback",    /* Gamma - luminosité optimale */
-        "cc.linear",               /* Color Correction - couleurs correctes */
-        /* "agc.threshold" DÉSACTIVÉ - cause flashes */
-    };
-
-    static const esp_ipa_config_t sc202cs_ipa_config = {
-        .ipa_nums = 5,     /* 5 IPAs actifs (tous sauf AGC) */
-        .ipa_names = sc202cs_ipa_names,
-    };
-
-    /* Check if this is the SC202CS sensor */
-    if (cam_name && strcmp(cam_name, "SC202CS") == 0) {
-        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CC (no AGC)", cam_name);
-        return &sc202cs_ipa_config;
-    }
-
-    ESP_LOGW(TAG, "No IPA config for camera: %s", cam_name ? cam_name : "NULL");
-    return NULL;
 }
