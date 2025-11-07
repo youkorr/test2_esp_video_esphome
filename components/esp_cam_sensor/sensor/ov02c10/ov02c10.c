@@ -72,6 +72,9 @@ struct ov02c10_cam {
  #define delay_ms(ms)  vTaskDelay((ms > portTICK_PERIOD_MS ? ms/ portTICK_PERIOD_MS : 1))
  #define OV02C10_SUPPORT_NUM CONFIG_CAMERA_OV02C10_MAX_SUPPORT
 
+ #ifndef CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT
+ #define CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT 0
+ #endif
 
  static const uint8_t s_ov02c10_exp_min = 0x08;
  static const uint32_t s_limited_gain = CONFIG_CAMERA_OV02C10_ABSOLUTE_GAIN_LIMIT;
@@ -1592,7 +1595,7 @@ static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t i
     /* Depending on the interface type, an available configuration is automatically loaded.
     You can set the output format of the sensor without using query_format().*/
     if (format == NULL) {
-        format = &ov02c10_format_info[CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DAFAULT];
+        format = &ov02c10_format_info[CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT];
     }
 
     ret = ov02c10_write_array(dev->sccb_handle, (ov02c10_reginfo_t *)format->regs);
@@ -1794,7 +1797,7 @@ static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t i
         }
     }
     if (config->sensor_port != ESP_CAM_SENSOR_DVP) {
-        dev->cur_format = &ov02c10_format_info[CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DAFAULT];
+        dev->cur_format = &ov02c10_format_info[CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT];
     } 
 
     // Configure sensor power, clock, and SCCB port

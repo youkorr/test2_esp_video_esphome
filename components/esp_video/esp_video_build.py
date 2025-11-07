@@ -62,7 +62,7 @@ esp_cam_sensor_sources = [
 # Ajouter les chemins d'include pour les sensors (private_include)
 esp_cam_sensor_includes = [
     "sensor/ov5647/private_include",
-    "sensor/sc202cs/private_include",
+    "sensor/sc202cs/include/private_include",
     "sensor/ov02c10/private_include",
 ]
 
