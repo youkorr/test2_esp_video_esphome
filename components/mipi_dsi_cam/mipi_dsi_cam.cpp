@@ -234,26 +234,57 @@ bool MipiDSICamComponent::setup_sensor_controls_() {
   bool success = true;
   struct v4l2_control ctrl;
 
-  // IMPORTANT: Ne PAS configurer gain/exposition fixes
-  // L'IPA (Image Processing Algorithm) gère automatiquement:
-  // - Auto White Balance (AWB)
-  // - Auto Gain (via algorithmes IPA)
-  // - Auto Exposure (via algorithmes IPA)
-  // - Denoising, Sharpening, Gamma, Color Correction
+  // APPROCHE HYBRIDE: Capteur + IPA
+  // 1. Essayer d'activer contrôles auto du capteur (si disponibles)
+  // 2. IPA travaille EN COMPLÉMENT pour améliorer l'image
+  // 3. Si capteur ne supporte pas → IPA gère tout
   //
-  // Les contrôles V4L2 standards (brightness, contrast, saturation)
-  // ne fonctionnent pas sur SC202CS (errno=22 Invalid argument)
-  // C'est NORMAL - l'ISP pipeline IPA gère tout ça
+  // Pipeline: Capteur (auto-gain/expo) → ISP → IPA (AWB, sharpen, etc.)
 
-  ESP_LOGI(TAG, "  ✓ Gain/Exposition: gérés par IPA pipeline");
-  ESP_LOGI(TAG, "  ✓ Auto White Balance: IPA 'awb.gray' actif");
-  ESP_LOGI(TAG, "  ✓ Denoising: IPA 'denoising.gain_feedback' actif");
-  ESP_LOGI(TAG, "  ✓ Sharpening: IPA 'sharpen.freq_feedback' actif");
-  ESP_LOGI(TAG, "  ✓ Gamma: IPA 'gamma.lumma_feedback' actif");
-  ESP_LOGI(TAG, "  ✓ Color Correction: IPA 'cc.linear' actif");
+  ESP_LOGI(TAG, "Tentative d'activation contrôles auto du capteur...");
+
+  // 1. ACTIVER auto-exposition du capteur (si disponible)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+  ctrl.value = V4L2_EXPOSURE_AUTO;  // Mode AUTO
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGI(TAG, "  ℹ️  V4L2_CID_EXPOSURE_AUTO non supporté → IPA gère l'exposition");
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto-exposition capteur: ACTIVÉE");
+  }
+
+  // 2. ACTIVER auto-gain du capteur (si disponible)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTOGAIN;
+  ctrl.value = 1;  // ACTIVÉ
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGI(TAG, "  ℹ️  V4L2_CID_AUTOGAIN non supporté → IPA gère le gain");
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto-gain capteur: ACTIVÉ");
+  }
+
+  // 3. ACTIVER auto white balance du capteur (si disponible)
+  // Note: IPA AWB travaille EN COMPLÉMENT du capteur
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  ctrl.value = 1;  // ACTIVÉ
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGI(TAG, "  ℹ️  V4L2_CID_AUTO_WHITE_BALANCE non supporté → IPA AWB seul");
+  } else {
+    ESP_LOGI(TAG, "  ✓ Auto white balance capteur: ACTIVÉ");
+  }
+
   ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "  Note: Contrôles V4L2 (brightness, contrast, saturation)");
-  ESP_LOGI(TAG, "        non utilisés - ISP pipeline gère tout automatiquement");
+  ESP_LOGI(TAG, "Pipeline IPA actif (travaille avec/sans contrôles capteur):");
+  ESP_LOGI(TAG, "  ✓ Auto White Balance: 'awb.gray'");
+  ESP_LOGI(TAG, "  ✓ Denoising: 'denoising.gain_feedback'");
+  ESP_LOGI(TAG, "  ✓ Sharpening: 'sharpen.freq_feedback'");
+  ESP_LOGI(TAG, "  ✓ Gamma: 'gamma.lumma_feedback'");
+  ESP_LOGI(TAG, "  ✓ Color Correction: 'cc.linear'");
+  ESP_LOGI(TAG, "  ❌ AGC désactivé (évite flashes)");
 
   ESP_LOGI(TAG, "========================================");
   if (success) {
