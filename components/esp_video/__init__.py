@@ -163,25 +163,27 @@ async def to_code(config):
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE=1",
             "-DCONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1",
+            "-DESP_VIDEO_ISP_ENABLED=1",  # Pour esp_video_component.cpp
         ])
-        cg.add_define("ESP_VIDEO_ISP_ENABLED", "1")
 
     # Allocateur mémoire
     if config[CONF_USE_HEAP_ALLOCATOR]:
         flags.append("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
 
-    # Encodeur H.264 (CORRIGÉ: utilise H264_VIDEO_DEVICE, pas HW_H264_VIDEO_DEVICE)
+    # Encodeur H.264
     if config[CONF_ENABLE_H264]:
-        flags.append("-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1")
-        cg.add_define("ESP_VIDEO_H264_ENABLED", "1")
+        flags.extend([
+            "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
+            "-DESP_VIDEO_H264_ENABLED=1",  # Pour esp_video_component.cpp
+        ])
 
-    # Encodeur JPEG (CORRIGÉ: utilise JPEG_VIDEO_DEVICE, pas HW_JPEG)
+    # Encodeur JPEG
     if config[CONF_ENABLE_JPEG]:
         flags.extend([
             "-DCONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE=1",
-            "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",  # Pour esp_driver_jpeg
+            "-DCONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE=1",
+            "-DESP_VIDEO_JPEG_ENABLED=1",  # Pour esp_video_component.cpp
         ])
-        cg.add_define("ESP_VIDEO_JPEG_ENABLED", "1")
 
     # Appliquer tous les flags
     for flag in flags:
