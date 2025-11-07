@@ -489,13 +489,17 @@ uint32_t MipiDSICamComponent::map_pixel_format_(const std::string &fmt) {
   std::string fmt_upper = fmt;
   std::transform(fmt_upper.begin(), fmt_upper.end(), fmt_upper.begin(), ::toupper);
 
-  if (fmt_upper == "JPEG" || fmt_upper == "MJPEG") return V4L2_PIX_FMT_JPEG;
   if (fmt_upper == "RGB565") return V4L2_PIX_FMT_RGB565;
   if (fmt_upper == "YUV422" || fmt_upper == "YUYV") return V4L2_PIX_FMT_YUV422P;
   if (fmt_upper == "RAW8") return V4L2_PIX_FMT_SBGGR8;
+  if (fmt_upper == "JPEG" || fmt_upper == "MJPEG") {
+    ESP_LOGW(TAG, "JPEG demandé mais SC202CS ne supporte pas JPEG via MIPI-CSI");
+    ESP_LOGW(TAG, "Utilisation RGB565 à la place");
+    return V4L2_PIX_FMT_RGB565;
+  }
 
-  ESP_LOGW(TAG, "Format inconnu '%s', utilisation JPEG", fmt.c_str());
-  return V4L2_PIX_FMT_JPEG;  // Par défaut JPEG pour performance
+  ESP_LOGW(TAG, "Format inconnu '%s', utilisation RGB565", fmt.c_str());
+  return V4L2_PIX_FMT_RGB565;  // SC202CS capture en RGB565
 }
 
 bool MipiDSICamComponent::parse_resolution_(const std::string &res, uint16_t &w, uint16_t &h) {
