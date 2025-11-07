@@ -397,9 +397,12 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 #endif
 
+    ESP_LOGI(TAG, "🔍 Starting sensor detection loop...");
     for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
+        ESP_LOGI(TAG, "  Checking sensor: port=%d, sccb_addr=0x%x", p->port, p->sccb_addr);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
+            ESP_LOGI(TAG, "  → MIPI-CSI sensor detected, initializing...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
@@ -453,6 +456,20 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 }
             }
 #endif
+
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "DEBUG: esp_video_init() reached ISP section");
+            ESP_LOGI(TAG, "  cam_dev=%p", cam_dev);
+            if (cam_dev) {
+                ESP_LOGI(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+                ESP_LOGI(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
+            }
+#ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");
+#else
+            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=0 (NOT DEFINED)");
+#endif
+            ESP_LOGI(TAG, "========================================");
 
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
             ESP_LOGI(TAG, "🔍 ISP Pipeline Controller: ENABLED");
