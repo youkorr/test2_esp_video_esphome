@@ -154,10 +154,11 @@ async def to_code(config):
     # Capteurs de caméra - configurations pour TOUS les capteurs supportés
     # L'auto-détection essaiera tous les capteurs et utilisera celui détecté
 
-    # SC202CS
+    # SC202CS (pas de fichier JSON cfg disponible - utilise configs par défaut de libesp_ipa.a)
     flags.extend([
         "-DCONFIG_CAMERA_SC202CS=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
+        "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1",
         "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=16000",  # 16x max
         "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=1",
         "-DCONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY=0",
@@ -167,20 +168,24 @@ async def to_code(config):
     flags.extend([
         "-DCONFIG_CAMERA_OV5647=1",
         "-DCONFIG_CAMERA_OV5647_AUTO_DETECT=1",
+        "-DCONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1",
         "-DCONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=0",
         "-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT=0",
+        "-DCONFIG_CAMERA_OV5647_DEFAULT_IPA_JSON_CONFIGURATION_FILE=1",  # Utiliser cfg/ov5647_default.json
     ])
 
     # OV02C10
     flags.extend([
         "-DCONFIG_CAMERA_OV02C10=1",
         "-DCONFIG_CAMERA_OV02C10_AUTO_DETECT=1",
+        "-DCONFIG_CAMERA_OV02C10_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1",
         "-DCONFIG_CAMERA_OV02C10_ABSOLUTE_GAIN_LIMIT=16000",  # 16x max
         "-DCONFIG_CAMERA_OV02C10_ANA_GAIN_PRIORITY=1",         # Analog gain priority
         "-DCONFIG_CAMERA_OV02C10_DIG_GAIN_PRIORITY=0",
         "-DCONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE=0",
         "-DCONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT=0",
         "-DCONFIG_CAMERA_OV02C10_MAX_SUPPORT=1",
+        "-DCONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE=1",  # Utiliser cfg/ov02c10_default.json
     ])
 
     # ISP (Image Signal Processor)

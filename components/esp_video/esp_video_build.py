@@ -159,6 +159,80 @@ if os.path.exists(esp_sccb_intf_dir):
             print(f"[ESP-Video Build] + esp_sccb_intf/{src}")
 
 # ========================================================================
+# Embarquer les fichiers JSON IPA des capteurs comme binary data
+# ========================================================================
+print("")
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
+print("[ESP-Video Build] ========================================")
+
+# Liste des fichiers JSON à embarquer
+json_files_to_embed = [
+    {
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/ov5647/cfg/ov5647_default.json"),
+        "symbol": "ov5647_ipa_config_json",
+    },
+    {
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/ov02c10/cfg/ov02c10_default.json"),
+        "symbol": "ov02c10_ipa_config_json",
+    },
+]
+
+# Embarquer chaque fichier JSON comme binary data
+embedded_json_objects = []
+for json_info in json_files_to_embed:
+    json_path = json_info["path"]
+    symbol_name = json_info["symbol"]
+
+    if os.path.exists(json_path):
+        # Créer un nom de fichier objet pour ce JSON
+        json_basename = os.path.basename(json_path).replace(".", "_")
+        obj_filename = f"embedded_{json_basename}.o"
+        obj_path = os.path.join("$BUILD_DIR", obj_filename)
+
+        # Utiliser objcopy pour créer un fichier objet depuis le JSON
+        # Les symbols générés seront: _binary_<name>_start, _binary_<name>_end, _binary_<name>_size
+        objcopy_cmd = f"xtensa-esp32s3-elf-objcopy --input-target binary --output-target elf32-xtensa-le --binary-architecture xtensa {json_path} {obj_path}"
+
+        # Note: PlatformIO/SCons n'a pas objcopy par défaut, donc on va utiliser une approche différente
+        # On va créer un fichier C qui contient le JSON comme string
+        c_wrapper_content = f'''/* Auto-generated wrapper for {os.path.basename(json_path)} */
+#include <stddef.h>
+
+const char {symbol_name}_start[] __attribute__((aligned(4))) =
+'''
+
+        # Lire le contenu du JSON et le convertir en string C
+        try:
+            with open(json_path, 'r') as f:
+                json_content = f.read()
+                # Échapper les caractères spéciaux pour le string C
+                json_content_escaped = json_content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                c_wrapper_content += f'    "{json_content_escaped}";\n\n'
+                c_wrapper_content += f'const char *{symbol_name}_end = {symbol_name}_start + sizeof({symbol_name}_start);\n'
+                c_wrapper_content += f'const size_t {symbol_name}_size = sizeof({symbol_name}_start);\n'
+
+            # Créer le fichier C wrapper
+            wrapper_filename = f"embedded_{symbol_name}.c"
+            wrapper_path = os.path.join(component_dir, "src", wrapper_filename)
+
+            # Écrire le fichier wrapper
+            with open(wrapper_path, 'w') as f:
+                f.write(c_wrapper_content)
+
+            # Ajouter ce wrapper aux sources à compiler
+            sources_to_add.append(wrapper_path)
+            print(f"[ESP-Video Build] 📄 JSON embarqué: {os.path.basename(json_path)} -> {symbol_name}")
+
+        except Exception as e:
+            print(f"[ESP-Video Build] ⚠️  Erreur lors de l'embedding de {json_path}: {e}")
+    else:
+        print(f"[ESP-Video Build] ⚠️  Fichier JSON introuvable: {json_path}")
+
+print("[ESP-Video Build] ========================================")
+print("")
+
+# ========================================================================
 # Ajouter toutes les sources à la compilation
 # ========================================================================
 if sources_to_add:
