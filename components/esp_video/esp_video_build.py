@@ -130,10 +130,19 @@ if os.path.exists(esp_ipa_dir):
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[ESP-Video Build] ✓ Compiling esp_ipa/{src}")
+    print("[ESP-Video Build] === esp_ipa sources compiled ===")
 
-    # IMPORTANT: NE PAS ajouter libesp_ipa.a ici car elle écraserait nos sources!
-    # La lib sera linkée automatiquement par __init__.py si nécessaire
-    print("[ESP-Video Build] === esp_ipa sources added (lib NOT added to avoid override) ===")
+    # Linker avec libesp_ipa.a pour les fonctions IPA internes
+    # (esp_ipa_pipeline_process, esp_ipa_pipeline_create, etc.)
+    # Notre version.c compilée ci-dessus fournit la config custom
+    esp_ipa_lib_dir = os.path.join(esp_ipa_dir, "lib/esp32p4")
+    if os.path.exists(esp_ipa_lib_dir):
+        esp_ipa_lib_path = os.path.join(esp_ipa_lib_dir, "libesp_ipa.a")
+        if os.path.exists(esp_ipa_lib_path):
+            env.Append(LIBPATH=[esp_ipa_lib_dir])
+            env.Append(LIBS=["esp_ipa"])
+            print(f"[ESP-Video Build] ✓ Linking libesp_ipa.a (IPA functions)")
+            print(f"[ESP-Video Build]   Note: version.c compiled above provides custom config")
 
 # ========================================================================
 # Sources esp_sccb_intf
