@@ -196,41 +196,18 @@ async def to_code(config):
     logging.info(f"[ESP-Video] {len(flags)} flags de compilation ajoutés")
 
     # -----------------------------------------------------------------------
-    # Compilation des sources esp_ipa (config custom)
-    # -----------------------------------------------------------------------
-    # IMPORTANT: Compiler version.c AVANT de linker avec libesp_ipa.a
-    # pour que notre config custom soit utilisée (pas celle de la lib)
-
-    logging.info("[ESP-Video] === Compilation sources esp_ipa (config custom) ===")
-
-    if os.path.exists(esp_ipa_dir):
-        # 1. Compiler version.c (notre config: 5 IPAs sans AGC)
-        version_c = os.path.join(esp_ipa_dir, "src/version.c")
-        if os.path.exists(version_c):
-            cg.add_library_files(version_c)
-            logging.info(f"[ESP-Video] ✓ Compiling esp_ipa/src/version.c (5 IPAs, no AGC)")
-
-        # 2. Compiler esp_ipa_detect_stubs.c (detect array)
-        detect_stubs = os.path.join(esp_ipa_dir, "src/esp_ipa_detect_stubs.c")
-        if os.path.exists(detect_stubs):
-            cg.add_library_files(detect_stubs)
-            logging.info(f"[ESP-Video] ✓ Compiling esp_ipa/src/esp_ipa_detect_stubs.c")
-
-        # 3. PUIS linker avec libesp_ipa.a (fonctions IPA internes seulement)
-        esp_ipa_lib_dir = os.path.join(esp_ipa_dir, "lib/esp32p4")
-        if os.path.exists(esp_ipa_lib_dir):
-            cg.add_build_flag(f"-L{esp_ipa_lib_dir}")
-            cg.add_build_flag("-lesp_ipa")
-            logging.info(f"[ESP-Video] ✓ Linking libesp_ipa.a (IPA functions)")
-            logging.info(f"[ESP-Video]   Note: version.o compiled above provides custom config")
-
-    logging.info("[ESP-Video] === esp_ipa build complete ===")
-
-    # -----------------------------------------------------------------------
     # Compilation des sources via script PlatformIO
     # -----------------------------------------------------------------------
-    # Les sources C/C++ de tous les autres composants (esp_video, esp_cam_sensor,
-    # esp_h264, esp_sccb_intf) sont compilées via le script esp_video_build.py
+    # Les sources C/C++ de tous les composants (esp_video, esp_cam_sensor,
+    # esp_h264, esp_ipa, esp_sccb_intf) sont compilées via le script
+    # esp_video_build.py qui est exécuté pendant la phase de build PlatformIO.
+    #
+    # NOTE: esp_ipa est compilé dans esp_video_build.py avec ordre garanti:
+    # 1. Compile version.c (config custom: 5 IPAs, no AGC)
+    # 2. Compile esp_ipa_detect_stubs.c
+    # 3. Ajoute tout à libesp_video_full.a
+    # 4. Link avec libesp_ipa.a (fonctions IPA internes)
+    # Le linker utilise version.o de libesp_video_full.a (pas celui de libesp_ipa.a)
 
     # -----------------------------------------------------------------------
     # Flags de compilation supplémentaires pour la compatibilité

@@ -112,10 +112,33 @@ if os.path.exists(esp_h264_dir):
             print(f"[ESP-Video Build] + esp_h264/{src}")
 
 # ========================================================================
-# NOTE: esp_ipa sources (version.c, esp_ipa_detect_stubs.c) et linking
-# avec libesp_ipa.a sont gérés directement dans __init__.py pour garantir
-# l'ordre correct de compilation et de linking
+# Sources esp_ipa (IMPORTANT: compiler AVANT de linker avec libesp_ipa.a)
 # ========================================================================
+esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
+esp_ipa_sources = [
+    "src/version.c",              # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
+    "src/esp_ipa_detect_stubs.c", # Detection array
+]
+
+print("")
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
+print("[ESP-Video Build] ========================================")
+
+if os.path.exists(esp_ipa_dir):
+    for src in esp_ipa_sources:
+        src_path = os.path.join(esp_ipa_dir, src)
+        if os.path.exists(src_path):
+            sources_to_add.append(src_path)
+            print(f"[ESP-Video Build] ✓ esp_ipa/{src} -> libesp_video_full.a")
+    print("[ESP-Video Build]")
+    print("[ESP-Video Build] Ces sources seront dans libesp_video_full.a")
+    print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
+    print("[ESP-Video Build] ========================================")
+else:
+    print("[ESP-Video Build] ⚠️  Répertoire esp_ipa introuvable!")
+
+print("")
 
 # ========================================================================
 # Sources esp_sccb_intf
@@ -150,9 +173,27 @@ if sources_to_add:
         objects
     )
 
-    # Ajouter la bibliothèque au linkage
+    # Ajouter la bibliothèque au linkage (PREPEND = avant les autres libs)
     env.Prepend(LIBS=[lib])
 
     print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
+    print(f"[ESP-Video Build] ✓ libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
+
+    # Maintenant linker avec libesp_ipa.a pour les fonctions IPA internes
+    # Le linker utilisera notre version.o de libesp_video_full.a (déjà Prepend ci-dessus)
+    # avant de chercher dans libesp_ipa.a
+    esp_ipa_lib_dir = os.path.join(parent_components_dir, "esp_ipa", "lib/esp32p4")
+    if os.path.exists(esp_ipa_lib_dir):
+        env.Append(LIBPATH=[esp_ipa_lib_dir])
+        env.Append(LIBS=["esp_ipa"])
+        print("")
+        print("[ESP-Video Build] ========================================")
+        print("[ESP-Video Build] ✓ Linking avec libesp_ipa.a (fonctions IPA internes)")
+        print("[ESP-Video Build]   Ordre de linking:")
+        print("[ESP-Video Build]   1. libesp_video_full.a (version.o custom)")
+        print("[ESP-Video Build]   2. libesp_ipa.a (fonctions internes seulement)")
+        print("[ESP-Video Build] ========================================")
+    else:
+        print("[ESP-Video Build] ⚠️  libesp_ipa.a introuvable!")
 else:
     print("[ESP-Video Build] ⚠️ Aucune source trouvée!")
