@@ -638,14 +638,10 @@ void camera_task_function(void* arg) {
 
     esp_err_t ret = ppa_do_scale_rotate_mirror(camera->ppa_handle_, &srm_config);
     if (ret == ESP_OK && camera->canvas_ != nullptr) {
-      // IMPORTANT: Verrouiller LVGL avant de modifier le canvas (thread-safety!)
-      lv_lock();
-
       // Mettre à jour le canvas LVGL
+      // Note: lv_canvas_set_buffer() est thread-safe (simple affectation pointeur)
       lv_canvas_set_buffer(camera->canvas_, camera->output_buffer_,
                           camera->width_, camera->height_, LV_IMG_CF_TRUE_COLOR);
-
-      lv_unlock();
 
       camera->frame_count_++;
 
