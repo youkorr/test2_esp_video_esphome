@@ -548,12 +548,19 @@ void camera_task_function(void* arg) {
   ESP_LOGI(TAG, "   Priority: %d", uxTaskPriorityGet(nullptr));
 
   uint32_t last_fps_log = 0;
+  uint32_t total_dqbuf_time = 0;
+  uint32_t total_jpeg_time = 0;
+  uint32_t total_ppa_time = 0;
+  uint32_t total_canvas_time = 0;
+  uint32_t profile_count = 0;
 
   while (camera->task_running_) {
     if (!camera->streaming_ || camera->video_fd_ < 0 || camera->ppa_handle_ == nullptr) {
       vTaskDelay(pdMS_TO_TICKS(100));
       continue;
     }
+
+    uint32_t t_start = millis();
 
     // DQBUF - Récupérer frame du driver
     struct v4l2_buffer buf;
@@ -568,6 +575,8 @@ void camera_task_function(void* arg) {
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
+
+    uint32_t t_dqbuf = millis();
 
     // Buffer source pour PPA (soit JPEG décodé, soit données brutes)
     uint8_t* source_buffer = camera->buffers_[buf.index];
@@ -609,6 +618,8 @@ void camera_task_function(void* arg) {
       }
     }
 
+    uint32_t t_jpeg = millis();
+
     // PPA - Scale/Rotate/Mirror sur données RGB565
     ppa_srm_oper_config_t srm_config = {
       .in = {
@@ -641,6 +652,8 @@ void camera_task_function(void* arg) {
     };
 
     esp_err_t ret = ppa_do_scale_rotate_mirror(camera->ppa_handle_, &srm_config);
+    uint32_t t_ppa = millis();
+
     if (ret == ESP_OK && camera->canvas_ != nullptr) {
       // Mettre à jour le canvas LVGL
       // Note: lv_canvas_set_buffer() est thread-safe (simple affectation pointeur)
@@ -648,21 +661,46 @@ void camera_task_function(void* arg) {
                           camera->width_, camera->height_, LV_IMG_CF_TRUE_COLOR);
 
       camera->frame_count_++;
-
-      // Logger FPS toutes les 100 frames
-      if (camera->frame_count_ % 100 == 0) {
-        uint32_t now = millis();
-        if (last_fps_log > 0) {
-          float elapsed = (now - last_fps_log) / 1000.0f;
-          float fps = 100.0f / elapsed;
-          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f", camera->frame_count_, fps);
-        }
-        last_fps_log = now;
-      }
     }
+
+    uint32_t t_canvas = millis();
 
     // QBUF - Retourner buffer au driver
     ioctl(camera->video_fd_, VIDIOC_QBUF, &buf);
+
+    // Profiling détaillé
+    total_dqbuf_time += (t_dqbuf - t_start);
+    total_jpeg_time += (t_jpeg - t_dqbuf);
+    total_ppa_time += (t_ppa - t_jpeg);
+    total_canvas_time += (t_canvas - t_ppa);
+    profile_count++;
+
+    // Logger FPS et profiling toutes les 100 frames
+    if (camera->frame_count_ % 100 == 0) {
+      uint32_t now = millis();
+      if (last_fps_log > 0) {
+        float elapsed = (now - last_fps_log) / 1000.0f;
+        float fps = 100.0f / elapsed;
+
+        // Temps moyens
+        uint32_t avg_dqbuf = total_dqbuf_time / profile_count;
+        uint32_t avg_jpeg = total_jpeg_time / profile_count;
+        uint32_t avg_ppa = total_ppa_time / profile_count;
+        uint32_t avg_canvas = total_canvas_time / profile_count;
+
+        ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f", camera->frame_count_, fps);
+        ESP_LOGI(TAG, "⏱️  Temps moyen: DQBUF=%ums, JPEG=%ums, PPA=%ums, Canvas=%ums",
+                 avg_dqbuf, avg_jpeg, avg_ppa, avg_canvas);
+
+        // Reset profiling
+        total_dqbuf_time = 0;
+        total_jpeg_time = 0;
+        total_ppa_time = 0;
+        total_canvas_time = 0;
+        profile_count = 0;
+      }
+      last_fps_log = now;
+    }
 
     // Délai court comme M5Stack (10ms)
     vTaskDelay(pdMS_TO_TICKS(10));
