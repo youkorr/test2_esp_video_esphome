@@ -119,7 +119,7 @@ void ESPVideoComponent::setup() {
 
   // Vérifier si l'ISP pipeline est initialisé
 #ifdef ESP_VIDEO_ISP_ENABLED
-  extern bool esp_video_isp_pipeline_is_initialized(void);
+  extern "C" bool esp_video_isp_pipeline_is_initialized(void);
   bool isp_initialized = esp_video_isp_pipeline_is_initialized();
   ESP_LOGI(TAG, "🔍 ISP Pipeline status: %s", isp_initialized ? "INITIALIZED ✅" : "NOT INITIALIZED ❌");
 
