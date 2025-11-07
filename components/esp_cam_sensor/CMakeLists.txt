@@ -25,6 +25,7 @@ idf_component_register(SRCS ${srcs}
                        REQUIRES ${requires}
                        PRIV_REQUIRES ${priv_requires})
 
-
-
-
+# Force linker to include sensor detection functions (prevent optimization)
+# These symbols are defined via ESP_CAM_SENSOR_DETECT_FN macro in sensor source files
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_sc202cs_detect_1")
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_ov5647_detect_1")
