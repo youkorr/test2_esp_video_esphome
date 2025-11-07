@@ -27,30 +27,34 @@
 /**
  * The camera sensor detection array - contiguous structures
  *
- * Each sensor has its detect function declared in its public header.
- * We create the detection structures here with the appropriate port and I2C address.
+ * These must be defined as individual structures (not an array) to match the extern declarations.
+ * By defining them sequentially in the same file, the compiler typically places them contiguously
+ * in memory, allowing iteration from &start to &end.
  */
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
-    {
-        .detect = ov5647_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV5647_SCCB_ADDR
-    },
-    {
-        .detect = sc202cs_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = SC202CS_SCCB_ADDR
-    },
-    {
-        .detect = ov02c10_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV02C10_SCCB_ADDR
-    },
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
+    .detect = ov5647_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV5647_SCCB_ADDR
+};
+
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_sc202cs = {
+    .detect = sc202cs_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = SC202CS_SCCB_ADDR
+};
+
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_ov02c10 = {
+    .detect = ov02c10_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV02C10_SCCB_ADDR
 };
 
 /**
- * End marker - symbol pointing to one element past the end of the array
- *
- * This allows the code to iterate: while (p < &__esp_cam_sensor_detect_fn_array_end)
+ * End marker - dummy structure placed after the last sensor entry.
+ * The code iterates: for (p = &start; p < &end; ++p)
  */
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end[0] __attribute__((used));
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
