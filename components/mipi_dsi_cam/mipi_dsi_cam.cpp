@@ -81,15 +81,20 @@ void MipiDSICamComponent::setup() {
     return;
   }
 
-  // Start streaming
-  if (!this->start_stream_()) {
-    ESP_LOGE(TAG, "❌ Échec démarrage streaming");
-    this->mark_failed();
-    return;
+  // Start streaming (optionnel)
+  if (this->auto_start_) {
+    ESP_LOGI(TAG, "Auto-start activé - démarrage du streaming...");
+    if (!this->start_stream_()) {
+      ESP_LOGE(TAG, "❌ Échec démarrage streaming");
+      this->mark_failed();
+      return;
+    }
+    this->streaming_ = true;
+  } else {
+    ESP_LOGI(TAG, "Auto-start désactivé - appelez start_streaming() manuellement");
   }
 
   this->initialized_ = true;
-  this->streaming_ = true;
 
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "✅ Caméra prête");

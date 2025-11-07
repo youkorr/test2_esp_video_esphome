@@ -54,6 +54,7 @@ class MipiDSICamComponent : public Component {
   void set_pixel_format(const std::string &fmt) { this->pixel_format_ = fmt; }
   void set_framerate(uint8_t fps) { this->framerate_ = fps; }
   void set_jpeg_quality(uint8_t quality) { this->jpeg_quality_ = quality; }
+  void set_auto_start(bool auto_start) { this->auto_start_ = auto_start; }
 
   // Configuration PPA
   void set_mirror_x(bool mirror) { this->mirror_x_ = mirror; }
@@ -83,6 +84,7 @@ class MipiDSICamComponent : public Component {
   std::string pixel_format_{"RGB565"};
   uint8_t framerate_{30};
   uint8_t jpeg_quality_{10};
+  bool auto_start_{false};  // Ne PAS démarrer automatiquement le streaming
 
   // Configuration PPA
   bool mirror_x_{true};     // Mirror horizontal (comme la demo M5Stack)

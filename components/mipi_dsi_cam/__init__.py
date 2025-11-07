@@ -32,6 +32,7 @@ CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_MIRROR_X = "mirror_x"
 CONF_MIRROR_Y = "mirror_y"
 CONF_ROTATION = "rotation"
+CONF_AUTO_START = "auto_start"
 
 def validate_gpio_pin(value):
     """Valide un pin GPIO - accepte GPIO36 ou 36"""
@@ -58,6 +59,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MIRROR_X, default=True): cv.boolean,  # Comme M5Stack demo
     cv.Optional(CONF_MIRROR_Y, default=False): cv.boolean,
     cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
+    cv.Optional(CONF_AUTO_START, default=False): cv.boolean,  # Ne PAS démarrer automatiquement
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -83,3 +85,6 @@ async def to_code(config):
     cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
     cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
     cg.add(var.set_rotation(config[CONF_ROTATION]))
+
+    # Auto-start
+    cg.add(var.set_auto_start(config[CONF_AUTO_START]))
