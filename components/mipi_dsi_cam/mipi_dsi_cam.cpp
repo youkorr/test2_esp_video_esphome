@@ -305,41 +305,40 @@ bool MipiDSICamComponent::setup_sensor_controls_() {
 
   // Les contrôles standards V4L2 ne fonctionnent pas sur SC202CS
   // (déjà testé - tous retournent errno=22)
+  // De plus, on DÉSACTIVE auto-gain/exposure car on utilise valeurs fixes ci-dessus
 
-  // 1. Auto-exposition (ne fonctionne pas)
+  // 1. DÉSACTIVER auto-exposition (on utilise exposition fixe)
   memset(&ctrl, 0, sizeof(ctrl));
   ctrl.id = V4L2_CID_EXPOSURE_AUTO;
-  ctrl.value = V4L2_EXPOSURE_AUTO;  // Mode automatique
+  ctrl.value = V4L2_EXPOSURE_MANUAL;  // Mode MANUEL - pas automatique
 
   if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_EXPOSURE_AUTO failed: errno=%d (%s)", errno, strerror(errno));
-    success = false;
+    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_EXPOSURE_AUTO non supporté (OK, on utilise valeur fixe)");
   } else {
-    ESP_LOGI(TAG, "  ✓ Auto-exposition: ACTIVÉE");
+    ESP_LOGI(TAG, "  ✓ Auto-exposition: DÉSACTIVÉE (mode manuel)");
   }
 
-  // 2. Auto-gain (CRITIQUE pour luminosité!)
+  // 2. DÉSACTIVER auto-gain (on utilise gain fixe)
   memset(&ctrl, 0, sizeof(ctrl));
   ctrl.id = V4L2_CID_AUTOGAIN;
-  ctrl.value = 1;  // Activé
+  ctrl.value = 0;  // DÉSACTIVÉ - on utilise gain fixe ci-dessus
 
   if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_AUTOGAIN failed: errno=%d (%s)", errno, strerror(errno));
-    success = false;
+    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_AUTOGAIN non supporté (OK, on utilise valeur fixe)");
   } else {
-    ESP_LOGI(TAG, "  ✓ Auto-gain: ACTIVÉ");
+    ESP_LOGI(TAG, "  ✓ Auto-gain: DÉSACTIVÉ (gain fixe utilisé)");
   }
 
-  // 3. Auto white balance (pour couleurs correctes)
+  // 3. DÉSACTIVER auto white balance V4L2 (on utilise IPA AWB)
+  // On laisse IPA's "awb.gray" gérer le white balance dans le pipeline ISP
   memset(&ctrl, 0, sizeof(ctrl));
   ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
-  ctrl.value = 1;  // Activé
+  ctrl.value = 0;  // DÉSACTIVÉ - IPA AWB prend le relais
 
   if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "  ⚠️  V4L2_CID_AUTO_WHITE_BALANCE failed: errno=%d (%s)", errno, strerror(errno));
-    // Non critique
+    ESP_LOGD(TAG, "  ℹ️  V4L2_CID_AUTO_WHITE_BALANCE non supporté (OK, IPA AWB actif)");
   } else {
-    ESP_LOGI(TAG, "  ✓ Auto white balance: ACTIVÉE");
+    ESP_LOGI(TAG, "  ✓ Auto white balance V4L2: DÉSACTIVÉE (IPA AWB actif)");
   }
 
   // 4. Luminosité (augmenter si image trop sombre)
