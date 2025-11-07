@@ -163,9 +163,17 @@ static esp_err_t h264_video_start(struct esp_video *video, uint32_t type)
         };
 
         if (h264_video->hw_codec) {
+#ifdef CONFIG_ESP_DRIVER_H264_ENCODER_SUPPORTED
+            // Hardware H.264 encoder available (ESP-IDF driver component)
             h264_err = esp_h264_enc_hw_new(&config, &h264_video->enc_handle);
+#else
+            // Hardware H.264 driver not available in this build, fall back to software
+            ESP_LOGW(TAG, "Hardware H.264 encoder not available - falling back to software encoder");
+            h264_err = esp_h264_enc_sw_new((const esp_h264_enc_cfg_sw_t *)&config, &h264_video->enc_handle);
+#endif
         } else {
-            h264_err = ESP_H264_ERR_UNSUPPORTED;
+            // Software encoder explicitly requested
+            h264_err = esp_h264_enc_sw_new((const esp_h264_enc_cfg_sw_t *)&config, &h264_video->enc_handle);
         }
 
         if (h264_err != ESP_H264_ERR_OK) {
@@ -470,16 +478,14 @@ esp_err_t esp_video_create_h264_video_device(bool hw_codec)
     uint32_t device_caps = V4L2_CAP_VIDEO_M2M | V4L2_CAP_EXT_PIX_FORMAT | V4L2_CAP_STREAMING;
     uint32_t caps = device_caps | V4L2_CAP_DEVICE_CAPS;
 
-    if (hw_codec == false) {
-        return ESP_ERR_NOT_SUPPORTED;
-    }
-
     h264_video = heap_caps_calloc(1, sizeof(struct h264_video), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     if (!h264_video) {
         return ESP_ERR_NO_MEM;
     }
 
+    // Set hw_codec flag (will use software encoding if hardware not available)
     h264_video->hw_codec = hw_codec;
+    ESP_LOGI(TAG, "Creating H.264 video device (hw_codec=%s)", hw_codec ? "true" : "false");
     h264_video->gop = H264_VIDEO_DEVICE_GOP;
     h264_video->min_qp = H264_VIDEO_DEVICE_MIN_QP;
     h264_video->max_qp = H264_VIDEO_DEVICE_MAX_QP;
@@ -497,7 +503,7 @@ esp_err_t esp_video_create_h264_video_device(bool hw_codec)
 /**
  * @brief Destroy H.264 video device
  *
- * @param hw_codec true: hardware H.264, false: software H.264(has not supported)
+ * @param hw_codec true: hardware H.264, false: software H.264
  *
  * @return
  *      - ESP_OK on success
@@ -508,10 +514,6 @@ esp_err_t esp_video_destroy_h264_video_device(bool hw_codec)
     esp_err_t ret;
     struct esp_video *video;
     struct h264_video *h264_video;
-
-    if (hw_codec == false) {
-        return ESP_ERR_NOT_SUPPORTED;
-    }
 
     video = esp_video_device_get_object(H264_NAME);
     if (!video) {
