@@ -25,8 +25,9 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Intervalle pour 30 FPS
-  this->update_interval_ = 33;  // ms
+  // Intervalle pour capture rapide (comme démo M5Stack)
+  // M5Stack utilise 10ms entre frames = ~100 FPS max théorique
+  this->update_interval_ = 10;  // ms (au lieu de 33ms)
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
@@ -105,13 +106,16 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // Mettre à jour le buffer du canvas
+  // Mettre à jour le buffer du canvas (COMME LA DÉMO M5STACK)
   // NOTE: lv_canvas_set_buffer ne copie PAS les données - il pointe juste vers le buffer
+  // IMPORTANT: Ne PAS appeler lv_obj_invalidate() - c'est ce qui cause le FPS faible!
+  // LVGL redessine automatiquement lors de son prochain cycle de rafraîchissement
+
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
 
-  // Invalider uniquement la zone du canvas (pas tout l'écran)
-  // Cela force LVGL à redessiner seulement cette zone lors du prochain cycle
-  lv_obj_invalidate(this->canvas_obj_);
+  // PAS de lv_obj_invalidate() ici! La démo M5Stack ne l'utilise pas.
+  // lv_obj_invalidate() force un redraw complet de 1.8MB, ce qui prend ~250ms
+  // et limite le FPS à 3-4 au lieu de 30.
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
