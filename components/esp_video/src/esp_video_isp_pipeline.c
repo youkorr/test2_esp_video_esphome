@@ -1028,6 +1028,14 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_LOGD(TAG, "  max:     %0.4f", isp->sensor.max_gain);
         ESP_LOGD(TAG, "  step:    %0.4f", isp->sensor.step_gain);
         ESP_LOGD(TAG, "  current: %0.4f", isp->sensor.cur_gain);
+
+        // WORKAROUND SC202CS: Limiter le gain max à 16x
+        // Le sensor retourne parfois des valeurs énormes (63x) qui causent saturation/bruit
+        // Limiter à 16x pour meilleur rapport signal/bruit
+        if (isp->sensor.max_gain > 16.0f) {
+            ESP_LOGW(TAG, "⚠️  Limiting max_gain from %0.4f to 16.0 (SC202CS optimal)", isp->sensor.max_gain);
+            isp->sensor.max_gain = 16.0f;
+        }
     } else {
         ESP_LOGD(TAG, "V4L2_CID_GAIN is not supported");
     }
