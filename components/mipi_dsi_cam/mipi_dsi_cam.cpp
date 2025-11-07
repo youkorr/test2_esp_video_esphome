@@ -576,7 +576,7 @@ void camera_task_function(void* arg) {
         .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,  // BGR pour compatibilité ESP32-P4
       };
 
-      jpeg_decode_picture_info_t pic_info = {};
+      uint32_t out_size = 0;
 
       // Décoder JPEG compressé → RGB565
       esp_err_t ret = jpeg_decoder_process(
@@ -586,11 +586,11 @@ void camera_task_function(void* arg) {
         buf.bytesused,                // Taille JPEG
         camera->jpeg_decode_buffer_,  // RGB565 décodé (sortie)
         camera->jpeg_decode_buffer_size_,
-        &pic_info
+        &out_size                     // Taille de sortie
       );
 
       if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "❌ jpeg_decoder_process failed: %d (bytesused=%u)", ret, buf.bytesused);
+        ESP_LOGE(TAG, "❌ jpeg_decoder_process failed: %d (JPEG=%u bytes)", ret, buf.bytesused);
         ioctl(camera->video_fd_, VIDIOC_QBUF, &buf);
         continue;
       }
@@ -600,8 +600,8 @@ void camera_task_function(void* arg) {
 
       // Logger info JPEG toutes les 500 frames
       if (camera->frame_count_ % 500 == 0) {
-        ESP_LOGI(TAG, "📸 JPEG: %ux%u, taille compressée=%u octets",
-                 pic_info.width, pic_info.height, buf.bytesused);
+        ESP_LOGI(TAG, "📸 JPEG: compressé=%u bytes, décodé=%u bytes, ratio=%.1fx",
+                 buf.bytesused, out_size, (float)out_size / buf.bytesused);
       }
     }
 
