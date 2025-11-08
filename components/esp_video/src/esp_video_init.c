@@ -397,19 +397,19 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 #endif
 
-    ESP_LOGI(TAG, "🔍 Starting sensor detection loop...");
-    ESP_LOGI(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
-    ESP_LOGI(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
-    ESP_LOGI(TAG, "  DEBUG: Pointer difference = %ld bytes",
+    ESP_LOGW(TAG, "🔍 Starting sensor detection loop...");
+    ESP_LOGW(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
+    ESP_LOGW(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
+    ESP_LOGW(TAG, "  DEBUG: Pointer difference = %ld bytes",
              (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)__esp_cam_sensor_detect_fn_array_start));
-    ESP_LOGI(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
+    ESP_LOGW(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
 
     for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
-        ESP_LOGI(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
+        ESP_LOGW(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
                  (void*)p, p->port, p->sccb_addr, (void*)p->detect);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
-            ESP_LOGI(TAG, "  → Attempting to detect MIPI-CSI sensor...");
+            ESP_LOGW(TAG, "  → Attempting to detect MIPI-CSI sensor...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
@@ -430,7 +430,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 continue;
             }
 
-            ESP_LOGI(TAG, "  ✓ Sensor detected successfully: %s (addr 0x%x)",
+            ESP_LOGW(TAG, "  ✓ Sensor detected successfully: %s (addr 0x%x)",
                      cam_dev->name ? cam_dev->name : "unknown", p->sccb_addr);
 
             ret = esp_video_create_csi_video_device(cam_dev);
@@ -438,7 +438,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 ESP_LOGE(TAG, "  ✗ Failed to create MIPI-CSI video device: %d (%s)", ret, esp_err_to_name(ret));
                 return ret;
             }
-            ESP_LOGI(TAG, "  ✓ MIPI-CSI video device created successfully");
+            ESP_LOGW(TAG, "  ✓ MIPI-CSI video device created successfully");
 
 #if CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
             if (config->cam_motor) {
