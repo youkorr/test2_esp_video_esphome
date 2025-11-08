@@ -25,44 +25,48 @@
  */
 
 /**
- * The camera sensor detection array - contiguous structures
+ * The camera sensor detection array - implemented as a real contiguous array
  *
- * We use __attribute__((section(".sensor_detect"), used)) to:
- * 1. Force the compiler to place all structures contiguously in the same memory section
- * 2. Prevent the compiler/linker from optimizing them out
- * This ensures that iteration with pointer arithmetic (++p) works correctly.
+ * IMPORTANT: The code in esp_video_init.c expects this to be a contiguous array:
+ *   for (p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p)
+ *
+ * Using separate variables with section attributes doesn't guarantee contiguity.
+ * We must use an actual C array to guarantee contiguous memory layout.
  *
  * NOTE: The detect functions take esp_cam_sensor_config_t * but the union expects void *.
  * We cast them to match the expected signature.
  */
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = OV5647_SCCB_ADDR
+
+// The actual contiguous array of sensor detect structures
+// The array is named to match what esp_video_init.c expects
+// The loop will iterate from __esp_cam_sensor_detect_fn_array_start[0] through [2]
+// and stop at __esp_cam_sensor_detect_fn_array_end (which is [3])
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
+    // Sensor 0: OV5647
+    {
+        .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .sccb_addr = OV5647_SCCB_ADDR
+    },
+    // Sensor 1: SC202CS
+    {
+        .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .sccb_addr = SC202CS_SCCB_ADDR
+    },
+    // Sensor 2: OV02C10
+    {
+        .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .sccb_addr = OV02C10_SCCB_ADDR
+    }
 };
 
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_sc202cs = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = SC202CS_SCCB_ADDR
-};
-
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sensor_ov02c10 = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = OV02C10_SCCB_ADDR
-};
-
-/**
- * End marker - dummy structure placed after the last sensor entry.
- * The code iterates: for (p = &start; p < &end; ++p)
- */
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
-    .detect = NULL,
-    .port = 0,
-    .sccb_addr = 0
-};
+// End marker - this is a separate structure that marks the end of the array
+// The loop compares: p < &__esp_cam_sensor_detect_fn_array_end
+// So this structure must be placed right after the array in memory
+//
+// However, C doesn't guarantee that separate global variables will be contiguous
+// So we use a trick: we declare this as an extern and define it in the header
+// Actually, the simplest is to just reference the array bound
+#define __esp_cam_sensor_detect_fn_array_end (__esp_cam_sensor_detect_fn_array_start[3])
