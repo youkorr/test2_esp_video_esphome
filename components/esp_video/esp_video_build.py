@@ -252,9 +252,10 @@ print("[ESP-Video Build] ========================================")
 print("")
 
 # ========================================================================
-# Forcer la recompilation en modifiant le timestamp des fichiers sources
+# Forcer la recompilation en modifiant le timestamp ET supprimant les .o
 # ========================================================================
 import time as time_module
+import glob
 
 # Fichiers critiques qui doivent être recompilés (problème de cache SCons)
 force_rebuild_files = [
@@ -264,6 +265,22 @@ force_rebuild_files = [
 
 print("[ESP-Video Build] ========================================")
 print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+
+# Étape 1: Supprimer tous les .o correspondants PARTOUT
+build_root = env.subst("$PROJECT_BUILD_DIR")
+for src_file in force_rebuild_files:
+    basename = os.path.basename(src_file).replace('.c', '.o')
+    # Chercher récursivement dans tout le projet
+    obj_pattern = os.path.join(build_root, "**", basename)
+    found_objs = glob.glob(obj_pattern, recursive=True)
+    for obj_file in found_objs:
+        try:
+            os.remove(obj_file)
+            print(f"[ESP-Video Build] 🗑️  DELETED: {obj_file}")
+        except Exception as e:
+            print(f"[ESP-Video Build] ⚠️  Could not delete {obj_file}: {e}")
+
+# Étape 2: Modifier les timestamps des sources
 for src_file in force_rebuild_files:
     if os.path.exists(src_file):
         # Modifier le timestamp du fichier pour forcer SCons à le recompiler
@@ -273,6 +290,7 @@ for src_file in force_rebuild_files:
         print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
     else:
         print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
+
 print("[ESP-Video Build] ========================================")
 
 # ========================================================================

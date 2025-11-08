@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v2 */
+
 #include <string.h>
 #include <inttypes.h>
 #include "hal/gpio_ll.h"
