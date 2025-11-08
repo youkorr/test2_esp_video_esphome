@@ -91,12 +91,12 @@ class MipiDSICamComponent : public Component {
     void *start;
     size_t length;
   } v4l2_buffers_[2];
-  uint8_t *image_buffer_{nullptr};  // Buffer de destination pour PPA/DMA
+  uint8_t *image_buffer_{nullptr};  // Buffer de destination RGB565 après décodage JPEG
   size_t image_buffer_size_{0};
   uint16_t image_width_{0};
   uint16_t image_height_{0};
   uint32_t frame_sequence_{0};
-  void *ppa_handle_{nullptr};  // Handle PPA pour copie hardware
+  void *jpeg_decoder_{nullptr};  // Handle décodeur JPEG hardware (au lieu de PPA)
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();

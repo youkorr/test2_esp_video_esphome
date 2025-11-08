@@ -25,9 +25,8 @@ extern "C" {
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
-#include "driver/ppa.h"
+#include "driver/jpeg_decode.h"  // JPEG hardware decoder (remplace PPA)
 #include "esp_timer.h"
-#include "esp_cache.h"  // Test 3: Cache sync for PPA DMA
 }
 
 namespace esphome {
@@ -590,16 +589,13 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "=== START STREAMING ===");
+  ESP_LOGI(TAG, "=== START STREAMING (JPEG Hardware) ===");
 
-  // Choisir le device selon le format
-  const char *dev = wants_jpeg_(this->pixel_format_) ?
-                    ESP_VIDEO_JPEG_DEVICE_NAME :
-                    wants_h264_(this->pixel_format_) ?
-                    ESP_VIDEO_H264_DEVICE_NAME :
-                    ESP_VIDEO_MIPI_CSI_DEVICE_NAME;
+  // FORCER l'utilisation de JPEG hardware pour performance optimale
+  // /dev/video10 = JPEG encoder → ~20-100KB par frame au lieu de 1.8MB
+  const char *dev = ESP_VIDEO_JPEG_DEVICE_NAME;
 
-  ESP_LOGI(TAG, "Device: %s", dev);
+  ESP_LOGI(TAG, "Device: %s (JPEG hardware encoder)", dev);
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -608,7 +604,7 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  // 2. Configurer le format (OBLIGATOIRE avant VIDIOC_G_FMT)
+  // 2. Configurer le format MJPEG (OBLIGATOIRE avant VIDIOC_G_FMT)
   uint32_t width, height;
   if (!map_resolution_(this->resolution_, width, height)) {
     ESP_LOGE(TAG, "Invalid resolution: %s", this->resolution_.c_str());
@@ -617,7 +613,8 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  uint32_t fourcc = map_pixfmt_fourcc_(this->pixel_format_);
+  // FORCER MJPEG pour utiliser l'encodeur JPEG hardware
+  uint32_t fourcc = V4L2_PIX_FMT_MJPEG;
 
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
@@ -645,22 +642,19 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  this->image_buffer_size_ = fmt.fmt.pix.sizeimage;
+  uint32_t jpeg_buffer_size = fmt.fmt.pix.sizeimage;  // Taille JPEG compressé (~20-100KB)
 
-  // Fallback: calculer manuellement si sizeimage = 0
-  if (this->image_buffer_size_ == 0) {
-    // Pour RGB565: 2 bytes/pixel, pour YUYV: 2 bytes/pixel
-    uint32_t bytes_per_pixel = (fourcc == V4L2_PIX_FMT_RGB565 || fourcc == V4L2_PIX_FMT_YUYV) ? 2 : 4;
-    this->image_buffer_size_ = this->image_width_ * this->image_height_ * bytes_per_pixel;
-    ESP_LOGW(TAG, "Driver returned sizeimage=0, calculated manually: %u bytes", this->image_buffer_size_);
-  }
+  ESP_LOGI(TAG, "Format: %ux%u, MJPEG, compressed size=%u bytes",
+           this->image_width_, this->image_height_, jpeg_buffer_size);
 
-  ESP_LOGI(TAG, "Format: %ux%u, fourcc=0x%08X, size=%u",
-           this->image_width_, this->image_height_,
-           fmt.fmt.pix.pixelformat, this->image_buffer_size_);
+  // 4. Allouer buffer RGB565 pour le résultat décodé
+  // Le décodeur JPEG produira du RGB565: 2 bytes/pixel
+  this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
 
-  // 4. Allouer buffer de destination avec alignement 64 bytes (Test 4: PPA DMA optimization)
-  this->image_buffer_ = (uint8_t*)heap_caps_aligned_alloc(64,  // 64-byte alignment for PPA DMA
+  ESP_LOGI(TAG, "Allocating RGB565 output buffer: %u bytes (%ux%u × 2)",
+           this->image_buffer_size_, this->image_width_, this->image_height_);
+
+  this->image_buffer_ = (uint8_t*)heap_caps_aligned_alloc(64,  // 64-byte alignment pour JPEG decoder
                                                             this->image_buffer_size_,
                                                             MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
   if (!this->image_buffer_) {
@@ -678,18 +672,23 @@ bool MipiDSICamComponent::start_streaming() {
            this->image_buffer_size_, this->image_buffer_,
            is_aligned ? "64-byte aligned ✓" : "NOT aligned ✗");
 
-  // 5. Initialiser le PPA (Pixel Processing Accelerator) pour copie hardware
-  ppa_client_config_t ppa_config = {
-    .oper_type = PPA_OPERATION_SRM,
-    .max_pending_trans_num = 1,
+  // 5. Initialiser le décodeur JPEG hardware
+  jpeg_decode_engine_cfg_t decode_engine_cfg = {
+    .timeout_ms = 50,  // Timeout de décodage
   };
-  ppa_client_handle_t *ppa_h = (ppa_client_handle_t*)&this->ppa_handle_;
-  if (ppa_register_client(&ppa_config, ppa_h) != ESP_OK) {
-    ESP_LOGW(TAG, "PPA not available, falling back to memcpy");
-    this->ppa_handle_ = nullptr;
-  } else {
-    ESP_LOGI(TAG, "✓ PPA hardware accelerator initialized");
+  jpeg_decoder_handle_t *jpeg_h = (jpeg_decoder_handle_t*)&this->jpeg_decoder_;
+
+  esp_err_t ret = jpeg_new_decoder_engine(&decode_engine_cfg, jpeg_h);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize JPEG decoder: %s", esp_err_to_name(ret));
+    heap_caps_free(this->image_buffer_);
+    this->image_buffer_ = nullptr;
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
   }
+
+  ESP_LOGI(TAG, "✓ JPEG hardware decoder initialized (ESP32-P4 1080P@30fps capable)");
 
   // 6. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
@@ -826,57 +825,39 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Copier vers image_buffer_ (PPA hardware ou memcpy fallback)
-  uint8_t *src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  // 2. Décoder JPEG → RGB565 avec hardware accelerator
+  uint8_t *jpeg_data = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  uint32_t jpeg_size = buf.bytesused;  // Taille JPEG compressé (~20-100KB)
 
-  if (this->ppa_handle_) {
-    // Utiliser PPA hardware accelerator (comme M5Stack)
-    ppa_srm_oper_config_t srm_config = {
-      .in = {
-        .buffer = src,
-        .pic_w = this->image_width_,
-        .pic_h = this->image_height_,
-        .block_w = this->image_width_,
-        .block_h = this->image_height_,
-        .block_offset_x = 0,
-        .block_offset_y = 0,
-        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-      },
-      .out = {
-        .buffer = this->image_buffer_,
-        .buffer_size = this->image_buffer_size_,
-        .pic_w = this->image_width_,
-        .pic_h = this->image_height_,
-        .block_offset_x = 0,
-        .block_offset_y = 0,
-        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-      },
-      .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
-      .scale_x = 1,
-      .scale_y = 1,
-      .mirror_x = true,  // Match M5Stack configuration exactly
-      .mirror_y = false,
-      .rgb_swap = false,
-      .byte_swap = false,
-      .mode = PPA_TRANS_MODE_BLOCKING,
+  if (this->jpeg_decoder_) {
+    // Utiliser le décodeur JPEG hardware de l'ESP32-P4
+    jpeg_decode_cfg_t decode_cfg = {
+      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,  // Sortie directe en RGB565
+      .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,      // Ordre BGR pour LVGL
     };
 
-    // Test 3: Cache sync for PPA DMA performance
-    // Sync source buffer from cache to memory and invalidate cache
-    esp_cache_msync((void*)src, this->image_buffer_size_,
-                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+    jpeg_decode_picture_info_t pic_info;
+    memset(&pic_info, 0, sizeof(pic_info));
 
-    ppa_client_handle_t ppa_h = (ppa_client_handle_t)this->ppa_handle_;
-    ppa_do_scale_rotate_mirror(ppa_h, &srm_config);
+    jpeg_decoder_handle_t jpeg_h = (jpeg_decoder_handle_t)this->jpeg_decoder_;
+    esp_err_t ret = jpeg_decoder_process(jpeg_h,
+                                          &decode_cfg,
+                                          jpeg_data,       // Source: JPEG compressé
+                                          jpeg_size,
+                                          this->image_buffer_,  // Destination: RGB565
+                                          this->image_buffer_size_,
+                                          &pic_info);
 
-    // Sync destination buffer from memory to cache
-    esp_cache_msync(this->image_buffer_, this->image_buffer_size_,
-                    ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+      // Re-queue le buffer même en cas d'erreur
+      ioctl(this->video_fd_, VIDIOC_QBUF, &buf);
+      return false;
+    }
   } else {
-    // Fallback: memcpy CPU (lent mais fonctionne)
-    size_t copy_size = buf.bytesused < this->image_buffer_size_ ?
-                       buf.bytesused : this->image_buffer_size_;
-    memcpy(this->image_buffer_, src, copy_size);
+    ESP_LOGE(TAG, "JPEG decoder not initialized!");
+    ioctl(this->video_fd_, VIDIOC_QBUF, &buf);
+    return false;
   }
   uint32_t t3 = esp_timer_get_time();
 
@@ -884,11 +865,14 @@ bool MipiDSICamComponent::capture_frame() {
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame captured: %u bytes, sequence=%u",
-             buf.bytesused, buf.sequence);
-    ESP_LOGI(TAG, "   Copy method: %s", this->ppa_handle_ ? "PPA hardware" : "memcpy CPU");
-    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, %s=%uus",
-             (uint32_t)(t2-t1), this->ppa_handle_ ? "PPA" : "memcpy", (uint32_t)(t3-t2));
+    ESP_LOGI(TAG, "✅ First frame decoded:");
+    ESP_LOGI(TAG, "   JPEG size: %u bytes (compressed)", jpeg_size);
+    ESP_LOGI(TAG, "   RGB565 output: %u bytes (%ux%u)",
+             this->image_buffer_size_, this->image_width_, this->image_height_);
+    ESP_LOGI(TAG, "   Compression ratio: %.1fx",
+             (float)this->image_buffer_size_ / jpeg_size);
+    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, JPEG decode=%uus",
+             (uint32_t)(t2-t1), (uint32_t)(t3-t2));
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              this->image_buffer_[0], this->image_buffer_[1],
              this->image_buffer_[2], this->image_buffer_[3],
@@ -898,7 +882,7 @@ bool MipiDSICamComponent::capture_frame() {
   // Profiling détaillé toutes les 100 frames
   profile_count++;
   total_dqbuf_us += (t2 - t1);
-  total_copy_us += (t3 - t2);
+  total_copy_us += (t3 - t2);  // "copy" = decode pour JPEG
 
   // 3. Re-queue le buffer immédiatement
   uint32_t t4 = esp_timer_get_time();
@@ -911,13 +895,19 @@ bool MipiDSICamComponent::capture_frame() {
   total_qbuf_us += (t5 - t4);
 
   if (profile_count == 100) {
-    ESP_LOGI(TAG, "📊 Profiling (avg over 100 frames):");
-    ESP_LOGI(TAG, "   DQBUF: %u us", total_dqbuf_us / 100);
-    ESP_LOGI(TAG, "   %s: %u us", this->ppa_handle_ ? "PPA copy" : "memcpy", total_copy_us / 100);
-    ESP_LOGI(TAG, "   QBUF: %u us", total_qbuf_us / 100);
-    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms)",
-             (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100,
-             (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100000.0f);
+    uint32_t avg_dqbuf = total_dqbuf_us / 100;
+    uint32_t avg_decode = total_copy_us / 100;
+    uint32_t avg_qbuf = total_qbuf_us / 100;
+    uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
+    float fps = 1000000.0f / avg_total;  // Calcul FPS
+
+    ESP_LOGI(TAG, "📊 JPEG Hardware Profiling (avg over 100 frames):");
+    ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
+    ESP_LOGI(TAG, "   JPEG decode: %u us (%.1f ms) ← Hardware decoder", avg_decode, avg_decode / 1000.0f);
+    ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
+    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS",
+             avg_total, avg_total / 1000.0f, fps);
+
     profile_count = 0;
     total_dqbuf_us = 0;
     total_copy_us = 0;
@@ -952,11 +942,12 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Désactiver le PPA
-  if (this->ppa_handle_) {
-    ppa_client_handle_t ppa_h = (ppa_client_handle_t)this->ppa_handle_;
-    ppa_unregister_client(ppa_h);
-    this->ppa_handle_ = nullptr;
+  // 3. Libérer le décodeur JPEG
+  if (this->jpeg_decoder_) {
+    jpeg_decoder_handle_t jpeg_h = (jpeg_decoder_handle_t)this->jpeg_decoder_;
+    jpeg_del_decoder_engine(jpeg_h);
+    this->jpeg_decoder_ = nullptr;
+    ESP_LOGI(TAG, "✓ JPEG decoder released");
   }
 
   // 4. Libérer le buffer d'image
