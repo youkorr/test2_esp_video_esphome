@@ -252,6 +252,40 @@ print("[ESP-Video Build] ========================================")
 print("")
 
 # ========================================================================
+# Forcer la recompilation en supprimant les .o cachés
+# ========================================================================
+import glob
+
+# Fichiers critiques qui doivent être recompilés (problème de cache SCons)
+force_rebuild_sources = [
+    "esp_video_init.c",
+    "esp_cam_sensor_detect_stubs.c",
+]
+
+# Supprimer les .o correspondants dans le build directory
+build_dir = env.subst("$BUILD_DIR")
+for src_name in force_rebuild_sources:
+    # Chercher les .o avec ce nom de base (récursivement dans toutes les sous-dirs)
+    obj_pattern = os.path.join(build_dir, "**", f"*{src_name.replace('.c', '.o')}")
+    obj_files = glob.glob(obj_pattern, recursive=True)
+    for obj_file in obj_files:
+        try:
+            os.remove(obj_file)
+            print(f"[ESP-Video Build] 🔨 Deleted cached object: {os.path.basename(obj_file)}")
+        except:
+            pass  # Fichier déjà supprimé ou n'existe pas
+
+    # Aussi chercher dans le répertoire racine du build
+    obj_name = src_name.replace('.c', '.o')
+    direct_obj = os.path.join(build_dir, obj_name)
+    if os.path.exists(direct_obj):
+        try:
+            os.remove(direct_obj)
+            print(f"[ESP-Video Build] 🔨 Deleted cached object: {obj_name}")
+        except:
+            pass
+
+# ========================================================================
 # Ajouter toutes les sources à la compilation
 # ========================================================================
 if sources_to_add:
