@@ -457,12 +457,16 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             ESP_LOGW(TAG, "  ✓ Sensor detected successfully: %s (addr 0x%x)",
                      cam_dev->name ? cam_dev->name : "unknown", p->sccb_addr);
 
+            ESP_LOGE(TAG, "  🔧 About to call esp_video_create_csi_video_device(cam_dev=%p)...", (void*)cam_dev);
             ret = esp_video_create_csi_video_device(cam_dev);
+            ESP_LOGE(TAG, "  📡 esp_video_create_csi_video_device() returned: ret=%d (%s)",
+                     ret, esp_err_to_name(ret));
+
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "  ✗ Failed to create MIPI-CSI video device: %d (%s)", ret, esp_err_to_name(ret));
                 return ret;
             }
-            ESP_LOGW(TAG, "  ✓ MIPI-CSI video device created successfully");
+            ESP_LOGE(TAG, "  ✅ MIPI-CSI video device created successfully - /dev/video0 should exist now");
 
 #if CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
             if (config->cam_motor) {
@@ -495,12 +499,13 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             }
 #endif
 
-            ESP_LOGI(TAG, "========================================");
-            ESP_LOGI(TAG, "DEBUG: esp_video_init() reached ISP section");
-            ESP_LOGI(TAG, "  cam_dev=%p", cam_dev);
+            ESP_LOGE(TAG, "");
+            ESP_LOGE(TAG, "========================================");
+            ESP_LOGE(TAG, "🔍 DEBUG: esp_video_init() reached ISP configuration section");
+            ESP_LOGE(TAG, "  cam_dev=%p", cam_dev);
             if (cam_dev) {
-                ESP_LOGI(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
-                ESP_LOGI(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
+                ESP_LOGE(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+                ESP_LOGE(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
             }
 #ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
             ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");
