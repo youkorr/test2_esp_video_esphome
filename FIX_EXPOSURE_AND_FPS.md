@@ -120,19 +120,35 @@ id(tab5_cam).set_exposure(0);  // 0 = auto
 
 ```cpp
 // Gain faible (image plus sombre mais moins de bruit)
-id(tab5_cam).set_gain(2000);  // 2x
+id(tab5_cam).set_gain(4000);  // 4x (minimum)
 
-// Gain moyen (recommandé)
-id(tab5_cam).set_gain(4000);  // 4x
+// Gain moyen (recommandé pour la plupart des scènes)
+id(tab5_cam).set_gain(16000);  // 16x - équilibre qualité/sensibilité
 
-// Gain élevé (image plus claire mais plus de bruit)
-id(tab5_cam).set_gain(8000);  // 8x
+// Gain élevé (scènes sombres, plus de bruit)
+id(tab5_cam).set_gain(32000);  // 32x - sensibilité améliorée
+
+// Gain maximum (utiliser avec précaution!)
+id(tab5_cam).set_gain(63008);  // 63x - sensibilité maximale, bruit élevé
 ```
 
-**Valeurs:**
-- `1000`: 1x (minimum, image sombre)
-- `2000-4000`: 2-4x (recommandé)
-- `8000-16000`: 8-16x (maximum, image bruitée)
+**Valeurs (basées sur Kconfig SC202CS):**
+- `4000`: 4x (minimum hardware, image sombre)
+- `16000`: 16x (recommandé - bon équilibre qualité/sensibilité)
+- `32000`: 32x (low-light amélioré, bruit modéré)
+- `63008`: 63x (maximum hardware, sensibilité maximale, bruit très élevé, risque de surchauffe)
+
+⚠️ **Note:** Valeurs hors de la plage 4000-63008 seront clampées par le driver
+
+**Stratégie de Gain (Kconfig):**
+Le SC202CS supporte deux stratégies de gain configurables dans menuconfig:
+- `CAMERA_SC202CS_ANA_GAIN_PRIORITY`: Priorité au gain analogique (moins de bruit)
+- `CAMERA_SC202CS_DIG_GAIN_PRIORITY`: Priorité au gain numérique (**défaut**, transitions plus douces)
+
+Pour réduire le bruit, vous pouvez recompiler avec gain analogique prioritaire via `menuconfig`:
+```
+Component config → Camera Sensor → SC202CS → Gain control priority → Analog gain priority
+```
 
 ### 3. Balance des Blancs (Mode)
 
@@ -330,6 +346,43 @@ display:
 ```
 
 **Ce simple changement devrait résoudre 90% des problèmes!**
+
+---
+
+## 📋 Formats et Résolutions Disponibles (SC202CS Kconfig)
+
+Le SC202CS supporte plusieurs formats configurables dans menuconfig. Le format par défaut peut affecter la qualité d'image et les performances:
+
+**Formats disponibles:**
+1. **RAW8 1280x720 30fps** (défaut actuel)
+   - Résolution: HD (1280x720)
+   - Format: 8-bit RAW Bayer
+   - Interface: MIPI CSI-2 1-lane, 24MHz
+   - ✅ Recommandé pour performance/qualité équilibrée
+
+2. **RAW8 1600x1200 30fps**
+   - Résolution: Full HD (1600x1200)
+   - Format: 8-bit RAW Bayer
+   - ⚠️ Plus haute résolution mais peut affecter FPS
+
+3. **RAW10 1600x1200 30fps**
+   - Résolution: Full HD (1600x1200)
+   - Format: 10-bit RAW Bayer (meilleure dynamique)
+   - ✅ Meilleure qualité couleur et plage dynamique
+   - ⚠️ Nécessite plus de bande passante/mémoire
+
+4. **RAW10 1600x900 30fps**
+   - Résolution: HD+ (1600x900)
+   - Format: 10-bit RAW Bayer
+   - ✅ Bon compromis résolution/qualité
+
+**Pour changer le format:**
+```
+menuconfig → Component config → Camera Sensor → SC202CS →
+Select default output format for MIPI CSI interface
+```
+
+**Note:** RAW10 offre une meilleure plage dynamique (plus de détails dans les ombres/hautes lumières) mais nécessite plus de ressources. Si les couleurs blanc→vert persistent avec RAW8, essayez RAW10.
 
 ---
 
