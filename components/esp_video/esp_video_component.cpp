@@ -2,6 +2,8 @@
 #include "i2c_helper.h"
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
+#include <sys/stat.h>
+#include <unistd.h>
 
 // Headers ESP-Video
 extern "C" {
@@ -131,6 +133,52 @@ void ESPVideoComponent::setup() {
   }
 
   ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo prêts (bus I2C partagé)");
+
+  // Vérifier quels devices vidéo ont été créés
+  ESP_LOGW(TAG, "🔍 Vérification des devices vidéo créés:");
+  struct stat st;
+  if (stat("/dev/video0", &st) == 0) {
+    ESP_LOGW(TAG, "   ✅ /dev/video0 existe (CSI video device - capteur détecté!)");
+  } else {
+    ESP_LOGW(TAG, "   ❌ /dev/video0 N'EXISTE PAS (capteur NON détecté!)");
+    ESP_LOGW(TAG, "      Cela signifie que la détection du capteur a échoué dans esp_video_init()");
+  }
+  if (stat("/dev/video10", &st) == 0) {
+    ESP_LOGW(TAG, "   ✅ /dev/video10 existe (JPEG encoder)");
+  }
+  if (stat("/dev/video11", &st) == 0) {
+    ESP_LOGW(TAG, "   ✅ /dev/video11 existe (H.264 encoder)");
+  }
+  if (stat("/dev/video20", &st) == 0) {
+    ESP_LOGW(TAG, "   ✅ /dev/video20 existe (ISP device)");
+  }
+
+  // Tenter de lire l'ID du capteur directement via I2C pour vérifier que XCLK fonctionne
+  ESP_LOGW(TAG, "🔍 Test direct I2C du capteur SC202CS (addr 0x36):");
+  uint8_t sensor_id_high = 0, sensor_id_low = 0;
+
+  // SC202CS: Chip ID register high byte at 0x3107, low byte at 0x3108
+  // Expected ID: 0xCB33
+  esp_err_t err_h = i2c_read_register(i2c_handle, 0x36, 0x3107, &sensor_id_high);
+  esp_err_t err_l = i2c_read_register(i2c_handle, 0x36, 0x3108, &sensor_id_low);
+
+  if (err_h == ESP_OK && err_l == ESP_OK) {
+    uint16_t chip_id = (sensor_id_high << 8) | sensor_id_low;
+    ESP_LOGW(TAG, "   ✅ I2C lecture réussie: Chip ID = 0x%04X (attendu: 0xCB33)", chip_id);
+    if (chip_id == 0xCB33) {
+      ESP_LOGW(TAG, "      ✅ SC202CS identifié correctement - XCLK fonctionne!");
+    } else if (chip_id == 0x0000 || chip_id == 0xFFFF) {
+      ESP_LOGW(TAG, "      ❌ ID invalide - XCLK probablement inactif ou capteur déconnecté");
+    } else {
+      ESP_LOGW(TAG, "      ⚠️  ID inattendu - possible autre capteur ou erreur I2C");
+    }
+  } else {
+    ESP_LOGW(TAG, "   ❌ I2C lecture échouée (err_h=%d, err_l=%d)", err_h, err_l);
+    ESP_LOGW(TAG, "      Causes possibles:");
+    ESP_LOGW(TAG, "      1. XCLK non initialisé/inactif");
+    ESP_LOGW(TAG, "      2. Mauvaise adresse I2C");
+    ESP_LOGW(TAG, "      3. Capteur pas alimenté/connecté");
+  }
 
   // Vérifier si l'ISP pipeline est initialisé
 #ifdef ESP_VIDEO_ISP_ENABLED
