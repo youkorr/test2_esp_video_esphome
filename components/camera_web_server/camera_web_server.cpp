@@ -274,8 +274,15 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     size_t image_size = server->camera_->get_image_size();
 
     if (image_data == nullptr || image_size == 0) {
+      ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u", image_data, image_size);
+      vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
+
+    ESP_LOGD(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
+             server->camera_->get_image_width(),
+             server->camera_->get_image_height(),
+             image_size);
 
     // Encoder RGB565 → JPEG
     jpeg_encode_cfg_t encode_config = {};
@@ -301,6 +308,8 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
+    ESP_LOGD(TAG, "JPEG encoded: %u bytes (quality=%d)", jpeg_size, server->jpeg_quality_);
+
     // Envoyer boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
       ESP_LOGI(TAG, "Stream client disconnected");
@@ -316,8 +325,11 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
 
     // Envoyer les données JPEG
     if (httpd_resp_send_chunk(req, (const char *)server->jpeg_buffer_, jpeg_size) != ESP_OK) {
+      ESP_LOGI(TAG, "Failed to send JPEG chunk");
       break;
     }
+
+    ESP_LOGD(TAG, "Frame sent successfully");
 
     // Limiter le framerate pour ne pas surcharger le réseau
     vTaskDelay(pdMS_TO_TICKS(33));  // ~30 FPS
