@@ -172,6 +172,12 @@ void ESPVideoComponent::setup() {
     return;
   }
 
+  // CRITICAL: Wait for sensor to stabilize after XCLK starts
+  // Camera sensors need time to power up and initialize internal logic after XCLK becomes active
+  ESP_LOGI(TAG, "⏳ Waiting 100ms for sensor to stabilize...");
+  delay(100);
+  ESP_LOGI(TAG, "✅ Sensor should be ready for I2C communication");
+
   ESP_LOGI(TAG, "");
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  Calling esp_video_init()");
@@ -234,19 +240,23 @@ void ESPVideoComponent::setup() {
   uint8_t sensor_id_high = 0, sensor_id_low = 0;
 
   // SC202CS: Chip ID register high byte at 0x3107, low byte at 0x3108
-  // Expected ID: 0xCB33
+  // Expected ID: 0xEB52 (SC202CS_PID from sc202cs.c)
   esp_err_t err_h = i2c_read_register(i2c_handle, 0x36, 0x3107, &sensor_id_high);
   esp_err_t err_l = i2c_read_register(i2c_handle, 0x36, 0x3108, &sensor_id_low);
 
   if (err_h == ESP_OK && err_l == ESP_OK) {
     uint16_t chip_id = (sensor_id_high << 8) | sensor_id_low;
-    ESP_LOGW(TAG, "   ✅ I2C lecture réussie: Chip ID = 0x%04X (attendu: 0xCB33)", chip_id);
-    if (chip_id == 0xCB33) {
+    ESP_LOGW(TAG, "   ✅ I2C lecture réussie: Chip ID = 0x%04X (attendu: 0xEB52 pour SC202CS)", chip_id);
+    if (chip_id == 0xEB52) {
       ESP_LOGW(TAG, "      ✅ SC202CS identifié correctement - XCLK fonctionne!");
     } else if (chip_id == 0x0000 || chip_id == 0xFFFF) {
       ESP_LOGW(TAG, "      ❌ ID invalide - XCLK probablement inactif ou capteur déconnecté");
     } else {
-      ESP_LOGW(TAG, "      ⚠️  ID inattendu - possible autre capteur ou erreur I2C");
+      ESP_LOGW(TAG, "      ⚠️  ID inattendu (0x%04X) - possible autre capteur", chip_id);
+      // Liste des IDs connus:
+      // 0xEB52 = SC202CS
+      // 0x5647 = OV5647
+      // 0x0C10 = OV02C10
     }
   } else {
     ESP_LOGW(TAG, "   ❌ I2C lecture échouée (err_h=%d, err_l=%d)", err_h, err_l);

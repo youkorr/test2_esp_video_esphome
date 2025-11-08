@@ -32,18 +32,19 @@
 
 // Define _start as an array containing all sensors
 // The C standard guarantees array elements are contiguous in memory
+// ORDER MATTERS: Put most likely sensor first for faster detection
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
-    // Sensor 0: OV5647
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV5647_SCCB_ADDR
-    },
-    // Sensor 1: SC202CS
+    // Sensor 0: SC202CS (M5Stack Tab5 default sensor - try first!)
     {
         .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
         .port = ESP_CAM_SENSOR_MIPI_CSI,
         .sccb_addr = SC202CS_SCCB_ADDR
+    },
+    // Sensor 1: OV5647
+    {
+        .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .sccb_addr = OV5647_SCCB_ADDR
     },
     // Sensor 2: OV02C10
     {
