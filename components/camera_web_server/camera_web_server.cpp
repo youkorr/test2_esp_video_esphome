@@ -207,13 +207,12 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
   }
 
   // Encoder RGB565 → JPEG avec hardware encoder ESP32-P4
-  jpeg_encode_cfg_t encode_config = {
-      .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
-      .image_quality = (uint32_t)server->jpeg_quality_,
-      .width = server->camera_->get_image_width(),
-      .height = server->camera_->get_image_height(),
-      .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
-  };
+  jpeg_encode_cfg_t encode_config = {};
+  encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
+  encode_config.image_quality = (uint32_t)server->jpeg_quality_;
+  encode_config.width = server->camera_->get_image_width();
+  encode_config.height = server->camera_->get_image_height();
+  encode_config.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
 
   uint32_t jpeg_size = 0;
   esp_err_t ret = jpeg_encoder_process(
@@ -279,13 +278,12 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     }
 
     // Encoder RGB565 → JPEG
-    jpeg_encode_cfg_t encode_config = {
-        .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
-        .image_quality = (uint32_t)server->jpeg_quality_,
-        .width = server->camera_->get_image_width(),
-        .height = server->camera_->get_image_height(),
-        .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
-    };
+    jpeg_encode_cfg_t encode_config = {};
+    encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
+    encode_config.image_quality = (uint32_t)server->jpeg_quality_;
+    encode_config.width = server->camera_->get_image_width();
+    encode_config.height = server->camera_->get_image_height();
+    encode_config.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
 
     uint32_t jpeg_size = 0;
     esp_err_t ret = jpeg_encoder_process(
