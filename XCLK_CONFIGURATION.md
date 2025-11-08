@@ -14,7 +14,7 @@ Ces cartes utilisent une GPIO de l'ESP32-P4 pour générer l'horloge via LEDC/PW
 ```yaml
 esp_video:
   i2c_id: bsp_bus
-  xclk_pin: 36              # GPIO qui fournit l'horloge au capteur
+  xclk_pin: GPIO36          # Format ESPHome: "GPIOXX" (ou juste 36 fonctionne aussi)
   xclk_freq: 24000000       # Fréquence: 24 MHz (typique pour MIPI-CSI)
   enable_h264: true
   enable_jpeg: true
@@ -70,9 +70,15 @@ esp_video:
 - Si connectée à un oscillateur/cristal → Type 2
 
 ### Test Empirique:
-1. Essayez d'abord avec `xclk_pin: 36` (Type 1)
-2. Si la détection échoue, essayez `xclk_pin: -1` (Type 2)
+1. Essayez d'abord avec `xclk_pin: GPIO36` (Type 1)
+2. Si la détection échoue, essayez `xclk_pin: -1` ou `xclk_pin: NO_CLOCK` (Type 2)
 3. Vérifiez les logs pour voir si le capteur est détecté
+
+### Formats Acceptés pour xclk_pin:
+- `GPIO36` - Format ESPHome standard (recommandé)
+- `36` - Numéro GPIO simple (fonctionne aussi)
+- `-1` - Pas de GPIO, oscillateur externe
+- `NO_CLOCK` - Alias pour -1 (plus lisible)
 
 ## Logs Attendus
 
@@ -133,10 +139,12 @@ esp_video:
   i2c_id: bsp_bus
 
   # Pour cartes AVEC GPIO XCLK (changez le numéro si nécessaire):
-  xclk_pin: 36
+  xclk_pin: GPIO36
 
   # Pour cartes AVEC oscillateur externe (décommentez):
   # xclk_pin: -1
+  # OU
+  # xclk_pin: NO_CLOCK
 
   xclk_freq: 24000000
   enable_h264: true

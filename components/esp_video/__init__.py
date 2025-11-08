@@ -32,6 +32,26 @@ CONF_XCLK_FREQ = "xclk_freq"
 # Utilisez xclk_pin: -1 pour les cartes avec oscillateur externe sur le PCB
 NO_CLOCK = -1
 
+def parse_gpio_pin(value):
+    """Parse une pin GPIO au format ESPHome (GPIO36 ou -1)"""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        if value == "-1" or value.upper() == "NO_CLOCK":
+            return NO_CLOCK
+        # Format "GPIO36" -> 36
+        if value.upper().startswith("GPIO"):
+            try:
+                return int(value[4:])
+            except ValueError:
+                raise cv.Invalid(f"Format GPIO invalide: {value}. Utilisez 'GPIO36' ou -1")
+        # Si c'est juste un nombre en string
+        try:
+            return int(value)
+        except ValueError:
+            raise cv.Invalid(f"Format GPIO invalide: {value}. Utilisez 'GPIO36' ou -1")
+    raise cv.Invalid(f"Type de pin invalide: {type(value)}")
+
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
@@ -49,7 +69,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
-        cv.Optional(CONF_XCLK_PIN, default=36): cv.int_range(min=-1, max=48),  # GPIO pin for XCLK, -1 = not used
+        # XCLK pin accepte: "GPIO36", 36, -1, ou "NO_CLOCK"
+        cv.Optional(CONF_XCLK_PIN, default="GPIO36"): cv.Any(cv.string, cv.int_range(min=-1, max=48)),
         cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_range(min=1000000, max=40000000),  # 1-40 MHz
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
@@ -66,7 +87,8 @@ async def to_code(config):
 
     # Configure XCLK pour la détection des capteurs MIPI-CSI
     # CRITICAL: Les capteurs ont besoin de XCLK actif pour répondre sur I2C!
-    xclk_pin = config[CONF_XCLK_PIN]
+    xclk_pin_raw = config[CONF_XCLK_PIN]
+    xclk_pin = parse_gpio_pin(xclk_pin_raw)  # Convertit "GPIO36" -> 36, ou "-1" -> -1
     xclk_freq = config[CONF_XCLK_FREQ]
     has_ext_clock = xclk_pin != NO_CLOCK
 
