@@ -16,7 +16,7 @@
 /**
  * @brief Camera sensor detection array - ESPHome/PlatformIO implementation
  *
- * CRITICAL FIX: Force linker to place array and sentinel adjacently using section attributes.
+ * CRITICAL FIX v2: Force linker to place array and sentinel adjacently.
  *
  * The header declares:
  *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
@@ -24,18 +24,20 @@
  *
  * The code iterates: for (p = start; p < &end; ++p)
  *
- * PROBLEM: The linker was placing _end 15108 bytes away from _start, causing
- * the loop to iterate through 1259 garbage entries instead of 3 valid sensors.
+ * PROBLEM 1 (original): Linker placed _end 15108 bytes away, causing 1259 iterations
+ * ATTEMPTED FIX: Used .sensor_detect.00 and .sensor_detect.01 subsections
+ * PROBLEM 2: Linker placed sections in REVERSE order (.01 before .00)!
+ *   Result: _end=0x4ff40000, _start=0x4ff4000c → difference = -12 bytes
+ *   Loop never executed because start > end
  *
- * SOLUTION: Use explicit section attributes with ordering (.sensor_detect.00, .sensor_detect.01)
- * to force the linker to place them adjacently. The linker sorts sections alphabetically,
- * so .00 comes before .01, guaranteeing correct placement.
+ * SOLUTION v2: Place BOTH in the SAME section (.rodata.sensor_detect)
+ * The linker will preserve declaration order within the same section.
  */
 
 // Define _start as an array containing all sensors
-// Use section .sensor_detect.00 to ensure it comes first
+// Both variables in SAME section to preserve declaration order
 // ORDER MATTERS: Put most likely sensor first for faster detection
-__attribute__((section(".sensor_detect.00"), used))
+__attribute__((section(".rodata.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     // Sensor 0: SC202CS (M5Stack Tab5 default sensor - try first!)
     {
@@ -57,10 +59,9 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     },
 };
 
-// Define _end as a sentinel placed right after the array
-// Use section .sensor_detect.01 to ensure it comes immediately after .00
-// The linker will place sections in alphabetical order: .00 then .01
-__attribute__((section(".sensor_detect.01"), used))
+// Define _end as a sentinel in the SAME section, declared immediately after array
+// This should preserve declaration order: _start then _end
+__attribute__((section(".rodata.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
@@ -70,18 +71,17 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
 /**
  * How this works:
  *
- * 1. __esp_cam_sensor_detect_fn_array_start is in section .sensor_detect.00
- * 2. __esp_cam_sensor_detect_fn_array_end is in section .sensor_detect.01
- * 3. The linker places sections in alphabetical order, so .00 comes before .01
- * 4. With used attribute, the linker won't optimize these away
- * 5. This guarantees _end is placed immediately after _start in memory
- * 6. The loop for (p = start; p < &end; ++p) will iterate exactly 3 times
+ * 1. Both variables in section ".rodata.sensor_detect"
+ * 2. Linker preserves declaration order within same section
+ * 3. Array declared first, sentinel declared second
+ * 4. __attribute__((used)) prevents optimization
+ * 5. Loop: for (p = start; p < &end; ++p) iterates exactly 3 times
  *
  * Expected memory layout:
- *   Address 0x4ff1390c: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS)
- *   Address 0x4ff13918: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
- *   Address 0x4ff13924: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
- *   Address 0x4ff13930: __esp_cam_sensor_detect_fn_array_end (sentinel)
+ *   0x4ff40xxx: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS)
+ *   0x4ff40xxx+12: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
+ *   0x4ff40xxx+24: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
+ *   0x4ff40xxx+36: __esp_cam_sensor_detect_fn_array_end (sentinel)
  *
- * Pointer difference should be 36 bytes (3 sensors × 12 bytes), not 15108 bytes!
+ * Pointer difference should be +36 bytes (3 sensors × 12 bytes)
  */
