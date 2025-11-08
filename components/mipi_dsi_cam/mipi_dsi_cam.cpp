@@ -273,13 +273,12 @@ void MipiDSICamComponent::setup() {
     return;
   }
 
-  // Configurer l'ISP si disponible et si le format le nécessite
+  // L'ISP est configuré AUTOMATIQUEMENT par esp_video_init()
+  // Pas besoin de configuration manuelle via VIDIOC_S_FMT sur /dev/video20
+  // Le pipeline se configure quand on démarre le streaming sur /dev/video0
   if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
-    if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
-      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
-    } else {
-      ESP_LOGI(TAG, "✓ ISP configuré avec succès");
-    }
+    ESP_LOGI(TAG, "✓ ISP sera utilisé automatiquement dans le pipeline de capture");
+    ESP_LOGI(TAG, "  Format demandé: %s @ %s", this->pixel_format_.c_str(), this->resolution_.c_str());
   }
 
   // Configurer l'encodeur JPEG si nécessaire
@@ -373,9 +372,15 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
+  // Choisir le device de capture selon le format
+  // IMPORTANT: Pour RGB565/YUYV/formats bruts, capturer depuis /dev/video0 (CSI)
+  // L'ISP /dev/video20 est utilisé AUTOMATIQUEMENT dans le pipeline interne
+  // Seulement JPEG/H264 utilisent leurs encodeurs dédiés
   const char *dev = wants_jpeg_(this->pixel_format_) ?
-                    ESP_VIDEO_JPEG_DEVICE_NAME :
-                    ESP_VIDEO_ISP1_DEVICE_NAME;
+                    ESP_VIDEO_JPEG_DEVICE_NAME :       // /dev/video10 pour JPEG
+                    wants_h264_(this->pixel_format_) ?
+                    ESP_VIDEO_H264_DEVICE_NAME :       // /dev/video11 pour H264
+                    ESP_VIDEO_MIPI_CSI_DEVICE_NAME;    // /dev/video0 pour RGB565/YUYV/etc
 
   ESP_LOGI(TAG, "📸 Capture V4L2 streaming: %s → %s", dev, path.c_str());
 
