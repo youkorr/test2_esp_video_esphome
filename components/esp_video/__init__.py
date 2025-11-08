@@ -25,6 +25,8 @@ CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
+CONF_XCLK_PIN = "xclk_pin"
+CONF_XCLK_FREQ = "xclk_freq"
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
@@ -43,6 +45,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
+        cv.Optional(CONF_XCLK_PIN, default=36): cv.int_range(min=-1, max=48),  # GPIO pin for XCLK, -1 = not used
+        cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_range(min=1000000, max=40000000),  # 1-40 MHz
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -56,7 +60,13 @@ async def to_code(config):
     i2c_bus = await cg.get_variable(config[CONF_I2C_ID])
     cg.add(var.set_i2c_bus(i2c_bus))
 
+    # Configure XCLK pour la détection des capteurs MIPI-CSI
+    # CRITICAL: Les capteurs ont besoin de XCLK actif pour répondre sur I2C!
+    cg.add(var.set_xclk_pin(config[CONF_XCLK_PIN]))
+    cg.add(var.set_xclk_freq(config[CONF_XCLK_FREQ]))
+
     logging.info(f"[ESP-Video] Configuration I2C: Utilise le bus ESPHome '{config[CONF_I2C_ID]}'")
+    logging.info(f"[ESP-Video] Configuration XCLK: GPIO{config[CONF_XCLK_PIN]} @ {config[CONF_XCLK_FREQ]/1000000:.1f} MHz")
     logging.info("[ESP-Video] esp_video utilisera le bus I2C ESPHome (init_sccb=false)")
     logging.info("[ESP-Video] Avantage: Partage propre du bus I2C, pas de conflit")
 

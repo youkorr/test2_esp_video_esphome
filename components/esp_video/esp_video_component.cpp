@@ -109,6 +109,11 @@ void ESPVideoComponent::setup() {
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
 
+  // Configure XCLK for sensor detection (required for MIPI-CSI sensors!)
+  // CRITICAL: Sensors need XCLK active to respond on I2C during detection
+  csi_config.xclk_pin = this->xclk_pin_;      // XCLK pin (default: GPIO36)
+  csi_config.xclk_freq = this->xclk_freq_;    // XCLK frequency (default: 24MHz)
+
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 

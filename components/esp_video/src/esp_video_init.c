@@ -422,6 +422,8 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             cfg.reset_pin = config->csi->reset_pin;
             cfg.pwdn_pin = config->csi->pwdn_pin;
             cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
+            cfg.xclk_pin = config->csi->xclk_pin;       // Initialize XCLK pin (critical for sensor detection!)
+            cfg.xclk_freq_hz = config->csi->xclk_freq;  // Initialize XCLK frequency
             cam_dev = (*(p->detect))((void *)&cfg);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->csi->sccb_config);

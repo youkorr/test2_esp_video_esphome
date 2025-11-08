@@ -58,6 +58,10 @@ typedef struct esp_video_init_csi_config {
 
     gpio_num_t  reset_pin;                      /*!< Camera sensor reset pin, if hardware has no reset pin, set reset_pin to be -1 */
     gpio_num_t  pwdn_pin;                       /*!< Camera sensor power down pin, if hardware has no power down pin, set pwdn_pin to be -1 */
+
+    /* XCLK configuration for camera sensor */
+    gpio_num_t  xclk_pin;                       /*!< Camera sensor XCLK pin, set to -1 if not used (for ESPHome/PlatformIO builds) */
+    uint32_t    xclk_freq;                      /*!< Camera sensor XCLK frequency in Hz (typically 24MHz for MIPI-CSI sensors) */
 } esp_video_init_csi_config_t;
 #endif /* CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE */
 
