@@ -1162,6 +1162,125 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
   return true;
 }
 
+// ============================================================================
+// Contrôles V4L2 Standards (pour ESPHome number components)
+// ============================================================================
+
+/**
+ * @brief Régler la luminosité de l'image
+ * @param value Valeur de luminosité (-128 à 127, défaut: 0)
+ */
+bool MipiDSICamComponent::set_brightness(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set brightness: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_BRIGHTNESS;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set brightness: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler le contraste de l'image
+ * @param value Valeur de contraste (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_contrast(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set contrast: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_CONTRAST;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set contrast: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la saturation des couleurs
+ * @param value Valeur de saturation (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_saturation(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set saturation: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_SATURATION;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set saturation: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la teinte de l'image
+ * @param value Valeur de teinte (-180 à 180, défaut: 0)
+ */
+bool MipiDSICamComponent::set_hue(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set hue: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_HUE;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set hue: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la netteté de l'image (filter)
+ * @param value Valeur de netteté (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_sharpness(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set sharpness: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_SHARPNESS;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set sharpness: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
+  return true;
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 
