@@ -291,6 +291,7 @@ for src_file in force_rebuild_files:
         # print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
         # print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
     else:
+        pass
         # print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
 
 # print("[ESP-Video Build] ========================================")
