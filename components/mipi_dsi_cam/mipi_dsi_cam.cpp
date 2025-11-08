@@ -752,6 +752,43 @@ bool MipiDSICamComponent::start_streaming() {
   ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
   ESP_LOGI(TAG, "   → %s copy to LVGL buffer", this->ppa_handle_ ? "PPA hardware" : "memcpy");
 
+  // Test 2: Memory zone analysis (PPA performance investigation)
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
+
+  // Analyze V4L2 buffers
+  for (int i = 0; i < 2; i++) {
+    uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
+    const char* zone = "UNKNOWN";
+    if (addr >= 0x48000000 && addr < 0x4C000000) {
+      zone = "SPIRAM (0x48000000-0x4C000000)";
+    } else if (addr >= 0x40800000 && addr < 0x40900000) {
+      zone = "SRAM (0x40800000-0x40900000)";
+    } else if (addr >= 0x40000000 && addr < 0x40800000) {
+      zone = "IRAM/DRAM";
+    }
+    ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
+  }
+
+  // Analyze image_buffer_
+  uintptr_t img_addr = (uintptr_t)this->image_buffer_;
+  const char* img_zone = "UNKNOWN";
+  if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
+    img_zone = "SPIRAM (0x48000000-0x4C000000)";
+  } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
+    img_zone = "SRAM (0x40800000-0x40900000)";
+  } else if (img_addr >= 0x40000000 && img_addr < 0x40800000) {
+    img_zone = "IRAM/DRAM";
+  }
+  ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
+
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "💡 PPA Performance Notes:");
+  ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
+  ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
+  ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
+  ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
+
   return true;
 }
 
