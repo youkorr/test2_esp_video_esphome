@@ -16,25 +16,26 @@
 /**
  * @brief Camera sensor detection array - ESPHome/PlatformIO implementation
  *
- * FINAL SOLUTION: Define a real contiguous array and use pointer arithmetic.
+ * CRITICAL FIX: Force linker to place array and sentinel adjacently using section attributes.
  *
  * The header declares:
- *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
+ *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
  *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
  *
- * The code iterates: for (p = &start; p < &end; ++p)
+ * The code iterates: for (p = start; p < &end; ++p)
  *
- * We define _start as an array (which the C standard guarantees is contiguous),
- * and _end as a single variable immediately following it.
+ * PROBLEM: The linker was placing _end 15108 bytes away from _start, causing
+ * the loop to iterate through 1259 garbage entries instead of 3 valid sensors.
  *
- * When you take &array_name where array_name is an array, you get a pointer
- * to the first element. So &__esp_cam_sensor_detect_fn_array_start gives
- * us a pointer to the first sensor.
+ * SOLUTION: Use explicit section attributes with ordering (.sensor_detect.00, .sensor_detect.01)
+ * to force the linker to place them adjacently. The linker sorts sections alphabetically,
+ * so .00 comes before .01, guaranteeing correct placement.
  */
 
 // Define _start as an array containing all sensors
-// The C standard guarantees array elements are contiguous in memory
+// Use section .sensor_detect.00 to ensure it comes first
 // ORDER MATTERS: Put most likely sensor first for faster detection
+__attribute__((section(".sensor_detect.00"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     // Sensor 0: SC202CS (M5Stack Tab5 default sensor - try first!)
     {
@@ -57,8 +58,9 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
 };
 
 // Define _end as a sentinel placed right after the array
-// The C compiler will typically place this immediately after the array in .data/.rodata
-// Making it likely (though not guaranteed) to be at &array[3]
+// Use section .sensor_detect.01 to ensure it comes immediately after .00
+// The linker will place sections in alphabetical order: .00 then .01
+__attribute__((section(".sensor_detect.01"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
@@ -68,28 +70,18 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
 /**
  * How this works:
  *
- * 1. __esp_cam_sensor_detect_fn_array_start is defined as an array[3]
- * 2. When code uses &__esp_cam_sensor_detect_fn_array_start, it gets
- *    a pointer to the first element (same as &array[0])
- * 3. The loop increments this pointer: p++
- * 4. p < &__esp_cam_sensor_detect_fn_array_end checks if we've reached the end
+ * 1. __esp_cam_sensor_detect_fn_array_start is in section .sensor_detect.00
+ * 2. __esp_cam_sensor_detect_fn_array_end is in section .sensor_detect.01
+ * 3. The linker places sections in alphabetical order, so .00 comes before .01
+ * 4. With used attribute, the linker won't optimize these away
+ * 5. This guarantees _end is placed immediately after _start in memory
+ * 6. The loop for (p = start; p < &end; ++p) will iterate exactly 3 times
  *
- * The header declared _start and _end as "extern esp_cam_sensor_detect_fn_t",
- * which is compatible with both:
- * - An array definition (array name decays to pointer to first element)
- * - A single variable
+ * Expected memory layout:
+ *   Address 0x4ff1390c: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS)
+ *   Address 0x4ff13918: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
+ *   Address 0x4ff13924: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
+ *   Address 0x4ff13930: __esp_cam_sensor_detect_fn_array_end (sentinel)
  *
- * This works because in C:
- * - "esp_cam_sensor_detect_fn_t array[3]" when used in expressions
- *   becomes "esp_cam_sensor_detect_fn_t *" (pointer to first element)
- * - Taking &array gives you the address of the first element
- *
- * CRITICAL: We rely on the compiler placing __esp_cam_sensor_detect_fn_array_end
- * immediately after the array. While not guaranteed by C standard, GCC typically
- * does this for variables in the same translation unit with similar storage class.
- *
- * If the compiler doesn't place them contiguously, the loop will iterate too
- * many or too few times. To guarantee correctness, we should modify esp_video_init.c
- * to calculate the end based on array size, but that would require changing
- * upstream code.
+ * Pointer difference should be 36 bytes (3 sensors × 12 bytes), not 15108 bytes!
  */
