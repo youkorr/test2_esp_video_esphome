@@ -10,6 +10,8 @@ extern "C" {
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "driver/ledc.h"  // For XCLK generation via LEDC (like M5Stack does)
+#include "freertos/FreeRTOS.h"  // For vTaskDelay
+#include "freertos/task.h"      // For pdMS_TO_TICKS
 
 // Forward declaration for ISP pipeline check
 #ifdef ESP_VIDEO_ISP_ENABLED
@@ -175,7 +177,7 @@ void ESPVideoComponent::setup() {
   // CRITICAL: Wait for sensor to stabilize after XCLK starts
   // Camera sensors need time to power up and initialize internal logic after XCLK becomes active
   ESP_LOGI(TAG, "⏳ Waiting 100ms for sensor to stabilize...");
-  delay(100);
+  vTaskDelay(pdMS_TO_TICKS(100));  // 100ms delay for sensor initialization
   ESP_LOGI(TAG, "✅ Sensor should be ready for I2C communication");
 
   ESP_LOGI(TAG, "");
