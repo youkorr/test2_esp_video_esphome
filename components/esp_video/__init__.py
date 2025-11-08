@@ -92,7 +92,8 @@ async def to_code(config):
     xclk_freq = config[CONF_XCLK_FREQ]
     has_ext_clock = xclk_pin != NO_CLOCK
 
-    cg.add(var.set_xclk_pin(xclk_pin))
+    # Cast explicite en gpio_num_t pour éviter l'erreur de compilation
+    cg.add(var.set_xclk_pin(cg.RawExpression(f"static_cast<gpio_num_t>({xclk_pin})")))
     cg.add(var.set_xclk_freq(xclk_freq))
 
     logging.info(f"[ESP-Video] Configuration I2C: Utilise le bus ESPHome '{config[CONF_I2C_ID]}'")
