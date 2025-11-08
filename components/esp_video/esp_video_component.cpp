@@ -114,6 +114,11 @@ void ESPVideoComponent::setup() {
   csi_config.xclk_pin = this->xclk_pin_;      // XCLK pin (default: GPIO36)
   csi_config.xclk_freq = this->xclk_freq_;    // XCLK frequency (default: 24MHz)
 
+  ESP_LOGW(TAG, "🔧 XCLK Configuration passée à esp_video_init():");
+  ESP_LOGW(TAG, "   xclk_pin = GPIO%d (membre: GPIO%d)", csi_config.xclk_pin, this->xclk_pin_);
+  ESP_LOGW(TAG, "   xclk_freq = %u Hz (membre: %u Hz)", csi_config.xclk_freq, this->xclk_freq_);
+  ESP_LOGW(TAG, "   Adresse csi_config = %p", (void*)&csi_config);
+
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
