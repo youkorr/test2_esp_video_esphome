@@ -46,50 +46,43 @@
  *
  * The code uses: for (p = &start; p < &end; ++p)
  *
- * CRITICAL ISSUE with section attributes:
- * The linker can place items in a section in ANY ORDER. If the linker places
- * __esp_cam_sensor_detect_fn_array_end BEFORE __esp_cam_sensor_detect_fn_array_start
- * in memory, the loop condition (p < &end) will be FALSE from the start and
- * the loop will never execute!
+ * SOLUTION: Define individual structures in declaration order. GCC places symbols
+ * from the same translation unit in the same section in the order they appear in
+ * the source file. This is a GCC implementation detail we can rely on for this
+ * specific toolchain (riscv32-esp GCC 14.2.0).
  *
- * SOLUTION: Use a guaranteed contiguous array in a structure, then alias the
- * individual elements to match the expected symbol names.
+ * We use numbered section names (.sensor_detect.0, .sensor_detect.1, etc.) to
+ * help the linker maintain order even if it sorts sections alphabetically.
  */
 
-// Create the sensor detection array including the end marker
-// We name the array __esp_cam_sensor_detect_fn_array_start to match the expected symbol
-// The header declares: extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
-//
-// Array elements are GUARANTEED contiguous: &array[0] < &array[1] < &array[2] < &array[3]
-// The loop: for (p = &array[0]; p < &array[3]; ++p) will iterate over elements 0, 1, 2
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] __attribute__((used)) = {
-    // [0] - OV5647
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV5647_SCCB_ADDR
-    },
-    // [1] - SC202CS
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = SC202CS_SCCB_ADDR
-    },
-    // [2] - OV02C10
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV02C10_SCCB_ADDR
-    },
-    // [3] - End marker (loop stops before reaching this)
-    {
-        .detect = NULL,
-        .port = 0,
-        .sccb_addr = 0
-    }
+// Sensor 0: OV5647 - this is __esp_cam_sensor_detect_fn_array_start
+__attribute__((section(".sensor_detect.0"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV5647_SCCB_ADDR
 };
 
-// Define the end symbol as a reference to the 4th element of the array
-// This ensures &__esp_cam_sensor_detect_fn_array_end == &__esp_cam_sensor_detect_fn_array_start[3]
-// We use #define to make it an alias for the array element
-#define __esp_cam_sensor_detect_fn_array_end (__esp_cam_sensor_detect_fn_array_start[3])
+// Sensor 1: SC202CS
+__attribute__((section(".sensor_detect.1"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sc202cs = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = SC202CS_SCCB_ADDR
+};
+
+// Sensor 2: OV02C10
+__attribute__((section(".sensor_detect.2"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_ov02c10 = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV02C10_SCCB_ADDR
+};
+
+// End marker - this is __esp_cam_sensor_detect_fn_array_end
+__attribute__((section(".sensor_detect.3"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
