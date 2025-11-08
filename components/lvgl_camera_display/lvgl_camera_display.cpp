@@ -46,23 +46,48 @@ void LVGLCameraDisplay::loop() {
 
   // Si la caméra est en streaming, capturer ET mettre à jour le canvas
   if (this->camera_->is_streaming()) {
+    // Statistiques de frames manquées
+    static uint32_t attempts = 0;
+    static uint32_t skipped = 0;
+
+    uint32_t t1 = millis();
     bool frame_captured = this->camera_->capture_frame();
+    uint32_t t2 = millis();
+
+    attempts++;
+    if (!frame_captured) skipped++;
 
     if (frame_captured) {
       this->update_canvas_();
+      uint32_t t3 = millis();
       this->frame_count_++;
 
-      // Logger FPS réel toutes les 100 frames
+      // Accumuler les temps pour statistiques
+      static uint32_t last_time = 0;
+      static uint32_t total_capture_ms = 0;
+      static uint32_t total_canvas_ms = 0;
+
+      total_capture_ms += (t2 - t1);
+      total_canvas_ms += (t3 - t2);
+
+      // Logger performance toutes les 100 frames
       if (this->frame_count_ % 100 == 0) {
-        static uint32_t last_time = 0;
         uint32_t now_time = millis();
 
         if (last_time > 0) {
           float elapsed = (now_time - last_time) / 1000.0f;  // secondes
           float fps = 100.0f / elapsed;
-          ESP_LOGI(TAG, "🎞️ %u frames affichées - FPS moyen: %.2f", this->frame_count_, fps);
+          float avg_capture = total_capture_ms / 100.0f;
+          float avg_canvas = total_canvas_ms / 100.0f;
+          float skip_rate = (skipped * 100.0f) / attempts;
+          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
+                   this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
         }
         last_time = now_time;
+        total_capture_ms = 0;
+        total_canvas_ms = 0;
+        attempts = 0;
+        skipped = 0;
       }
     }
   }

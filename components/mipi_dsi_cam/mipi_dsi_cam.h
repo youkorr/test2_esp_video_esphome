@@ -51,15 +51,15 @@ class MipiDSICamComponent : public Component {
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
-  // Stubs pour lvgl_camera_display
-  bool is_streaming() const { return pipeline_started_; }
-  bool start_streaming() { return pipeline_started_; }
-  void stop_streaming() { /* Le pipeline reste actif */ }
-  bool capture_frame() { return true; }
-  uint8_t* get_image_data() { return nullptr; }
-  uint16_t get_image_width() const { return 0; }
-  uint16_t get_image_height() const { return 0; }
-  size_t get_image_size() const { return 0; }
+  // API pour lvgl_camera_display (streaming continu)
+  bool is_streaming() const { return streaming_active_; }
+  bool start_streaming();
+  void stop_streaming();
+  bool capture_frame();
+  uint8_t* get_image_data() { return image_buffer_; }
+  uint16_t get_image_width() const { return image_width_; }
+  uint16_t get_image_height() const { return image_height_; }
+  size_t get_image_size() const { return image_buffer_size_; }
 
  protected:
   std::string sensor_name_{"sc202cs"};
@@ -84,6 +84,19 @@ class MipiDSICamComponent : public Component {
   uint32_t snapshot_count_{0};
   uint32_t error_count_{0};
 
+  // État du streaming vidéo continu
+  bool streaming_active_{false};
+  int video_fd_{-1};
+  struct {
+    void *start;
+    size_t length;
+  } v4l2_buffers_[2];
+  uint8_t *image_buffer_{nullptr};
+  size_t image_buffer_size_{0};
+  uint16_t image_width_{0};
+  uint16_t image_height_{0};
+  uint32_t frame_sequence_{0};
+
   bool check_pipeline_health_();
   void cleanup_pipeline_();
 };
@@ -100,6 +113,27 @@ class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamCo
     if (!this->parent_->capture_snapshot_to_file(filename)) {
       ESP_LOGE("mipi_dsi_cam", "Échec de la capture snapshot vers: %s", filename.c_str());
     }
+  }
+};
+
+template<typename... Ts>
+class StartStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComponent> {
+ public:
+  void play(Ts... x) override {
+    if (this->parent_->start_streaming()) {
+      ESP_LOGI("mipi_dsi_cam", "✅ Streaming vidéo démarré");
+    } else {
+      ESP_LOGE("mipi_dsi_cam", "❌ Échec du démarrage du streaming");
+    }
+  }
+};
+
+template<typename... Ts>
+class StopStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComponent> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->stop_streaming();
+    ESP_LOGI("mipi_dsi_cam", "⏹️  Streaming vidéo arrêté");
   }
 };
 

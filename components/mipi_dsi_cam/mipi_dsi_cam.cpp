@@ -320,6 +320,9 @@ void MipiDSICamComponent::setup() {
   if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
   if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
   ESP_LOGI(TAG, "==============================");
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "ℹ️  Le streaming vidéo n'est PAS démarré automatiquement");
+  ESP_LOGI(TAG, "   Utilisez start_streaming() / stop_streaming() pour contrôler");
 }
 
 void MipiDSICamComponent::loop() {
@@ -567,6 +570,267 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
            (unsigned)this->snapshot_count_, path.c_str(), (unsigned)written);
 
   return (written == buf.bytesused);
+}
+
+// ============================================================================
+// Streaming Vidéo Continu pour LVGL Display
+// ============================================================================
+
+bool MipiDSICamComponent::start_streaming() {
+  if (this->streaming_active_) {
+    ESP_LOGW(TAG, "Streaming déjà actif");
+    return true;
+  }
+
+  if (!this->pipeline_started_) {
+    ESP_LOGE(TAG, "Pipeline non démarré, impossible de streamer");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "=== START STREAMING ===");
+
+  // Choisir le device selon le format
+  const char *dev = wants_jpeg_(this->pixel_format_) ?
+                    ESP_VIDEO_JPEG_DEVICE_NAME :
+                    wants_h264_(this->pixel_format_) ?
+                    ESP_VIDEO_H264_DEVICE_NAME :
+                    ESP_VIDEO_MIPI_CSI_DEVICE_NAME;
+
+  ESP_LOGI(TAG, "Device: %s", dev);
+
+  // 1. Ouvrir le device
+  this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
+  if (this->video_fd_ < 0) {
+    ESP_LOGE(TAG, "open(%s) failed: %s", dev, strerror(errno));
+    return false;
+  }
+
+  // 2. Configurer le format (OBLIGATOIRE avant VIDIOC_G_FMT)
+  uint32_t width, height;
+  if (!map_resolution_(this->resolution_, width, height)) {
+    ESP_LOGE(TAG, "Invalid resolution: %s", this->resolution_.c_str());
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  uint32_t fourcc = map_pixfmt_fourcc_(this->pixel_format_);
+
+  struct v4l2_format fmt;
+  memset(&fmt, 0, sizeof(fmt));
+  fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  fmt.fmt.pix.width = width;
+  fmt.fmt.pix.height = height;
+  fmt.fmt.pix.pixelformat = fourcc;
+  fmt.fmt.pix.field = V4L2_FIELD_NONE;
+
+  // SET le format pour que le driver calcule sizeimage
+  if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  // 3. Vérifier le format appliqué (le driver peut ajuster)
+  if (ioctl(this->video_fd_, VIDIOC_G_FMT, &fmt) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_G_FMT failed: %s", strerror(errno));
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  this->image_width_ = fmt.fmt.pix.width;
+  this->image_height_ = fmt.fmt.pix.height;
+  this->image_buffer_size_ = fmt.fmt.pix.sizeimage;
+
+  // Fallback: calculer manuellement si sizeimage = 0
+  if (this->image_buffer_size_ == 0) {
+    // Pour RGB565: 2 bytes/pixel, pour YUYV: 2 bytes/pixel
+    uint32_t bytes_per_pixel = (fourcc == V4L2_PIX_FMT_RGB565 || fourcc == V4L2_PIX_FMT_YUYV) ? 2 : 4;
+    this->image_buffer_size_ = this->image_width_ * this->image_height_ * bytes_per_pixel;
+    ESP_LOGW(TAG, "Driver returned sizeimage=0, calculated manually: %u bytes", this->image_buffer_size_);
+  }
+
+  ESP_LOGI(TAG, "Format: %ux%u, fourcc=0x%08X, size=%u",
+           this->image_width_, this->image_height_,
+           fmt.fmt.pix.pixelformat, this->image_buffer_size_);
+
+  // 4. Allouer le buffer d'image persistant
+  this->image_buffer_ = (uint8_t*)heap_caps_malloc(this->image_buffer_size_, MALLOC_CAP_8BIT);
+  if (!this->image_buffer_) {
+    ESP_LOGE(TAG, "Failed to allocate image buffer (%u bytes)", this->image_buffer_size_);
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  memset(this->image_buffer_, 0, this->image_buffer_size_);
+  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p",
+           this->image_buffer_size_, this->image_buffer_);
+
+  // 5. Demander 2 buffers V4L2 en mode MMAP
+  struct v4l2_requestbuffers req;
+  memset(&req, 0, sizeof(req));
+  req.count = 2;
+  req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  req.memory = V4L2_MEMORY_MMAP;
+
+  if (ioctl(this->video_fd_, VIDIOC_REQBUFS, &req) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_REQBUFS failed: %s", strerror(errno));
+    heap_caps_free(this->image_buffer_);
+    this->image_buffer_ = nullptr;
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
+
+  // 6. Mapper et queuer les buffers
+  for (unsigned int i = 0; i < 2; i++) {
+    struct v4l2_buffer buf;
+    memset(&buf, 0, sizeof(buf));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    buf.index = i;
+
+    if (ioctl(this->video_fd_, VIDIOC_QUERYBUF, &buf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QUERYBUF[%u] failed: %s", i, strerror(errno));
+      this->stop_streaming();
+      return false;
+    }
+
+    this->v4l2_buffers_[i].length = buf.length;
+    this->v4l2_buffers_[i].start = mmap(NULL, buf.length,
+                                        PROT_READ | PROT_WRITE,
+                                        MAP_SHARED, this->video_fd_, buf.m.offset);
+
+    if (this->v4l2_buffers_[i].start == MAP_FAILED) {
+      ESP_LOGE(TAG, "mmap[%u] failed: %s", i, strerror(errno));
+      this->stop_streaming();
+      return false;
+    }
+
+    ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
+             i, buf.length, this->v4l2_buffers_[i].start);
+
+    if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] failed: %s", i, strerror(errno));
+      this->stop_streaming();
+      return false;
+    }
+  }
+
+  // 7. DÉMARRER LE STREAMING
+  int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  if (ioctl(this->video_fd_, VIDIOC_STREAMON, &type) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_STREAMON failed: %s", strerror(errno));
+    this->stop_streaming();
+    return false;
+  }
+
+  this->streaming_active_ = true;
+  this->frame_sequence_ = 0;
+
+  ESP_LOGI(TAG, "✓ Streaming started");
+  ESP_LOGI(TAG, "   → CSI controller active");
+  ESP_LOGI(TAG, "   → ISP active");
+  ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
+
+  return true;
+}
+
+bool MipiDSICamComponent::capture_frame() {
+  if (!this->streaming_active_) {
+    return false;
+  }
+
+  // 1. Dequeue un buffer rempli
+  struct v4l2_buffer buf;
+  memset(&buf, 0, sizeof(buf));
+  buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  buf.memory = V4L2_MEMORY_MMAP;
+
+  if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
+    if (errno == EAGAIN) {
+      // Pas de frame disponible (mode non-blocking)
+      return false;
+    }
+    ESP_LOGE(TAG, "VIDIOC_DQBUF failed: %s", strerror(errno));
+    return false;
+  }
+
+  // 2. Copier les données dans le buffer d'image
+  size_t copy_size = buf.bytesused < this->image_buffer_size_ ?
+                     buf.bytesused : this->image_buffer_size_;
+
+  memcpy(this->image_buffer_, this->v4l2_buffers_[buf.index].start, copy_size);
+
+  this->frame_sequence_++;
+
+  // Log uniquement la première frame
+  if (this->frame_sequence_ == 1) {
+    ESP_LOGI(TAG, "✅ First frame captured: %u bytes, sequence=%u",
+             buf.bytesused, buf.sequence);
+    ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
+             this->image_buffer_[0], this->image_buffer_[1],
+             this->image_buffer_[2], this->image_buffer_[3],
+             this->image_buffer_[4], this->image_buffer_[5]);
+  }
+
+  // 3. Re-queue le buffer pour la prochaine capture
+  if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
+    return false;
+  }
+
+  return true;
+}
+
+void MipiDSICamComponent::stop_streaming() {
+  if (!this->streaming_active_) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "=== STOP STREAMING ===");
+
+  // 1. Arrêter le streaming
+  if (this->video_fd_ >= 0) {
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(this->video_fd_, VIDIOC_STREAMOFF, &type) < 0) {
+      ESP_LOGW(TAG, "VIDIOC_STREAMOFF failed: %s", strerror(errno));
+    }
+  }
+
+  // 2. Libérer les buffers mappés
+  for (int i = 0; i < 2; i++) {
+    if (this->v4l2_buffers_[i].start != nullptr &&
+        this->v4l2_buffers_[i].start != MAP_FAILED) {
+      munmap(this->v4l2_buffers_[i].start, this->v4l2_buffers_[i].length);
+      this->v4l2_buffers_[i].start = nullptr;
+      this->v4l2_buffers_[i].length = 0;
+    }
+  }
+
+  // 3. Fermer le device
+  if (this->video_fd_ >= 0) {
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+  }
+
+  // 4. Libérer le buffer d'image
+  if (this->image_buffer_) {
+    heap_caps_free(this->image_buffer_);
+    this->image_buffer_ = nullptr;
+  }
+
+  this->streaming_active_ = false;
+  this->image_width_ = 0;
+  this->image_height_ = 0;
+  this->image_buffer_size_ = 0;
+
+  ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
 }
 
 }  // namespace mipi_dsi_cam

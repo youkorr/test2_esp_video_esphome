@@ -12,6 +12,8 @@ CODEOWNERS = ["@youkorr"]
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
 MipiDSICamComponent = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 CaptureSnapshotAction = mipi_dsi_cam_ns.class_("CaptureSnapshotAction", automation.Action)
+StartStreamingAction = mipi_dsi_cam_ns.class_("StartStreamingAction", automation.Action)
+StopStreamingAction = mipi_dsi_cam_ns.class_("StopStreamingAction", automation.Action)
 
 # Configuration du composant
 CONF_SENSOR_TYPE = "sensor_type"
@@ -119,5 +121,33 @@ async def capture_snapshot_action_to_code(config, action_id, template_arg, args)
     
     template_ = await cg.templatable(config[CONF_FILENAME], args, cg.std_string)
     cg.add(var.set_filename(template_))
-    
+
+    return var
+
+# Action pour démarrer le streaming vidéo
+@automation.register_action(
+    "mipi_dsi_cam.start_streaming",
+    StartStreamingAction,
+    cv.Schema({
+        cv.GenerateID(): cv.use_id(MipiDSICamComponent),
+    })
+)
+async def start_streaming_action_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg)
+    cg.add(var.set_parent(paren))
+    return var
+
+# Action pour arrêter le streaming vidéo
+@automation.register_action(
+    "mipi_dsi_cam.stop_streaming",
+    StopStreamingAction,
+    cv.Schema({
+        cv.GenerateID(): cv.use_id(MipiDSICamComponent),
+    })
+)
+async def stop_streaming_action_to_code(config, action_id, template_arg, args):
+    paren = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg)
+    cg.add(var.set_parent(paren))
     return var
