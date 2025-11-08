@@ -46,42 +46,65 @@
  *
  * The code uses: for (p = &start; p < &end; ++p)
  *
- * We use __attribute__((section(".sensor_detect"))) to place all structures
- * in the same memory section. The linker will place all items in the same
- * section contiguously, which allows pointer arithmetic to work correctly.
+ * CRITICAL ISSUE with section attributes:
+ * The linker can place items in a section in ANY ORDER. If the linker places
+ * __esp_cam_sensor_detect_fn_array_end BEFORE __esp_cam_sensor_detect_fn_array_start
+ * in memory, the loop condition (p < &end) will be FALSE from the start and
+ * the loop will never execute!
  *
- * The "orphan section .sensor_detect" warning is harmless - it just means
- * the section isn't explicitly defined in the linker script, but the linker
- * handles it automatically by placing all .sensor_detect items together.
+ * SOLUTION: Use a guaranteed contiguous array in a structure, then alias the
+ * individual elements to match the expected symbol names.
  */
 
-// Start marker - first sensor in the detection array
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = OV5647_SCCB_ADDR
+// Create a structure containing the sensor array to ensure contiguity and order
+static struct {
+    esp_cam_sensor_detect_fn_t sensors[4];  // 3 sensors + 1 end marker
+} __attribute__((used)) sensor_array_container = {
+    .sensors = {
+        // [0] - OV5647
+        {
+            .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
+            .port = ESP_CAM_SENSOR_MIPI_CSI,
+            .sccb_addr = OV5647_SCCB_ADDR
+        },
+        // [1] - SC202CS
+        {
+            .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
+            .port = ESP_CAM_SENSOR_MIPI_CSI,
+            .sccb_addr = SC202CS_SCCB_ADDR
+        },
+        // [2] - OV02C10
+        {
+            .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
+            .port = ESP_CAM_SENSOR_MIPI_CSI,
+            .sccb_addr = OV02C10_SCCB_ADDR
+        },
+        // [3] - End marker
+        {
+            .detect = NULL,
+            .port = 0,
+            .sccb_addr = 0
+        }
+    }
 };
 
-// Additional sensors - placed in the same section
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sc202cs = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = SC202CS_SCCB_ADDR
-};
+// Use weak aliases to map the array elements to the expected symbol names
+// Note: We use __attribute__((weak)) so these can be overridden if needed
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start
+    __attribute__((weak, alias("sensor_array_container")));
 
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_ov02c10 = {
-    .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .sccb_addr = OV02C10_SCCB_ADDR
-};
+// For the end marker, we create a separate symbol that points to the 4th element
+// We can't use direct aliasing with an offset, so we use assembly or initialization
+//
+// Alternative: Just define them directly referencing the array
+#undef __esp_cam_sensor_detect_fn_array_start
+#undef __esp_cam_sensor_detect_fn_array_end
 
-// End marker - loop stops when p reaches &__esp_cam_sensor_detect_fn_array_end
-__attribute__((section(".sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
-    .detect = NULL,
-    .port = 0,
-    .sccb_addr = 0
-};
+// Direct approach: declare them as references to array elements
+// This guarantees they are in the correct order
+esp_cam_sensor_detect_fn_t * const __esp_cam_sensor_detect_fn_array_start_ptr = &sensor_array_container.sensors[0];
+esp_cam_sensor_detect_fn_t * const __esp_cam_sensor_detect_fn_array_end_ptr = &sensor_array_container.sensors[3];
+
+// Map the struct types to the array elements via macros for the code that uses &symbol
+#define __esp_cam_sensor_detect_fn_array_start (sensor_array_container.sensors[0])
+#define __esp_cam_sensor_detect_fn_array_end (sensor_array_container.sensors[3])
