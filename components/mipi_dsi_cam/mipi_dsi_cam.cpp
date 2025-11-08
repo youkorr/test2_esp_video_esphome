@@ -27,6 +27,7 @@ extern "C" {
 #include "linux/videodev2.h"
 #include "driver/ppa.h"
 #include "esp_timer.h"
+#include "esp_cache.h"  // Test 3: Cache sync for PPA DMA
 }
 
 namespace esphome {
@@ -854,8 +855,17 @@ bool MipiDSICamComponent::capture_frame() {
       .mode = PPA_TRANS_MODE_BLOCKING,
     };
 
+    // Test 3: Cache sync for PPA DMA performance
+    // Sync source buffer from cache to memory and invalidate cache
+    esp_cache_msync((void*)src, this->image_buffer_size_,
+                    ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_INVALIDATE);
+
     ppa_client_handle_t ppa_h = (ppa_client_handle_t)this->ppa_handle_;
     ppa_do_scale_rotate_mirror(ppa_h, &srm_config);
+
+    // Sync destination buffer from memory to cache
+    esp_cache_msync(this->image_buffer_, this->image_buffer_size_,
+                    ESP_CACHE_MSYNC_FLAG_DIR_M2C);
   } else {
     // Fallback: memcpy CPU (lent mais fonctionne)
     size_t copy_size = buf.bytesused < this->image_buffer_size_ ?
