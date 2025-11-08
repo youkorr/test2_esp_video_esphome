@@ -176,8 +176,9 @@ void ESPVideoComponent::setup() {
 
   // CRITICAL: Wait for sensor to stabilize after XCLK starts
   // Camera sensors need time to power up and initialize internal logic after XCLK becomes active
-  ESP_LOGI(TAG, "⏳ Waiting 100ms for sensor to stabilize...");
-  vTaskDelay(pdMS_TO_TICKS(100));  // 100ms delay for sensor initialization
+  // SC202CS datasheet: Power-on sequence requires ~300ms for full initialization
+  ESP_LOGI(TAG, "⏳ Waiting 300ms for sensor to stabilize...");
+  vTaskDelay(pdMS_TO_TICKS(300));  // 300ms delay for sensor initialization
   ESP_LOGI(TAG, "✅ Sensor should be ready for I2C communication");
 
   ESP_LOGI(TAG, "");
