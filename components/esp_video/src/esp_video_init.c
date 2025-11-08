@@ -436,12 +436,23 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
             cfg.xclk_pin = config->csi->xclk_pin;       // Initialize XCLK pin (critical for sensor detection!)
             cfg.xclk_freq_hz = config->csi->xclk_freq;  // Initialize XCLK frequency
+
+            ESP_LOGE(TAG, "  🔧 Calling detect function at %p with config:", (void*)p->detect);
+            ESP_LOGE(TAG, "     sccb_handle=%p, reset_pin=%d, pwdn_pin=%d",
+                     cfg.sccb_handle, cfg.reset_pin, cfg.pwdn_pin);
+            ESP_LOGE(TAG, "     xclk_pin=%d, xclk_freq=%lu Hz", cfg.xclk_pin, cfg.xclk_freq_hz);
+
             cam_dev = (*(p->detect))((void *)&cfg);
+
+            ESP_LOGE(TAG, "  📡 detect() returned: cam_dev=%p", (void*)cam_dev);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->csi->sccb_config);
-                ESP_LOGE(TAG, "  ✗ Sensor detection failed for address 0x%x", p->sccb_addr);
+                ESP_LOGE(TAG, "  ✗ Sensor detection FAILED for address 0x%x (cam_dev is NULL)", p->sccb_addr);
                 continue;
             }
+
+            ESP_LOGE(TAG, "  ✅ Sensor detection SUCCEEDED! cam_dev->name=%s, cam_dev->id.pid=0x%x",
+                     cam_dev->name ? cam_dev->name : "NULL", cam_dev->id.pid);
 
             ESP_LOGW(TAG, "  ✓ Sensor detected successfully: %s (addr 0x%x)",
                      cam_dev->name ? cam_dev->name : "unknown", p->sccb_addr);
