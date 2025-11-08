@@ -714,11 +714,11 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming started (JPEG Hardware)");
+  ESP_LOGI(TAG, "✓ Streaming started (Zero-Copy Mode)");
   ESP_LOGI(TAG, "   → CSI controller active");
   ESP_LOGI(TAG, "   → ISP active");
   ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
-  ESP_LOGI(TAG, "   → %s decode to LVGL buffer", this->jpeg_decoder_ ? "JPEG hardware" : "memcpy");
+  ESP_LOGI(TAG, "   → Zero-copy: LVGL uses V4L2 buffers directly (no PPA, no copy)");
 
   // Test 2: Memory zone analysis (PPA performance investigation)
   ESP_LOGI(TAG, "");
