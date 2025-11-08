@@ -56,10 +56,7 @@ class MipiDSICamComponent : public Component {
   bool start_streaming();
   void stop_streaming();
   bool capture_frame();
-  uint8_t* get_image_data() {
-    return (current_buffer_index_ >= 0) ?
-           (uint8_t*)v4l2_buffers_[current_buffer_index_].start : nullptr;
-  }
+  uint8_t* get_image_data() { return image_buffer_; }
   uint16_t get_image_width() const { return image_width_; }
   uint16_t get_image_height() const { return image_height_; }
   size_t get_image_size() const { return image_buffer_size_; }
@@ -94,11 +91,12 @@ class MipiDSICamComponent : public Component {
     void *start;
     size_t length;
   } v4l2_buffers_[2];
-  int current_buffer_index_{-1};  // Index du buffer actuellement affiché par LVGL
+  uint8_t *image_buffer_{nullptr};  // Buffer de destination pour PPA/DMA
   size_t image_buffer_size_{0};
   uint16_t image_width_{0};
   uint16_t image_height_{0};
   uint32_t frame_sequence_{0};
+  void *ppa_handle_{nullptr};  // Handle PPA pour copie hardware
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();
