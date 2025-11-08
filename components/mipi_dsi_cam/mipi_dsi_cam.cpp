@@ -759,7 +759,13 @@ bool MipiDSICamComponent::capture_frame() {
     return false;
   }
 
+  static uint32_t profile_count = 0;
+  static uint32_t total_dqbuf_us = 0;
+  static uint32_t total_copy_us = 0;
+  static uint32_t total_qbuf_us = 0;
+
   // 1. Dequeue un buffer rempli
+  uint32_t t1 = esp_timer_get_time();
   struct v4l2_buffer buf;
   memset(&buf, 0, sizeof(buf));
   buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -773,6 +779,7 @@ bool MipiDSICamComponent::capture_frame() {
     ESP_LOGE(TAG, "VIDIOC_DQBUF failed: %s", strerror(errno));
     return false;
   }
+  uint32_t t2 = esp_timer_get_time();
 
   // 2. Copier vers image_buffer_ (PPA hardware ou memcpy fallback)
   uint8_t *src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
@@ -817,6 +824,7 @@ bool MipiDSICamComponent::capture_frame() {
                        buf.bytesused : this->image_buffer_size_;
     memcpy(this->image_buffer_, src, copy_size);
   }
+  uint32_t t3 = esp_timer_get_time();
 
   this->frame_sequence_++;
 
@@ -825,16 +833,41 @@ bool MipiDSICamComponent::capture_frame() {
     ESP_LOGI(TAG, "✅ First frame captured: %u bytes, sequence=%u",
              buf.bytesused, buf.sequence);
     ESP_LOGI(TAG, "   Copy method: %s", this->ppa_handle_ ? "PPA hardware" : "memcpy CPU");
+    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, %s=%uus",
+             (uint32_t)(t2-t1), this->ppa_handle_ ? "PPA" : "memcpy", (uint32_t)(t3-t2));
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              this->image_buffer_[0], this->image_buffer_[1],
              this->image_buffer_[2], this->image_buffer_[3],
              this->image_buffer_[4], this->image_buffer_[5]);
   }
 
+  // Profiling détaillé toutes les 100 frames
+  profile_count++;
+  total_dqbuf_us += (t2 - t1);
+  total_copy_us += (t3 - t2);
+
   // 3. Re-queue le buffer immédiatement
+  uint32_t t4 = esp_timer_get_time();
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
     ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
     return false;
+  }
+  uint32_t t5 = esp_timer_get_time();
+
+  total_qbuf_us += (t5 - t4);
+
+  if (profile_count == 100) {
+    ESP_LOGI(TAG, "📊 Profiling (avg over 100 frames):");
+    ESP_LOGI(TAG, "   DQBUF: %u us", total_dqbuf_us / 100);
+    ESP_LOGI(TAG, "   %s: %u us", this->ppa_handle_ ? "PPA copy" : "memcpy", total_copy_us / 100);
+    ESP_LOGI(TAG, "   QBUF: %u us", total_qbuf_us / 100);
+    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms)",
+             (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100,
+             (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100000.0f);
+    profile_count = 0;
+    total_dqbuf_us = 0;
+    total_copy_us = 0;
+    total_qbuf_us = 0;
   }
 
   return true;
