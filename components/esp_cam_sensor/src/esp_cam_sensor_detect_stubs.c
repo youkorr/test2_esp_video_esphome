@@ -57,9 +57,10 @@
  */
 
 // Create a structure containing the sensor array to ensure contiguity and order
+// We declare this structure with a unique name to avoid conflicts
 static struct {
     esp_cam_sensor_detect_fn_t sensors[4];  // 3 sensors + 1 end marker
-} __attribute__((used)) sensor_array_container = {
+} sensor_array_container __attribute__((used)) = {
     .sensors = {
         // [0] - OV5647
         {
@@ -88,23 +89,7 @@ static struct {
     }
 };
 
-// Use weak aliases to map the array elements to the expected symbol names
-// Note: We use __attribute__((weak)) so these can be overridden if needed
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start
-    __attribute__((weak, alias("sensor_array_container")));
-
-// For the end marker, we create a separate symbol that points to the 4th element
-// We can't use direct aliasing with an offset, so we use assembly or initialization
-//
-// Alternative: Just define them directly referencing the array
-#undef __esp_cam_sensor_detect_fn_array_start
-#undef __esp_cam_sensor_detect_fn_array_end
-
-// Direct approach: declare them as references to array elements
-// This guarantees they are in the correct order
-esp_cam_sensor_detect_fn_t * const __esp_cam_sensor_detect_fn_array_start_ptr = &sensor_array_container.sensors[0];
-esp_cam_sensor_detect_fn_t * const __esp_cam_sensor_detect_fn_array_end_ptr = &sensor_array_container.sensors[3];
-
-// Map the struct types to the array elements via macros for the code that uses &symbol
+// Map the expected symbol names to array elements using macros
+// This is the simplest approach that guarantees correct ordering
 #define __esp_cam_sensor_detect_fn_array_start (sensor_array_container.sensors[0])
 #define __esp_cam_sensor_detect_fn_array_end (sensor_array_container.sensors[3])
