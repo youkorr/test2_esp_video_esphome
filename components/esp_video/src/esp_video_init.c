@@ -329,6 +329,13 @@ static bool sensor_is_detected(esp_cam_sensor_detect_fn_t *p, esp_cam_sensor_dev
  */
 esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "========================================");
+    ESP_LOGE(TAG, "🚀 CUSTOM esp_video_init() CALLED! (v2025-11-08-v3)");
+    ESP_LOGE(TAG, "   This confirms our modified version is being used");
+    ESP_LOGE(TAG, "========================================");
+    ESP_LOGE(TAG, "");
+
     esp_err_t ret = ESP_OK;
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
     bool csi_inited = false;
@@ -347,6 +354,8 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
         ESP_LOGW(TAG, "Please validate camera config");
         return ESP_ERR_INVALID_ARG;
     }
+
+    ESP_LOGE(TAG, "✅ Config is valid, continuing initialization...");
 
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
     ret = esp_video_create_isp_video_device();
@@ -399,19 +408,21 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 #endif
 
-    ESP_LOGW(TAG, "🔍 Starting sensor detection loop...");
-    ESP_LOGW(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
-    ESP_LOGW(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
-    ESP_LOGW(TAG, "  DEBUG: Pointer difference = %ld bytes",
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "🔍 Starting sensor detection loop...");
+    ESP_LOGE(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
+    ESP_LOGE(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
+    ESP_LOGE(TAG, "  DEBUG: Pointer difference = %ld bytes",
              (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)__esp_cam_sensor_detect_fn_array_start));
-    ESP_LOGW(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
+    ESP_LOGE(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
+    ESP_LOGE(TAG, "");
 
     for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
-        ESP_LOGW(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
+        ESP_LOGE(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
                  (void*)p, p->port, p->sccb_addr, (void*)p->detect);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
-            ESP_LOGW(TAG, "  → Attempting to detect MIPI-CSI sensor...");
+            ESP_LOGE(TAG, "  → Attempting to detect MIPI-CSI sensor...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
