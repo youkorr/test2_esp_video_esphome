@@ -12,8 +12,8 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
-print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
+# print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
+# print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
 
 # Liste de tous les fichiers sources à compiler
 sources_to_add = []
@@ -141,10 +141,10 @@ esp_ipa_sources = [
     "src/esp_ipa_detect_stubs.c", # Detection array
 ]
 
-print("")
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
-print("[ESP-Video Build] ========================================")
+# print("")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
+# print("[ESP-Video Build] ========================================")
 
 if os.path.exists(esp_ipa_dir):
     for src in esp_ipa_sources:
@@ -181,10 +181,10 @@ if os.path.exists(esp_sccb_intf_dir):
 # ========================================================================
 # Embarquer les fichiers JSON IPA des capteurs comme binary data
 # ========================================================================
-print("")
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
-print("[ESP-Video Build] ========================================")
+# print("")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
+# print("[ESP-Video Build] ========================================")
 
 # Liste des fichiers JSON à embarquer
 json_files_to_embed = [
@@ -247,10 +247,11 @@ const char {symbol_name}_start[] __attribute__((aligned(4))) =
         except Exception as e:
             print(f"[ESP-Video Build] ⚠️  Erreur lors de l'embedding de {json_path}: {e}")
     else:
+        pass
         # print(f"[ESP-Video Build] ⚠️  Fichier JSON introuvable: {json_path}")
 
-print("[ESP-Video Build] ========================================")
-print("")
+# print("[ESP-Video Build] ========================================")
+# print("")
 
 # ========================================================================
 # Forcer la recompilation en modifiant le timestamp ET supprimant les .o
@@ -264,8 +265,8 @@ force_rebuild_files = [
     os.path.join(esp_cam_sensor_dir, "src/esp_cam_sensor_detect_stubs.c"),
 ]
 
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
 
 # Étape 1: Supprimer tous les .o correspondants PARTOUT
 build_root = env.subst("$PROJECT_BUILD_DIR")
@@ -292,7 +293,7 @@ for src_file in force_rebuild_files:
     else:
         # print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
 
-print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] ========================================")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
