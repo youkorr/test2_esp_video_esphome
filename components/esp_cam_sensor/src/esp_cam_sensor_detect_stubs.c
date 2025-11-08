@@ -37,36 +37,51 @@
  * We cast them to match the expected signature.
  */
 
-// The actual contiguous array of sensor detect structures
-// The array is named to match what esp_video_init.c expects
-// The loop will iterate from __esp_cam_sensor_detect_fn_array_start[0] through [2]
-// and stop at __esp_cam_sensor_detect_fn_array_end (which is [3])
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
-    // Sensor 0: OV5647
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV5647_SCCB_ADDR
-    },
-    // Sensor 1: SC202CS
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = SC202CS_SCCB_ADDR
-    },
-    // Sensor 2: OV02C10
-    {
-        .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
-        .port = ESP_CAM_SENSOR_MIPI_CSI,
-        .sccb_addr = OV02C10_SCCB_ADDR
-    }
+/**
+ * Camera sensor detection array for ESPHome/PlatformIO
+ *
+ * The header declares these as single structures:
+ *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
+ *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
+ *
+ * The code uses: for (p = &start; p < &end; ++p)
+ *
+ * We use __attribute__((section(".sensor_detect"))) to place all structures
+ * in the same memory section. The linker will place all items in the same
+ * section contiguously, which allows pointer arithmetic to work correctly.
+ *
+ * The "orphan section .sensor_detect" warning is harmless - it just means
+ * the section isn't explicitly defined in the linker script, but the linker
+ * handles it automatically by placing all .sensor_detect items together.
+ */
+
+// Start marker - first sensor in the detection array
+__attribute__((section(".sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV5647_SCCB_ADDR
 };
 
-// End marker - this is a separate structure that marks the end of the array
-// The loop compares: p < &__esp_cam_sensor_detect_fn_array_end
-// So this structure must be placed right after the array in memory
-//
-// However, C doesn't guarantee that separate global variables will be contiguous
-// So we use a trick: we declare this as an extern and define it in the header
-// Actually, the simplest is to just reference the array bound
-#define __esp_cam_sensor_detect_fn_array_end (__esp_cam_sensor_detect_fn_array_start[3])
+// Additional sensors - placed in the same section
+__attribute__((section(".sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sc202cs = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = SC202CS_SCCB_ADDR
+};
+
+__attribute__((section(".sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_ov02c10 = {
+    .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .sccb_addr = OV02C10_SCCB_ADDR
+};
+
+// End marker - loop stops when p reaches &__esp_cam_sensor_detect_fn_array_end
+__attribute__((section(".sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
