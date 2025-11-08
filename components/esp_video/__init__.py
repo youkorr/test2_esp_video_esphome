@@ -28,6 +28,10 @@ CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 CONF_XCLK_PIN = "xclk_pin"
 CONF_XCLK_FREQ = "xclk_freq"
 
+# Constante pour indiquer qu'il n'y a pas d'horloge externe contrôlée par GPIO
+# Utilisez xclk_pin: -1 pour les cartes avec oscillateur externe sur le PCB
+NO_CLOCK = -1
+
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
     # Au moins un encodeur doit être activé
@@ -62,11 +66,22 @@ async def to_code(config):
 
     # Configure XCLK pour la détection des capteurs MIPI-CSI
     # CRITICAL: Les capteurs ont besoin de XCLK actif pour répondre sur I2C!
-    cg.add(var.set_xclk_pin(config[CONF_XCLK_PIN]))
-    cg.add(var.set_xclk_freq(config[CONF_XCLK_FREQ]))
+    xclk_pin = config[CONF_XCLK_PIN]
+    xclk_freq = config[CONF_XCLK_FREQ]
+    has_ext_clock = xclk_pin != NO_CLOCK
+
+    cg.add(var.set_xclk_pin(xclk_pin))
+    cg.add(var.set_xclk_freq(xclk_freq))
 
     logging.info(f"[ESP-Video] Configuration I2C: Utilise le bus ESPHome '{config[CONF_I2C_ID]}'")
-    logging.info(f"[ESP-Video] Configuration XCLK: GPIO{config[CONF_XCLK_PIN]} @ {config[CONF_XCLK_FREQ]/1000000:.1f} MHz")
+
+    if has_ext_clock:
+        logging.info(f"[ESP-Video] Configuration XCLK: GPIO{xclk_pin} @ {xclk_freq/1000000:.1f} MHz")
+        logging.info("[ESP-Video]   → Horloge externe contrôlée par GPIO (pour cartes avec XCLK GPIO)")
+    else:
+        logging.info(f"[ESP-Video] Configuration XCLK: Oscillateur externe sur PCB @ {xclk_freq/1000000:.1f} MHz")
+        logging.info("[ESP-Video]   → Pas de contrôle GPIO (xclk_pin=-1, pour cartes avec oscillateur intégré)")
+
     logging.info("[ESP-Video] esp_video utilisera le bus I2C ESPHome (init_sccb=false)")
     logging.info("[ESP-Video] Avantage: Partage propre du bus I2C, pas de conflit")
 
