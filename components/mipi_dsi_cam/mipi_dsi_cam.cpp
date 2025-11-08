@@ -694,6 +694,22 @@ bool MipiDSICamComponent::start_streaming() {
   ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
   ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
+  // Auto-appliquer les gains RGB CCM si configurés dans YAML
+  if (this->rgb_gains_enabled_) {
+    ESP_LOGI(TAG, "");
+    ESP_LOGI(TAG, "🎨 Applying CCM RGB gains from YAML configuration...");
+
+    // Attendre que streaming soit stable (100ms)
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
+      ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
+               this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
+    } else {
+      ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
+    }
+  }
+
   return true;
 }
 

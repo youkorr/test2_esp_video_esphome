@@ -6,9 +6,41 @@ Inspiré de ESPHome PR#7639, nous avons ajouté l'accès direct à la CCM de l'I
 
 ---
 
-## 🎯 Méthode Recommandée: `set_rgb_gains()`
+## ⭐ Méthode la Plus Simple: Configuration YAML
 
-La méthode la plus simple pour corriger les couleurs.
+**NOUVEAU!** Vous pouvez maintenant configurer les gains RGB directement dans votre YAML, sans lambda!
+
+### Configuration Recommandée (Auto-apply)
+
+```yaml
+mipi_dsi_cam:
+  id: tab5_cam
+  i2c_id: bsp_bus
+  sensor: sc202cs
+  resolution: "720P"
+  pixel_format: "RGB565"
+  framerate: 30
+
+  # Correction couleur automatique (appliquée au démarrage du streaming)
+  rgb_gains:
+    red: 1.30      # Augmenter rouge (compense dominante verte/cyan)
+    green: 0.85    # Réduire vert (corrige blanc→vert) ← CLÉ!
+    blue: 1.25     # Augmenter bleu (compense dominante jaune)
+```
+
+**Avantages:**
+- ✅ Appliqué automatiquement quand vous appelez `start_streaming()`
+- ✅ Pas besoin de lambda ou delay manuel
+- ✅ Configuration centralisée et propre
+- ✅ Valeurs sauvegardées avec votre configuration
+
+**Valeurs disponibles:** 0.1 à 4.0 (défaut: 1.0 = neutre)
+
+---
+
+## 🎯 Méthode Alternative: `set_rgb_gains()` en Lambda
+
+Si vous préférez contrôler manuellement ou changer dynamiquement les gains.
 
 ### Usage de Base
 
@@ -231,6 +263,91 @@ id(tab5_cam).start_streaming();
 delay(100);  // Attendre que streaming soit actif
 id(tab5_cam).set_rgb_gains(1.3, 0.85, 1.25);
 ```
+
+---
+
+## 🔄 YAML vs Lambda: Quelle Méthode Choisir?
+
+### Comparaison Rapide
+
+| Aspect | Configuration YAML | Lambda `set_rgb_gains()` |
+|--------|-------------------|--------------------------|
+| **Simplicité** | ⭐⭐⭐⭐⭐ Très simple | ⭐⭐⭐ Moyen |
+| **Auto-apply** | ✅ Automatique au streaming | ❌ Manuel avec delay |
+| **Modification runtime** | ❌ Nécessite recompile | ✅ Changement dynamique |
+| **Debugging** | ⚠️ Valeurs fixes | ✅ Test rapide de valeurs |
+| **Production** | ✅ Recommandé | ⚠️ OK si besoin dynamique |
+
+### Quand Utiliser YAML (Recommandé pour la plupart des cas)
+
+✅ **Utilisez la configuration YAML si:**
+- Vous connaissez les bonnes valeurs pour votre capteur/éclairage
+- Vous voulez une solution "set and forget" (configurer et oublier)
+- Vous déployez en production avec des valeurs stables
+- Vous préférez une configuration propre et centralisée
+
+**Exemple production:**
+```yaml
+mipi_dsi_cam:
+  sensor: sc202cs
+  rgb_gains:
+    red: 1.30
+    green: 0.85
+    blue: 1.25
+  # Plus besoin de lambda!
+```
+
+### Quand Utiliser Lambda
+
+✅ **Utilisez lambda `set_rgb_gains()` si:**
+- Vous testez différentes valeurs pour calibration
+- Vous changez les gains selon l'heure du jour (éclairage variable)
+- Vous voulez des contrôles runtime via boutons/sliders
+- Vous faites du debugging ou des tests A/B
+
+**Exemple calibration/test:**
+```yaml
+button:
+  - name: "Test Gains 1"
+    on_press:
+      - lambda: 'id(cam).set_rgb_gains(1.2, 0.9, 1.15);'
+  - name: "Test Gains 2"
+    on_press:
+      - lambda: 'id(cam).set_rgb_gains(1.3, 0.85, 1.25);'
+  - name: "Test Gains 3"
+    on_press:
+      - lambda: 'id(cam).set_rgb_gains(1.5, 1.0, 1.6);'
+```
+
+### Combiner les Deux (Avancé)
+
+Vous pouvez avoir une configuration YAML par défaut ET la surcharger avec lambda:
+
+```yaml
+mipi_dsi_cam:
+  id: cam
+  rgb_gains:
+    red: 1.30     # Valeur par défaut (jour)
+    green: 0.85
+    blue: 1.25
+
+# Surcharger selon l'heure
+time:
+  - platform: homeassistant
+    id: ha_time
+    on_time:
+      # Matin (6h): Lumière froide → plus de rouge
+      - hours: 6
+        then:
+          - lambda: 'id(cam).set_rgb_gains(1.5, 0.85, 1.1);'
+
+      # Soir (18h): Lumière chaude → moins de rouge
+      - hours: 18
+        then:
+          - lambda: 'id(cam).set_rgb_gains(1.2, 0.85, 1.4);'
+```
+
+**Note:** Les appels lambda surchargent la config YAML jusqu'au prochain redémarrage.
 
 ---
 

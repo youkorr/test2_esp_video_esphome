@@ -48,6 +48,14 @@ class MipiDSICamComponent : public Component {
   void set_framerate(int f) { framerate_ = f; }
   void set_jpeg_quality(int q) { jpeg_quality_ = q; }
 
+  // Configuration des gains RGB CCM depuis YAML
+  void set_rgb_gains_config(float red, float green, float blue) {
+    rgb_gains_red_ = red;
+    rgb_gains_green_ = green;
+    rgb_gains_blue_ = blue;
+    rgb_gains_enabled_ = true;
+  }
+
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
@@ -84,6 +92,12 @@ class MipiDSICamComponent : public Component {
   std::string pixel_format_{"JPEG"};
   int framerate_{30};
   int jpeg_quality_{10};
+
+  // Configuration CCM RGB gains depuis YAML
+  bool rgb_gains_enabled_{false};
+  float rgb_gains_red_{1.0f};
+  float rgb_gains_green_{1.0f};
+  float rgb_gains_blue_{1.0f};
 
   // Tous en pointeurs void* pour éviter les types incomplets
   void *sensor_dev_{nullptr};
