@@ -25,9 +25,9 @@ void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "========================================");
 
 #ifdef ESP_VIDEO_VERSION
-  ESP_LOGI(TAG, "Version: %s", ESP_VIDEO_VERSION);
+  ESP_LOGI(TAG, "Version: %s (XCLK Support Enabled)", ESP_VIDEO_VERSION);
 #else
-  ESP_LOGI(TAG, "Version: Unknown");
+  ESP_LOGI(TAG, "Version: 2025-11-08 (XCLK Support Enabled)");
 #endif
 
   // Afficher les fonctionnalités activées
