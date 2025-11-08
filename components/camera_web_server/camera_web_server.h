@@ -6,6 +6,7 @@
 
 #ifdef USE_ESP_IDF
 #include <esp_http_server.h>
+#include "driver/jpeg_encode.h"
 #endif
 
 namespace esphome {
@@ -31,8 +32,16 @@ class CameraWebServer : public Component {
 #ifdef USE_ESP_IDF
   httpd_handle_t server_{nullptr};
 
+  // JPEG encoder hardware
+  jpeg_encoder_handle_t jpeg_handle_{nullptr};
+  uint8_t *jpeg_buffer_{nullptr};
+  size_t jpeg_buffer_size_{0};
+  int jpeg_quality_{80};  // 0-100
+
   esp_err_t start_server_();
   void stop_server_();
+  esp_err_t init_jpeg_encoder_();
+  void cleanup_jpeg_encoder_();
 
   // HTTP handlers (static pour compatibilité avec httpd API C)
   static esp_err_t stream_handler_(httpd_req_t *req);

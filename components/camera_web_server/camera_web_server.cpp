@@ -4,6 +4,8 @@
 #ifdef USE_ESP_IDF
 #include <esp_timer.h>
 #include <sys/time.h>
+#include "driver/jpeg_encode.h"
+#include "esp_heap_caps.h"
 #endif
 
 namespace esphome {
@@ -28,9 +30,17 @@ void CameraWebServer::setup() {
     return;
   }
 
+  // Initialiser le JPEG encoder hardware
+  if (this->init_jpeg_encoder_() != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize JPEG encoder");
+    this->mark_failed();
+    return;
+  }
+
   // Démarrer le serveur HTTP
   if (this->start_server_() != ESP_OK) {
     ESP_LOGE(TAG, "Failed to start web server");
+    this->cleanup_jpeg_encoder_();
     this->mark_failed();
     return;
   }
@@ -43,6 +53,66 @@ void CameraWebServer::setup() {
 
 void CameraWebServer::loop() {
   // Le serveur HTTP tourne en background, rien à faire ici
+}
+
+esp_err_t CameraWebServer::init_jpeg_encoder_() {
+  // Initialiser le moteur JPEG encoder hardware ESP32-P4
+  jpeg_encode_engine_cfg_t encode_cfg = {
+      .timeout_ms = 5000,
+  };
+
+  esp_err_t ret = jpeg_new_encoder_engine(&encode_cfg, &this->jpeg_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create JPEG encoder engine: %d", ret);
+    return ret;
+  }
+
+  ESP_LOGI(TAG, "JPEG encoder engine created");
+
+  // Allouer buffer pour output JPEG
+  // Pour RGB565 (2 bytes/pixel), JPEG typiquement 1/3 à 1/2 de la taille
+  // 1280x720x2 = 1843200 bytes RGB565
+  // Allouer ~1MB pour JPEG output (suffisant pour quality 80)
+  size_t input_size = 1280 * 720 * 2;  // Max resolution RGB565
+  size_t jpeg_alloc_size = input_size / 2;  // ~920 KB
+
+  jpeg_encode_memory_alloc_cfg_t mem_cfg = {
+      .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+  };
+
+  this->jpeg_buffer_ = (uint8_t *)jpeg_alloc_encoder_mem(
+      jpeg_alloc_size,
+      &mem_cfg,
+      &this->jpeg_buffer_size_
+  );
+
+  if (this->jpeg_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate JPEG output buffer");
+    jpeg_del_encoder_engine(this->jpeg_handle_);
+    this->jpeg_handle_ = nullptr;
+    return ESP_ERR_NO_MEM;
+  }
+
+  ESP_LOGI(TAG, "JPEG encoder initialized:");
+  ESP_LOGI(TAG, "  Output buffer: %u bytes", this->jpeg_buffer_size_);
+  ESP_LOGI(TAG, "  Quality: %d", this->jpeg_quality_);
+
+  return ESP_OK;
+}
+
+void CameraWebServer::cleanup_jpeg_encoder_() {
+  if (this->jpeg_buffer_ != nullptr) {
+    free(this->jpeg_buffer_);
+    this->jpeg_buffer_ = nullptr;
+    this->jpeg_buffer_size_ = 0;
+  }
+
+  if (this->jpeg_handle_ != nullptr) {
+    jpeg_del_encoder_engine(this->jpeg_handle_);
+    this->jpeg_handle_ = nullptr;
+  }
+
+  ESP_LOGD(TAG, "JPEG encoder cleaned up");
 }
 
 esp_err_t CameraWebServer::start_server_() {
@@ -101,6 +171,9 @@ void CameraWebServer::stop_server_() {
     httpd_stop(this->server_);
     this->server_ = nullptr;
   }
+
+  // Nettoyer le JPEG encoder
+  this->cleanup_jpeg_encoder_();
 }
 
 // Handler pour snapshot JPEG unique
@@ -123,7 +196,7 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  // Obtenir le buffer image (RGB565 actuellement)
+  // Obtenir le buffer image (RGB565)
   uint8_t *image_data = server->camera_->get_image_data();
   size_t image_size = server->camera_->get_image_size();
 
@@ -133,17 +206,40 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  // TODO: Si format est RGB565, encoder en JPEG avec hardware encoder
-  // Pour l'instant, on envoie le RGB565 brut (le navigateur ne pourra pas l'afficher)
-  // Il faudra implémenter l'encodage JPEG hardware ici
+  // Encoder RGB565 → JPEG avec hardware encoder ESP32-P4
+  jpeg_encode_cfg_t encode_config = {
+      .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
+      .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
+      .image_quality = server->jpeg_quality_,
+      .width = server->camera_->get_image_width(),
+      .height = server->camera_->get_image_height(),
+  };
 
+  uint32_t jpeg_size = 0;
+  esp_err_t ret = jpeg_encoder_process(
+      server->jpeg_handle_,
+      &encode_config,
+      image_data,              // RGB565 input
+      image_size,              // RGB565 size
+      server->jpeg_buffer_,    // JPEG output
+      server->jpeg_buffer_size_,
+      &jpeg_size               // JPEG size résultant
+  );
+
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "JPEG encoding failed: %d", ret);
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  ESP_LOGD(TAG, "JPEG encoded: %u bytes (from %u bytes RGB565)", jpeg_size, image_size);
+
+  // Envoyer le JPEG encodé
   httpd_resp_set_type(req, "image/jpeg");
   httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=snapshot.jpg");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  // ATTENTION: Ceci envoie RGB565 brut, pas JPEG!
-  // Il faut ajouter l'encodage JPEG hardware
-  esp_err_t res = httpd_resp_send(req, (const char *)image_data, image_size);
+  esp_err_t res = httpd_resp_send(req, (const char *)server->jpeg_buffer_, jpeg_size);
 
   return res;
 }
@@ -182,24 +278,46 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
+    // Encoder RGB565 → JPEG
+    jpeg_encode_cfg_t encode_config = {
+        .src_type = JPEG_ENCODE_IN_FORMAT_RGB565,
+        .sub_sample = JPEG_DOWN_SAMPLING_YUV422,
+        .image_quality = server->jpeg_quality_,
+        .width = server->camera_->get_image_width(),
+        .height = server->camera_->get_image_height(),
+    };
+
+    uint32_t jpeg_size = 0;
+    esp_err_t ret = jpeg_encoder_process(
+        server->jpeg_handle_,
+        &encode_config,
+        image_data,
+        image_size,
+        server->jpeg_buffer_,
+        server->jpeg_buffer_size_,
+        &jpeg_size
+    );
+
+    if (ret != ESP_OK) {
+      ESP_LOGW(TAG, "JPEG encoding failed in stream: %d", ret);
+      continue;
+    }
+
     // Envoyer boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
       ESP_LOGI(TAG, "Stream client disconnected");
       break;
     }
 
-    // TODO: Encoder en JPEG si nécessaire
-    // Pour l'instant RGB565 brut (incompatible avec navigateur)
-
-    // Envoyer header de la part
+    // Envoyer header de la part avec taille JPEG
     char part_buf[128];
-    int hlen = snprintf(part_buf, sizeof(part_buf), STREAM_PART, image_size);
+    int hlen = snprintf(part_buf, sizeof(part_buf), STREAM_PART, jpeg_size);
     if (httpd_resp_send_chunk(req, part_buf, hlen) != ESP_OK) {
       break;
     }
 
-    // Envoyer les données image
-    if (httpd_resp_send_chunk(req, (const char *)image_data, image_size) != ESP_OK) {
+    // Envoyer les données JPEG
+    if (httpd_resp_send_chunk(req, (const char *)server->jpeg_buffer_, jpeg_size) != ESP_OK) {
       break;
     }
 
