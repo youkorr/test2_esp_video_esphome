@@ -2,6 +2,8 @@
 
 Ce document explique comment corriger les 3 problèmes identifiés avec le capteur SC202CS.
 
+**⚠️ Alternative recommandée:** Si la qualité d'image est critique, [consultez la section OV5647](#-alternative-recommandée-ov5647-raspberry-pi-camera-v1) pour une solution complète avec calibration IPA JSON.
+
 ## Problèmes Résolus
 
 ### ✅ Problème 1: FPS Limité à 4 (au lieu de 30)
@@ -16,8 +18,8 @@ Ce document explique comment corriger les 3 problèmes identifiés avec le capte
 
 ### ✅ Problème 3: Blanc → Vert
 **Symptôme:** Les zones blanches apparaissent vertes
-**Cause:** AWB (Auto White Balance) mal paramétré
-**Solution:** AWB amélioré + méthodes de contrôle manuel ajoutées
+**Cause:** SC202CS manque de calibration IPA JSON (AWB/CCM génériques)
+**Solution:** Méthodes de contrôle manuel WB ajoutées OU migration vers OV5647 (recommandé)
 
 ---
 
@@ -330,7 +332,7 @@ Quand vous appelez les méthodes de contrôle, vous verrez:
 2. **`components/mipi_dsi_cam/mipi_dsi_cam.h`**
    - Ajout de 4 méthodes publiques de contrôle manuel:
      - `set_exposure(int value)` - Contrôle exposition (0-65535, 0=auto V4L2)
-     - `set_gain(int value)` - Contrôle gain (1000-16000)
+     - `set_gain(int value)` - Contrôle gain (4000-63008 pour SC202CS)
      - `set_white_balance_mode(bool auto_mode)` - Mode AWB
      - `set_white_balance_temp(int kelvin)` - Température WB (2800-6500K)
 
@@ -421,6 +423,159 @@ Capteur SANS JSON (calibration générique):
    - Résultat: moins précis qu'une calibration d'usine
 
 **Recommandation:** Si la qualité d'image est critique, envisagez de passer à un capteur OV5647 qui est entièrement supporté et calibré.
+
+---
+
+## 📷 Alternative Recommandée: OV5647 (Raspberry Pi Camera v1)
+
+L'OV5647 est **fortement recommandé** comme alternative au SC202CS car il dispose d'une **calibration IPA complète** et d'un support matériel supérieur.
+
+### Avantages OV5647 vs SC202CS
+
+| Caractéristique | SC202CS | OV5647 | Avantage |
+|----------------|---------|---------|----------|
+| **Calibration IPA JSON** | ❌ Non disponible | ✅ `ov5647_default.json` | **OV5647** |
+| **Couleurs (blanc→vert)** | ⚠️ Problème persistant | ✅ Correctes | **OV5647** |
+| **AEC/AGC automatique** | ❌ Non (libesp_ipa.a) | ✅ Oui (via IPA JSON) | **OV5647** |
+| **AWB automatique** | ⚠️ Basique | ✅ Calibré | **OV5647** |
+| **MIPI CSI Lanes** | 1-lane (300 Mbps/lane) | 2-lane (600 Mbps/lane) | **OV5647** |
+| **Résolution maximale** | 1600x1200 @ 30fps | 1920x1080 @ 30fps | **OV5647** |
+| **Autofocus** | ❌ Non | ✅ Oui (VCM via GPIO0) | **OV5647** |
+| **Line Sync CSI** | ❌ Non documenté | ✅ Configurable | **OV5647** |
+| **FPS maximum** | 30fps | 50fps (RAW8 800x800) | **OV5647** |
+| **Configuration personnalisée** | ⚠️ Limitée | ✅ JSON customisable | **OV5647** |
+
+### Formats et Résolutions OV5647 (Kconfig)
+
+**Formats RAW8 haute vitesse (50fps):**
+1. **RAW8 800x800 50fps** (défaut)
+   - Résolution: 800x800 (carré)
+   - FPS: 50 (meilleur que SC202CS!)
+   - Interface: MIPI CSI-2 2-lane, 24MHz
+   - ✅ **Recommandé pour FPS élevé**
+
+2. **RAW8 800x1280 50fps**
+   - Résolution: 800x1280 (portrait)
+   - FPS: 50
+   - Usage: Affichage vertical
+
+3. **RAW8 800x640 50fps**
+   - Résolution: WVGA (wide VGA)
+   - FPS: 50
+   - Usage: Format large
+
+**Formats RAW10 haute qualité:**
+4. **RAW10 1920x1080 30fps**
+   - Résolution: Full HD (1920x1080)
+   - Format: 10-bit RAW (meilleure dynamique)
+   - FPS: 30
+   - ✅ **Recommandé pour qualité d'image maximale**
+
+5. **RAW10 1280x960 Binning 45fps**
+   - Résolution: SXGA (1280x960)
+   - Mode: Binning (combine pixels pour moins de bruit)
+   - FPS: 45
+   - ✅ **Bon compromis qualité/vitesse**
+
+### Configuration IPA JSON (Point Clé!)
+
+L'OV5647 dispose d'un **fichier JSON de calibration complet**:
+
+**Emplacement:** `esp_cam_sensor/sensors/ov5647/cfg/ov5647_default.json`
+
+Ce fichier contient:
+- ✅ Matrices de correction couleur (CCM) calibrées
+- ✅ Paramètres AWB optimisés (pas de blanc→vert!)
+- ✅ Tables AEC/AGC pour exposition automatique
+- ✅ Calibration gamma pour chaque température de couleur
+- ✅ Paramètres de réduction de bruit optimisés
+
+**Option de personnalisation:**
+Vous pouvez créer votre propre fichier JSON pour des conditions spécifiques:
+```
+menuconfig → Component config → Camera Sensor → OV5647 →
+IPA Configuration File → Use custom configuration
+```
+
+Puis spécifier le chemin: `components/my_camera_config/ov5647_custom.json`
+
+### Fonctionnalités Matérielles Supplémentaires
+
+**1. Line Synchronization CSI:**
+```
+menuconfig → Component config → Camera Sensor → OV5647 →
+Enable CSI line synchronization (recommandé: activé)
+```
+- Améliore la synchronisation des frames
+- Réduit les artefacts d'image
+- Meilleure détection d'erreurs
+
+**2. Autofocus (VCM Motor):**
+```
+menuconfig → Component config → Camera Sensor → OV5647 →
+Enable autofocus motor by OV5647's GPIO0
+```
+- Contrôle du moteur Voice Coil Motor (VCM)
+- Autofocus automatique
+- Nécessite module caméra avec lentille AF
+
+### Changer de Format OV5647
+
+Pour optimiser qualité ou FPS:
+```
+menuconfig → Component config → Camera Sensor → OV5647 →
+Select default output format for MIPI CSI interface
+```
+
+**Recommandations selon usage:**
+
+**Pour FPS maximum (streaming fluide):**
+- Choisir: `RAW8 800x800 50fps` (défaut)
+- Avantage: 50 FPS (66% plus rapide que SC202CS!)
+- Résolution suffisante pour affichage embedded
+
+**Pour qualité maximale (enregistrement/analyse):**
+- Choisir: `RAW10 1920x1080 30fps`
+- Avantage: Full HD avec 10-bit dynamique
+- Meilleure qualité couleur et détails
+
+**Pour équilibre qualité/vitesse:**
+- Choisir: `RAW10 1280x960 Binning 45fps`
+- Avantage: 45 FPS avec mode binning (moins de bruit)
+- Résolution SXGA (1.2MP)
+
+### Migration SC202CS → OV5647
+
+**Matériel requis:**
+- Module OV5647 (Raspberry Pi Camera v1 ou compatible)
+- Connecteur MIPI CSI 2-lane (vs 1-lane pour SC202CS)
+- Alimentation 3.3V identique
+
+**Changements logiciels:**
+1. Menuconfig: Désactiver `CAMERA_SC202CS`, activer `CAMERA_OV5647`
+2. Code: Aucun changement nécessaire si vous utilisez l'API `esp_cam_sensor`
+3. Auto-détection: OV5647 sera détecté automatiquement au boot
+4. IPA: Configuration JSON chargée automatiquement
+
+**Résultats attendus après migration:**
+- ✅ **Plus de surexposition:** AEC automatique via JSON
+- ✅ **Plus de blanc→vert:** CCM calibrée dans JSON
+- ✅ **FPS amélioré:** 50 FPS au lieu de 30 FPS
+- ✅ **Bande passante:** 2x plus (2-lane vs 1-lane)
+- ✅ **Qualité globale:** Nettement supérieure
+
+### Compatibilité avec Code Actuel
+
+Les 4 méthodes de contrôle manuel implémentées (`set_exposure`, `set_gain`, `set_white_balance_mode`, `set_white_balance_temp`) fonctionneront également avec l'OV5647:
+
+```cpp
+// Ces méthodes fonctionnent avec TOUS les capteurs V4L2
+id(tab5_cam).set_exposure(20000);  // Override AEC si nécessaire
+id(tab5_cam).set_gain(16000);      // Override AGC si nécessaire
+id(tab5_cam).set_white_balance_temp(5500);  // Override AWB si nécessaire
+```
+
+**Différence clé:** Avec OV5647, vous aurez **rarement besoin** d'utiliser ces overrides manuels car l'AEC/AWB/AGC automatiques via JSON fonctionnent correctement!
 
 ---
 
