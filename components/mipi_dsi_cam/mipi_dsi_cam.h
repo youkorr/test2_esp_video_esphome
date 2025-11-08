@@ -56,7 +56,10 @@ class MipiDSICamComponent : public Component {
   bool start_streaming();
   void stop_streaming();
   bool capture_frame();
-  uint8_t* get_image_data() { return image_buffer_; }
+  uint8_t* get_image_data() {
+    return (current_buffer_index_ >= 0) ?
+           (uint8_t*)v4l2_buffers_[current_buffer_index_].start : nullptr;
+  }
   uint16_t get_image_width() const { return image_width_; }
   uint16_t get_image_height() const { return image_height_; }
   size_t get_image_size() const { return image_buffer_size_; }
@@ -91,7 +94,7 @@ class MipiDSICamComponent : public Component {
     void *start;
     size_t length;
   } v4l2_buffers_[2];
-  uint8_t *image_buffer_{nullptr};
+  int current_buffer_index_{-1};  // Index du buffer actuellement affiché par LVGL
   size_t image_buffer_size_{0};
   uint16_t image_width_{0};
   uint16_t image_height_{0};
