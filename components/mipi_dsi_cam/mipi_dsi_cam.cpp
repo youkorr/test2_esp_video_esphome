@@ -887,6 +887,163 @@ void MipiDSICamComponent::stop_streaming() {
   ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
 }
 
+// ============================================================================
+// Contrôles Manuels d'Exposition et Balance des Blancs
+// ============================================================================
+
+/**
+ * @brief Définir l'exposition manuelle du capteur
+ *
+ * Permet de contrôler manuellement l'exposition pour corriger la surexposition.
+ * Désactive temporairement l'AEC automatique.
+ *
+ * @param value Valeur d'exposition (0-65535). Valeurs typiques:
+ *              - 1000-5000: Très faible exposition (scènes très lumineuses)
+ *              - 5000-15000: Faible exposition (scènes lumineuses)
+ *              - 15000-30000: Exposition normale (défaut)
+ *              - 30000-50000: Haute exposition (scènes sombres)
+ *              - 0: Réactiver AEC automatique
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_exposure(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set exposure: streaming not active");
+    return false;
+  }
+
+  // V4L2_CID_EXPOSURE_ABSOLUTE control
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+
+  if (value == 0) {
+    // Réactiver AEC automatique
+    ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+    ctrl.value = V4L2_EXPOSURE_AUTO;  // Auto exposure
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGE(TAG, "Failed to enable auto exposure: %s", strerror(errno));
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ Auto exposure enabled (AEC active)");
+  } else {
+    // Désactiver AEC et définir exposition manuelle
+    ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+    ctrl.value = V4L2_EXPOSURE_MANUAL;  // Manual exposure
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGW(TAG, "Failed to disable auto exposure: %s", strerror(errno));
+      // Continue anyway, try to set exposure value
+    }
+
+    // Définir la valeur d'exposition
+    ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+    ctrl.value = value;
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGE(TAG, "Failed to set exposure to %d: %s", value, strerror(errno));
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ Manual exposure set to %d (AEC disabled)", value);
+  }
+
+  return true;
+}
+
+/**
+ * @brief Définir le gain manuel du capteur
+ *
+ * Contrôle le gain analogique/numérique du capteur.
+ *
+ * @param value Valeur de gain (1000-16000):
+ *              - 1000: 1x (gain minimum, image la plus sombre)
+ *              - 2000: 2x
+ *              - 4000: 4x
+ *              - 8000: 8x (défaut recommandé)
+ *              - 16000: 16x (gain maximum, image la plus claire mais bruitée)
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_gain(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set gain: streaming not active");
+    return false;
+  }
+
+  // V4L2_CID_GAIN control
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_GAIN;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set gain to %d: %s", value, strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Gain set to %d (%.1fx)", value, value / 1000.0f);
+  return true;
+}
+
+/**
+ * @brief Activer/désactiver la balance des blancs automatique
+ *
+ * @param auto_mode true pour AWB automatique, false pour manuel
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance mode: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  ctrl.value = auto_mode ? 1 : 0;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set white balance mode: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ White balance: %s", auto_mode ? "AUTO (AWB enabled)" : "MANUAL");
+  return true;
+}
+
+/**
+ * @brief Définir la température de couleur manuelle (balance des blancs)
+ *
+ * Permet de corriger la dominante de couleur (ex: blanc → vert).
+ * Nécessite que AWB soit désactivé (set_white_balance_mode(false)).
+ *
+ * @param kelvin Température de couleur en Kelvin:
+ *               - 2800K: Lampe incandescente (jaune/orange)
+ *               - 3200K: Lampe halogène
+ *               - 4000K: Fluorescent blanc froid
+ *               - 5000K: Lumière du jour (neutre)
+ *               - 5500K: Flash électronique (défaut recommandé)
+ *               - 6500K: Ciel nuageux (bleuté)
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance temperature: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
+  ctrl.value = kelvin;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set white balance temperature to %dK: %s", kelvin, strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ White balance temperature set to %dK", kelvin);
+  return true;
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 

@@ -61,6 +61,12 @@ class MipiDSICamComponent : public Component {
   uint16_t get_image_height() const { return image_height_; }
   size_t get_image_size() const { return image_buffer_size_; }
 
+  // Contrôles manuels d'exposition et couleur (pour corriger surexposition et blanc→vert)
+  bool set_exposure(int value);     // Contrôle manuel de l'exposition (0-65535, défaut: auto)
+  bool set_gain(int value);          // Contrôle manuel du gain (1000-16000, 1000=1x, 16000=16x)
+  bool set_white_balance_mode(bool auto_mode);  // true=auto AWB, false=manuel
+  bool set_white_balance_temp(int kelvin);      // Température couleur (2800-6500K)
+
  protected:
   std::string sensor_name_{"sc202cs"};
   int i2c_id_{0};
