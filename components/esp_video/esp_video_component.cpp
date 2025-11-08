@@ -9,6 +9,7 @@
 extern "C" {
 #include "esp_video_init.h"
 #include "esp_video_device.h"
+#include "driver/ledc.h"  // For XCLK generation via LEDC (like M5Stack does)
 
 // Forward declaration for ISP pipeline check
 #ifdef ESP_VIDEO_ISP_ENABLED
@@ -20,6 +21,62 @@ namespace esphome {
 namespace esp_video {
 
 static const char *const TAG = "esp_video";
+
+/**
+ * @brief Initialize camera XCLK using LEDC (like M5Stack Tab5 does)
+ *
+ * CRITICAL: For MIPI-CSI sensors on ESP32-P4, esp_video_init() does NOT initialize XCLK!
+ * XCLK initialization only happens for DVP sensors in esp_video_init.c.
+ *
+ * For MIPI-CSI, we must initialize XCLK BEFORE calling esp_video_init(), otherwise
+ * the sensor will not respond on I2C during detection (PID=0x0).
+ *
+ * This matches M5Stack's approach in bsp_cam_osc_init() which uses LEDC to generate
+ * 24 MHz clock on GPIO 36.
+ *
+ * @param gpio_num GPIO pin for XCLK output
+ * @param freq_hz XCLK frequency in Hz (typically 24000000 for MIPI-CSI sensors)
+ * @return ESP_OK on success, error code otherwise
+ */
+static esp_err_t init_xclk_ledc(gpio_num_t gpio_num, uint32_t freq_hz) {
+  ESP_LOGI(TAG, "🔧 Initializing XCLK via LEDC on GPIO%d @ %u Hz", gpio_num, freq_hz);
+
+  // Configure LEDC timer for XCLK generation (matching M5Stack's implementation)
+  ledc_timer_config_t timer_conf = {};
+  timer_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  timer_conf.timer_num = LEDC_TIMER_0;
+  timer_conf.duty_resolution = LEDC_TIMER_1_BIT;  // 1-bit resolution for 50% duty cycle
+  timer_conf.freq_hz = freq_hz;
+  timer_conf.clk_cfg = LEDC_AUTO_CLK;
+
+  esp_err_t ret = ledc_timer_config(&timer_conf);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ LEDC timer config failed: %s", esp_err_to_name(ret));
+    return ret;
+  }
+
+  // Configure LEDC channel to output XCLK on the specified GPIO
+  ledc_channel_config_t ch_conf = {};
+  ch_conf.speed_mode = LEDC_LOW_SPEED_MODE;
+  ch_conf.channel = LEDC_CHANNEL_0;
+  ch_conf.timer_sel = LEDC_TIMER_0;
+  ch_conf.intr_type = LEDC_INTR_DISABLE;
+  ch_conf.gpio_num = gpio_num;
+  ch_conf.duty = 1;  // 50% duty cycle (1 out of 2^1 = 2)
+  ch_conf.hpoint = 0;
+
+  ret = ledc_channel_config(&ch_conf);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ LEDC channel config failed: %s", esp_err_to_name(ret));
+    return ret;
+  }
+
+  ESP_LOGI(TAG, "✅ XCLK initialized successfully via LEDC");
+  ESP_LOGI(TAG, "   → GPIO%d now outputs %u Hz clock signal", gpio_num, freq_hz);
+  ESP_LOGI(TAG, "   → Sensor can now respond on I2C during detection");
+
+  return ESP_OK;
+}
 
 void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "========================================");
@@ -99,6 +156,27 @@ void ESPVideoComponent::setup() {
 
   ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
 
+  // CRITICAL: Initialize XCLK BEFORE calling esp_video_init()!
+  // For MIPI-CSI sensors, esp_video_init() does NOT initialize XCLK (only for DVP).
+  // Without XCLK active, the sensor will NOT respond on I2C → detection fails (PID=0x0)
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "========================================");
+  ESP_LOGI(TAG, "  Initializing XCLK (BEFORE esp_video_init)");
+  ESP_LOGI(TAG, "========================================");
+
+  esp_err_t xclk_ret = init_xclk_ledc(this->xclk_pin_, this->xclk_freq_);
+  if (xclk_ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ XCLK initialization failed!");
+    ESP_LOGE(TAG, "   Sensor will NOT respond on I2C without XCLK");
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "");
+  ESP_LOGI(TAG, "========================================");
+  ESP_LOGI(TAG, "  Calling esp_video_init()");
+  ESP_LOGI(TAG, "========================================");
+
   esp_video_init_csi_config_t csi_config = {};
 
   // Ne PAS initialiser SCCB - utiliser le bus I2C ESPHome existant
@@ -111,15 +189,13 @@ void ESPVideoComponent::setup() {
   csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
   csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
 
-  // Configure XCLK for sensor detection (required for MIPI-CSI sensors!)
-  // CRITICAL: Sensors need XCLK active to respond on I2C during detection
-  csi_config.xclk_pin = this->xclk_pin_;      // XCLK pin (default: GPIO36)
-  csi_config.xclk_freq = this->xclk_freq_;    // XCLK frequency (default: 24MHz)
-
-  ESP_LOGW(TAG, "🔧 XCLK Configuration passée à esp_video_init():");
-  ESP_LOGW(TAG, "   xclk_pin = GPIO%d (membre: GPIO%d)", csi_config.xclk_pin, this->xclk_pin_);
-  ESP_LOGW(TAG, "   xclk_freq = %u Hz (membre: %u Hz)", csi_config.xclk_freq, this->xclk_freq_);
-  ESP_LOGW(TAG, "   Adresse csi_config = %p", (void*)&csi_config);
+  // NOTE: xclk_pin and xclk_freq are NOT used by esp_video_init() for MIPI-CSI!
+  // XCLK initialization only happens for DVP sensors in esp_video_init.c.
+  // For MIPI-CSI, XCLK must be initialized BEFORE calling esp_video_init(),
+  // which we did above using init_xclk_ledc().
+  // Setting these fields here for documentation/completeness only:
+  csi_config.xclk_pin = this->xclk_pin_;      // IGNORED for MIPI-CSI
+  csi_config.xclk_freq = this->xclk_freq_;    // IGNORED for MIPI-CSI
 
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
