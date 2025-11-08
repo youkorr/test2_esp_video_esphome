@@ -157,9 +157,10 @@ if os.path.exists(esp_ipa_dir):
     # print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
     # print("[ESP-Video Build] ========================================")
 else:
+    pass
     # print("[ESP-Video Build] ⚠️  Répertoire esp_ipa introuvable!")
 
-print("")
+# print("")
 
 # ========================================================================
 # Sources esp_sccb_intf
