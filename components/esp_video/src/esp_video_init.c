@@ -398,14 +398,13 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 #endif
 
     ESP_LOGI(TAG, "🔍 Starting sensor detection loop...");
-    ESP_LOGI(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_start = %p", (void*)&__esp_cam_sensor_detect_fn_array_start);
+    ESP_LOGI(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
     ESP_LOGI(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
-    ESP_LOGI(TAG, "  DEBUG: Pointer difference = %ld bytes (%ld structures)",
-             (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)&__esp_cam_sensor_detect_fn_array_start),
-             (long)((&__esp_cam_sensor_detect_fn_array_end - &__esp_cam_sensor_detect_fn_array_start)));
+    ESP_LOGI(TAG, "  DEBUG: Pointer difference = %ld bytes",
+             (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)__esp_cam_sensor_detect_fn_array_start));
     ESP_LOGI(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
 
-    for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
+    for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
         ESP_LOGI(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
                  (void*)p, p->port, p->sccb_addr, (void*)p->detect);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
@@ -719,7 +718,7 @@ esp_err_t esp_video_deinit(void)
     ESP_RETURN_ON_ERROR(esp_video_destroy_h264_video_device(true), TAG, "Failed to destroy H.264 video device");
 #endif
 
-    for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
+    for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_deinited && p->port == ESP_CAM_SENSOR_MIPI_CSI) {
             esp_cam_sensor_device_t *cam_dev;
