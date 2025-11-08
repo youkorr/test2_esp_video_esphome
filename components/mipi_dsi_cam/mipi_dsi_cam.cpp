@@ -810,7 +810,7 @@ bool MipiDSICamComponent::capture_frame() {
       .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
       .scale_x = 1,
       .scale_y = 1,
-      .mirror_x = false,
+      .mirror_x = true,  // Match M5Stack configuration exactly
       .mirror_y = false,
       .rgb_swap = false,
       .byte_swap = false,
