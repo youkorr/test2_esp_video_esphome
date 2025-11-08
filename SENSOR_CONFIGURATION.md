@@ -4,7 +4,7 @@
 
 Le fichier `components/esp_cam_sensor/src/esp_cam_sensor_detect_stubs.c` définit l'ordre dans lequel les capteurs sont testés pendant la détection automatique.
 
-**Ce fichier est ignoré par git** (via `.gitignore`), ce qui vous permet de le modifier localement sans polluer le dépôt.
+**Note**: Ce fichier est tracké par git. L'ordre actuel (SC202CS en premier) est optimisé pour M5Stack Tab5. Si vous utilisez un autre capteur, vous pouvez modifier localement ce fichier, mais vos changements seront visibles dans `git status`.
 
 ## Capteurs Supportés
 

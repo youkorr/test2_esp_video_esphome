@@ -1,7 +1,3 @@
-# Sensor detection order - allows users to customize without polluting git
-# Each user can modify this file locally to match their sensor hardware
-components/esp_cam_sensor/src/esp_cam_sensor_detect_stubs.c
-
 # ESPHome build artifacts (if any)
 .esphome/
 *.pyc
