@@ -16,7 +16,7 @@
 /**
  * @brief Camera sensor detection array - ESPHome/PlatformIO implementation
  *
- * CRITICAL FIX v3: Force linker to place array and sentinel adjacently.
+ * CRITICAL FIX v4: Declare variables in REVERSE order to compensate for linker inversion.
  *
  * The header declares:
  *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
@@ -27,17 +27,28 @@
  * PROBLEM 1 (original): Linker placed _end 15108 bytes away, causing 1259 iterations
  * ATTEMPTED FIX v1: Used .sensor_detect.00 and .sensor_detect.01 subsections
  * PROBLEM 2: Linker placed sections in REVERSE order (.01 before .00)!
- *   Result: _end=0x4ff40000, _start=0x4ff4000c → difference = -12 bytes
- *   Loop never executed because start > end
  * ATTEMPTED FIX v2: Used .rodata.sensor_detect
  * PROBLEM 3: Assembler warning - .rodata sections have incorrect attributes
+ * ATTEMPTED FIX v3: Used .data.sensor_detect
+ * PROBLEM 4: ESP-IDF linker STILL inverted the order!
+ *   Result: _end=0x4ff1390c, _start=0x4ff13918 → difference = -12 bytes
  *
- * SOLUTION v3: Use .data.sensor_detect (correct section type for initialized globals)
- * The linker will preserve declaration order within the same section.
+ * SOLUTION v4: DECLARE IN REVERSE ORDER to compensate for linker inversion!
+ * If linker systematically inverts, declaring _end BEFORE _start will result
+ * in the linker placing _start before _end in memory (the correct order).
  */
 
+// INTENTIONALLY DECLARE _end FIRST (linker will place it LAST)
+// Define _end as a sentinel in .data.sensor_detect
+__attribute__((section(".data.sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
+
+// INTENTIONALLY DECLARE _start SECOND (linker will place it FIRST)
 // Define _start as an array containing all sensors
-// Both variables in SAME .data section to preserve declaration order
 // ORDER MATTERS: Put most likely sensor first for faster detection
 __attribute__((section(".data.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
@@ -61,29 +72,25 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     },
 };
 
-// Define _end as a sentinel in the SAME section, declared immediately after array
-// This should preserve declaration order: _start then _end
-__attribute__((section(".data.sensor_detect"), used))
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
-    .detect = NULL,
-    .port = 0,
-    .sccb_addr = 0
-};
-
 /**
- * How this works:
+ * How this works (REVERSE DECLARATION HACK):
  *
  * 1. Both variables in section ".data.sensor_detect" (.data for initialized globals)
- * 2. Linker preserves declaration order within same section
- * 3. Array declared first, sentinel declared second
- * 4. __attribute__((used)) prevents optimization
- * 5. Loop: for (p = start; p < &end; ++p) iterates exactly 3 times
+ * 2. ESP-IDF linker INVERTS declaration order within custom sections
+ * 3. We declare _end FIRST, _start SECOND (reverse of logical order)
+ * 4. Linker inverts this: places _start in memory first, _end second (correct!)
+ * 5. __attribute__((used)) prevents optimization
+ * 6. Loop: for (p = start; p < &end; ++p) now works correctly
  *
- * Expected memory layout:
- *   0x4ff40xxx: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS)
- *   0x4ff40xxx+12: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
- *   0x4ff40xxx+24: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
- *   0x4ff40xxx+36: __esp_cam_sensor_detect_fn_array_end (sentinel)
+ * Declaration order (in source code):
+ *   Line 44: __esp_cam_sensor_detect_fn_array_end (declared FIRST)
+ *   Line 54: __esp_cam_sensor_detect_fn_array_start[] (declared SECOND)
  *
- * Pointer difference should be +36 bytes (3 sensors × 12 bytes)
+ * Expected memory layout (after linker inversion):
+ *   0x4ff13xxx: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS) ← placed FIRST
+ *   0x4ff13xxx+12: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
+ *   0x4ff13xxx+24: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
+ *   0x4ff13xxx+36: __esp_cam_sensor_detect_fn_array_end (sentinel) ← placed LAST
+ *
+ * Pointer difference should be +36 bytes (3 sensors × 12 bytes), NOT -12!
  */
