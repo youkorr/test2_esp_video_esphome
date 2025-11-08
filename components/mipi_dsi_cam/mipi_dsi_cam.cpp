@@ -25,6 +25,7 @@ extern "C" {
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
+#include "driver/ppa.h"
 }
 
 namespace esphome {
@@ -656,20 +657,33 @@ bool MipiDSICamComponent::start_streaming() {
            this->image_width_, this->image_height_,
            fmt.fmt.pix.pixelformat, this->image_buffer_size_);
 
-  // 4. Allouer le buffer d'image persistant
-  this->image_buffer_ = (uint8_t*)heap_caps_malloc(this->image_buffer_size_, MALLOC_CAP_8BIT);
+  // 4. Allouer buffer de destination (DMA + SPIRAM comme M5Stack)
+  this->image_buffer_ = (uint8_t*)heap_caps_malloc(this->image_buffer_size_,
+                                                     MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
   if (!this->image_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate image buffer (%u bytes)", this->image_buffer_size_);
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
   }
-
   memset(this->image_buffer_, 0, this->image_buffer_size_);
-  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p",
+  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p (DMA+SPIRAM)",
            this->image_buffer_size_, this->image_buffer_);
 
-  // 5. Demander 2 buffers V4L2 en mode MMAP
+  // 5. Initialiser le PPA (Pixel Processing Accelerator) pour copie hardware
+  ppa_client_config_t ppa_config = {
+    .oper_type = PPA_OPERATION_SRM,
+    .max_pending_trans_num = 1,
+  };
+  ppa_client_handle_t *ppa_h = (ppa_client_handle_t*)&this->ppa_handle_;
+  if (ppa_register_client(&ppa_config, ppa_h) != ESP_OK) {
+    ESP_LOGW(TAG, "PPA not available, falling back to memcpy");
+    this->ppa_handle_ = nullptr;
+  } else {
+    ESP_LOGI(TAG, "✓ PPA hardware accelerator initialized");
+  }
+
+  // 6. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
   req.count = 2;
@@ -678,8 +692,6 @@ bool MipiDSICamComponent::start_streaming() {
 
   if (ioctl(this->video_fd_, VIDIOC_REQBUFS, &req) < 0) {
     ESP_LOGE(TAG, "VIDIOC_REQBUFS failed: %s", strerror(errno));
-    heap_caps_free(this->image_buffer_);
-    this->image_buffer_ = nullptr;
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
@@ -687,7 +699,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
 
-  // 6. Mapper et queuer les buffers
+  // 7. Mapper et queuer les buffers
   for (unsigned int i = 0; i < 2; i++) {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
@@ -722,7 +734,7 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  // 7. DÉMARRER LE STREAMING
+  // 8. DÉMARRER LE STREAMING
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (ioctl(this->video_fd_, VIDIOC_STREAMON, &type) < 0) {
     ESP_LOGE(TAG, "VIDIOC_STREAMON failed: %s", strerror(errno));
@@ -733,10 +745,11 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming started");
+  ESP_LOGI(TAG, "✓ Streaming started (M5Stack-style)");
   ESP_LOGI(TAG, "   → CSI controller active");
   ESP_LOGI(TAG, "   → ISP active");
   ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
+  ESP_LOGI(TAG, "   → %s copy to LVGL buffer", this->ppa_handle_ ? "PPA hardware" : "memcpy");
 
   return true;
 }
@@ -761,11 +774,49 @@ bool MipiDSICamComponent::capture_frame() {
     return false;
   }
 
-  // 2. Copier les données dans le buffer d'image
-  size_t copy_size = buf.bytesused < this->image_buffer_size_ ?
-                     buf.bytesused : this->image_buffer_size_;
+  // 2. Copier vers image_buffer_ (PPA hardware ou memcpy fallback)
+  uint8_t *src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
 
-  memcpy(this->image_buffer_, this->v4l2_buffers_[buf.index].start, copy_size);
+  if (this->ppa_handle_) {
+    // Utiliser PPA hardware accelerator (comme M5Stack)
+    ppa_srm_oper_config_t srm_config = {
+      .in = {
+        .buffer = src,
+        .pic_w = this->image_width_,
+        .pic_h = this->image_height_,
+        .block_w = this->image_width_,
+        .block_h = this->image_height_,
+        .block_offset_x = 0,
+        .block_offset_y = 0,
+        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+      },
+      .out = {
+        .buffer = this->image_buffer_,
+        .buffer_size = this->image_buffer_size_,
+        .pic_w = this->image_width_,
+        .pic_h = this->image_height_,
+        .block_offset_x = 0,
+        .block_offset_y = 0,
+        .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+      },
+      .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+      .scale_x = 1.0f,
+      .scale_y = 1.0f,
+      .mirror_x = false,
+      .mirror_y = false,
+      .rgb_swap = false,
+      .byte_swap = false,
+      .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    ppa_client_handle_t ppa_h = (ppa_client_handle_t)this->ppa_handle_;
+    ppa_do_scale_rotate_mirror(ppa_h, &srm_config);
+  } else {
+    // Fallback: memcpy CPU (lent mais fonctionne)
+    size_t copy_size = buf.bytesused < this->image_buffer_size_ ?
+                       buf.bytesused : this->image_buffer_size_;
+    memcpy(this->image_buffer_, src, copy_size);
+  }
 
   this->frame_sequence_++;
 
@@ -773,13 +824,14 @@ bool MipiDSICamComponent::capture_frame() {
   if (this->frame_sequence_ == 1) {
     ESP_LOGI(TAG, "✅ First frame captured: %u bytes, sequence=%u",
              buf.bytesused, buf.sequence);
+    ESP_LOGI(TAG, "   Copy method: %s", this->ppa_handle_ ? "PPA hardware" : "memcpy CPU");
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              this->image_buffer_[0], this->image_buffer_[1],
              this->image_buffer_[2], this->image_buffer_[3],
              this->image_buffer_[4], this->image_buffer_[5]);
   }
 
-  // 3. Re-queue le buffer pour la prochaine capture
+  // 3. Re-queue le buffer immédiatement
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
     ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
     return false;
@@ -813,16 +865,23 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Fermer le device
-  if (this->video_fd_ >= 0) {
-    close(this->video_fd_);
-    this->video_fd_ = -1;
+  // 3. Désactiver le PPA
+  if (this->ppa_handle_) {
+    ppa_client_handle_t ppa_h = (ppa_client_handle_t)this->ppa_handle_;
+    ppa_unregister_client(ppa_h);
+    this->ppa_handle_ = nullptr;
   }
 
   // 4. Libérer le buffer d'image
   if (this->image_buffer_) {
     heap_caps_free(this->image_buffer_);
     this->image_buffer_ = nullptr;
+  }
+
+  // 5. Fermer le device
+  if (this->video_fd_ >= 0) {
+    close(this->video_fd_);
+    this->video_fd_ = -1;
   }
 
   this->streaming_active_ = false;
