@@ -37,6 +37,28 @@ void LVGLCameraDisplay::setup() {
 void LVGLCameraDisplay::loop() {
   uint32_t now = millis();
 
+  // Profiling: mesurer la fréquence réelle d'appel de loop()
+  static uint32_t last_loop_call = 0;
+  static uint32_t loop_call_count = 0;
+  static uint32_t total_loop_interval_ms = 0;
+
+  if (last_loop_call > 0) {
+    uint32_t loop_interval = now - last_loop_call;
+    total_loop_interval_ms += loop_interval;
+    loop_call_count++;
+
+    // Log tous les 1000 appels pour voir la fréquence réelle
+    if (loop_call_count == 1000) {
+      float avg_loop_interval = total_loop_interval_ms / 1000.0f;
+      float loop_frequency = 1000.0f / avg_loop_interval;
+      ESP_LOGW(TAG, "⚠️  loop() frequency: %.1f Hz (avg interval: %.2fms)",
+               loop_frequency, avg_loop_interval);
+      loop_call_count = 0;
+      total_loop_interval_ms = 0;
+    }
+  }
+  last_loop_call = now;
+
   // Vérifier si c'est le moment de mettre à jour
   if (now - this->last_update_ < this->update_interval_) {
     return;
