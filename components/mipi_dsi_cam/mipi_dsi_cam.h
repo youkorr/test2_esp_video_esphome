@@ -116,6 +116,27 @@ class CaptureSnapshotAction : public Action<Ts...>, public Parented<MipiDSICamCo
   }
 };
 
+template<typename... Ts>
+class StartStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComponent> {
+ public:
+  void play(Ts... x) override {
+    if (this->parent_->start_streaming()) {
+      ESP_LOGI("mipi_dsi_cam", "✅ Streaming vidéo démarré");
+    } else {
+      ESP_LOGE("mipi_dsi_cam", "❌ Échec du démarrage du streaming");
+    }
+  }
+};
+
+template<typename... Ts>
+class StopStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComponent> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->stop_streaming();
+    ESP_LOGI("mipi_dsi_cam", "⏹️  Streaming vidéo arrêté");
+  }
+};
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 

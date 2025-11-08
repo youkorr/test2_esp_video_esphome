@@ -320,17 +320,9 @@ void MipiDSICamComponent::setup() {
   if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
   if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
   ESP_LOGI(TAG, "==============================");
-
-  // Démarrer le streaming automatiquement pour LVGL display
   ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "🎬 Démarrage automatique du streaming vidéo continu...");
-  if (this->start_streaming()) {
-    ESP_LOGI(TAG, "✅ Streaming vidéo démarré avec succès!");
-    ESP_LOGI(TAG, "   Le composant lvgl_camera_display peut maintenant afficher la vidéo");
-  } else {
-    ESP_LOGW(TAG, "⚠️ Échec du démarrage du streaming vidéo");
-    ESP_LOGW(TAG, "   Le composant lvgl_camera_display ne pourra pas afficher de vidéo");
-  }
+  ESP_LOGI(TAG, "ℹ️  Le streaming vidéo n'est PAS démarré automatiquement");
+  ESP_LOGI(TAG, "   Utilisez start_streaming() / stop_streaming() pour contrôler");
 }
 
 void MipiDSICamComponent::loop() {
