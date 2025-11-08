@@ -659,18 +659,24 @@ bool MipiDSICamComponent::start_streaming() {
            this->image_width_, this->image_height_,
            fmt.fmt.pix.pixelformat, this->image_buffer_size_);
 
-  // 4. Allouer buffer de destination (DMA + SPIRAM comme M5Stack)
-  this->image_buffer_ = (uint8_t*)heap_caps_malloc(this->image_buffer_size_,
-                                                     MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
+  // 4. Allouer buffer de destination avec alignement 64 bytes (Test 4: PPA DMA optimization)
+  this->image_buffer_ = (uint8_t*)heap_caps_aligned_alloc(64,  // 64-byte alignment for PPA DMA
+                                                            this->image_buffer_size_,
+                                                            MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
   if (!this->image_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate image buffer (%u bytes)", this->image_buffer_size_);
+    ESP_LOGE(TAG, "Failed to allocate aligned image buffer (%u bytes)", this->image_buffer_size_);
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
   }
   memset(this->image_buffer_, 0, this->image_buffer_size_);
-  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p (DMA+SPIRAM)",
-           this->image_buffer_size_, this->image_buffer_);
+
+  // Verify alignment
+  uintptr_t addr = (uintptr_t)this->image_buffer_;
+  bool is_aligned = (addr % 64) == 0;
+  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p (DMA+SPIRAM, %s)",
+           this->image_buffer_size_, this->image_buffer_,
+           is_aligned ? "64-byte aligned ✓" : "NOT aligned ✗");
 
   // 5. Initialiser le PPA (Pixel Processing Accelerator) pour copie hardware
   ppa_client_config_t ppa_config = {
