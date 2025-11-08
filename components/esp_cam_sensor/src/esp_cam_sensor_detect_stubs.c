@@ -16,7 +16,7 @@
 /**
  * @brief Camera sensor detection array - ESPHome/PlatformIO implementation
  *
- * CRITICAL FIX v2: Force linker to place array and sentinel adjacently.
+ * CRITICAL FIX v3: Force linker to place array and sentinel adjacently.
  *
  * The header declares:
  *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
@@ -25,19 +25,21 @@
  * The code iterates: for (p = start; p < &end; ++p)
  *
  * PROBLEM 1 (original): Linker placed _end 15108 bytes away, causing 1259 iterations
- * ATTEMPTED FIX: Used .sensor_detect.00 and .sensor_detect.01 subsections
+ * ATTEMPTED FIX v1: Used .sensor_detect.00 and .sensor_detect.01 subsections
  * PROBLEM 2: Linker placed sections in REVERSE order (.01 before .00)!
  *   Result: _end=0x4ff40000, _start=0x4ff4000c → difference = -12 bytes
  *   Loop never executed because start > end
+ * ATTEMPTED FIX v2: Used .rodata.sensor_detect
+ * PROBLEM 3: Assembler warning - .rodata sections have incorrect attributes
  *
- * SOLUTION v2: Place BOTH in the SAME section (.rodata.sensor_detect)
+ * SOLUTION v3: Use .data.sensor_detect (correct section type for initialized globals)
  * The linker will preserve declaration order within the same section.
  */
 
 // Define _start as an array containing all sensors
-// Both variables in SAME section to preserve declaration order
+// Both variables in SAME .data section to preserve declaration order
 // ORDER MATTERS: Put most likely sensor first for faster detection
-__attribute__((section(".rodata.sensor_detect"), used))
+__attribute__((section(".data.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     // Sensor 0: SC202CS (M5Stack Tab5 default sensor - try first!)
     {
@@ -61,7 +63,7 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
 
 // Define _end as a sentinel in the SAME section, declared immediately after array
 // This should preserve declaration order: _start then _end
-__attribute__((section(".rodata.sensor_detect"), used))
+__attribute__((section(".data.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
@@ -71,7 +73,7 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
 /**
  * How this works:
  *
- * 1. Both variables in section ".rodata.sensor_detect"
+ * 1. Both variables in section ".data.sensor_detect" (.data for initialized globals)
  * 2. Linker preserves declaration order within same section
  * 3. Array declared first, sentinel declared second
  * 4. __attribute__((used)) prevents optimization
