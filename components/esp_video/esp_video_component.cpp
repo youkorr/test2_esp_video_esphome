@@ -11,7 +11,8 @@ extern "C" {
 #include "esp_video_device.h"
 #include "driver/ledc.h"  // For XCLK generation via LEDC (like M5Stack does)
 #include "freertos/FreeRTOS.h"  // For vTaskDelay
-#include "freertos/task.h"      // For pdMS_TO_TICKS
+#include "freertos/task.h"      // For pdMS_TO_TICKS and xTaskCreatePinnedToCore
+#include "freertos/semphr.h"    // For semaphores (core synchronization)
 
 // Forward declaration for ISP pipeline check
 #ifdef ESP_VIDEO_ISP_ENABLED
@@ -23,6 +24,38 @@ namespace esphome {
 namespace esp_video {
 
 static const char *const TAG = "esp_video";
+
+// Structure for passing parameters to esp_video_init task on core 0
+struct esp_video_init_params_t {
+  esp_video_init_config_t *video_config;
+  esp_err_t result;
+  SemaphoreHandle_t done_semaphore;
+};
+
+/**
+ * @brief Task that runs esp_video_init on core 0
+ *
+ * CRITICAL: ESP32-P4 hardware peripherals (ISP, MIPI-CSI, camera) must be
+ * initialized on core 0. If ESPHome runs on core 1 and calls esp_video_init()
+ * from setup(), the camera drivers may not initialize correctly.
+ *
+ * This task ensures esp_video_init() runs on core 0 regardless of which core
+ * ESPHome is running on.
+ */
+static void esp_video_init_task_core0(void *param) {
+  esp_video_init_params_t *params = (esp_video_init_params_t *)param;
+
+  ESP_LOGI(TAG, "📍 esp_video_init() running on core %d", xPortGetCoreID());
+
+  // Call esp_video_init on core 0
+  params->result = esp_video_init(params->video_config);
+
+  // Signal completion
+  xSemaphoreGive(params->done_semaphore);
+
+  // Delete this task
+  vTaskDelete(NULL);
+}
 
 /**
  * @brief Initialize camera XCLK using LEDC (like M5Stack Tab5 does)
@@ -193,15 +226,65 @@ void ESPVideoComponent::setup() {
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
 
-  ESP_LOGI(TAG, "Appel esp_video_init() avec handle I2C ESPHome...");
-  esp_err_t ret = esp_video_init(&video_config);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "❌ Échec esp_video_init(): %d (%s)", ret, esp_err_to_name(ret));
+  // CRITICAL: ESP32-P4 camera hardware must be initialized on core 0
+  // If ESPHome runs on core 1, we must create a task on core 0 to call esp_video_init()
+  ESP_LOGI(TAG, "Current core: %d", xPortGetCoreID());
+  ESP_LOGI(TAG, "📍 Forcing esp_video_init() to run on core 0 (hardware requirement)");
+
+  // Create semaphore for task synchronization
+  SemaphoreHandle_t done_sem = xSemaphoreCreateBinary();
+  if (done_sem == NULL) {
+    ESP_LOGE(TAG, "❌ Failed to create semaphore");
     this->mark_failed();
     return;
   }
 
-  ESP_LOGI(TAG, "✅ esp_video_init() réussi - Devices vidéo prêts (bus I2C partagé)");
+  // Prepare parameters for core 0 task
+  esp_video_init_params_t params = {};
+  params.video_config = &video_config;
+  params.done_semaphore = done_sem;
+
+  // Create task on core 0
+  TaskHandle_t task_handle = NULL;
+  BaseType_t task_created = xTaskCreatePinnedToCore(
+      esp_video_init_task_core0,  // Task function
+      "esp_video_init",            // Task name
+      8192,                        // Stack size
+      &params,                     // Parameters
+      5,                           // Priority
+      &task_handle,                // Task handle
+      0                            // Core 0 (PRO_CPU)
+  );
+
+  if (task_created != pdPASS) {
+    ESP_LOGE(TAG, "❌ Failed to create esp_video_init task on core 0");
+    vSemaphoreDelete(done_sem);
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "⏳ Waiting for esp_video_init() to complete on core 0...");
+
+  // Wait for task to complete (max 10 seconds)
+  if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(10000)) != pdTRUE) {
+    ESP_LOGE(TAG, "❌ esp_video_init() timed out after 10 seconds");
+    vSemaphoreDelete(done_sem);
+    this->mark_failed();
+    return;
+  }
+
+  // Clean up semaphore
+  vSemaphoreDelete(done_sem);
+
+  // Check result
+  esp_err_t ret = params.result;
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "❌ Échec esp_video_init() sur core 0: %d (%s)", ret, esp_err_to_name(ret));
+    this->mark_failed();
+    return;
+  }
+
+  ESP_LOGI(TAG, "✅ esp_video_init() réussi sur core 0 - Devices vidéo prêts!");
 
   // Vérifier quels devices vidéo ont été créés
   ESP_LOGW(TAG, "🔍 Vérification des devices vidéo créés:");
