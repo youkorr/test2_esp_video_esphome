@@ -252,38 +252,28 @@ print("[ESP-Video Build] ========================================")
 print("")
 
 # ========================================================================
-# Forcer la recompilation en supprimant les .o cachés
+# Forcer la recompilation en modifiant le timestamp des fichiers sources
 # ========================================================================
-import glob
+import time as time_module
 
 # Fichiers critiques qui doivent être recompilés (problème de cache SCons)
-force_rebuild_sources = [
-    "esp_video_init.c",
-    "esp_cam_sensor_detect_stubs.c",
+force_rebuild_files = [
+    os.path.join(component_dir, "src/esp_video_init.c"),
+    os.path.join(esp_cam_sensor_dir, "src/esp_cam_sensor_detect_stubs.c"),
 ]
 
-# Supprimer les .o correspondants dans le build directory
-build_dir = env.subst("$BUILD_DIR")
-for src_name in force_rebuild_sources:
-    # Chercher les .o avec ce nom de base (récursivement dans toutes les sous-dirs)
-    obj_pattern = os.path.join(build_dir, "**", f"*{src_name.replace('.c', '.o')}")
-    obj_files = glob.glob(obj_pattern, recursive=True)
-    for obj_file in obj_files:
-        try:
-            os.remove(obj_file)
-            print(f"[ESP-Video Build] 🔨 Deleted cached object: {os.path.basename(obj_file)}")
-        except:
-            pass  # Fichier déjà supprimé ou n'existe pas
-
-    # Aussi chercher dans le répertoire racine du build
-    obj_name = src_name.replace('.c', '.o')
-    direct_obj = os.path.join(build_dir, obj_name)
-    if os.path.exists(direct_obj):
-        try:
-            os.remove(direct_obj)
-            print(f"[ESP-Video Build] 🔨 Deleted cached object: {obj_name}")
-        except:
-            pass
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+for src_file in force_rebuild_files:
+    if os.path.exists(src_file):
+        # Modifier le timestamp du fichier pour forcer SCons à le recompiler
+        current_time = time_module.time()
+        os.utime(src_file, (current_time, current_time))
+        print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
+        print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
+    else:
+        print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
+print("[ESP-Video Build] ========================================")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
