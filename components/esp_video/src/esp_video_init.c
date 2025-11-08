@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v2 */
+
 #include <string.h>
 #include <inttypes.h>
 #include "hal/gpio_ll.h"
@@ -327,6 +329,13 @@ static bool sensor_is_detected(esp_cam_sensor_detect_fn_t *p, esp_cam_sensor_dev
  */
 esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "========================================");
+    ESP_LOGE(TAG, "🚀 CUSTOM esp_video_init() CALLED! (v2025-11-08-v3)");
+    ESP_LOGE(TAG, "   This confirms our modified version is being used");
+    ESP_LOGE(TAG, "========================================");
+    ESP_LOGE(TAG, "");
+
     esp_err_t ret = ESP_OK;
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
     bool csi_inited = false;
@@ -345,6 +354,8 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
         ESP_LOGW(TAG, "Please validate camera config");
         return ESP_ERR_INVALID_ARG;
     }
+
+    ESP_LOGE(TAG, "✅ Config is valid, continuing initialization...");
 
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
     ret = esp_video_create_isp_video_device();
@@ -397,19 +408,21 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 #endif
 
-    ESP_LOGW(TAG, "🔍 Starting sensor detection loop...");
-    ESP_LOGW(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
-    ESP_LOGW(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
-    ESP_LOGW(TAG, "  DEBUG: Pointer difference = %ld bytes",
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "🔍 Starting sensor detection loop...");
+    ESP_LOGE(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
+    ESP_LOGE(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
+    ESP_LOGE(TAG, "  DEBUG: Pointer difference = %ld bytes",
              (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)__esp_cam_sensor_detect_fn_array_start));
-    ESP_LOGW(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
+    ESP_LOGE(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
+    ESP_LOGE(TAG, "");
 
     for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
-        ESP_LOGW(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
+        ESP_LOGE(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
                  (void*)p, p->port, p->sccb_addr, (void*)p->detect);
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
-            ESP_LOGW(TAG, "  → Attempting to detect MIPI-CSI sensor...");
+            ESP_LOGE(TAG, "  → Attempting to detect MIPI-CSI sensor...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
@@ -423,22 +436,37 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
             cfg.xclk_pin = config->csi->xclk_pin;       // Initialize XCLK pin (critical for sensor detection!)
             cfg.xclk_freq_hz = config->csi->xclk_freq;  // Initialize XCLK frequency
+
+            ESP_LOGE(TAG, "  🔧 Calling detect function at %p with config:", (void*)p->detect);
+            ESP_LOGE(TAG, "     sccb_handle=%p, reset_pin=%d, pwdn_pin=%d",
+                     cfg.sccb_handle, cfg.reset_pin, cfg.pwdn_pin);
+            ESP_LOGE(TAG, "     xclk_pin=%d, xclk_freq=%lu Hz", cfg.xclk_pin, cfg.xclk_freq_hz);
+
             cam_dev = (*(p->detect))((void *)&cfg);
+
+            ESP_LOGE(TAG, "  📡 detect() returned: cam_dev=%p", (void*)cam_dev);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->csi->sccb_config);
-                ESP_LOGE(TAG, "  ✗ Sensor detection failed for address 0x%x", p->sccb_addr);
+                ESP_LOGE(TAG, "  ✗ Sensor detection FAILED for address 0x%x (cam_dev is NULL)", p->sccb_addr);
                 continue;
             }
+
+            ESP_LOGE(TAG, "  ✅ Sensor detection SUCCEEDED! cam_dev->name=%s, cam_dev->id.pid=0x%x",
+                     cam_dev->name ? cam_dev->name : "NULL", cam_dev->id.pid);
 
             ESP_LOGW(TAG, "  ✓ Sensor detected successfully: %s (addr 0x%x)",
                      cam_dev->name ? cam_dev->name : "unknown", p->sccb_addr);
 
+            ESP_LOGE(TAG, "  🔧 About to call esp_video_create_csi_video_device(cam_dev=%p)...", (void*)cam_dev);
             ret = esp_video_create_csi_video_device(cam_dev);
+            ESP_LOGE(TAG, "  📡 esp_video_create_csi_video_device() returned: ret=%d (%s)",
+                     ret, esp_err_to_name(ret));
+
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "  ✗ Failed to create MIPI-CSI video device: %d (%s)", ret, esp_err_to_name(ret));
                 return ret;
             }
-            ESP_LOGW(TAG, "  ✓ MIPI-CSI video device created successfully");
+            ESP_LOGE(TAG, "  ✅ MIPI-CSI video device created successfully - /dev/video0 should exist now");
 
 #if CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
             if (config->cam_motor) {
@@ -471,12 +499,13 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             }
 #endif
 
-            ESP_LOGI(TAG, "========================================");
-            ESP_LOGI(TAG, "DEBUG: esp_video_init() reached ISP section");
-            ESP_LOGI(TAG, "  cam_dev=%p", cam_dev);
+            ESP_LOGE(TAG, "");
+            ESP_LOGE(TAG, "========================================");
+            ESP_LOGE(TAG, "🔍 DEBUG: esp_video_init() reached ISP configuration section");
+            ESP_LOGE(TAG, "  cam_dev=%p", cam_dev);
             if (cam_dev) {
-                ESP_LOGI(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
-                ESP_LOGI(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
+                ESP_LOGE(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+                ESP_LOGE(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
             }
 #ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
             ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");

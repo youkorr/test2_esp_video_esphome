@@ -1,0 +1,16 @@
+# Configuration ESP-IDF pour augmenter les limites VFS
+# Ce fichier est utilisé par ESPHome lors de la compilation avec framework: esp-idf
+
+# Augmenter la limite VFS pour supporter plus de devices
+# Par défaut: 8 → Nouveau: 16
+# Nécessaire pour:
+# - /dev/video0, /dev/video10, /dev/video11, /dev/video20 (4 devices)
+# - Devices système (UART, console, etc.)
+# - Sockets réseau (lwip)
+CONFIG_VFS_MAX_COUNT=16
+
+# Augmenter le nombre maximal de file descriptors pour lwip
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# S'assurer que les sockets lwip peuvent s'enregistrer
+CONFIG_VFS_SUPPORT_IO=y

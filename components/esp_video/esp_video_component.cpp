@@ -4,6 +4,9 @@
 #include "esp_heap_caps.h"
 #include <sys/stat.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <string.h>
 
 // Headers ESP-Video
 extern "C" {
@@ -287,22 +290,35 @@ void ESPVideoComponent::setup() {
   ESP_LOGI(TAG, "✅ esp_video_init() réussi sur core 0 - Devices vidéo prêts!");
 
   // Vérifier quels devices vidéo ont été créés
-  ESP_LOGW(TAG, "🔍 Vérification des devices vidéo créés:");
-  struct stat st;
-  if (stat("/dev/video0", &st) == 0) {
-    ESP_LOGW(TAG, "   ✅ /dev/video0 existe (CSI video device - capteur détecté!)");
+  // NOTE: stat() ne fonctionne pas avec les devices VFS ESP-IDF, utilisons open() à la place
+  ESP_LOGW(TAG, "🔍 Vérification des devices vidéo créés (via open test):");
+
+  int fd = open("/dev/video0", O_RDWR);
+  if (fd >= 0) {
+    ESP_LOGW(TAG, "   ✅ /dev/video0 existe et accessible (CSI video device - capteur détecté!)");
+    ESP_LOGW(TAG, "      File descriptor: %d", fd);
+    close(fd);
   } else {
-    ESP_LOGW(TAG, "   ❌ /dev/video0 N'EXISTE PAS (capteur NON détecté!)");
+    ESP_LOGW(TAG, "   ❌ /dev/video0 N'EXISTE PAS ou non accessible (errno=%d: %s)", errno, strerror(errno));
     ESP_LOGW(TAG, "      Cela signifie que la détection du capteur a échoué dans esp_video_init()");
   }
-  if (stat("/dev/video10", &st) == 0) {
+
+  fd = open("/dev/video10", O_RDWR);
+  if (fd >= 0) {
     ESP_LOGW(TAG, "   ✅ /dev/video10 existe (JPEG encoder)");
+    close(fd);
   }
-  if (stat("/dev/video11", &st) == 0) {
+
+  fd = open("/dev/video11", O_RDWR);
+  if (fd >= 0) {
     ESP_LOGW(TAG, "   ✅ /dev/video11 existe (H.264 encoder)");
+    close(fd);
   }
-  if (stat("/dev/video20", &st) == 0) {
+
+  fd = open("/dev/video20", O_RDWR);
+  if (fd >= 0) {
     ESP_LOGW(TAG, "   ✅ /dev/video20 existe (ISP device)");
+    close(fd);
   }
 
   // Tenter de lire l'ID du capteur directement via I2C pour vérifier que XCLK fonctionne

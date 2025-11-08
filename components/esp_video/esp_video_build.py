@@ -252,38 +252,46 @@ print("[ESP-Video Build] ========================================")
 print("")
 
 # ========================================================================
-# Forcer la recompilation en supprimant les .o cachés
+# Forcer la recompilation en modifiant le timestamp ET supprimant les .o
 # ========================================================================
+import time as time_module
 import glob
 
 # Fichiers critiques qui doivent être recompilés (problème de cache SCons)
-force_rebuild_sources = [
-    "esp_video_init.c",
-    "esp_cam_sensor_detect_stubs.c",
+force_rebuild_files = [
+    os.path.join(component_dir, "src/esp_video_init.c"),
+    os.path.join(esp_cam_sensor_dir, "src/esp_cam_sensor_detect_stubs.c"),
 ]
 
-# Supprimer les .o correspondants dans le build directory
-build_dir = env.subst("$BUILD_DIR")
-for src_name in force_rebuild_sources:
-    # Chercher les .o avec ce nom de base (récursivement dans toutes les sous-dirs)
-    obj_pattern = os.path.join(build_dir, "**", f"*{src_name.replace('.c', '.o')}")
-    obj_files = glob.glob(obj_pattern, recursive=True)
-    for obj_file in obj_files:
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+
+# Étape 1: Supprimer tous les .o correspondants PARTOUT
+build_root = env.subst("$PROJECT_BUILD_DIR")
+for src_file in force_rebuild_files:
+    basename = os.path.basename(src_file).replace('.c', '.o')
+    # Chercher récursivement dans tout le projet
+    obj_pattern = os.path.join(build_root, "**", basename)
+    found_objs = glob.glob(obj_pattern, recursive=True)
+    for obj_file in found_objs:
         try:
             os.remove(obj_file)
-            print(f"[ESP-Video Build] 🔨 Deleted cached object: {os.path.basename(obj_file)}")
-        except:
-            pass  # Fichier déjà supprimé ou n'existe pas
+            print(f"[ESP-Video Build] 🗑️  DELETED: {obj_file}")
+        except Exception as e:
+            print(f"[ESP-Video Build] ⚠️  Could not delete {obj_file}: {e}")
 
-    # Aussi chercher dans le répertoire racine du build
-    obj_name = src_name.replace('.c', '.o')
-    direct_obj = os.path.join(build_dir, obj_name)
-    if os.path.exists(direct_obj):
-        try:
-            os.remove(direct_obj)
-            print(f"[ESP-Video Build] 🔨 Deleted cached object: {obj_name}")
-        except:
-            pass
+# Étape 2: Modifier les timestamps des sources
+for src_file in force_rebuild_files:
+    if os.path.exists(src_file):
+        # Modifier le timestamp du fichier pour forcer SCons à le recompiler
+        current_time = time_module.time()
+        os.utime(src_file, (current_time, current_time))
+        print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
+        print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
+    else:
+        print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
+
+print("[ESP-Video Build] ========================================")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
@@ -292,8 +300,23 @@ if sources_to_add:
     # Compiler chaque fichier source en objet
     objects = []
     for src_file in sources_to_add:
+        # Vérifier si c'est un fichier critique qui doit être forcé à recompiler
+        is_critical = any(
+            src_file.endswith(os.path.basename(critical_file))
+            for critical_file in force_rebuild_files
+        )
+
         # Compiler le fichier source en .o
         obj = env.Object(src_file)
+
+        # Pour les fichiers critiques, forcer SCons à toujours les recompiler
+        if is_critical:
+            # AlwaysBuild: Force SCons to rebuild this file every time
+            env.AlwaysBuild(obj)
+            # NoCache: Don't use cached version of this object file
+            env.NoCache(obj)
+            print(f"[ESP-Video Build] ⚡ ALWAYS BUILD (NO CACHE): {os.path.basename(src_file)}")
+
         objects.extend(obj)
 
     # Créer une bibliothèque statique avec les objets compilés

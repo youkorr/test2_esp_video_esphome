@@ -1,0 +1,11 @@
+# Augmenter la limite VFS pour supporter plus de devices video
+# Par défaut: CONFIG_VFS_MAX_COUNT=8
+# Nous avons besoin de:
+# - 4 video devices (/dev/video0, /dev/video10, /dev/video11, /dev/video20)
+# - Sockets réseau (lwip)
+# - Autres VFS (UART, etc.)
+CONFIG_VFS_MAX_COUNT=16
+
+# Augmenter aussi le nombre maximal de file descriptors
+# Par défaut: CONFIG_LWIP_MAX_SOCKETS=10
+CONFIG_LWIP_MAX_SOCKETS=16

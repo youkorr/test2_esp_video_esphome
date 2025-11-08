@@ -16,25 +16,41 @@
 /**
  * @brief Camera sensor detection array - ESPHome/PlatformIO implementation
  *
- * FINAL SOLUTION: Define a real contiguous array and use pointer arithmetic.
+ * CRITICAL FIX v4: Declare variables in REVERSE order to compensate for linker inversion.
  *
  * The header declares:
- *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
+ *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
  *   extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
  *
- * The code iterates: for (p = &start; p < &end; ++p)
+ * The code iterates: for (p = start; p < &end; ++p)
  *
- * We define _start as an array (which the C standard guarantees is contiguous),
- * and _end as a single variable immediately following it.
+ * PROBLEM 1 (original): Linker placed _end 15108 bytes away, causing 1259 iterations
+ * ATTEMPTED FIX v1: Used .sensor_detect.00 and .sensor_detect.01 subsections
+ * PROBLEM 2: Linker placed sections in REVERSE order (.01 before .00)!
+ * ATTEMPTED FIX v2: Used .rodata.sensor_detect
+ * PROBLEM 3: Assembler warning - .rodata sections have incorrect attributes
+ * ATTEMPTED FIX v3: Used .data.sensor_detect
+ * PROBLEM 4: ESP-IDF linker STILL inverted the order!
+ *   Result: _end=0x4ff1390c, _start=0x4ff13918 → difference = -12 bytes
  *
- * When you take &array_name where array_name is an array, you get a pointer
- * to the first element. So &__esp_cam_sensor_detect_fn_array_start gives
- * us a pointer to the first sensor.
+ * SOLUTION v4: DECLARE IN REVERSE ORDER to compensate for linker inversion!
+ * If linker systematically inverts, declaring _end BEFORE _start will result
+ * in the linker placing _start before _end in memory (the correct order).
  */
 
+// INTENTIONALLY DECLARE _end FIRST (linker will place it LAST)
+// Define _end as a sentinel in .data.sensor_detect
+__attribute__((section(".data.sensor_detect"), used))
+esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
+    .detect = NULL,
+    .port = 0,
+    .sccb_addr = 0
+};
+
+// INTENTIONALLY DECLARE _start SECOND (linker will place it FIRST)
 // Define _start as an array containing all sensors
-// The C standard guarantees array elements are contiguous in memory
 // ORDER MATTERS: Put most likely sensor first for faster detection
+__attribute__((section(".data.sensor_detect"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     // Sensor 0: SC202CS (M5Stack Tab5 default sensor - try first!)
     {
@@ -56,40 +72,25 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[] = {
     },
 };
 
-// Define _end as a sentinel placed right after the array
-// The C compiler will typically place this immediately after the array in .data/.rodata
-// Making it likely (though not guaranteed) to be at &array[3]
-esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
-    .detect = NULL,
-    .port = 0,
-    .sccb_addr = 0
-};
-
 /**
- * How this works:
+ * How this works (REVERSE DECLARATION HACK):
  *
- * 1. __esp_cam_sensor_detect_fn_array_start is defined as an array[3]
- * 2. When code uses &__esp_cam_sensor_detect_fn_array_start, it gets
- *    a pointer to the first element (same as &array[0])
- * 3. The loop increments this pointer: p++
- * 4. p < &__esp_cam_sensor_detect_fn_array_end checks if we've reached the end
+ * 1. Both variables in section ".data.sensor_detect" (.data for initialized globals)
+ * 2. ESP-IDF linker INVERTS declaration order within custom sections
+ * 3. We declare _end FIRST, _start SECOND (reverse of logical order)
+ * 4. Linker inverts this: places _start in memory first, _end second (correct!)
+ * 5. __attribute__((used)) prevents optimization
+ * 6. Loop: for (p = start; p < &end; ++p) now works correctly
  *
- * The header declared _start and _end as "extern esp_cam_sensor_detect_fn_t",
- * which is compatible with both:
- * - An array definition (array name decays to pointer to first element)
- * - A single variable
+ * Declaration order (in source code):
+ *   Line 44: __esp_cam_sensor_detect_fn_array_end (declared FIRST)
+ *   Line 54: __esp_cam_sensor_detect_fn_array_start[] (declared SECOND)
  *
- * This works because in C:
- * - "esp_cam_sensor_detect_fn_t array[3]" when used in expressions
- *   becomes "esp_cam_sensor_detect_fn_t *" (pointer to first element)
- * - Taking &array gives you the address of the first element
+ * Expected memory layout (after linker inversion):
+ *   0x4ff13xxx: __esp_cam_sensor_detect_fn_array_start[0] (SC202CS) ← placed FIRST
+ *   0x4ff13xxx+12: __esp_cam_sensor_detect_fn_array_start[1] (OV5647)
+ *   0x4ff13xxx+24: __esp_cam_sensor_detect_fn_array_start[2] (OV02C10)
+ *   0x4ff13xxx+36: __esp_cam_sensor_detect_fn_array_end (sentinel) ← placed LAST
  *
- * CRITICAL: We rely on the compiler placing __esp_cam_sensor_detect_fn_array_end
- * immediately after the array. While not guaranteed by C standard, GCC typically
- * does this for variables in the same translation unit with similar storage class.
- *
- * If the compiler doesn't place them contiguously, the loop will iterate too
- * many or too few times. To guarantee correctness, we should modify esp_video_init.c
- * to calculate the end based on array size, but that would require changing
- * upstream code.
+ * Pointer difference should be +36 bytes (3 sensors × 12 bytes), NOT -12!
  */
