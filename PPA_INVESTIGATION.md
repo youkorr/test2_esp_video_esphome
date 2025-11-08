@@ -128,12 +128,35 @@ Utiliser heap_caps_aligned_alloc au lieu de heap_caps_malloc.
 **Effort:** Moyen
 **Status:** ✅ Implémenté (commit ed57dba) - 64-byte alignment avec vérification
 
-### Test 5: Mesurer M5Stack (Élevé) 🔜 À FAIRE
+### Test 5: Mesurer M5Stack (Élevé) 🔜 EN COURS
 
 Modifier leur code pour profiler exactement le temps PPA.
 
 **Probabilité de succès:** 100% (avoir la vérité)
 **Effort:** Élevé
+**Guide:** Voir `M5STACK_PROFILING_GUIDE.md` pour instructions détaillées
+
+## 📊 Résultats des Tests 1-4
+
+**Tests effectués sur hardware - Aucune amélioration:**
+
+```
+📊 Profiling (avg over 100 frames):
+   DQBUF: 396 us
+   PPA copy: 43492 us (43.5 ms) ← INCHANGÉ
+   QBUF: 54 us
+   TOTAL: 43942 us (43.9 ms) → ~22 FPS
+```
+
+**Diagnostics validés:**
+- ✅ Tous les buffers en SPIRAM (zone optimale)
+- ✅ 64-byte alignment confirmé
+- ✅ Cache sync actif (pas d'erreurs)
+- ✅ mirror_x = true (config M5Stack)
+
+**Conclusion:** Les 4 optimizations n'ont eu AUCUN impact sur le temps PPA.
+
+**Hypothèse forte:** 43ms (~42 MB/s) est la **performance normale** du PPA pour 1.8MB RGB565 copy sur ESP32-P4 avec SPIRAM.
 
 ## 💡 Solution Alternative: Zero-Copy
 
