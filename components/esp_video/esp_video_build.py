@@ -300,8 +300,23 @@ if sources_to_add:
     # Compiler chaque fichier source en objet
     objects = []
     for src_file in sources_to_add:
+        # Vérifier si c'est un fichier critique qui doit être forcé à recompiler
+        is_critical = any(
+            src_file.endswith(os.path.basename(critical_file))
+            for critical_file in force_rebuild_files
+        )
+
         # Compiler le fichier source en .o
         obj = env.Object(src_file)
+
+        # Pour les fichiers critiques, forcer SCons à toujours les recompiler
+        if is_critical:
+            # AlwaysBuild: Force SCons to rebuild this file every time
+            env.AlwaysBuild(obj)
+            # NoCache: Don't use cached version of this object file
+            env.NoCache(obj)
+            print(f"[ESP-Video Build] ⚡ ALWAYS BUILD (NO CACHE): {os.path.basename(src_file)}")
+
         objects.extend(obj)
 
     # Créer une bibliothèque statique avec les objets compilés
