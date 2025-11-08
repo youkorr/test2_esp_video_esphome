@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <errno.h>
 
 // Headers C avec protection extern "C"
@@ -272,13 +273,12 @@ void MipiDSICamComponent::setup() {
     return;
   }
 
-  // Configurer l'ISP si disponible et si le format le nécessite
+  // L'ISP est configuré AUTOMATIQUEMENT par esp_video_init()
+  // Pas besoin de configuration manuelle via VIDIOC_S_FMT sur /dev/video20
+  // Le pipeline se configure quand on démarre le streaming sur /dev/video0
   if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
-    if (!isp_apply_fmt_fps_(this->resolution_, this->pixel_format_, this->framerate_)) {
-      ESP_LOGW(TAG, "⚠️ Application V4L2 (format/résolution/FPS) sur ISP a échoué");
-    } else {
-      ESP_LOGI(TAG, "✓ ISP configuré avec succès");
-    }
+    ESP_LOGI(TAG, "✓ ISP sera utilisé automatiquement dans le pipeline de capture");
+    ESP_LOGI(TAG, "  Format demandé: %s @ %s", this->pixel_format_.c_str(), this->resolution_.c_str());
   }
 
   // Configurer l'encodeur JPEG si nécessaire
@@ -372,12 +372,19 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  const char *dev = wants_jpeg_(this->pixel_format_) ? 
-                    ESP_VIDEO_JPEG_DEVICE_NAME : 
-                    ESP_VIDEO_ISP1_DEVICE_NAME;
-  
-  ESP_LOGI(TAG, "📸 Capture: %s → %s", dev, path.c_str());
+  // Choisir le device de capture selon le format
+  // IMPORTANT: Pour RGB565/YUYV/formats bruts, capturer depuis /dev/video0 (CSI)
+  // L'ISP /dev/video20 est utilisé AUTOMATIQUEMENT dans le pipeline interne
+  // Seulement JPEG/H264 utilisent leurs encodeurs dédiés
+  const char *dev = wants_jpeg_(this->pixel_format_) ?
+                    ESP_VIDEO_JPEG_DEVICE_NAME :       // /dev/video10 pour JPEG
+                    wants_h264_(this->pixel_format_) ?
+                    ESP_VIDEO_H264_DEVICE_NAME :       // /dev/video11 pour H264
+                    ESP_VIDEO_MIPI_CSI_DEVICE_NAME;    // /dev/video0 pour RGB565/YUYV/etc
 
+  ESP_LOGI(TAG, "📸 Capture V4L2 streaming: %s → %s", dev, path.c_str());
+
+  // 1. Ouvrir le device
   int fd = open(dev, O_RDWR | O_NONBLOCK);
   if (fd < 0) {
     ESP_LOGE(TAG, "open(%s) a échoué: errno=%d (%s)", dev, errno, strerror(errno));
@@ -385,39 +392,133 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
+  // 2. Vérifier le format actuel
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  
-  size_t buffer_size = MAX_FRAME_SIZE;
-  if (ioctl(fd, VIDIOC_G_FMT, &fmt) >= 0 && fmt.fmt.pix.sizeimage > 0) {
-    buffer_size = fmt.fmt.pix.sizeimage;
-  }
 
-  if (buffer_size > MAX_FRAME_SIZE) {
-    buffer_size = MAX_FRAME_SIZE;
-  }
-
-  uint8_t *buffer = (uint8_t*)heap_caps_malloc(buffer_size, MALLOC_CAP_8BIT);
-  if (!buffer) {
-    ESP_LOGE(TAG, "Échec allocation mémoire (%u octets)", (unsigned)buffer_size);
+  if (ioctl(fd, VIDIOC_G_FMT, &fmt) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_G_FMT a échoué: %s", strerror(errno));
     close(fd);
     this->error_count_++;
     return false;
   }
 
-  ssize_t bytes_read = read(fd, buffer, buffer_size);
-  close(fd);
+  ESP_LOGI(TAG, "Format actuel: %ux%u, fourcc=0x%08X, sizeimage=%u",
+           fmt.fmt.pix.width, fmt.fmt.pix.height,
+           fmt.fmt.pix.pixelformat, fmt.fmt.pix.sizeimage);
 
-  if (bytes_read <= 0) {
-    ESP_LOGE(TAG, "read(%s) a échoué: errno=%d (%s)", dev, errno, strerror(errno));
-    heap_caps_free(buffer);
+  // 3. Demander 2 buffers en mode MMAP
+  struct v4l2_requestbuffers req;
+  memset(&req, 0, sizeof(req));
+  req.count = 2;
+  req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  req.memory = V4L2_MEMORY_MMAP;
+
+  if (ioctl(fd, VIDIOC_REQBUFS, &req) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_REQBUFS a échoué: %s", strerror(errno));
+    close(fd);
     this->error_count_++;
     return false;
   }
-  
-  ESP_LOGI(TAG, "Lu %d octets depuis le device", (int)bytes_read);
 
+  ESP_LOGI(TAG, "✓ %u buffers alloués", req.count);
+
+  // 4. Mapper et queuer les buffers
+  struct {
+    void *start;
+    size_t length;
+  } buffers[2];
+
+  for (unsigned int i = 0; i < req.count; i++) {
+    struct v4l2_buffer buf;
+    memset(&buf, 0, sizeof(buf));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_MMAP;
+    buf.index = i;
+
+    // Obtenir les infos du buffer
+    if (ioctl(fd, VIDIOC_QUERYBUF, &buf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QUERYBUF[%u] a échoué: %s", i, strerror(errno));
+      close(fd);
+      this->error_count_++;
+      return false;
+    }
+
+    // Mapper le buffer en mémoire
+    buffers[i].length = buf.length;
+    buffers[i].start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE,
+                            MAP_SHARED, fd, buf.m.offset);
+
+    if (buffers[i].start == MAP_FAILED) {
+      ESP_LOGE(TAG, "mmap[%u] a échoué: %s", i, strerror(errno));
+      // Nettoyer les buffers déjà mappés
+      for (unsigned int j = 0; j < i; j++) {
+        munmap(buffers[j].start, buffers[j].length);
+      }
+      close(fd);
+      this->error_count_++;
+      return false;
+    }
+
+    ESP_LOGI(TAG, "✓ Buffer[%u] mappé: %u octets @ %p", i, buf.length, buffers[i].start);
+
+    // Mettre le buffer dans la queue
+    if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] a échoué: %s", i, strerror(errno));
+      // Nettoyer tous les buffers mappés
+      for (unsigned int j = 0; j <= i; j++) {
+        munmap(buffers[j].start, buffers[j].length);
+      }
+      close(fd);
+      this->error_count_++;
+      return false;
+    }
+  }
+
+  ESP_LOGI(TAG, "✓ Tous les buffers sont dans la queue");
+
+  // 5. DÉMARRER LE STREAMING ★★★
+  int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  if (ioctl(fd, VIDIOC_STREAMON, &type) < 0) {
+    ESP_LOGE(TAG, "❌ VIDIOC_STREAMON a échoué: %s", strerror(errno));
+    // Nettoyer tous les buffers
+    for (unsigned int i = 0; i < req.count; i++) {
+      munmap(buffers[i].start, buffers[i].length);
+    }
+    close(fd);
+    this->error_count_++;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✅ STREAMING DÉMARRÉ - Le sensor stream maintenant !");
+  ESP_LOGI(TAG, "   → CSI controller actif");
+  ESP_LOGI(TAG, "   → ISP actif");
+  ESP_LOGI(TAG, "   → Sensor SC202CS streaming MIPI data");
+
+  // 6. Attendre et récupérer une frame
+  struct v4l2_buffer buf;
+  memset(&buf, 0, sizeof(buf));
+  buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  buf.memory = V4L2_MEMORY_MMAP;
+
+  ESP_LOGI(TAG, "Attente d'une frame...");
+
+  if (ioctl(fd, VIDIOC_DQBUF, &buf) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_DQBUF a échoué: %s", strerror(errno));
+    ioctl(fd, VIDIOC_STREAMOFF, &type);
+    for (unsigned int i = 0; i < req.count; i++) {
+      munmap(buffers[i].start, buffers[i].length);
+    }
+    close(fd);
+    this->error_count_++;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✅ Frame capturée: %u octets (buffer index=%u, sequence=%u)",
+           buf.bytesused, buf.index, buf.sequence);
+
+  // 7. Créer le répertoire si nécessaire
   std::string dir = path.substr(0, path.find_last_of('/'));
   if (!dir.empty()) {
     struct stat st;
@@ -426,29 +527,46 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     }
   }
 
+  // 8. Sauvegarder la frame
   FILE *f = fopen(path.c_str(), "wb");
   if (!f) {
     ESP_LOGE(TAG, "fopen(%s) pour écriture a échoué: %s", path.c_str(), strerror(errno));
-    heap_caps_free(buffer);
+    ioctl(fd, VIDIOC_STREAMOFF, &type);
+    for (unsigned int i = 0; i < req.count; i++) {
+      munmap(buffers[i].start, buffers[i].length);
+    }
+    close(fd);
     this->error_count_++;
     return false;
   }
 
-  size_t written = fwrite(buffer, 1, bytes_read, f);
+  size_t written = fwrite(buffers[buf.index].start, 1, buf.bytesused, f);
   fclose(f);
-  heap_caps_free(buffer);
 
-  if (written != (size_t)bytes_read) {
-    ESP_LOGW(TAG, "Écriture incomplète (%u / %u octets)", (unsigned)written, (unsigned)bytes_read);
-    this->error_count_++;
-    return false;
+  if (written != buf.bytesused) {
+    ESP_LOGW(TAG, "Écriture incomplète (%u / %u octets)",
+             (unsigned)written, buf.bytesused);
   }
+
+  // 9. Arrêter le streaming
+  if (ioctl(fd, VIDIOC_STREAMOFF, &type) < 0) {
+    ESP_LOGW(TAG, "VIDIOC_STREAMOFF a échoué: %s", strerror(errno));
+  } else {
+    ESP_LOGI(TAG, "✓ Streaming arrêté");
+  }
+
+  // 10. Libérer les buffers mappés
+  for (unsigned int i = 0; i < req.count; i++) {
+    munmap(buffers[i].start, buffers[i].length);
+  }
+
+  close(fd);
 
   this->snapshot_count_++;
-  ESP_LOGI(TAG, "✅ Snapshot #%u enregistré: %s (%u octets)", 
+  ESP_LOGI(TAG, "✅ Snapshot #%u enregistré: %s (%u octets)",
            (unsigned)this->snapshot_count_, path.c_str(), (unsigned)written);
-  
-  return true;
+
+  return (written == buf.bytesused);
 }
 
 }  // namespace mipi_dsi_cam
