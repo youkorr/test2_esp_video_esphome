@@ -525,14 +525,14 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "=== START STREAMING (Zero-Copy RGB565) ===");
+  // ESP_LOGI(TAG, "=== START STREAMING (Zero-Copy RGB565) ===");
 
   // Solution finale: Zero-copy pour 30+ FPS garanti
   // Utiliser les buffers V4L2 MMAP directement, sans copie PPA
   const char *dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // /dev/video0
 
-  ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
-  ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
+  // ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
+  // ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -583,13 +583,13 @@ bool MipiDSICamComponent::start_streaming() {
   // La vraie taille sera récupérée des buffers V4L2 plus tard
   this->image_buffer_size_ = 0;
 
-  ESP_LOGI(TAG, "Format: %ux%u, RGB565",
-           this->image_width_, this->image_height_);
+  // ESP_LOGI(TAG, "Format: %ux%u, RGB565",
+  //          this->image_width_, this->image_height_);
 
   // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
   // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
   this->image_buffer_ = nullptr;
-  ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
+  // ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
 
   // 4. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
@@ -605,7 +605,7 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
+  // ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
 
   // 7. Mapper et queuer les buffers
   for (unsigned int i = 0; i < 2; i++) {
@@ -632,13 +632,13 @@ bool MipiDSICamComponent::start_streaming() {
       return false;
     }
 
-    ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
-             i, buf.length, this->v4l2_buffers_[i].start);
+    // ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
+    //          i, buf.length, this->v4l2_buffers_[i].start);
 
     // Utiliser la taille réelle du buffer V4L2 (au lieu de fmt.fmt.pix.sizeimage qui peut être 0)
     if (i == 0) {
       this->image_buffer_size_ = buf.length;
-      ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
+      // ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
     }
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
@@ -659,60 +659,59 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming started (Zero-Copy Mode)");
-  ESP_LOGI(TAG, "   → CSI controller active");
-  ESP_LOGI(TAG, "   → ISP active");
-  ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
-  ESP_LOGI(TAG, "   → Zero-copy: LVGL uses V4L2 buffers directly (no PPA, no copy)");
+  ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
-  // Test 2: Memory zone analysis (PPA performance investigation)
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
-
-  // Analyze V4L2 buffers
-  for (int i = 0; i < 2; i++) {
-    uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
-    const char* zone = "UNKNOWN";
-    if (addr >= 0x48000000 && addr < 0x4C000000) {
-      zone = "SPIRAM (0x48000000-0x4C000000)";
-    } else if (addr >= 0x40800000 && addr < 0x40900000) {
-      zone = "SRAM (0x40800000-0x40900000)";
-    } else if (addr >= 0x40000000 && addr < 0x40800000) {
-      zone = "IRAM/DRAM";
-    }
-    ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
-  }
-
-  // Analyze image_buffer_
-  uintptr_t img_addr = (uintptr_t)this->image_buffer_;
-  const char* img_zone = "UNKNOWN";
-  if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
-    img_zone = "SPIRAM (0x48000000-0x4C000000)";
-  } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
-    img_zone = "SRAM (0x40800000-0x40900000)";
-  } else if (img_addr >= 0x40000000 && img_addr < 0x40800000) {
-    img_zone = "IRAM/DRAM";
-  }
-  ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
-
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "💡 PPA Performance Notes:");
-  ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
-  ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
-  ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
-  ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
+  // Logs détaillés commentés pour réduire verbosité
+  // ESP_LOGI(TAG, "   → CSI controller active");
+  // ESP_LOGI(TAG, "   → ISP active");
+  // ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
+  // ESP_LOGI(TAG, "   → Zero-copy: LVGL uses V4L2 buffers directly (no PPA, no copy)");
+  //
+  // // Test 2: Memory zone analysis (PPA performance investigation)
+  // ESP_LOGI(TAG, "");
+  // ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
+  //
+  // // Analyze V4L2 buffers
+  // for (int i = 0; i < 2; i++) {
+  //   uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
+  //   const char* zone = "UNKNOWN";
+  //   if (addr >= 0x48000000 && addr < 0x4C000000) {
+  //     zone = "SPIRAM (0x48000000-0x4C000000)";
+  //   } else if (addr >= 0x40800000 && addr < 0x40900000) {
+  //     zone = "SRAM (0x40800000-0x40900000)";
+  //   } else if (addr >= 0x40000000 && addr < 0x40800000) {
+  //     zone = "IRAM/DRAM";
+  //   }
+  //   ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
+  // }
+  //
+  // // Analyze image_buffer_
+  // uintptr_t img_addr = (uintptr_t)this->image_buffer_;
+  // const char* img_zone = "UNKNOWN";
+  // if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
+  //   img_zone = "SPIRAM (0x48000000-0x4C000000)";
+  // } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
+  //   img_zone = "SRAM (0x40800000-0x40900000)";
+  // } else if (img_addr >= 0x40000000 && addr < 0x40800000) {
+  //   img_zone = "IRAM/DRAM";
+  // }
+  // ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
+  //
+  // ESP_LOGI(TAG, "");
+  // ESP_LOGI(TAG, "💡 PPA Performance Notes:");
+  // ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
+  // ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
+  // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
+  // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
-    ESP_LOGI(TAG, "");
-    ESP_LOGI(TAG, "🎨 Applying CCM RGB gains from YAML configuration...");
-
     // Attendre que streaming soit stable (100ms)
     vTaskDelay(pdMS_TO_TICKS(100));
 
     if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
-      ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
-               this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
+      // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
+      //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
     } else {
       ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
     }
@@ -784,18 +783,19 @@ bool MipiDSICamComponent::capture_frame() {
   total_qbuf_us += (t5 - t4);
 
   if (profile_count == 100) {
-    uint32_t avg_dqbuf = total_dqbuf_us / 100;
-    uint32_t avg_pointer = total_copy_us / 100;
-    uint32_t avg_qbuf = total_qbuf_us / 100;
-    uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
-    float fps = 1000000.0f / avg_total;  // Calcul FPS
-
-    ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
-    ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
-    ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
-    ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
-    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
-             avg_total, avg_total / 1000.0f, fps);
+    // Logs de profiling commentés pour réduire verbosité
+    // uint32_t avg_dqbuf = total_dqbuf_us / 100;
+    // uint32_t avg_pointer = total_copy_us / 100;
+    // uint32_t avg_qbuf = total_qbuf_us / 100;
+    // uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
+    // float fps = 1000000.0f / avg_total;  // Calcul FPS
+    //
+    // ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
+    // ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
+    // ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
+    // ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
+    // ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
+    //          avg_total, avg_total / 1000.0f, fps);
 
     profile_count = 0;
     total_dqbuf_us = 0;
@@ -811,7 +811,7 @@ void MipiDSICamComponent::stop_streaming() {
     return;
   }
 
-  ESP_LOGI(TAG, "=== STOP STREAMING ===");
+  // ESP_LOGI(TAG, "=== STOP STREAMING ===");
 
   // 1. Arrêter le streaming
   if (this->video_fd_ >= 0) {
@@ -845,7 +845,7 @@ void MipiDSICamComponent::stop_streaming() {
   this->image_height_ = 0;
   this->image_buffer_size_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
+  // ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
 }
 
 // ============================================================================
@@ -1185,7 +1185,7 @@ bool MipiDSICamComponent::set_brightness(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  // ESP_LOGI(TAG, "✓ Brightness set to %d", value);
   return true;
 }
 
@@ -1208,7 +1208,7 @@ bool MipiDSICamComponent::set_contrast(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  // ESP_LOGI(TAG, "✓ Contrast set to %d", value);
   return true;
 }
 
@@ -1231,7 +1231,7 @@ bool MipiDSICamComponent::set_saturation(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  // ESP_LOGI(TAG, "✓ Saturation set to %d", value);
   return true;
 }
 
@@ -1254,7 +1254,7 @@ bool MipiDSICamComponent::set_hue(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  // ESP_LOGI(TAG, "✓ Hue set to %d", value);
   return true;
 }
 
@@ -1277,7 +1277,7 @@ bool MipiDSICamComponent::set_sharpness(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
+  // ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
   return true;
 }
 
