@@ -752,11 +752,11 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming started (M5Stack-style)");
+  ESP_LOGI(TAG, "✓ Streaming started (JPEG Hardware)");
   ESP_LOGI(TAG, "   → CSI controller active");
   ESP_LOGI(TAG, "   → ISP active");
   ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
-  ESP_LOGI(TAG, "   → %s copy to LVGL buffer", this->ppa_handle_ ? "PPA hardware" : "memcpy");
+  ESP_LOGI(TAG, "   → %s decode to LVGL buffer", this->jpeg_decoder_ ? "JPEG hardware" : "memcpy");
 
   // Test 2: Memory zone analysis (PPA performance investigation)
   ESP_LOGI(TAG, "");
@@ -836,8 +836,7 @@ bool MipiDSICamComponent::capture_frame() {
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,      // Ordre BGR pour LVGL
     };
 
-    jpeg_decode_picture_info_t pic_info;
-    memset(&pic_info, 0, sizeof(pic_info));
+    uint32_t out_size = 0;  // Taille de sortie RGB565 décodée
 
     jpeg_decoder_handle_t jpeg_h = (jpeg_decoder_handle_t)this->jpeg_decoder_;
     esp_err_t ret = jpeg_decoder_process(jpeg_h,
@@ -846,7 +845,7 @@ bool MipiDSICamComponent::capture_frame() {
                                           jpeg_size,
                                           this->image_buffer_,  // Destination: RGB565
                                           this->image_buffer_size_,
-                                          &pic_info);
+                                          &out_size);      // Taille effectivement décodée
 
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
