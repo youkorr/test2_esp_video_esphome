@@ -605,11 +605,34 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  // 2. Obtenir le format actuel
+  // 2. Configurer le format (OBLIGATOIRE avant VIDIOC_G_FMT)
+  uint32_t width, height;
+  if (!map_resolution_(this->resolution_, width, height)) {
+    ESP_LOGE(TAG, "Invalid resolution: %s", this->resolution_.c_str());
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  uint32_t fourcc = map_pixfmt_fourcc_(this->pixel_format_);
+
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  fmt.fmt.pix.width = width;
+  fmt.fmt.pix.height = height;
+  fmt.fmt.pix.pixelformat = fourcc;
+  fmt.fmt.pix.field = V4L2_FIELD_NONE;
 
+  // SET le format pour que le driver calcule sizeimage
+  if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
+    close(this->video_fd_);
+    this->video_fd_ = -1;
+    return false;
+  }
+
+  // 3. Vérifier le format appliqué (le driver peut ajuster)
   if (ioctl(this->video_fd_, VIDIOC_G_FMT, &fmt) < 0) {
     ESP_LOGE(TAG, "VIDIOC_G_FMT failed: %s", strerror(errno));
     close(this->video_fd_);
@@ -621,11 +644,19 @@ bool MipiDSICamComponent::start_streaming() {
   this->image_height_ = fmt.fmt.pix.height;
   this->image_buffer_size_ = fmt.fmt.pix.sizeimage;
 
+  // Fallback: calculer manuellement si sizeimage = 0
+  if (this->image_buffer_size_ == 0) {
+    // Pour RGB565: 2 bytes/pixel, pour YUYV: 2 bytes/pixel
+    uint32_t bytes_per_pixel = (fourcc == V4L2_PIX_FMT_RGB565 || fourcc == V4L2_PIX_FMT_YUYV) ? 2 : 4;
+    this->image_buffer_size_ = this->image_width_ * this->image_height_ * bytes_per_pixel;
+    ESP_LOGW(TAG, "Driver returned sizeimage=0, calculated manually: %u bytes", this->image_buffer_size_);
+  }
+
   ESP_LOGI(TAG, "Format: %ux%u, fourcc=0x%08X, size=%u",
            this->image_width_, this->image_height_,
            fmt.fmt.pix.pixelformat, this->image_buffer_size_);
 
-  // 3. Allouer le buffer d'image persistant
+  // 4. Allouer le buffer d'image persistant
   this->image_buffer_ = (uint8_t*)heap_caps_malloc(this->image_buffer_size_, MALLOC_CAP_8BIT);
   if (!this->image_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate image buffer (%u bytes)", this->image_buffer_size_);
@@ -638,7 +669,7 @@ bool MipiDSICamComponent::start_streaming() {
   ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p",
            this->image_buffer_size_, this->image_buffer_);
 
-  // 4. Demander 2 buffers V4L2 en mode MMAP
+  // 5. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
   req.count = 2;
@@ -656,7 +687,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
 
-  // 5. Mapper et queuer les buffers
+  // 6. Mapper et queuer les buffers
   for (unsigned int i = 0; i < 2; i++) {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
@@ -691,7 +722,7 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  // 6. DÉMARRER LE STREAMING
+  // 7. DÉMARRER LE STREAMING
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (ioctl(this->video_fd_, VIDIOC_STREAMON, &type) < 0) {
     ESP_LOGE(TAG, "VIDIOC_STREAMON failed: %s", strerror(errno));
