@@ -591,11 +591,11 @@ bool MipiDSICamComponent::start_streaming() {
 
   ESP_LOGI(TAG, "=== START STREAMING (JPEG Hardware) ===");
 
-  // FORCER l'utilisation de JPEG hardware pour performance optimale
-  // /dev/video10 = JPEG encoder → ~20-100KB par frame au lieu de 1.8MB
-  const char *dev = ESP_VIDEO_JPEG_DEVICE_NAME;
+  // Utiliser /dev/video0 avec format JPEG (ISP encode directement)
+  // L'ISP ESP32-P4 a l'encodeur JPEG intégré
+  const char *dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // /dev/video0
 
-  ESP_LOGI(TAG, "Device: %s (JPEG hardware encoder)", dev);
+  ESP_LOGI(TAG, "Device: %s (ISP with JPEG encoding)", dev);
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -604,7 +604,20 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  // 2. Configurer le format MJPEG (OBLIGATOIRE avant VIDIOC_G_FMT)
+  // 2. Set JPEG quality control BEFORE format configuration
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
+  ctrl.value = this->jpeg_quality_;  // 1-63: 1=best quality, 63=most compressed
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "Failed to set JPEG quality to %d: %s (using driver default)",
+             this->jpeg_quality_, strerror(errno));
+  } else {
+    ESP_LOGI(TAG, "✓ JPEG quality set to %d", this->jpeg_quality_);
+  }
+
+  // 3. Configurer le format MJPEG (OBLIGATOIRE avant VIDIOC_G_FMT)
   uint32_t width, height;
   if (!map_resolution_(this->resolution_, width, height)) {
     ESP_LOGE(TAG, "Invalid resolution: %s", this->resolution_.c_str());
