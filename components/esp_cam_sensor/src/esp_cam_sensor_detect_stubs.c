@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2024-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
+ *
+ * Modified: 2025-11-08 - Force rebuild to ensure SC202CS is first in detection order
  */
 
 #include <stddef.h>
