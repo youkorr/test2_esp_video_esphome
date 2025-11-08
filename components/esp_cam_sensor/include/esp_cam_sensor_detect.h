@@ -37,11 +37,16 @@ extern "C" {
 
 /**
  * @brief camera sensor auto detect function array start.
+ *
+ * In ESPHome/PlatformIO builds, this is defined as an array[] in
+ * esp_cam_sensor_detect_stubs.c to guarantee contiguous memory layout.
  */
-extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
+extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
 
 /**
  * @brief camera sensor auto detect function array end.
+ *
+ * In ESPHome/PlatformIO builds, this is a sentinel element placed after the array.
  */
 extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end;
 
