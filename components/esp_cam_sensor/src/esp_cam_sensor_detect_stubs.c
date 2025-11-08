@@ -46,18 +46,20 @@
  *
  * The code uses: for (p = &start; p < &end; ++p)
  *
- * SOLUTION: Define individual structures with section names matching linker.lf.
- * The linker.lf expects sections named ".esp_cam_sensor_detect_fn+" (+ means subsections).
- * We use numbered subsections (.esp_cam_sensor_detect_fn.0, .esp_cam_sensor_detect_fn.1, etc.)
- * to help the linker maintain alphabetical/numerical order.
+ * SOLUTION: Use GCC's guarantee that variables in the same section from the same
+ * translation unit are placed in declaration order. All symbols go in the SAME
+ * section (not numbered subsections) to ensure they're treated as a group.
  *
- * The linker script uses SURROUND(__esp_cam_sensor_detect_fn_array) which automatically
- * creates __esp_cam_sensor_detect_fn_array_start and __esp_cam_sensor_detect_fn_array_end
- * symbols pointing to the beginning and end of the collected sections.
+ * We rely on:
+ * 1. All variables in the SAME .esp_cam_sensor_detect_fn section
+ * 2. All from the SAME source file (this file)
+ * 3. GCC places them in declaration order
+ *
+ * This should work even if the linker.lf fragment is not processed by PlatformIO.
  */
 
 // Sensor 0: OV5647 - this is __esp_cam_sensor_detect_fn_array_start
-__attribute__((section(".esp_cam_sensor_detect_fn.0"), used))
+__attribute__((section(".esp_cam_sensor_detect_fn"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))ov5647_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -65,7 +67,7 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start = {
 };
 
 // Sensor 1: SC202CS
-__attribute__((section(".esp_cam_sensor_detect_fn.1"), used))
+__attribute__((section(".esp_cam_sensor_detect_fn"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sc202cs = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))sc202cs_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -73,7 +75,7 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_sc202cs = {
 };
 
 // Sensor 2: OV02C10
-__attribute__((section(".esp_cam_sensor_detect_fn.2"), used))
+__attribute__((section(".esp_cam_sensor_detect_fn"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_ov02c10 = {
     .detect = (esp_cam_sensor_device_t *(*)(void *))ov02c10_detect,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -81,7 +83,8 @@ esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_ov02c10 = {
 };
 
 // End marker - this is __esp_cam_sensor_detect_fn_array_end
-__attribute__((section(".esp_cam_sensor_detect_fn.3"), used))
+// IMPORTANT: This MUST be the last variable declared in this section
+__attribute__((section(".esp_cam_sensor_detect_fn"), used))
 esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_end = {
     .detect = NULL,
     .port = 0,
