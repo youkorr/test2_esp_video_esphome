@@ -67,6 +67,11 @@ class MipiDSICamComponent : public Component {
   bool set_white_balance_mode(bool auto_mode);  // true=auto AWB, false=manuel
   bool set_white_balance_temp(int kelvin);      // Température couleur (2800-6500K)
 
+  // Contrôles ISP avancés (correction couleur précise via CCM et WB)
+  bool set_ccm_matrix(float matrix[3][3]);  // Matrice CCM 3x3 complète (correction couleur avancée)
+  bool set_rgb_gains(float red, float green, float blue);  // Gains RGB diagonaux simplifiés (corrige blanc→vert)
+  bool set_wb_gains(float red_gain, float blue_gain);      // White balance ISP (gains R/B, G=1.0)
+
  protected:
   std::string sensor_name_{"sc202cs"};
   int i2c_id_{0};

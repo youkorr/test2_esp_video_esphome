@@ -1044,6 +1044,163 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
   return true;
 }
 
+/**
+ * @brief Définir la matrice CCM (Color Correction Matrix) complète 3x3
+ *
+ * Permet une correction couleur avancée en configurant directement la matrice
+ * de correction couleur de l'ISP. Chaque élément peut être dans [-4.0, 4.0].
+ *
+ * Formule: [R_out, G_out, B_out] = matrix × [R_in, G_in, B_in]
+ *
+ * @param matrix Matrice 3x3 float (row-major order):
+ *               matrix[0][0..2]: Coefficients pour R_out
+ *               matrix[1][0..2]: Coefficients pour G_out
+ *               matrix[2][0..2]: Coefficients pour B_out
+ *
+ * Exemple d'identité (aucune correction):
+ *   {{1.0, 0.0, 0.0},
+ *    {0.0, 1.0, 0.0},
+ *    {0.0, 0.0, 1.0}}
+ *
+ * Exemple correction blanc→vert (M5Stack):
+ *   {{1.5, 0.0, 0.0},   // Booster rouge
+ *    {0.0, 1.0, 0.0},   // Vert normal
+ *    {0.0, 0.0, 1.6}}   // Booster bleu
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set CCM matrix: streaming not active");
+    return false;
+  }
+
+  // Créer structure CCM avec matrice fournie
+  esp_video_isp_ccm_t ccm_config;
+  memset(&ccm_config, 0, sizeof(ccm_config));
+  ccm_config.enable = true;
+
+  // Copier matrice (dimensions vérifiées par ISP_CCM_DIMENSION)
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      ccm_config.matrix[i][j] = matrix[i][j];
+    }
+  }
+
+  // Configurer via V4L2 ioctl avec CID personnalisé ESP32
+  struct v4l2_ext_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_USER_ESP_ISP_CCM;
+  ctrl.ptr = &ccm_config;
+  ctrl.size = sizeof(ccm_config);
+
+  struct v4l2_ext_controls ctrls;
+  memset(&ctrls, 0, sizeof(ctrls));
+  ctrls.count = 1;
+  ctrls.controls = &ctrl;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+    ESP_LOGE(TAG, "Failed to set CCM matrix: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ CCM matrix configured:");
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[0][0], matrix[0][1], matrix[0][2]);
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[1][0], matrix[1][1], matrix[1][2]);
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[2][0], matrix[2][1], matrix[2][2]);
+  return true;
+}
+
+/**
+ * @brief Définir les gains RGB de manière simplifiée (matrice diagonale)
+ *
+ * Wrapper simplifié de set_ccm_matrix() pour ajuster les gains par canal.
+ * Crée une matrice CCM diagonale: seuls les gains R, G, B sont modifiés.
+ *
+ * C'est l'approche utilisée par ESPHome PR#7639 pour corriger blanc→vert.
+ *
+ * Formule résultante: R_out = R_in × red, G_out = G_in × green, B_out = B_in × blue
+ *
+ * @param red   Gain canal rouge (ex: 1.3 = +30% rouge)
+ * @param green Gain canal vert (ex: 0.85 = -15% vert, corrige blanc→vert)
+ * @param blue  Gain canal bleu (ex: 1.25 = +25% bleu)
+ *
+ * Valeurs typiques pour corriger blanc→vert avec SC202CS:
+ *   - Correction légère: (1.2, 0.9, 1.15)
+ *   - Correction moyenne: (1.3, 0.85, 1.25) ← RECOMMANDÉ
+ *   - Correction M5Stack: (1.5, 1.0, 1.6)
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
+  // Créer matrice diagonale
+  float matrix[3][3] = {
+    {red,  0.0f, 0.0f},
+    {0.0f, green, 0.0f},
+    {0.0f, 0.0f,  blue}
+  };
+
+  if (!set_ccm_matrix(matrix)) {
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ RGB gains: R=%.2f, G=%.2f, B=%.2f", red, green, blue);
+  return true;
+}
+
+/**
+ * @brief Définir les gains White Balance de l'ISP (rouge et bleu)
+ *
+ * Contrôle les gains hardware de white balance de l'ISP (avant CCM).
+ * Le gain vert est fixe à 1.0 (référence).
+ *
+ * Note: Différent de set_rgb_gains() qui modifie la CCM (après demosaic).
+ *       L'ordre du pipeline est: Sensor → Demosaic → WB gains → CCM → Output
+ *
+ * @param red_gain  Gain du canal rouge (typiquement 0.5 - 4.0)
+ * @param blue_gain Gain du canal bleu (typiquement 0.5 - 4.0)
+ *
+ * Valeurs typiques:
+ *   - Lumière du jour: red=1.0, blue=1.0 (neutre)
+ *   - Incandescent: red=0.7, blue=1.8 (compenser jaune)
+ *   - Fluorescent: red=1.3, blue=0.9 (compenser vert)
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set WB gains: streaming not active");
+    return false;
+  }
+
+  // Créer structure WB
+  esp_video_isp_wb_t wb_config;
+  memset(&wb_config, 0, sizeof(wb_config));
+  wb_config.enable = true;
+  wb_config.red_gain = red_gain;
+  wb_config.blue_gain = blue_gain;
+
+  // Configurer via V4L2 ioctl avec CID personnalisé ESP32
+  struct v4l2_ext_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_USER_ESP_ISP_WB;
+  ctrl.ptr = &wb_config;
+  ctrl.size = sizeof(wb_config);
+
+  struct v4l2_ext_controls ctrls;
+  memset(&ctrls, 0, sizeof(ctrls));
+  ctrls.count = 1;
+  ctrls.controls = &ctrl;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+    ESP_LOGE(TAG, "Failed to set WB gains: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ WB gains: Red=%.2f, Blue=%.2f (Green=1.0)", red_gain, blue_gain);
+  return true;
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 
