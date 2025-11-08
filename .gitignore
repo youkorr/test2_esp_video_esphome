@@ -1,0 +1,11 @@
+# ESPHome build artifacts (if any)
+.esphome/
+*.pyc
+__pycache__/
+
+# Editor temporary files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

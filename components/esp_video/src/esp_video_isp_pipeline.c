@@ -141,6 +141,8 @@ static void print_stats_info(const esp_ipa_stats_t *stats)
         ESP_LOGD(TAG, "Sharpen high frequency pixel maximum value: %d", stats->sharpen_stats.value);
     }
 
+    // AF (Auto Focus) not available in current esp_ipa API version
+    #if 0
     if (stats->flags & IPA_STATS_FLAGS_AF) {
         const esp_ipa_stats_af_t *af_stats = stats->af_stats;
 
@@ -150,6 +152,7 @@ static void print_stats_info(const esp_ipa_stats_t *stats)
             ESP_LOGD(TAG, "  luminance[%2d]:  %"PRIu32, i, af_stats[i].luminance);
         }
     }
+    #endif
 
     ESP_LOGD(TAG, "");
 #endif
@@ -660,6 +663,8 @@ static void config_lsc(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 }
 #endif
 
+// AE target level not available in current esp_ipa API version
+#if 0
 static void config_sensor_ae_target_level(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
     struct v4l2_ext_controls controls;
@@ -679,7 +684,10 @@ static void config_sensor_ae_target_level(esp_video_isp_t *isp, esp_ipa_metadata
         }
     }
 }
+#endif
 
+// AWB, SR, AF config functions not available in current esp_ipa API version
+#if 0
 static void config_awb(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
     struct v4l2_ext_controls controls;
@@ -749,6 +757,7 @@ static void config_af(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
         }
     }
 }
+#endif
 
 #if CONFIG_ESP_VIDEO_ISP_PIPELINE_CONTROL_CAMERA_MOTOR
 static void config_motor_position(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
@@ -788,7 +797,7 @@ static void config_motor_position(esp_video_isp_t *isp, esp_ipa_metadata_t *meta
 
 static void config_isp_and_camera(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
 {
-    config_statistics_region(isp, metadata);
+    // config_statistics_region(isp, metadata);  // Disabled - not available in current API
 
     if (!isp->sensor_attr.awb) {
         config_white_balance(isp, metadata);
@@ -803,10 +812,10 @@ static void config_isp_and_camera(esp_video_isp_t *isp, esp_ipa_metadata_t *meta
 #if ESP_VIDEO_ISP_DEVICE_LSC
     config_lsc(isp, metadata);
 #endif
-    config_awb(isp, metadata);
-    config_af(isp, metadata);
+    // config_awb(isp, metadata);  // Disabled - not available in current API
+    // config_af(isp, metadata);  // Disabled - not available in current API
 
-    config_sensor_ae_target_level(isp, metadata);
+    // config_sensor_ae_target_level(isp, metadata);  // Disabled - not available in current API
     config_exposure_and_gain(isp, metadata);
 #if CONFIG_ESP_VIDEO_ISP_PIPELINE_CONTROL_CAMERA_MOTOR
     config_motor_position(isp, metadata);
@@ -859,6 +868,8 @@ static void isp_stats_to_ipa_stats(esp_video_isp_stats_t *isp_stat, esp_ipa_stat
         ipa_stats->flags |= IPA_STATS_FLAGS_SHARPEN;
     }
 
+    // AF stats not available in current esp_ipa API version
+    #if 0
     if (isp_stat->flags & ESP_VIDEO_ISP_STATS_FLAG_AF) {
         esp_ipa_stats_af_t *ipa_af = ipa_stats->af_stats;
         isp_af_result_t *isp_af = &isp_stat->af.af_result;
@@ -869,6 +880,7 @@ static void isp_stats_to_ipa_stats(esp_video_isp_stats_t *isp_stat, esp_ipa_stat
         }
         ipa_stats->flags |= IPA_STATS_FLAGS_AF;
     }
+    #endif
 }
 
 static void get_sensor_state(esp_video_isp_t *isp, int index)
@@ -1119,10 +1131,13 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         ret = ioctl(fd, VIDIOC_G_EXT_CTRLS, &controls);
         ESP_GOTO_ON_FALSE(ret == 0, ESP_ERR_NOT_SUPPORTED, fail_0, TAG, "failed to get AE target level");
 
+        // AE target level fields not available in current esp_ipa_sensor_t
+        #if 0
         isp->sensor.min_ae_target_level = qctrl.minimum;
         isp->sensor.max_ae_target_level = qctrl.maximum;
         isp->sensor.step_ae_target_level = qctrl.step;
         isp->sensor.cur_ae_target_level = control[0].value;
+        #endif
 
         ESP_LOGD(TAG, "AE target level:");
         ESP_LOGD(TAG, "  min:     %"PRIi64, qctrl.minimum);
@@ -1238,8 +1253,11 @@ static esp_err_t init_isp_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to queue buffer");
     }
 
-    ret = ioctl(fd, VIDIOC_STREAMON, &type);
-    ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to start stream");
+    // NOTE: Pour ESPHome/PlatformIO, le streaming est contrôlé manuellement par l'utilisateur
+    // Ne pas démarrer automatiquement le streaming ici - l'utilisateur appellera VIDIOC_STREAMON quand nécessaire
+    // ret = ioctl(fd, VIDIOC_STREAMON, &type);
+    // ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to start stream");
+    ESP_LOGI(TAG, "ISP metadata buffers initialized - streaming controlled by user");
 
     isp->isp_fd = fd;
 
@@ -1281,7 +1299,8 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     // Enable IPA debug logging to verify algorithm loading
     esp_ipa_pipeline_set_log(true);
 
-    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create_from_config(config->ipa_config, &isp->ipa_pipeline),
+    // Create IPA pipeline from config
+    ESP_GOTO_ON_ERROR(esp_ipa_pipeline_create(config->ipa_config->ipa_nums, config->ipa_config->ipa_names, &isp->ipa_pipeline),
                       fail_0, TAG, "failed to create IPA pipeline");
 
     // Print loaded IPA algorithms for verification

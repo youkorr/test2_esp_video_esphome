@@ -64,6 +64,45 @@ inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
   return handle;
 }
 
+/**
+ * @brief Read a register from an I2C device
+ *
+ * @param bus_handle I2C bus handle
+ * @param device_addr 7-bit I2C device address
+ * @param reg_addr 16-bit register address
+ * @param data Pointer to store read data
+ * @return ESP_OK on success, error code otherwise
+ */
+inline esp_err_t i2c_read_register(i2c_master_bus_handle_t bus_handle, uint8_t device_addr,
+                                    uint16_t reg_addr, uint8_t *data) {
+  if (bus_handle == nullptr || data == nullptr) {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  // Create device handle for this transaction
+  i2c_device_config_t dev_cfg = {};
+  dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+  dev_cfg.device_address = device_addr;
+  dev_cfg.scl_speed_hz = 400000;
+
+  i2c_master_dev_handle_t dev_handle;
+  esp_err_t ret = i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev_handle);
+  if (ret != ESP_OK) {
+    return ret;
+  }
+
+  // Write register address (2 bytes, big endian)
+  uint8_t reg_buf[2] = {(uint8_t)(reg_addr >> 8), (uint8_t)(reg_addr & 0xFF)};
+
+  // Perform write-read transaction
+  ret = i2c_master_transmit_receive(dev_handle, reg_buf, sizeof(reg_buf), data, 1, 1000);
+
+  // Remove device handle
+  i2c_master_bus_rm_device(dev_handle);
+
+  return ret;
+}
+
 }  // namespace esp_video
 }  // namespace esphome
 

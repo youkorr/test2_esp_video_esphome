@@ -94,6 +94,15 @@ esp_err_t esp_ipa_pipeline_process(esp_ipa_pipeline_handle_t handle, const esp_i
  */
 esp_err_t esp_ipa_pipeline_destroy(esp_ipa_pipeline_handle_t handle);
 
+/**
+ * @brief Get IPA pipeline configuration for specified camera sensor
+ *
+ * @param cam_name Camera sensor name (e.g., "SC202CS", "OV5647", "OV02C10")
+ *
+ * @return IPA configuration pointer for the camera, NULL if not found
+ */
+const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name);
+
 #ifdef __cplusplus
 }
 #endif

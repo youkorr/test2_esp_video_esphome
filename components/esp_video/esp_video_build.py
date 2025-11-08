@@ -62,7 +62,7 @@ esp_cam_sensor_sources = [
 # Ajouter les chemins d'include pour les sensors (private_include)
 esp_cam_sensor_includes = [
     "sensor/ov5647/private_include",
-    "sensor/sc202cs/private_include",
+    "sensor/sc202cs/include/private_include",
     "sensor/ov02c10/private_include",
 ]
 
@@ -93,7 +93,7 @@ esp_h264_sources = [
     # "port/src/esp_h264_alloc_less_than_5_3.c",  # Exclu: pour ESP-IDF < 5.3 seulement
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/):
+    # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/)
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
     "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
@@ -107,6 +107,25 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
+    # Ajouter les chemins d'include pour les bibliothèques H.264 (OpenH264, h264bsd)
+    h264_lib_includes = [
+        "sw/libs/openh264_inc",   # codec_api.h, codec_app_def.h, codec_def.h
+        "sw/libs/tinyh264_inc",   # h264bsd_decoder.h, basetype.h
+    ]
+
+    for inc in h264_lib_includes:
+        inc_path = os.path.join(esp_h264_dir, inc)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+            print(f"[ESP-Video Build] 📁 Include H.264 lib ajouté: {inc}")
+
+    # Ajouter les bibliothèques statiques OpenH264 et TinyH264
+    h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
+    if os.path.exists(h264_static_libs_dir):
+        env.Append(LIBPATH=[h264_static_libs_dir])
+        env.Append(LIBS=["openh264", "tinyh264"])
+        print(f"[ESP-Video Build] 📚 Bibliothèques H.264 ajoutées: libopenh264.a, libtinyh264.a")
+
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
         if os.path.exists(src_path):
@@ -231,6 +250,40 @@ const char {symbol_name}_start[] __attribute__((aligned(4))) =
 
 print("[ESP-Video Build] ========================================")
 print("")
+
+# ========================================================================
+# Forcer la recompilation en supprimant les .o cachés
+# ========================================================================
+import glob
+
+# Fichiers critiques qui doivent être recompilés (problème de cache SCons)
+force_rebuild_sources = [
+    "esp_video_init.c",
+    "esp_cam_sensor_detect_stubs.c",
+]
+
+# Supprimer les .o correspondants dans le build directory
+build_dir = env.subst("$BUILD_DIR")
+for src_name in force_rebuild_sources:
+    # Chercher les .o avec ce nom de base (récursivement dans toutes les sous-dirs)
+    obj_pattern = os.path.join(build_dir, "**", f"*{src_name.replace('.c', '.o')}")
+    obj_files = glob.glob(obj_pattern, recursive=True)
+    for obj_file in obj_files:
+        try:
+            os.remove(obj_file)
+            print(f"[ESP-Video Build] 🔨 Deleted cached object: {os.path.basename(obj_file)}")
+        except:
+            pass  # Fichier déjà supprimé ou n'existe pas
+
+    # Aussi chercher dans le répertoire racine du build
+    obj_name = src_name.replace('.c', '.o')
+    direct_obj = os.path.join(build_dir, obj_name)
+    if os.path.exists(direct_obj):
+        try:
+            os.remove(direct_obj)
+            print(f"[ESP-Video Build] 🔨 Deleted cached object: {obj_name}")
+        except:
+            pass
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation

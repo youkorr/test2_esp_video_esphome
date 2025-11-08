@@ -1,0 +1,26 @@
+# Configuration CORRECTE pour mipi_dsi_cam
+# À copier dans votre fichier /config/esphome/tab5.yaml (ligne 1340)
+
+mipi_dsi_cam:
+  id: tab5_cam
+  i2c_id: bsp_bus
+  sensor_type: sc202cs        # Était: sensor
+  xclk_pin: GPIO36            # Était: external_clock_pin
+  xclk_freq: 24000000         # Était: frequency
+  sensor_addr: 0x36           # Optionnel (0x36 par défaut pour sc202cs)
+  resolution: 720P
+  pixel_format: RGB565        # JPEG ou RGB565
+  framerate: 30
+  jpeg_quality: 10            # Uniquement si pixel_format: JPEG
+  # Note: mirror_x, mirror_y, rotation ne sont plus supportés dans la config
+  # Ces paramètres doivent être gérés au niveau du driver du capteur
+
+# Options disponibles:
+# - sensor_type: "sc202cs" (défaut), "ov5647", "ov02c10"
+# - xclk_pin: Pin GPIO pour l'horloge externe (défaut: GPIO36)
+# - xclk_freq: Fréquence de l'horloge en Hz (défaut: 24000000)
+# - sensor_addr: Adresse I2C du capteur en hexadécimal (défaut: 0x36)
+# - resolution: "720P", "1080P", etc.
+# - pixel_format: "RGB565" ou "JPEG"
+# - framerate: 1-60 fps (défaut: 30)
+# - jpeg_quality: 1-63 si pixel_format est JPEG (défaut: 10)

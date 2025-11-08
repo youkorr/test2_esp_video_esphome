@@ -7,6 +7,8 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
+#include "esp_err.h"
 #include "hal/isp_types.h"
 
 #ifdef __cplusplus
@@ -234,3 +236,15 @@ typedef struct esp_ipa_pipeline {
     uint8_t ipa_nums;      /*!< IPA numbers */
     esp_ipa_t **ipa_array; /*!< IPA array */
 } esp_ipa_pipeline_t;
+
+/**
+ * @brief IPA pipeline configuration
+ */
+typedef struct esp_ipa_config {
+    uint8_t ipa_nums;        /*!< Number of IPA algorithms */
+    const char **ipa_names;  /*!< IPA algorithm names array */
+} esp_ipa_config_t;
+
+#ifdef __cplusplus
+}
+#endif

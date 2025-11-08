@@ -10,4 +10,4 @@ entries:
 archive: *
 entries:
     * (cameras_detect_default);
-        cameras_detect -> flash_rodata KEEP() SURROUND(_esp_cam_sensor_detect_fn_array)
+        cameras_detect -> flash_rodata KEEP() SURROUND(__esp_cam_sensor_detect_fn_array)

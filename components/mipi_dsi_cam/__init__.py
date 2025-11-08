@@ -15,30 +15,72 @@ CaptureSnapshotAction = mipi_dsi_cam_ns.class_("CaptureSnapshotAction", automati
 
 # Configuration du composant
 CONF_SENSOR_TYPE = "sensor_type"
+CONF_SENSOR = "sensor"  # Alias pour compatibilité arrière
 CONF_I2C_ID = "i2c_id"
 CONF_LANE = "lane"
 CONF_XCLK_PIN = "xclk_pin"
+CONF_EXTERNAL_CLOCK_PIN = "external_clock_pin"  # Alias pour compatibilité arrière
 CONF_XCLK_FREQ = "xclk_freq"
+CONF_FREQUENCY = "frequency"  # Alias pour compatibilité arrière
 CONF_SENSOR_ADDR = "sensor_addr"
 CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FORMAT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
+CONF_MIRROR_X = "mirror_x"  # Accepté mais ignoré
+CONF_MIRROR_Y = "mirror_y"  # Accepté mais ignoré
+CONF_ROTATION = "rotation"  # Accepté mais ignoré
 CONF_FILENAME = "filename"
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(MipiDSICamComponent),
-    cv.Optional(CONF_SENSOR_TYPE, default="sc202cs"): cv.string,
-    cv.Optional(CONF_I2C_ID, default=0): cv.Any(cv.int_, cv.string),
-    cv.Optional(CONF_LANE, default=1): cv.int_range(min=1, max=4),
-    cv.Optional(CONF_XCLK_PIN, default="GPIO36"): cv.string,
-    cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_,
-    cv.Optional(CONF_SENSOR_ADDR, default=0x36): cv.hex_int,
-    cv.Optional(CONF_RESOLUTION, default="720P"): cv.string,
-    cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.string,
-    cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
-    cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
-}).extend(cv.COMPONENT_SCHEMA)
+def validate_and_normalize_config(config):
+    """Normalise la configuration pour accepter l'ancienne et la nouvelle syntaxe"""
+    # Compatibilité: sensor -> sensor_type
+    if CONF_SENSOR in config and CONF_SENSOR_TYPE not in config:
+        config[CONF_SENSOR_TYPE] = config[CONF_SENSOR]
+
+    # Compatibilité: external_clock_pin -> xclk_pin
+    if CONF_EXTERNAL_CLOCK_PIN in config and CONF_XCLK_PIN not in config:
+        config[CONF_XCLK_PIN] = config[CONF_EXTERNAL_CLOCK_PIN]
+
+    # Compatibilité: frequency -> xclk_freq
+    if CONF_FREQUENCY in config and CONF_XCLK_FREQ not in config:
+        config[CONF_XCLK_FREQ] = config[CONF_FREQUENCY]
+
+    # Valeur par défaut pour sensor_type si absent
+    if CONF_SENSOR_TYPE not in config:
+        config[CONF_SENSOR_TYPE] = "sc202cs"
+
+    return config
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema({
+        cv.GenerateID(): cv.declare_id(MipiDSICamComponent),
+        # Nouvelle syntaxe (préférée)
+        cv.Optional(CONF_SENSOR_TYPE): cv.string,
+        # Ancienne syntaxe (compatibilité)
+        cv.Optional(CONF_SENSOR): cv.string,
+        cv.Optional(CONF_I2C_ID, default=0): cv.Any(cv.int_, cv.string),
+        cv.Optional(CONF_LANE, default=1): cv.int_range(min=1, max=4),
+        # Nouvelle syntaxe (préférée)
+        cv.Optional(CONF_XCLK_PIN, default="GPIO36"): cv.string,
+        # Ancienne syntaxe (compatibilité)
+        cv.Optional(CONF_EXTERNAL_CLOCK_PIN): cv.string,
+        # Nouvelle syntaxe (préférée)
+        cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_,
+        # Ancienne syntaxe (compatibilité)
+        cv.Optional(CONF_FREQUENCY): cv.int_,
+        cv.Optional(CONF_SENSOR_ADDR, default=0x36): cv.hex_int,
+        cv.Optional(CONF_RESOLUTION, default="720P"): cv.string,
+        cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.string,
+        cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
+        cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
+        # Options obsolètes (acceptées mais ignorées)
+        cv.Optional(CONF_MIRROR_X): cv.boolean,
+        cv.Optional(CONF_MIRROR_Y): cv.boolean,
+        cv.Optional(CONF_ROTATION): cv.int_,
+    }).extend(cv.COMPONENT_SCHEMA),
+    validate_and_normalize_config
+)
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])

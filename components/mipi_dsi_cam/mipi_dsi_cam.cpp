@@ -13,7 +13,8 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 
-// Headers C - certains ont des extern "C" non fermés
+// Headers C avec protection extern "C"
+extern "C" {
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_types.h"
 #include "esp_video_init.h"
@@ -23,11 +24,7 @@
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
-
-// Fermer les extern "C" qui n'ont pas été fermés par les headers
-#ifdef __cplusplus
 }
-#endif
 
 namespace esphome {
 namespace mipi_dsi_cam {

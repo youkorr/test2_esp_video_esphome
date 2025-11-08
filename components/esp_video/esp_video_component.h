@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/components/i2c/i2c.h"
+#include "driver/gpio.h"  // For gpio_num_t
 
 namespace esphome {
 namespace esp_video {
@@ -30,9 +31,15 @@ class ESPVideoComponent : public Component {
   // Setter pour le bus I2C ESPHome
   void set_i2c_bus(i2c::I2CBus *bus) { this->i2c_bus_ = bus; }
 
+  // Setters pour XCLK (requis pour la détection des capteurs MIPI-CSI)
+  void set_xclk_pin(gpio_num_t pin) { this->xclk_pin_ = pin; }
+  void set_xclk_freq(uint32_t freq) { this->xclk_freq_ = freq; }
+
  protected:
   bool initialized_{false};
   i2c::I2CBus *i2c_bus_{nullptr};
+  gpio_num_t xclk_pin_{GPIO_NUM_36};     // Default XCLK pin for ESP32-P4
+  uint32_t xclk_freq_{24000000};         // Default 24MHz for MIPI-CSI sensors
 };
 
 }  // namespace esp_video
