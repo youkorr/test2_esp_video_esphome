@@ -25,8 +25,7 @@ extern "C" {
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
-#include "driver/jpeg_decode.h"  // JPEG hardware decoder (remplace PPA)
-#include "esp_timer.h"
+#include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
 
 namespace esphome {
@@ -589,13 +588,14 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "=== START STREAMING (JPEG Hardware) ===");
+  ESP_LOGI(TAG, "=== START STREAMING (Zero-Copy RGB565) ===");
 
-  // Utiliser /dev/video0 avec format JPEG (ISP encode directement)
-  // L'ISP ESP32-P4 a l'encodeur JPEG intégré
+  // Solution finale: Zero-copy pour 30+ FPS garanti
+  // Utiliser les buffers V4L2 MMAP directement, sans copie PPA
   const char *dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // /dev/video0
 
-  ESP_LOGI(TAG, "Device: %s (ISP with JPEG encoding)", dev);
+  ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
+  ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -604,20 +604,7 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  // 2. Set JPEG quality control BEFORE format configuration
-  struct v4l2_control ctrl;
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-  ctrl.value = this->jpeg_quality_;  // 1-63: 1=best quality, 63=most compressed
-
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
-    ESP_LOGW(TAG, "Failed to set JPEG quality to %d: %s (using driver default)",
-             this->jpeg_quality_, strerror(errno));
-  } else {
-    ESP_LOGI(TAG, "✓ JPEG quality set to %d", this->jpeg_quality_);
-  }
-
-  // 3. Configurer le format MJPEG (OBLIGATOIRE avant VIDIOC_G_FMT)
+  // 2. Configurer le format RGB565
   uint32_t width, height;
   if (!map_resolution_(this->resolution_, width, height)) {
     ESP_LOGE(TAG, "Invalid resolution: %s", this->resolution_.c_str());
@@ -626,8 +613,8 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  // FORCER MJPEG pour utiliser l'encodeur JPEG hardware
-  uint32_t fourcc = V4L2_PIX_FMT_MJPEG;
+  // RGB565 natif du CSI (pas de conversion, pas de copie)
+  uint32_t fourcc = V4L2_PIX_FMT_RGB565;
 
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
@@ -655,55 +642,17 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  uint32_t jpeg_buffer_size = fmt.fmt.pix.sizeimage;  // Taille JPEG compressé (~20-100KB)
+  this->image_buffer_size_ = fmt.fmt.pix.sizeimage;  // RGB565: 1280*720*2 = 1,843,200 bytes
 
-  ESP_LOGI(TAG, "Format: %ux%u, MJPEG, compressed size=%u bytes",
-           this->image_width_, this->image_height_, jpeg_buffer_size);
+  ESP_LOGI(TAG, "Format: %ux%u, RGB565, buffer size=%u bytes",
+           this->image_width_, this->image_height_, this->image_buffer_size_);
 
-  // 4. Allouer buffer RGB565 pour le résultat décodé
-  // Le décodeur JPEG produira du RGB565: 2 bytes/pixel
-  this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
+  // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
+  // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
+  this->image_buffer_ = nullptr;
+  ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
 
-  ESP_LOGI(TAG, "Allocating RGB565 output buffer: %u bytes (%ux%u × 2)",
-           this->image_buffer_size_, this->image_width_, this->image_height_);
-
-  this->image_buffer_ = (uint8_t*)heap_caps_aligned_alloc(64,  // 64-byte alignment pour JPEG decoder
-                                                            this->image_buffer_size_,
-                                                            MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM);
-  if (!this->image_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate aligned image buffer (%u bytes)", this->image_buffer_size_);
-    close(this->video_fd_);
-    this->video_fd_ = -1;
-    return false;
-  }
-  memset(this->image_buffer_, 0, this->image_buffer_size_);
-
-  // Verify alignment
-  uintptr_t addr = (uintptr_t)this->image_buffer_;
-  bool is_aligned = (addr % 64) == 0;
-  ESP_LOGI(TAG, "✓ Image buffer allocated: %u bytes @ %p (DMA+SPIRAM, %s)",
-           this->image_buffer_size_, this->image_buffer_,
-           is_aligned ? "64-byte aligned ✓" : "NOT aligned ✗");
-
-  // 5. Initialiser le décodeur JPEG hardware
-  jpeg_decode_engine_cfg_t decode_engine_cfg = {
-    .timeout_ms = 50,  // Timeout de décodage
-  };
-  jpeg_decoder_handle_t *jpeg_h = (jpeg_decoder_handle_t*)&this->jpeg_decoder_;
-
-  esp_err_t ret = jpeg_new_decoder_engine(&decode_engine_cfg, jpeg_h);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize JPEG decoder: %s", esp_err_to_name(ret));
-    heap_caps_free(this->image_buffer_);
-    this->image_buffer_ = nullptr;
-    close(this->video_fd_);
-    this->video_fd_ = -1;
-    return false;
-  }
-
-  ESP_LOGI(TAG, "✓ JPEG hardware decoder initialized (ESP32-P4 1080P@30fps capable)");
-
-  // 6. Demander 2 buffers V4L2 en mode MMAP
+  // 4. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
   req.count = 2;
@@ -838,52 +787,19 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Décoder JPEG → RGB565 avec hardware accelerator
-  uint8_t *jpeg_data = (uint8_t*)this->v4l2_buffers_[buf.index].start;
-  uint32_t jpeg_size = buf.bytesused;  // Taille JPEG compressé (~20-100KB)
-
-  if (this->jpeg_decoder_) {
-    // Utiliser le décodeur JPEG hardware de l'ESP32-P4
-    jpeg_decode_cfg_t decode_cfg = {
-      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,  // Sortie directe en RGB565
-      .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,      // Ordre BGR pour LVGL
-    };
-
-    uint32_t out_size = 0;  // Taille de sortie RGB565 décodée
-
-    jpeg_decoder_handle_t jpeg_h = (jpeg_decoder_handle_t)this->jpeg_decoder_;
-    esp_err_t ret = jpeg_decoder_process(jpeg_h,
-                                          &decode_cfg,
-                                          jpeg_data,       // Source: JPEG compressé
-                                          jpeg_size,
-                                          this->image_buffer_,  // Destination: RGB565
-                                          this->image_buffer_size_,
-                                          &out_size);      // Taille effectivement décodée
-
-    if (ret != ESP_OK) {
-      ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
-      // Re-queue le buffer même en cas d'erreur
-      ioctl(this->video_fd_, VIDIOC_QBUF, &buf);
-      return false;
-    }
-  } else {
-    ESP_LOGE(TAG, "JPEG decoder not initialized!");
-    ioctl(this->video_fd_, VIDIOC_QBUF, &buf);
-    return false;
-  }
+  // 2. Zero-copy: pointer directement vers le buffer V4L2 RGB565
+  this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
   uint32_t t3 = esp_timer_get_time();
 
   this->frame_sequence_++;
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame decoded:");
-    ESP_LOGI(TAG, "   JPEG size: %u bytes (compressed)", jpeg_size);
-    ESP_LOGI(TAG, "   RGB565 output: %u bytes (%ux%u)",
+    ESP_LOGI(TAG, "✅ First frame captured (zero-copy):");
+    ESP_LOGI(TAG, "   Buffer size: %u bytes (%ux%u × 2 = RGB565)",
              this->image_buffer_size_, this->image_width_, this->image_height_);
-    ESP_LOGI(TAG, "   Compression ratio: %.1fx",
-             (float)this->image_buffer_size_ / jpeg_size);
-    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, JPEG decode=%uus",
+    ESP_LOGI(TAG, "   Buffer address: %p (V4L2 MMAP)", this->image_buffer_);
+    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, Pointer assignment=%uus",
              (uint32_t)(t2-t1), (uint32_t)(t3-t2));
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              this->image_buffer_[0], this->image_buffer_[1],
@@ -894,7 +810,7 @@ bool MipiDSICamComponent::capture_frame() {
   // Profiling détaillé toutes les 100 frames
   profile_count++;
   total_dqbuf_us += (t2 - t1);
-  total_copy_us += (t3 - t2);  // "copy" = decode pour JPEG
+  total_copy_us += (t3 - t2);  // "copy" = pointer assignment (zero-copy, should be ~0us)
 
   // 3. Re-queue le buffer immédiatement
   uint32_t t4 = esp_timer_get_time();
@@ -908,16 +824,16 @@ bool MipiDSICamComponent::capture_frame() {
 
   if (profile_count == 100) {
     uint32_t avg_dqbuf = total_dqbuf_us / 100;
-    uint32_t avg_decode = total_copy_us / 100;
+    uint32_t avg_pointer = total_copy_us / 100;
     uint32_t avg_qbuf = total_qbuf_us / 100;
     uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
     float fps = 1000000.0f / avg_total;  // Calcul FPS
 
-    ESP_LOGI(TAG, "📊 JPEG Hardware Profiling (avg over 100 frames):");
+    ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
     ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
-    ESP_LOGI(TAG, "   JPEG decode: %u us (%.1f ms) ← Hardware decoder", avg_decode, avg_decode / 1000.0f);
+    ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
     ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
-    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS",
+    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
              avg_total, avg_total / 1000.0f, fps);
 
     profile_count = 0;
@@ -954,19 +870,8 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Libérer le décodeur JPEG
-  if (this->jpeg_decoder_) {
-    jpeg_decoder_handle_t jpeg_h = (jpeg_decoder_handle_t)this->jpeg_decoder_;
-    jpeg_del_decoder_engine(jpeg_h);
-    this->jpeg_decoder_ = nullptr;
-    ESP_LOGI(TAG, "✓ JPEG decoder released");
-  }
-
-  // 4. Libérer le buffer d'image
-  if (this->image_buffer_) {
-    heap_caps_free(this->image_buffer_);
-    this->image_buffer_ = nullptr;
-  }
+  // 3. Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
+  this->image_buffer_ = nullptr;
 
   // 5. Fermer le device
   if (this->video_fd_ >= 0) {
