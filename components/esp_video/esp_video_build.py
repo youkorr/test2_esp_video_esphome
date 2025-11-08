@@ -12,8 +12,8 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
-print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
+# print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
+# print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
 
 # Liste de tous les fichiers sources à compiler
 sources_to_add = []
@@ -41,7 +41,7 @@ for src in esp_video_sources:
     src_path = os.path.join(component_dir, src)
     if os.path.exists(src_path):
         sources_to_add.append(src_path)
-        print(f"[ESP-Video Build] + {src}")
+        # print(f"[ESP-Video Build] + {src}")
 
 # ========================================================================
 # Sources esp_cam_sensor
@@ -124,7 +124,7 @@ if os.path.exists(esp_h264_dir):
     if os.path.exists(h264_static_libs_dir):
         env.Append(LIBPATH=[h264_static_libs_dir])
         env.Append(LIBS=["openh264", "tinyh264"])
-        print(f"[ESP-Video Build] 📚 Bibliothèques H.264 ajoutées: libopenh264.a, libtinyh264.a")
+        # print(f"[ESP-Video Build] 📚 Bibliothèques H.264 ajoutées: libopenh264.a, libtinyh264.a")
 
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
@@ -141,10 +141,10 @@ esp_ipa_sources = [
     "src/esp_ipa_detect_stubs.c", # Detection array
 ]
 
-print("")
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
-print("[ESP-Video Build] ========================================")
+# print("")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
+# print("[ESP-Video Build] ========================================")
 
 if os.path.exists(esp_ipa_dir):
     for src in esp_ipa_sources:
@@ -152,14 +152,15 @@ if os.path.exists(esp_ipa_dir):
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[ESP-Video Build] ✓ esp_ipa/{src} -> libesp_video_full.a")
-    print("[ESP-Video Build]")
-    print("[ESP-Video Build] Ces sources seront dans libesp_video_full.a")
-    print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
-    print("[ESP-Video Build] ========================================")
+    # print("[ESP-Video Build]")
+    # print("[ESP-Video Build] Ces sources seront dans libesp_video_full.a")
+    # print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
+    # print("[ESP-Video Build] ========================================")
 else:
-    print("[ESP-Video Build] ⚠️  Répertoire esp_ipa introuvable!")
+    pass
+    # print("[ESP-Video Build] ⚠️  Répertoire esp_ipa introuvable!")
 
-print("")
+# print("")
 
 # ========================================================================
 # Sources esp_sccb_intf
@@ -180,10 +181,10 @@ if os.path.exists(esp_sccb_intf_dir):
 # ========================================================================
 # Embarquer les fichiers JSON IPA des capteurs comme binary data
 # ========================================================================
-print("")
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
-print("[ESP-Video Build] ========================================")
+# print("")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
+# print("[ESP-Video Build] ========================================")
 
 # Liste des fichiers JSON à embarquer
 json_files_to_embed = [
@@ -246,10 +247,11 @@ const char {symbol_name}_start[] __attribute__((aligned(4))) =
         except Exception as e:
             print(f"[ESP-Video Build] ⚠️  Erreur lors de l'embedding de {json_path}: {e}")
     else:
-        print(f"[ESP-Video Build] ⚠️  Fichier JSON introuvable: {json_path}")
+        pass
+        # print(f"[ESP-Video Build] ⚠️  Fichier JSON introuvable: {json_path}")
 
-print("[ESP-Video Build] ========================================")
-print("")
+# print("[ESP-Video Build] ========================================")
+# print("")
 
 # ========================================================================
 # Forcer la recompilation en modifiant le timestamp ET supprimant les .o
@@ -263,8 +265,8 @@ force_rebuild_files = [
     os.path.join(esp_cam_sensor_dir, "src/esp_cam_sensor_detect_stubs.c"),
 ]
 
-print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+# print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
 
 # Étape 1: Supprimer tous les .o correspondants PARTOUT
 build_root = env.subst("$PROJECT_BUILD_DIR")
@@ -286,12 +288,13 @@ for src_file in force_rebuild_files:
         # Modifier le timestamp du fichier pour forcer SCons à le recompiler
         current_time = time_module.time()
         os.utime(src_file, (current_time, current_time))
-        print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
-        print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
+        # print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
+        # print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
     else:
-        print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
+        pass
+        # print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
 
-print("[ESP-Video Build] ========================================")
+# print("[ESP-Video Build] ========================================")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
@@ -328,8 +331,8 @@ if sources_to_add:
     # Ajouter la bibliothèque au linkage (PREPEND = avant les autres libs)
     env.Prepend(LIBS=[lib])
 
-    print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
-    print(f"[ESP-Video Build] ✓ libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
+    # print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
+    # print(f"[ESP-Video Build] ✓ libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
 
     # Maintenant linker avec libesp_ipa.a pour les fonctions IPA internes
     # Le linker utilisera notre version.o de libesp_video_full.a (déjà Prepend ci-dessus)
@@ -338,14 +341,20 @@ if sources_to_add:
     if os.path.exists(esp_ipa_lib_dir):
         env.Append(LIBPATH=[esp_ipa_lib_dir])
         env.Append(LIBS=["esp_ipa"])
-        print("")
-        print("[ESP-Video Build] ========================================")
-        print("[ESP-Video Build] ✓ Linking avec libesp_ipa.a (fonctions IPA internes)")
-        print("[ESP-Video Build]   Ordre de linking:")
-        print("[ESP-Video Build]   1. libesp_video_full.a (version.o custom)")
-        print("[ESP-Video Build]   2. libesp_ipa.a (fonctions internes seulement)")
-        print("[ESP-Video Build] ========================================")
+        # print("")
+        # print("[ESP-Video Build] ========================================")
+        # print("[ESP-Video Build] ✓ Linking avec libesp_ipa.a (fonctions IPA internes)")
+        # print("[ESP-Video Build]   Ordre de linking:")
+        # print("[ESP-Video Build]   1. libesp_video_full.a (version.o custom)")
+        # print("[ESP-Video Build]   2. libesp_ipa.a (fonctions internes seulement)")
+        # print("[ESP-Video Build] ========================================")
     else:
-        print("[ESP-Video Build] ⚠️  libesp_ipa.a introuvable!")
+        # print("[ESP-Video Build] ⚠️  libesp_ipa.a introuvable!")
+        pass
 else:
-    print("[ESP-Video Build] ⚠️ Aucune source trouvée!")
+    # print("[ESP-Video Build] ⚠️ Aucune source trouvée!")
+    pass
+
+# Message simple final
+if sources_to_add:
+    print("esp-video: ok")

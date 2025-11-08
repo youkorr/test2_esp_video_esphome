@@ -59,11 +59,10 @@ static inline int safe_ioctl_(int fd, unsigned long req, void *arg, const char *
 static bool open_node_(const char *node, int *fd_out) {
   int fd = open(node, O_RDWR | O_NONBLOCK);
   if (fd < 0) {
-    ESP_LOGE(TAG, "open(%s) a échoué: errno=%d (%s)", node, errno, strerror(errno));
+    // Silencieux, sauf si réellement utilisé (erreur rapportée par appelant si nécessaire)
     return false;
   }
   *fd_out = fd;
-  ESP_LOGI(TAG, "Ouvert: %s (fd=%d)", node, fd);
   return true;
 }
 
@@ -124,7 +123,6 @@ static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_
     close_fd_(fd);
     return false;
   }
-  ESP_LOGI(TAG, "ISP S_FMT: %ux%u FOURCC=0x%08X", fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.pixelformat);
 
   if (fps > 0) {
     struct v4l2_streamparm parm;
@@ -132,12 +130,7 @@ static bool isp_apply_fmt_fps_(const std::string &res_s, const std::string &fmt_
     parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     parm.parm.capture.timeperframe.numerator = 1;
     parm.parm.capture.timeperframe.denominator = fps;
-
-    if (safe_ioctl_(fd, VIDIOC_S_PARM, &parm, "VIDIOC_S_PARM") < 0) {
-      ESP_LOGW(TAG, "Impossible d'appliquer FPS=%d", fps);
-    } else {
-      ESP_LOGI(TAG, "ISP S_PARM: FPS=%d", fps);
-    }
+    (void)safe_ioctl_(fd, VIDIOC_S_PARM, &parm, "VIDIOC_S_PARM");
   }
 
   close_fd_(fd);
@@ -156,11 +149,7 @@ static bool jpeg_apply_quality_(int quality) {
   ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
   ctrl.value = quality;
 
-  if (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(JPEG_QUALITY)") < 0) {
-    ESP_LOGW(TAG, "Impossible de régler la qualité JPEG");
-  } else {
-    ESP_LOGI(TAG, "Encodeur JPEG: Qualité=%d", quality);
-  }
+  (void)safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(JPEG_QUALITY)");
 
   close_fd_(fd);
   return true;
@@ -169,16 +158,13 @@ static bool jpeg_apply_quality_(int quality) {
 static bool h264_apply_basic_params_(int /*fps*/) {
   int fd = -1;
   if (!open_node_(ESP_VIDEO_H264_DEVICE_NAME, &fd)) return false;
-  ESP_LOGI(TAG, "Encodeur H.264 ouvert pour configuration");
   close_fd_(fd);
   return true;
 }
 
 void MipiDSICamComponent::cleanup_pipeline_() {
-  ESP_LOGW(TAG, "Nettoyage du pipeline vidéo...");
   // Le pipeline est géré par le composant esp_video
   this->pipeline_started_ = false;
-  ESP_LOGI(TAG, "Pipeline vidéo marqué comme arrêté");
 }
 
 bool MipiDSICamComponent::check_pipeline_health_() {
@@ -198,25 +184,11 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 }
 
 void MipiDSICamComponent::setup() {
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, " Initialisation MIPI-DSI-CAM");
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "Capteur      : %s", this->sensor_name_.c_str());
-  ESP_LOGI(TAG, "Résolution   : %s", this->resolution_.c_str());
-  ESP_LOGI(TAG, "Format Pixel : %s", this->pixel_format_.c_str());
-  ESP_LOGI(TAG, "Framerate    : %d FPS", this->framerate_);
-  ESP_LOGI(TAG, "Qualité JPEG : %d", this->jpeg_quality_);
-
+  // Vérifier mémoire disponible
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
-  ESP_LOGI(TAG, "Mémoire libre: %u octets", (unsigned)free_heap);
-
   if (free_heap < MIN_FREE_HEAP * 2) {
-    ESP_LOGW(TAG, "⚠️ Mémoire faible pour l'initialisation (%u octets)", (unsigned)free_heap);
+    ESP_LOGW(TAG, "⚠️ Low memory: %u bytes (min: %u)", (unsigned)free_heap, (unsigned)(MIN_FREE_HEAP * 2));
   }
-
-  // Le pipeline ESP-Video est géré par le composant esp_video
-  // Nous configurons seulement les paramètres V4L2
-  ESP_LOGI(TAG, "✓ Pipeline ESP-Video géré par le composant esp_video");
 
   // Vérifier que les devices nécessaires sont disponibles
   bool isp_available = false;
@@ -228,9 +200,6 @@ void MipiDSICamComponent::setup() {
   if (open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &test_fd)) {
     isp_available = true;
     close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ ISP détecté: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ ISP non disponible: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
   }
 
   // Tester si JPEG est disponible
@@ -238,9 +207,6 @@ void MipiDSICamComponent::setup() {
   if (open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &test_fd)) {
     jpeg_available = true;
     close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ Encodeur JPEG détecté: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ Encodeur JPEG non disponible: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
   }
 
   // Tester si H264 est disponible
@@ -248,82 +214,53 @@ void MipiDSICamComponent::setup() {
   if (open_node_(ESP_VIDEO_H264_DEVICE_NAME, &test_fd)) {
     h264_available = true;
     close_fd_(test_fd);
-    ESP_LOGI(TAG, "✓ Encodeur H.264 détecté: %s", ESP_VIDEO_H264_DEVICE_NAME);
-  } else {
-    ESP_LOGW(TAG, "✗ Encodeur H.264 non disponible: %s", ESP_VIDEO_H264_DEVICE_NAME);
   }
 
   // Vérifier qu'au moins un device est disponible
   if (!isp_available && !jpeg_available && !h264_available) {
-    ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "❌ ERREUR: Aucun device vidéo disponible!");
-    ESP_LOGE(TAG, "==============================");
-    ESP_LOGE(TAG, "Les devices suivants sont requis:");
-    ESP_LOGE(TAG, "  - ISP: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - JPEG: %s", ESP_VIDEO_JPEG_DEVICE_NAME);
-    ESP_LOGE(TAG, "  - H.264: %s", ESP_VIDEO_H264_DEVICE_NAME);
-    ESP_LOGE(TAG, "");
-    ESP_LOGE(TAG, "Vérifiez votre configuration esp_video:");
-    ESP_LOGE(TAG, "  esp_video:");
-    ESP_LOGE(TAG, "    enable_isp: true    # Requis pour RGB565/YUYV");
-    ESP_LOGE(TAG, "    enable_jpeg: true   # Requis pour JPEG/MJPEG");
-    ESP_LOGE(TAG, "    enable_h264: true   # Requis pour H.264");
-    ESP_LOGE(TAG, "==============================");
+    ESP_LOGE(TAG, "ERROR: No video devices available");
+    ESP_LOGE(TAG, "  Required: ISP(%s), JPEG(%s), or H264(%s)",
+             ESP_VIDEO_ISP1_DEVICE_NAME, ESP_VIDEO_JPEG_DEVICE_NAME, ESP_VIDEO_H264_DEVICE_NAME);
+    ESP_LOGE(TAG, "  Enable in esp_video: enable_isp/enable_jpeg/enable_h264: true");
     this->pipeline_started_ = false;
     this->mark_failed();
     return;
   }
 
-  // L'ISP est configuré AUTOMATIQUEMENT par esp_video_init()
-  // Pas besoin de configuration manuelle via VIDIOC_S_FMT sur /dev/video20
-  // Le pipeline se configure quand on démarre le streaming sur /dev/video0
-  if (isp_available && !wants_jpeg_(this->pixel_format_) && !wants_h264_(this->pixel_format_)) {
-    ESP_LOGI(TAG, "✓ ISP sera utilisé automatiquement dans le pipeline de capture");
-    ESP_LOGI(TAG, "  Format demandé: %s @ %s", this->pixel_format_.c_str(), this->resolution_.c_str());
-  }
-
   // Configurer l'encodeur JPEG si nécessaire
   if (wants_jpeg_(this->pixel_format_)) {
     if (!jpeg_available) {
-      ESP_LOGE(TAG, "❌ Format JPEG demandé mais encodeur JPEG non disponible");
-      ESP_LOGE(TAG, "   Activez enable_jpeg: true dans esp_video");
+      ESP_LOGE(TAG, "ERROR: JPEG format requested but JPEG encoder not available (enable_jpeg: true)");
       this->pipeline_started_ = false;
       this->mark_failed();
       return;
     }
     if (!jpeg_apply_quality_(this->jpeg_quality_)) {
-      ESP_LOGW(TAG, "⚠️ Qualité JPEG non appliquée");
-    } else {
-      ESP_LOGI(TAG, "✓ Encodeur JPEG configuré (qualité: %d)", this->jpeg_quality_);
+      ESP_LOGW(TAG, "WARNING: JPEG quality not applied");
     }
   }
 
   // Configurer l'encodeur H264 si nécessaire
   if (wants_h264_(this->pixel_format_)) {
     if (!h264_available) {
-      ESP_LOGE(TAG, "❌ Format H.264 demandé mais encodeur H.264 non disponible");
-      ESP_LOGE(TAG, "   Activez enable_h264: true dans esp_video");
+      ESP_LOGE(TAG, "ERROR: H264 format requested but H264 encoder not available (enable_h264: true)");
       this->pipeline_started_ = false;
       this->mark_failed();
       return;
     }
     (void)h264_apply_basic_params_(this->framerate_);
-    ESP_LOGI(TAG, "✓ Encodeur H.264 configuré");
   }
 
   this->pipeline_started_ = true;
   this->last_health_check_ = millis();
 
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "✅ Configuration caméra prête!");
-  ESP_LOGI(TAG, "   Format: %s", this->pixel_format_.c_str());
-  if (isp_available) ESP_LOGI(TAG, "   ISP: Disponible");
-  if (jpeg_available) ESP_LOGI(TAG, "   JPEG: Disponible");
-  if (h264_available) ESP_LOGI(TAG, "   H.264: Disponible");
-  ESP_LOGI(TAG, "==============================");
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "ℹ️  Le streaming vidéo n'est PAS démarré automatiquement");
-  ESP_LOGI(TAG, "   Utilisez start_streaming() / stop_streaming() pour contrôler");
+  // Messages simples de succès
+  ESP_LOGI(TAG, "esp-cam-sensor: ok (%s)", this->sensor_name_.c_str());
+  if (isp_available) ESP_LOGI(TAG, "esp-video-isp: ok");
+  if (jpeg_available) ESP_LOGI(TAG, "jpeg-encoder: ok");
+  if (h264_available) ESP_LOGI(TAG, "h264-encoder: ok");
+  ESP_LOGI(TAG, "Camera ready: %s @ %s (%d fps)",
+           this->pixel_format_.c_str(), this->resolution_.c_str(), this->framerate_);
 }
 
 void MipiDSICamComponent::loop() {
@@ -588,14 +525,14 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "=== START STREAMING (Zero-Copy RGB565) ===");
+  // ESP_LOGI(TAG, "=== START STREAMING (Zero-Copy RGB565) ===");
 
   // Solution finale: Zero-copy pour 30+ FPS garanti
   // Utiliser les buffers V4L2 MMAP directement, sans copie PPA
   const char *dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // /dev/video0
 
-  ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
-  ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
+  // ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
+  // ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -642,15 +579,17 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  this->image_buffer_size_ = fmt.fmt.pix.sizeimage;  // RGB565: 1280*720*2 = 1,843,200 bytes
+  // Note: fmt.fmt.pix.sizeimage peut retourner 0 avec certains drivers V4L2
+  // La vraie taille sera récupérée des buffers V4L2 plus tard
+  this->image_buffer_size_ = 0;
 
-  ESP_LOGI(TAG, "Format: %ux%u, RGB565, buffer size=%u bytes",
-           this->image_width_, this->image_height_, this->image_buffer_size_);
+  // ESP_LOGI(TAG, "Format: %ux%u, RGB565",
+  //          this->image_width_, this->image_height_);
 
   // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
   // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
   this->image_buffer_ = nullptr;
-  ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
+  // ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
 
   // 4. Demander 2 buffers V4L2 en mode MMAP
   struct v4l2_requestbuffers req;
@@ -666,7 +605,7 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
+  // ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
 
   // 7. Mapper et queuer les buffers
   for (unsigned int i = 0; i < 2; i++) {
@@ -693,8 +632,14 @@ bool MipiDSICamComponent::start_streaming() {
       return false;
     }
 
-    ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
-             i, buf.length, this->v4l2_buffers_[i].start);
+    // ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
+    //          i, buf.length, this->v4l2_buffers_[i].start);
+
+    // Utiliser la taille réelle du buffer V4L2 (au lieu de fmt.fmt.pix.sizeimage qui peut être 0)
+    if (i == 0) {
+      this->image_buffer_size_ = buf.length;
+      // ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
+    }
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
       ESP_LOGE(TAG, "VIDIOC_QBUF[%u] failed: %s", i, strerror(errno));
@@ -714,48 +659,63 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming started (JPEG Hardware)");
-  ESP_LOGI(TAG, "   → CSI controller active");
-  ESP_LOGI(TAG, "   → ISP active");
-  ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
-  ESP_LOGI(TAG, "   → %s decode to LVGL buffer", this->jpeg_decoder_ ? "JPEG hardware" : "memcpy");
+  ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
-  // Test 2: Memory zone analysis (PPA performance investigation)
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
+  // Logs détaillés commentés pour réduire verbosité
+  // ESP_LOGI(TAG, "   → CSI controller active");
+  // ESP_LOGI(TAG, "   → ISP active");
+  // ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
+  // ESP_LOGI(TAG, "   → Zero-copy: LVGL uses V4L2 buffers directly (no PPA, no copy)");
+  //
+  // // Test 2: Memory zone analysis (PPA performance investigation)
+  // ESP_LOGI(TAG, "");
+  // ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
+  //
+  // // Analyze V4L2 buffers
+  // for (int i = 0; i < 2; i++) {
+  //   uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
+  //   const char* zone = "UNKNOWN";
+  //   if (addr >= 0x48000000 && addr < 0x4C000000) {
+  //     zone = "SPIRAM (0x48000000-0x4C000000)";
+  //   } else if (addr >= 0x40800000 && addr < 0x40900000) {
+  //     zone = "SRAM (0x40800000-0x40900000)";
+  //   } else if (addr >= 0x40000000 && addr < 0x40800000) {
+  //     zone = "IRAM/DRAM";
+  //   }
+  //   ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
+  // }
+  //
+  // // Analyze image_buffer_
+  // uintptr_t img_addr = (uintptr_t)this->image_buffer_;
+  // const char* img_zone = "UNKNOWN";
+  // if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
+  //   img_zone = "SPIRAM (0x48000000-0x4C000000)";
+  // } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
+  //   img_zone = "SRAM (0x40800000-0x40900000)";
+  // } else if (img_addr >= 0x40000000 && addr < 0x40800000) {
+  //   img_zone = "IRAM/DRAM";
+  // }
+  // ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
+  //
+  // ESP_LOGI(TAG, "");
+  // ESP_LOGI(TAG, "💡 PPA Performance Notes:");
+  // ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
+  // ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
+  // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
+  // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
-  // Analyze V4L2 buffers
-  for (int i = 0; i < 2; i++) {
-    uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
-    const char* zone = "UNKNOWN";
-    if (addr >= 0x48000000 && addr < 0x4C000000) {
-      zone = "SPIRAM (0x48000000-0x4C000000)";
-    } else if (addr >= 0x40800000 && addr < 0x40900000) {
-      zone = "SRAM (0x40800000-0x40900000)";
-    } else if (addr >= 0x40000000 && addr < 0x40800000) {
-      zone = "IRAM/DRAM";
+  // Auto-appliquer les gains RGB CCM si configurés dans YAML
+  if (this->rgb_gains_enabled_) {
+    // Attendre que streaming soit stable (100ms)
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
+      // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
+      //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
+    } else {
+      ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
     }
-    ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
   }
-
-  // Analyze image_buffer_
-  uintptr_t img_addr = (uintptr_t)this->image_buffer_;
-  const char* img_zone = "UNKNOWN";
-  if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
-    img_zone = "SPIRAM (0x48000000-0x4C000000)";
-  } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
-    img_zone = "SRAM (0x40800000-0x40900000)";
-  } else if (img_addr >= 0x40000000 && img_addr < 0x40800000) {
-    img_zone = "IRAM/DRAM";
-  }
-  ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
-
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "💡 PPA Performance Notes:");
-  ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
-  ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
-  ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
-  ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
   return true;
 }
@@ -823,18 +783,19 @@ bool MipiDSICamComponent::capture_frame() {
   total_qbuf_us += (t5 - t4);
 
   if (profile_count == 100) {
-    uint32_t avg_dqbuf = total_dqbuf_us / 100;
-    uint32_t avg_pointer = total_copy_us / 100;
-    uint32_t avg_qbuf = total_qbuf_us / 100;
-    uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
-    float fps = 1000000.0f / avg_total;  // Calcul FPS
-
-    ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
-    ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
-    ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
-    ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
-    ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
-             avg_total, avg_total / 1000.0f, fps);
+    // Logs de profiling commentés pour réduire verbosité
+    // uint32_t avg_dqbuf = total_dqbuf_us / 100;
+    // uint32_t avg_pointer = total_copy_us / 100;
+    // uint32_t avg_qbuf = total_qbuf_us / 100;
+    // uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
+    // float fps = 1000000.0f / avg_total;  // Calcul FPS
+    //
+    // ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
+    // ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
+    // ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
+    // ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
+    // ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
+    //          avg_total, avg_total / 1000.0f, fps);
 
     profile_count = 0;
     total_dqbuf_us = 0;
@@ -850,7 +811,7 @@ void MipiDSICamComponent::stop_streaming() {
     return;
   }
 
-  ESP_LOGI(TAG, "=== STOP STREAMING ===");
+  // ESP_LOGI(TAG, "=== STOP STREAMING ===");
 
   // 1. Arrêter le streaming
   if (this->video_fd_ >= 0) {
@@ -884,7 +845,440 @@ void MipiDSICamComponent::stop_streaming() {
   this->image_height_ = 0;
   this->image_buffer_size_ = 0;
 
-  ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
+  // ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
+}
+
+// ============================================================================
+// Contrôles Manuels d'Exposition et Balance des Blancs
+// ============================================================================
+
+/**
+ * @brief Définir l'exposition manuelle du capteur
+ *
+ * Permet de contrôler manuellement l'exposition pour corriger la surexposition.
+ * Désactive temporairement l'AEC automatique.
+ *
+ * @param value Valeur d'exposition (0-65535). Valeurs typiques:
+ *              - 1000-5000: Très faible exposition (scènes très lumineuses)
+ *              - 5000-15000: Faible exposition (scènes lumineuses)
+ *              - 15000-30000: Exposition normale (défaut)
+ *              - 30000-50000: Haute exposition (scènes sombres)
+ *              - 0: Réactiver AEC automatique
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_exposure(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set exposure: streaming not active");
+    return false;
+  }
+
+  // V4L2_CID_EXPOSURE_ABSOLUTE control
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+
+  if (value == 0) {
+    // Réactiver AEC automatique
+    ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+    ctrl.value = V4L2_EXPOSURE_AUTO;  // Auto exposure
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGE(TAG, "Failed to enable auto exposure: %s", strerror(errno));
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ Auto exposure enabled (AEC active)");
+  } else {
+    // Désactiver AEC et définir exposition manuelle
+    ctrl.id = V4L2_CID_EXPOSURE_AUTO;
+    ctrl.value = V4L2_EXPOSURE_MANUAL;  // Manual exposure
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGW(TAG, "Failed to disable auto exposure: %s", strerror(errno));
+      // Continue anyway, try to set exposure value
+    }
+
+    // Définir la valeur d'exposition
+    ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
+    ctrl.value = value;
+
+    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+      ESP_LOGE(TAG, "Failed to set exposure to %d: %s", value, strerror(errno));
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ Manual exposure set to %d (AEC disabled)", value);
+  }
+
+  return true;
+}
+
+/**
+ * @brief Définir le gain manuel du capteur
+ *
+ * Contrôle le gain analogique/numérique du capteur.
+ *
+ * @param value Valeur de gain (1000-16000):
+ *              - 1000: 1x (gain minimum, image la plus sombre)
+ *              - 2000: 2x
+ *              - 4000: 4x
+ *              - 8000: 8x (défaut recommandé)
+ *              - 16000: 16x (gain maximum, image la plus claire mais bruitée)
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_gain(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set gain: streaming not active");
+    return false;
+  }
+
+  // V4L2_CID_GAIN control
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_GAIN;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set gain to %d: %s", value, strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ Gain set to %d (%.1fx)", value, value / 1000.0f);
+  return true;
+}
+
+/**
+ * @brief Activer/désactiver la balance des blancs automatique
+ *
+ * @param auto_mode true pour AWB automatique, false pour manuel
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance mode: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  ctrl.value = auto_mode ? 1 : 0;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set white balance mode: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ White balance: %s", auto_mode ? "AUTO (AWB enabled)" : "MANUAL");
+  return true;
+}
+
+/**
+ * @brief Définir la température de couleur manuelle (balance des blancs)
+ *
+ * Permet de corriger la dominante de couleur (ex: blanc → vert).
+ * Nécessite que AWB soit désactivé (set_white_balance_mode(false)).
+ *
+ * @param kelvin Température de couleur en Kelvin:
+ *               - 2800K: Lampe incandescente (jaune/orange)
+ *               - 3200K: Lampe halogène
+ *               - 4000K: Fluorescent blanc froid
+ *               - 5000K: Lumière du jour (neutre)
+ *               - 5500K: Flash électronique (défaut recommandé)
+ *               - 6500K: Ciel nuageux (bleuté)
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance temperature: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
+  ctrl.value = kelvin;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set white balance temperature to %dK: %s", kelvin, strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ White balance temperature set to %dK", kelvin);
+  return true;
+}
+
+/**
+ * @brief Définir la matrice CCM (Color Correction Matrix) complète 3x3
+ *
+ * Permet une correction couleur avancée en configurant directement la matrice
+ * de correction couleur de l'ISP. Chaque élément peut être dans [-4.0, 4.0].
+ *
+ * Formule: [R_out, G_out, B_out] = matrix × [R_in, G_in, B_in]
+ *
+ * @param matrix Matrice 3x3 float (row-major order):
+ *               matrix[0][0..2]: Coefficients pour R_out
+ *               matrix[1][0..2]: Coefficients pour G_out
+ *               matrix[2][0..2]: Coefficients pour B_out
+ *
+ * Exemple d'identité (aucune correction):
+ *   {{1.0, 0.0, 0.0},
+ *    {0.0, 1.0, 0.0},
+ *    {0.0, 0.0, 1.0}}
+ *
+ * Exemple correction blanc→vert (M5Stack):
+ *   {{1.5, 0.0, 0.0},   // Booster rouge
+ *    {0.0, 1.0, 0.0},   // Vert normal
+ *    {0.0, 0.0, 1.6}}   // Booster bleu
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set CCM matrix: streaming not active");
+    return false;
+  }
+
+  // Créer structure CCM avec matrice fournie
+  esp_video_isp_ccm_t ccm_config;
+  memset(&ccm_config, 0, sizeof(ccm_config));
+  ccm_config.enable = true;
+
+  // Copier matrice (dimensions vérifiées par ISP_CCM_DIMENSION)
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 3; j++) {
+      ccm_config.matrix[i][j] = matrix[i][j];
+    }
+  }
+
+  // Configurer via V4L2 ioctl avec CID personnalisé ESP32
+  struct v4l2_ext_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_USER_ESP_ISP_CCM;
+  ctrl.ptr = &ccm_config;
+  ctrl.size = sizeof(ccm_config);
+
+  struct v4l2_ext_controls ctrls;
+  memset(&ctrls, 0, sizeof(ctrls));
+  ctrls.count = 1;
+  ctrls.controls = &ctrl;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+    ESP_LOGE(TAG, "Failed to set CCM matrix: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ CCM matrix configured:");
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[0][0], matrix[0][1], matrix[0][2]);
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[1][0], matrix[1][1], matrix[1][2]);
+  ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[2][0], matrix[2][1], matrix[2][2]);
+  return true;
+}
+
+/**
+ * @brief Définir les gains RGB de manière simplifiée (matrice diagonale)
+ *
+ * Wrapper simplifié de set_ccm_matrix() pour ajuster les gains par canal.
+ * Crée une matrice CCM diagonale: seuls les gains R, G, B sont modifiés.
+ *
+ * C'est l'approche utilisée par ESPHome PR#7639 pour corriger blanc→vert.
+ *
+ * Formule résultante: R_out = R_in × red, G_out = G_in × green, B_out = B_in × blue
+ *
+ * @param red   Gain canal rouge (ex: 1.3 = +30% rouge)
+ * @param green Gain canal vert (ex: 0.85 = -15% vert, corrige blanc→vert)
+ * @param blue  Gain canal bleu (ex: 1.25 = +25% bleu)
+ *
+ * Valeurs typiques pour corriger blanc→vert avec SC202CS:
+ *   - Correction légère: (1.2, 0.9, 1.15)
+ *   - Correction moyenne: (1.3, 0.85, 1.25) ← RECOMMANDÉ
+ *   - Correction M5Stack: (1.5, 1.0, 1.6)
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
+  // Créer matrice diagonale
+  float matrix[3][3] = {
+    {red,  0.0f, 0.0f},
+    {0.0f, green, 0.0f},
+    {0.0f, 0.0f,  blue}
+  };
+
+  if (!set_ccm_matrix(matrix)) {
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ RGB gains: R=%.2f, G=%.2f, B=%.2f", red, green, blue);
+  return true;
+}
+
+/**
+ * @brief Définir les gains White Balance de l'ISP (rouge et bleu)
+ *
+ * Contrôle les gains hardware de white balance de l'ISP (avant CCM).
+ * Le gain vert est fixe à 1.0 (référence).
+ *
+ * Note: Différent de set_rgb_gains() qui modifie la CCM (après demosaic).
+ *       L'ordre du pipeline est: Sensor → Demosaic → WB gains → CCM → Output
+ *
+ * @param red_gain  Gain du canal rouge (typiquement 0.5 - 4.0)
+ * @param blue_gain Gain du canal bleu (typiquement 0.5 - 4.0)
+ *
+ * Valeurs typiques:
+ *   - Lumière du jour: red=1.0, blue=1.0 (neutre)
+ *   - Incandescent: red=0.7, blue=1.8 (compenser jaune)
+ *   - Fluorescent: red=1.3, blue=0.9 (compenser vert)
+ *
+ * @return true si succès, false si erreur
+ */
+bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set WB gains: streaming not active");
+    return false;
+  }
+
+  // Créer structure WB
+  esp_video_isp_wb_t wb_config;
+  memset(&wb_config, 0, sizeof(wb_config));
+  wb_config.enable = true;
+  wb_config.red_gain = red_gain;
+  wb_config.blue_gain = blue_gain;
+
+  // Configurer via V4L2 ioctl avec CID personnalisé ESP32
+  struct v4l2_ext_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_USER_ESP_ISP_WB;
+  ctrl.ptr = &wb_config;
+  ctrl.size = sizeof(wb_config);
+
+  struct v4l2_ext_controls ctrls;
+  memset(&ctrls, 0, sizeof(ctrls));
+  ctrls.count = 1;
+  ctrls.controls = &ctrl;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+    ESP_LOGE(TAG, "Failed to set WB gains: %s", strerror(errno));
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ WB gains: Red=%.2f, Blue=%.2f (Green=1.0)", red_gain, blue_gain);
+  return true;
+}
+
+// ============================================================================
+// Contrôles V4L2 Standards (pour ESPHome number components)
+// ============================================================================
+
+/**
+ * @brief Régler la luminosité de l'image
+ * @param value Valeur de luminosité (-128 à 127, défaut: 0)
+ */
+bool MipiDSICamComponent::set_brightness(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set brightness: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_BRIGHTNESS;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set brightness: %s", strerror(errno));
+    return false;
+  }
+
+  // ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler le contraste de l'image
+ * @param value Valeur de contraste (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_contrast(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set contrast: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_CONTRAST;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set contrast: %s", strerror(errno));
+    return false;
+  }
+
+  // ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la saturation des couleurs
+ * @param value Valeur de saturation (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_saturation(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set saturation: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_SATURATION;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set saturation: %s", strerror(errno));
+    return false;
+  }
+
+  // ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la teinte de l'image
+ * @param value Valeur de teinte (-180 à 180, défaut: 0)
+ */
+bool MipiDSICamComponent::set_hue(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set hue: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_HUE;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set hue: %s", strerror(errno));
+    return false;
+  }
+
+  // ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  return true;
+}
+
+/**
+ * @brief Régler la netteté de l'image (filter)
+ * @param value Valeur de netteté (0 à 255, défaut: 128)
+ */
+bool MipiDSICamComponent::set_sharpness(int value) {
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set sharpness: streaming not active");
+    return false;
+  }
+
+  struct v4l2_control ctrl;
+  ctrl.id = V4L2_CID_SHARPNESS;
+  ctrl.value = value;
+
+  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGE(TAG, "Failed to set sharpness: %s", strerror(errno));
+    return false;
+  }
+
+  // ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
+  return true;
 }
 
 }  // namespace mipi_dsi_cam

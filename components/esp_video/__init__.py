@@ -96,17 +96,12 @@ async def to_code(config):
     cg.add(var.set_xclk_pin(cg.RawExpression(f"static_cast<gpio_num_t>({xclk_pin})")))
     cg.add(var.set_xclk_freq(xclk_freq))
 
-    logging.info(f"[ESP-Video] Configuration I2C: Utilise le bus ESPHome '{config[CONF_I2C_ID]}'")
-
+    # Logs silencieux sauf erreurs
+    logging.debug(f"[ESP-Video] I2C bus: '{config[CONF_I2C_ID]}'")
     if has_ext_clock:
-        logging.info(f"[ESP-Video] Configuration XCLK: GPIO{xclk_pin} @ {xclk_freq/1000000:.1f} MHz")
-        logging.info("[ESP-Video]   → Horloge externe contrôlée par GPIO (pour cartes avec XCLK GPIO)")
+        logging.debug(f"[ESP-Video] XCLK: GPIO{xclk_pin} @ {xclk_freq/1000000:.1f} MHz")
     else:
-        logging.info(f"[ESP-Video] Configuration XCLK: Oscillateur externe sur PCB @ {xclk_freq/1000000:.1f} MHz")
-        logging.info("[ESP-Video]   → Pas de contrôle GPIO (xclk_pin=-1, pour cartes avec oscillateur intégré)")
-
-    logging.info("[ESP-Video] esp_video utilisera le bus I2C ESPHome (init_sccb=false)")
-    logging.info("[ESP-Video] Avantage: Partage propre du bus I2C, pas de conflit")
+        logging.debug(f"[ESP-Video] XCLK: PCB oscillator @ {xclk_freq/1000000:.1f} MHz")
 
     # -----------------------------------------------------------------------
     # Vérification du framework
@@ -124,9 +119,6 @@ async def to_code(config):
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
-    logging.info(f"[ESP-Video] Répertoire composant: {component_dir}")
-    logging.info(f"[ESP-Video] Répertoire parent: {parent_components_dir}")
-
     # -----------------------------------------------------------------------
     # Ajout des répertoires include
     # -----------------------------------------------------------------------
@@ -138,7 +130,6 @@ async def to_code(config):
         inc_path = os.path.join(component_dir, inc)
         if os.path.exists(inc_path):
             cg.add_build_flag(f"-I{inc_path}")
-            logging.info(f"[ESP-Video] 📁 Include ajouté: {inc_path}")
             includes_found = True
 
     # esp_cam_sensor
@@ -148,7 +139,6 @@ async def to_code(config):
             inc_path = os.path.join(esp_cam_sensor_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
-                logging.info(f"[ESP-Video] 📁 Include esp_cam_sensor ajouté: {inc_path}")
                 includes_found = True
 
     # esp_h264
@@ -158,7 +148,6 @@ async def to_code(config):
             inc_path = os.path.join(esp_h264_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
-                logging.info(f"[ESP-Video] 📁 Include esp_h264 ajouté: {inc_path}")
                 includes_found = True
 
     # esp_ipa
@@ -168,7 +157,6 @@ async def to_code(config):
             inc_path = os.path.join(esp_ipa_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
-                logging.info(f"[ESP-Video] 📁 Include esp_ipa ajouté: {inc_path}")
                 includes_found = True
 
     # esp_sccb_intf
@@ -178,7 +166,6 @@ async def to_code(config):
             inc_path = os.path.join(esp_sccb_intf_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
-                logging.info(f"[ESP-Video] 📁 Include esp_sccb_intf ajouté: {inc_path}")
                 includes_found = True
 
     if not includes_found:
@@ -269,9 +256,6 @@ async def to_code(config):
     for flag in flags:
         cg.add_build_flag(flag)
 
-    logging.info(f"[ESP-Video] {len(flags)} flags de compilation ajoutés")
-
-
     extra_flags = [
         "-Wno-unused-function",
         "-Wno-unused-variable",
@@ -287,11 +271,8 @@ async def to_code(config):
     build_script_path = os.path.join(component_dir, "esp_video_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-        logging.info(f"[ESP-Video] Script de build ajouté: {build_script_path}")
     else:
         raise cv.Invalid(f"Script de build introuvable: {build_script_path}")
-
-    logging.info("[ESP-Video] ✅ Configuration terminée")
 
 
 

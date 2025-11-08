@@ -33,6 +33,10 @@ CONF_MIRROR_X = "mirror_x"  # Accepté mais ignoré
 CONF_MIRROR_Y = "mirror_y"  # Accepté mais ignoré
 CONF_ROTATION = "rotation"  # Accepté mais ignoré
 CONF_FILENAME = "filename"
+CONF_RGB_GAINS = "rgb_gains"
+CONF_RED_GAIN = "red"
+CONF_GREEN_GAIN = "green"
+CONF_BLUE_GAIN = "blue"
 
 def validate_and_normalize_config(config):
     """Normalise la configuration pour accepter l'ancienne et la nouvelle syntaxe"""
@@ -80,6 +84,12 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_MIRROR_X): cv.boolean,
         cv.Optional(CONF_MIRROR_Y): cv.boolean,
         cv.Optional(CONF_ROTATION): cv.int_,
+        # Contrôles ISP avancés (CCM RGB gains pour correction couleur)
+        cv.Optional(CONF_RGB_GAINS): cv.Schema({
+            cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
+            cv.Optional(CONF_GREEN_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
+            cv.Optional(CONF_BLUE_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
+        }),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_and_normalize_config
 )
@@ -104,6 +114,15 @@ async def to_code(config):
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
+
+    # Configuration des gains RGB CCM si présents
+    if CONF_RGB_GAINS in config:
+        rgb_config = config[CONF_RGB_GAINS]
+        cg.add(var.set_rgb_gains_config(
+            rgb_config[CONF_RED_GAIN],
+            rgb_config[CONF_GREEN_GAIN],
+            rgb_config[CONF_BLUE_GAIN]
+        ))
 
 # Action pour capturer un snapshot
 @automation.register_action(

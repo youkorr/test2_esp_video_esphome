@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
+#include "esphome/components/number/number.h"
 #include <string>
 #include <vector>
 
@@ -48,6 +49,14 @@ class MipiDSICamComponent : public Component {
   void set_framerate(int f) { framerate_ = f; }
   void set_jpeg_quality(int q) { jpeg_quality_ = q; }
 
+  // Configuration des gains RGB CCM depuis YAML
+  void set_rgb_gains_config(float red, float green, float blue) {
+    rgb_gains_red_ = red;
+    rgb_gains_green_ = green;
+    rgb_gains_blue_ = blue;
+    rgb_gains_enabled_ = true;
+  }
+
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
@@ -61,6 +70,24 @@ class MipiDSICamComponent : public Component {
   uint16_t get_image_height() const { return image_height_; }
   size_t get_image_size() const { return image_buffer_size_; }
 
+  // Contrôles manuels d'exposition et couleur (pour corriger surexposition et blanc→vert)
+  bool set_exposure(int value);     // Contrôle manuel de l'exposition (0-65535, défaut: auto)
+  bool set_gain(int value);          // Contrôle manuel du gain (1000-16000, 1000=1x, 16000=16x)
+  bool set_white_balance_mode(bool auto_mode);  // true=auto AWB, false=manuel
+  bool set_white_balance_temp(int kelvin);      // Température couleur (2800-6500K)
+
+  // Contrôles ISP avancés (correction couleur précise via CCM et WB)
+  bool set_ccm_matrix(float matrix[3][3]);  // Matrice CCM 3x3 complète (correction couleur avancée)
+  bool set_rgb_gains(float red, float green, float blue);  // Gains RGB diagonaux simplifiés (corrige blanc→vert)
+  bool set_wb_gains(float red_gain, float blue_gain);      // White balance ISP (gains R/B, G=1.0)
+
+  // Contrôles V4L2 standards (pour ESPHome number components)
+  bool set_brightness(int value);    // -128 à 127, défaut: 0
+  bool set_contrast(int value);      // 0 à 255, défaut: 128
+  bool set_saturation(int value);    // 0 à 255, défaut: 128
+  bool set_hue(int value);           // -180 à 180, défaut: 0
+  bool set_sharpness(int value);     // 0 à 255 (filter/sharpness control)
+
  protected:
   std::string sensor_name_{"sc202cs"};
   int i2c_id_{0};
@@ -73,6 +100,12 @@ class MipiDSICamComponent : public Component {
   std::string pixel_format_{"JPEG"};
   int framerate_{30};
   int jpeg_quality_{10};
+
+  // Configuration CCM RGB gains depuis YAML
+  bool rgb_gains_enabled_{false};
+  float rgb_gains_red_{1.0f};
+  float rgb_gains_green_{1.0f};
+  float rgb_gains_blue_{1.0f};
 
   // Tous en pointeurs void* pour éviter les types incomplets
   void *sensor_dev_{nullptr};
@@ -135,6 +168,81 @@ class StopStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComp
     this->parent_->stop_streaming();
     ESP_LOGI("mipi_dsi_cam", "⏹️  Streaming vidéo arrêté");
   }
+};
+
+// ============================================================================
+// Number Components pour contrôles caméra
+// ============================================================================
+
+class CamBrightnessNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override { camera_->set_brightness((int)value); }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamContrastNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override { camera_->set_contrast((int)value); }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamSaturationNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override { camera_->set_saturation((int)value); }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamHueNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override { camera_->set_hue((int)value); }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamFilterNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override { camera_->set_sharpness((int)value); }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamRedGainNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override {
+    // Récupérer les valeurs actuelles de green et blue (par défaut 1.0)
+    camera_->set_rgb_gains(value, 1.0f, 1.0f);
+  }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamGreenGainNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override {
+    camera_->set_rgb_gains(1.0f, value, 1.0f);
+  }
+  MipiDSICamComponent *camera_{nullptr};
+};
+
+class CamBlueGainNumber : public number::Number, public Component {
+ public:
+  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
+ protected:
+  void control(float value) override {
+    camera_->set_rgb_gains(1.0f, 1.0f, value);
+  }
+  MipiDSICamComponent *camera_{nullptr};
 };
 
 }  // namespace mipi_dsi_cam

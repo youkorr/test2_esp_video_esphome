@@ -40,41 +40,42 @@ void esp_ipa_print_version(void)
 /**
  * @brief Get IPA pipeline configuration for specified camera sensor
  *
- * Configuration IPA pour SC202CS - TOUS les IPAs SAUF AGC
+ * Configuration IPA pour SC202CS - Configuration STABLE
  * Pipeline: Capteur (RAW8) → ISP → IPA (5 algorithmes) → RGB565
  *
- * Algorithmes actifs:
- * - awb.gray: Auto White Balance (corrige blanc→vert)
- * - denoising.gain_feedback: Réduction bruit (image plus propre)
- * - sharpen.freq_feedback: Netteté (image plus claire)
- * - gamma.lumma_feedback: Gamma (luminosité optimale)
- * - cc.linear: Color Correction (couleurs correctes)
+ * Algorithmes actifs (vérifiés dans libesp_ipa.a):
+ * - awb.gray: Auto White Balance (balance des blancs automatique)
+ * - denoising.gain_feedback: Réduction du bruit
+ * - sharpen.freq_feedback: Netteté de l'image
+ * - gamma.lumma_feedback: Correction gamma (luminosité)
+ * - cc.linear: Matrice de correction couleur (CCM)
  *
- * Algorithme désactivé:
- * - agc.threshold: AGC (cause flashes - DÉSACTIVÉ)
+ * Note: AEC/AGC n'est PAS disponible dans cette version de libesp_ipa.a
+ * L'exposition doit être contrôlée manuellement via les méthodes V4L2:
+ * - set_exposure(value) pour contrôle manuel
+ * - set_gain(value) pour ajuster le gain
  *
  * @param cam_name Camera sensor name (e.g., "SC202CS", "OV5647", "OV02C10")
  * @return IPA configuration pointer for the camera, NULL if not found
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* Configuration IPA pour TOUS les capteurs - 5 algorithmes sans AGC */
+    /* Configuration IPA stable - 5 algorithmes disponibles */
     static const char *ipa_names[] = {
-        "awb.gray",                /* Auto White Balance - corrige blanc→vert */
-        "denoising.gain_feedback", /* Réduction bruit - image plus propre */
-        "sharpen.freq_feedback",   /* Netteté - image plus claire */
-        "gamma.lumma_feedback",    /* Gamma - luminosité optimale */
-        "cc.linear",               /* Color Correction - couleurs correctes */
-        /* "agc.threshold" DÉSACTIVÉ - cause flashes */
+        "awb.gray",                /* Auto White Balance */
+        "denoising.gain_feedback", /* Réduction bruit */
+        "sharpen.freq_feedback",   /* Netteté */
+        "gamma.lumma_feedback",    /* Correction gamma */
+        "cc.linear",               /* Color Correction Matrix */
     };
 
     static const esp_ipa_config_t ipa_config = {
-        .ipa_nums = 5,     /* 5 IPAs actifs (tous sauf AGC) */
+        .ipa_nums = 5,     /* 5 IPAs disponibles (pas d'AEC/AGC dans cette version) */
         .ipa_names = ipa_names,
     };
 
     if (cam_name) {
-        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CC (no AGC)", cam_name);
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CC (5 algos, no AEC)", cam_name);
         return &ipa_config;
     }
 
