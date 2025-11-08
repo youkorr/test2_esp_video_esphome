@@ -579,10 +579,12 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  this->image_buffer_size_ = fmt.fmt.pix.sizeimage;  // RGB565: 1280*720*2 = 1,843,200 bytes
+  // Note: fmt.fmt.pix.sizeimage peut retourner 0 avec certains drivers V4L2
+  // La vraie taille sera récupérée des buffers V4L2 plus tard
+  this->image_buffer_size_ = 0;
 
-  ESP_LOGI(TAG, "Format: %ux%u, RGB565, buffer size=%u bytes",
-           this->image_width_, this->image_height_, this->image_buffer_size_);
+  ESP_LOGI(TAG, "Format: %ux%u, RGB565",
+           this->image_width_, this->image_height_);
 
   // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
   // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
@@ -632,6 +634,12 @@ bool MipiDSICamComponent::start_streaming() {
 
     ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
              i, buf.length, this->v4l2_buffers_[i].start);
+
+    // Utiliser la taille réelle du buffer V4L2 (au lieu de fmt.fmt.pix.sizeimage qui peut être 0)
+    if (i == 0) {
+      this->image_buffer_size_ = buf.length;
+      ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
+    }
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
       ESP_LOGE(TAG, "VIDIOC_QBUF[%u] failed: %s", i, strerror(errno));
