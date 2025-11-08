@@ -11,8 +11,8 @@ Ce document explique comment corriger les 3 problèmes identifiés avec le capte
 
 ### ✅ Problème 2: Image Surexposée
 **Symptôme:** Image trop claire/blanche
-**Cause:** AEC (Auto Exposure Control) désactivé dans la config IPA
-**Solution:** AEC réactivé + méthodes de contrôle manuel ajoutées
+**Cause:** AEC (Auto Exposure Control) non disponible dans libesp_ipa.a
+**Solution:** Méthodes de contrôle manuel d'exposition ajoutées (set_exposure, set_gain)
 
 ### ✅ Problème 3: Blanc → Vert
 **Symptôme:** Les zones blanches apparaissent vertes
@@ -68,25 +68,24 @@ lvgl:
 
 ## Configuration Automatique (IPA)
 
-### AEC & AWB Automatiques (Réactivés)
+### ⚠️ Limitation: AEC Non Disponible
 
-Le pipeline IPA a été modifié pour inclure **6 algorithmes** (au lieu de 5):
+Le pipeline IPA utilise **5 algorithmes** disponibles dans libesp_ipa.a:
 
 ```
-Capteur SC202CS (RAW8) → ISP → IPA (6 algorithmes) → RGB565
+Capteur SC202CS (RAW8) → ISP → IPA (5 algorithmes) → RGB565
 
 Algorithmes actifs:
-  1. aec.simple              ← Auto Exposure Control (nouveau!)
-  2. awb.gray                ← Auto White Balance
-  3. denoising.gain_feedback ← Réduction du bruit
-  4. sharpen.freq_feedback   ← Netteté
-  5. gamma.lumma_feedback    ← Correction gamma
-  6. cc.linear               ← Color Correction Matrix
+  1. awb.gray                ← Auto White Balance
+  2. denoising.gain_feedback ← Réduction du bruit
+  3. sharpen.freq_feedback   ← Netteté
+  4. gamma.lumma_feedback    ← Correction gamma
+  5. cc.linear               ← Color Correction Matrix
 ```
 
-**Avec cette configuration, l'exposition et la balance des blancs sont automatiquement ajustées.**
+**⚠️ IMPORTANT:** AEC/AGC (Auto Exposure Control) n'est PAS disponible dans la version actuelle de libesp_ipa.a. Les algorithmes "aec.simple", "aec.threshold", et "agc.threshold" n'existent pas dans cette bibliothèque.
 
-Si l'ajustement automatique n'est pas satisfaisant, utilisez les contrôles manuels ci-dessous.
+**Conséquence:** L'exposition DOIT être contrôlée manuellement via les méthodes V4L2 ci-dessous. La balance des blancs (AWB) fonctionne automatiquement, mais peut nécessiter un ajustement manuel pour des scènes spécifiques.
 
 ---
 
@@ -229,18 +228,18 @@ lvgl:
 
 ## Procédure de Test Recommandée
 
-### Étape 1: Tester AEC/AWB Automatiques
+### Étape 1: Tester AWB Automatique et FPS
 
 1. Modifiez le YAML: `update_interval: never` → `update_interval: 33ms`
 2. Recompilez et flashez
 3. Démarrez le streaming
-4. **Attendez 5-10 secondes** pour que AEC/AWB convergent
-5. Vérifiez si l'exposition et les couleurs sont correctes
+4. **Attendez 5-10 secondes** pour que AWB (balance des blancs) converge
+5. Vérifiez FPS et couleurs
 
 **Résultat attendu:**
-- ✅ FPS: ~25-30 (au lieu de 4)
-- ✅ Exposition: Correcte automatiquement
-- ✅ Couleurs: Blancs corrects automatiquement
+- ✅ FPS: ~25-30 (au lieu de 4) - Garanti par le changement YAML
+- ⚠️ Exposition: Probablement TROP CLAIRE (pas d'AEC automatique)
+- ⚠️ Couleurs: AWB automatique peut améliorer, mais blanc→vert peut persister
 
 ### Étape 2: Ajustement Manuel (si nécessaire)
 
@@ -280,15 +279,17 @@ on_load:
 
 ## Diagnostic
 
-### Vérifier que AEC est actif
+### Vérifier la Configuration IPA
 
 Dans les logs au démarrage, cherchez:
 ```
-[esp_ipa] 📸 IPA config for SC202CS: AEC+AWB+Denoise+Sharpen+Gamma+CC
+[esp_ipa] 📸 IPA config for SC202CS: AWB+Denoise+Sharpen+Gamma+CC (5 algos, no AEC)
 [esp_video_isp_pipeline] 📸 IPA Pipeline created - verifying loaded algorithms:
 ```
 
-Si vous voyez "AEC+AWB" → ✅ AEC est bien actif
+Si vous voyez "5 algos, no AEC" → ✅ Configuration correcte (pas de risque de crash)
+
+⚠️ Si vous voyez "AEC" dans les logs, la configuration est INCORRECTE et causera un crash!
 
 ### Logs de Contrôles Manuels
 
@@ -306,14 +307,20 @@ Quand vous appelez les méthodes de contrôle, vous verrez:
 ### Fichiers Modifiés
 
 1. **`components/esp_ipa/src/version.c`**
-   - Réactivé AEC avec "aec.simple"
-   - 6 algorithmes IPA au lieu de 5
+   - Configuration STABLE: 5 algorithmes IPA (AWB, Denoise, Sharpen, Gamma, CC)
+   - ⚠️ AEC/AGC volontairement NON activé (n'existe pas dans libesp_ipa.a)
+   - Documentation complète des algorithmes disponibles
 
 2. **`components/mipi_dsi_cam/mipi_dsi_cam.h`**
-   - Ajout de 4 méthodes publiques de contrôle
+   - Ajout de 4 méthodes publiques de contrôle manuel:
+     - `set_exposure(int value)` - Contrôle exposition (0-65535, 0=auto V4L2)
+     - `set_gain(int value)` - Contrôle gain (1000-16000)
+     - `set_white_balance_mode(bool auto_mode)` - Mode AWB
+     - `set_white_balance_temp(int kelvin)` - Température WB (2800-6500K)
 
 3. **`components/mipi_dsi_cam/mipi_dsi_cam.cpp`**
-   - Implémentation des 4 méthodes de contrôle
+   - Implémentation complète des 4 méthodes avec V4L2 ioctl
+   - Gestion d'erreurs et logging détaillé
 
 ### Changement YAML Requis
 
@@ -323,6 +330,44 @@ display:
 ```
 
 **Ce simple changement devrait résoudre 90% des problèmes!**
+
+---
+
+## ⚠️ Limitation Importante: SC202CS et Calibration IPA
+
+### Problème Fondamental Découvert
+
+Le capteur **SC202CS est un capteur RAW** qui nécessite un **fichier JSON de calibration IPA** fourni par le fabricant (SmartSens). Ce fichier contient les matrices de correction couleur (CCM), les paramètres AWB optimisés, et d'autres calibrations spécifiques au capteur.
+
+**État actuel:** Le SC202CS **N'A PAS** de fichier JSON dans esp-cam-sensor!
+
+Capteurs avec JSON (fonctionnent parfaitement):
+- ✅ OV5647: `/components/esp-cam-sensor/sensors/ov5647_settings.c`
+- ✅ OV02C10: `/components/esp-cam-sensor/sensors/ov02c10_settings.c`
+
+Capteur SANS JSON (calibration générique):
+- ❌ SC202CS: **Aucun fichier JSON** → Utilise valeurs génériques
+
+**Conséquence:** Même avec contrôles manuels optimaux, les couleurs (blanc→vert) et l'exposition ne seront JAMAIS aussi bonnes que sur un capteur correctement calibré.
+
+### Solutions Possibles
+
+1. **Contacter SmartSens (fabricant SC202CS):**
+   - Demander le fichier JSON de calibration IPA pour ESP32-P4/ESP-IDF
+   - Email: support@smartsens.com
+   - Mentionner: ESP-IDF v5.4, esp-video-components, format JSON IPA
+
+2. **Utiliser un capteur supporté officiellement:**
+   - OV5647 (Raspberry Pi Camera v1) - **Recommandé**
+   - OV02C10 (capteur moderne 2MP)
+   - Ces capteurs ont une calibration complète et fonctionnent parfaitement
+
+3. **Créer une calibration manuelle (avancé):**
+   - Nécessite équipement de colorimétrie professionnel
+   - Temps: plusieurs jours de travail
+   - Résultat: moins précis qu'une calibration d'usine
+
+**Recommandation:** Si la qualité d'image est critique, envisagez de passer à un capteur OV5647 qui est entièrement supporté et calibré.
 
 ---
 
