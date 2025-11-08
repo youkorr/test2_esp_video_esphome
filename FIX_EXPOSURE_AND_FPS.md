@@ -579,6 +579,233 @@ id(tab5_cam).set_white_balance_temp(5500);  // Override AWB si nécessaire
 
 ---
 
+## 📷 Alternative Recommandée: OV02C10 (Capteur Moderne 2MP)
+
+L'OV02C10 est une autre **excellente alternative** au SC202CS, particulièrement adapté pour des applications modernes avec Full HD. Il dispose également d'une **calibration IPA JSON complète**.
+
+### Avantages OV02C10 vs SC202CS
+
+| Caractéristique | SC202CS | OV02C10 | Avantage |
+|----------------|---------|---------|----------|
+| **Calibration IPA JSON** | ❌ Non disponible | ✅ `ov02c10_default.json` | **OV02C10** |
+| **Couleurs (blanc→vert)** | ⚠️ Problème persistant | ✅ Correctes | **OV02C10** |
+| **AEC/AGC automatique** | ❌ Non (libesp_ipa.a) | ✅ Oui (via IPA JSON) | **OV02C10** |
+| **AWB automatique** | ⚠️ Basique | ✅ Calibré | **OV02C10** |
+| **Format RAW** | RAW8/RAW10 | **RAW10 uniquement** | **OV02C10** |
+| **Profondeur couleur** | 8/10-bit | **10-bit exclusif** | **OV02C10** |
+| **MIPI CSI Lanes** | 1-lane fixe | **1-lane OU 2-lane** (flexible) | **OV02C10** |
+| **Résolution maximale** | 1600x1200 @ 30fps | **1920x1080** @ 30fps | **OV02C10** |
+| **Autofocus** | ❌ Non | ✅ Oui (ISP AF, VCM motor) | **OV02C10** |
+| **Line Sync CSI** | ❌ Non documenté | ✅ Configurable | **OV02C10** |
+| **Configuration personnalisée** | ⚠️ Limitée | ✅ JSON customisable | **OV02C10** |
+
+### Formats et Résolutions OV02C10 (Kconfig)
+
+**Tous les formats sont RAW10 (10-bit) - Meilleure qualité couleur garantie!**
+
+1. **RAW10 1288x728 30fps, 1-lane** (défaut)
+   - Résolution: 1.3MP (format allongé)
+   - Format: 10-bit RAW Bayer
+   - Interface: MIPI CSI-2 1-lane, 24MHz
+   - ✅ **Bon équilibre bande passante/qualité**
+
+2. **RAW10 1920x1080 30fps, 1-lane**
+   - Résolution: Full HD (1920x1080)
+   - Format: 10-bit RAW Bayer
+   - Interface: MIPI CSI-2 1-lane, 24MHz
+   - ⚠️ Bande passante élevée sur 1-lane
+
+3. **RAW10 1920x1080 30fps, 2-lane**
+   - Résolution: Full HD (1920x1080)
+   - Format: 10-bit RAW Bayer
+   - Interface: MIPI CSI-2 2-lane, 24MHz
+   - ✅ **Recommandé pour Full HD 30fps stable**
+
+### Point Clé: RAW10 Exclusif
+
+L'OV02C10 utilise **uniquement RAW10** (10-bit), contrairement à SC202CS qui peut faire RAW8:
+
+**Avantages RAW10:**
+- 1024 niveaux de luminosité par canal (vs 256 pour RAW8)
+- Meilleure plage dynamique (détails ombres + hautes lumières)
+- Gradients de couleur plus doux (moins de banding)
+- Meilleure qualité pour l'IPA (plus de données pour AWB/CCM)
+
+**Inconvénient:** Bande passante 25% plus élevée que RAW8
+- Solution: Utiliser mode 2-lane pour Full HD sans compromis
+
+### Configuration IPA JSON (Point Clé!)
+
+L'OV02C10 dispose d'un **fichier JSON de calibration complet**:
+
+**Emplacement:** `esp_cam_sensor/sensors/ov02c10/cfg/ov02c10_default.json`
+
+Ce fichier contient:
+- ✅ Matrices de correction couleur (CCM) calibrées
+- ✅ Paramètres AWB optimisés (pas de blanc→vert!)
+- ✅ Tables AEC/AGC pour exposition automatique
+- ✅ Calibration gamma pour chaque température de couleur
+- ✅ Paramètres de réduction de bruit optimisés pour 10-bit
+
+**Option de personnalisation:**
+```
+menuconfig → Component config → Camera Sensor → OV02C10 →
+IPA JSON Configuration File → Customized
+```
+
+Puis spécifier le chemin dans:
+`CAMERA_OV02C10_CUSTOMIZED_IPA_JSON_CONFIGURATION_FILE_PATH`
+
+### Fonctionnalités Matérielles
+
+**1. Line Synchronization CSI:**
+```
+menuconfig → Component config → Camera Sensor → OV02C10 →
+CSI Line sync enable (recommandé: activé par défaut)
+```
+- Envoie short packet pour chaque ligne
+- Améliore synchronisation frames
+- Réduit artefacts d'image
+
+**2. Autofocus ISP:**
+```
+menuconfig → Component config → Camera Sensor → OV02C10 →
+AF(auto focus) enable (recommandé: activé par défaut)
+```
+- Autofocus basé sur ISP (meilleur que contrôle basique)
+- Contrôle pins I/O pour moteur VCM
+- Compatible modules caméra avec lentille AF
+
+### Changer de Format OV02C10
+
+Pour optimiser selon bande passante disponible:
+```
+menuconfig → Component config → Camera Sensor → OV02C10 →
+Default format select
+```
+
+**Recommandations selon usage:**
+
+**Pour compatibilité 1-lane (ESP32-P4 avec 1-lane CSI uniquement):**
+- Choisir: `RAW10 1288x728 30fps, 1-lane` (défaut)
+- Avantage: Bande passante optimale pour 1-lane
+- Résolution: 1.3MP, suffisant pour affichage embedded
+
+**Pour Full HD avec 2-lane (ESP32-P4 avec 2-lane CSI):**
+- Choisir: `RAW10 1920x1080 30fps, 2-lane`
+- Avantage: Full HD stable à 30 FPS
+- Meilleure qualité globale
+
+**Pour Full HD avec 1-lane (attention!):**
+- Choisir: `RAW10 1920x1080 30fps, 1-lane`
+- ⚠️ Bande passante limite, vérifier FPS réel
+- Peut nécessiter réduction FPS ou compression
+
+### Migration SC202CS → OV02C10
+
+**Matériel requis:**
+- Module OV02C10 (2MP moderne)
+- Connecteur MIPI CSI 1-lane OU 2-lane
+- Alimentation 3.3V identique
+
+**Changements logiciels:**
+1. Menuconfig: Désactiver `CAMERA_SC202CS`, activer `CAMERA_OV02C10`
+2. Choisir format selon vos lanes disponibles (1-lane ou 2-lane)
+3. Code: Aucun changement si vous utilisez l'API `esp_cam_sensor`
+4. Auto-détection: OV02C10 sera détecté automatiquement au boot
+5. IPA: Configuration JSON chargée automatiquement
+
+**Résultats attendus après migration:**
+- ✅ **Plus de surexposition:** AEC automatique via JSON
+- ✅ **Plus de blanc→vert:** CCM calibrée dans JSON
+- ✅ **Qualité couleur améliorée:** RAW10 exclusif (10-bit)
+- ✅ **Full HD disponible:** 1920x1080 @ 30fps (mode 2-lane)
+- ✅ **Autofocus ISP:** Meilleure qualité AF que contrôle basique
+
+### Compatibilité avec Code Actuel
+
+Les 4 méthodes de contrôle manuel implémentées fonctionneront également avec l'OV02C10:
+
+```cpp
+// Ces méthodes fonctionnent avec TOUS les capteurs V4L2
+id(tab5_cam).set_exposure(20000);  // Override AEC si nécessaire
+id(tab5_cam).set_gain(16000);      // Override AGC si nécessaire
+id(tab5_cam).set_white_balance_temp(5500);  // Override AWB si nécessaire
+```
+
+**Différence clé:** Avec OV02C10, vous aurez **rarement besoin** d'utiliser ces overrides manuels car l'AEC/AWB/AGC automatiques via JSON fonctionnent correctement, comme avec OV5647!
+
+---
+
+## 📋 Récapitulatif: Quel Capteur Choisir?
+
+Vous disposez de **3 ESP32-P4 avec des capteurs différents**. Voici un guide pour choisir le meilleur capteur selon votre application:
+
+### Comparaison des 3 Capteurs
+
+| Critère | SC202CS | OV5647 | OV02C10 | Meilleur Choix |
+|---------|---------|---------|----------|----------------|
+| **Calibration IPA JSON** | ❌ | ✅ | ✅ | OV5647/OV02C10 |
+| **Qualité couleur** | ⚠️ Blanc→vert | ✅ Parfaite | ✅ Parfaite | OV5647/OV02C10 |
+| **AEC/AGC auto** | ❌ | ✅ | ✅ | OV5647/OV02C10 |
+| **FPS maximum** | 30fps | **50fps** | 30fps | **OV5647** |
+| **Résolution max** | 1600x1200 | 1920x1080 | 1920x1080 | OV5647/OV02C10 |
+| **Format RAW** | RAW8/RAW10 | RAW8/RAW10 | **RAW10 seul** | **OV02C10** |
+| **Profondeur** | 8/10-bit | 8/10-bit | **10-bit exclusif** | **OV02C10** |
+| **MIPI Lanes** | 1-lane | 2-lane | **1 ou 2-lane** | **OV02C10** (flexible) |
+| **Autofocus** | ❌ | ✅ VCM | ✅ ISP AF | **OV02C10** (ISP) |
+| **Coût estimé** | ~$8-12 | ~$10-15 | ~$12-18 | SC202CS |
+| **Disponibilité** | Moyenne | **Excellente** | Bonne | **OV5647** |
+
+### Recommandations par Usage
+
+**Pour streaming haute vitesse (50 FPS):**
+- ✅ **OV5647** - RAW8 800x800 @ 50fps
+- Meilleur pour: UI interactive, gaming, applications temps réel
+- Limitation: Résolution 800x800 à 50fps
+
+**Pour qualité d'image maximale (Full HD):**
+- ✅ **OV02C10** - RAW10 1920x1080 @ 30fps (2-lane)
+- Meilleur pour: Enregistrement vidéo, analyse d'image, reconnaissance
+- Avantage: RAW10 exclusif (meilleure dynamique)
+
+**Pour compatibilité Raspberry Pi:**
+- ✅ **OV5647** - Module Raspberry Pi Camera v1
+- Meilleur pour: Projets nécessitant modules standard, disponibilité mondiale
+- Avantage: Écosystème énorme, support excellent
+
+**Si vous êtes bloqué avec SC202CS:**
+- ⚠️ Utilisez les contrôles manuels documentés dans ce guide
+- Limitez attentes: couleurs jamais parfaites sans JSON
+- Envisagez migration future vers OV5647/OV02C10
+
+### Configuration Multi-Capteurs dans ESPHome
+
+Pour vos **3 ESP32-P4 avec capteurs différents**, utilisez substitutions YAML:
+
+```yaml
+# esp32p4_sc202cs.yaml
+substitutions:
+  camera_sensor: "SC202CS"
+
+# esp32p4_ov5647.yaml
+substitutions:
+  camera_sensor: "OV5647"
+
+# esp32p4_ov02c10.yaml
+substitutions:
+  camera_sensor: "OV02C10"
+```
+
+L'auto-détection dans menuconfig s'occupera du reste:
+- `CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR`
+- `CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR`
+- `CAMERA_OV02C10_AUTO_DETECT_MIPI_INTERFACE_SENSOR`
+
+Tous activés par défaut, le bon capteur sera détecté automatiquement au boot!
+
+---
+
 ## Support
 
 Si après ces changements vous rencontrez toujours des problèmes:
