@@ -158,28 +158,12 @@ void ESPVideoComponent::setup() {
 
   ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
 
-  // CRITICAL: Initialize XCLK BEFORE calling esp_video_init()!
-  // For MIPI-CSI sensors, esp_video_init() does NOT initialize XCLK (only for DVP).
-  // Without XCLK active, the sensor will NOT respond on I2C → detection fails (PID=0x0)
-  ESP_LOGI(TAG, "");
-  ESP_LOGI(TAG, "========================================");
-  ESP_LOGI(TAG, "  Initializing XCLK (BEFORE esp_video_init)");
-  ESP_LOGI(TAG, "========================================");
-
-  esp_err_t xclk_ret = init_xclk_ledc(this->xclk_pin_, this->xclk_freq_);
-  if (xclk_ret != ESP_OK) {
-    ESP_LOGE(TAG, "❌ XCLK initialization failed!");
-    ESP_LOGE(TAG, "   Sensor will NOT respond on I2C without XCLK");
-    this->mark_failed();
-    return;
-  }
-
-  // CRITICAL: Wait for sensor to stabilize after XCLK starts
-  // Camera sensors need time to power up and initialize internal logic after XCLK becomes active
-  // SC202CS datasheet: Power-on sequence requires ~300ms for full initialization
-  ESP_LOGI(TAG, "⏳ Waiting 300ms for sensor to stabilize...");
-  vTaskDelay(pdMS_TO_TICKS(300));  // 300ms delay for sensor initialization
-  ESP_LOGI(TAG, "✅ Sensor should be ready for I2C communication");
+  // NOTE: XCLK initialization disabled for now
+  // The M5Stack Tab5 BSP may already initialize XCLK elsewhere
+  // Manual LEDC init was causing conflicts and crashes
+  // TODO: Investigate if XCLK is already initialized by BSP
+  ESP_LOGW(TAG, "⚠️  XCLK init via LEDC is DISABLED (testing safe mode)");
+  ESP_LOGW(TAG, "   Assuming XCLK is initialized by M5Stack BSP or hardware");
 
   ESP_LOGI(TAG, "");
   ESP_LOGI(TAG, "========================================");
