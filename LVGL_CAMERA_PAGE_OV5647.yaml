@@ -208,13 +208,20 @@ lvgl:
 # ============================================
 # CONFIGURATION CAMÉRA OV5647
 # ============================================
+# NOTE: Les noms de bus I2C sont configurables
+# Remplacez 'bsp_bus' par le nom de votre bus I2C
+
 # mipi_dsi_cam:
 #   id: tab5_cam
-#   i2c_id: bsp_bus
+#   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: ov5647
-#   xclk_pin: GPIO36
-#   xclk_freq: 24000000
-#   sensor_addr: 0x36           # OV5647 = 0x36
-#   resolution: "VGA"           # ou "1024x600"
+#   sensor_addr: 0x36          # OV5647 = 0x36
+#   resolution: "VGA"          # ou "1024x600"
 #   pixel_format: RGB565
 #   framerate: 30
+
+# lvgl_camera_display:
+#   id: camera_display
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
