@@ -121,18 +121,35 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
                     ESP_LOGI("camera", "Sensor: OV02C10");
-                    ESP_LOGI("camera", "Résolution: %dx%d",
-                      id(tab5_cam).get_image_width(),
-                      id(tab5_cam).get_image_height());
+                    ESP_LOGI("camera", "Résolution configurée: 800x480");
+
+                    // Résolution runtime (seulement si streaming actif)
+                    int w = id(tab5_cam).get_image_width();
+                    int h = id(tab5_cam).get_image_height();
+                    if (w > 0 && h > 0) {
+                      ESP_LOGI("camera", "Résolution runtime: %dx%d", w, h);
+                      ESP_LOGI("camera", "Streaming: ACTIF");
+                    } else {
+                      ESP_LOGI("camera", "Streaming: ARRÊTÉ");
+                    }
+
                     ESP_LOGI("camera", "Format: RGB565");
-                    ESP_LOGI("camera", "Canvas: 800x480");
+                    ESP_LOGI("camera", "Canvas: 800x480 plein écran");
                     ESP_LOGI("camera", "Bayer: BGGR");
+                    ESP_LOGI("camera", "MIPI: 2-lane");
+                    ESP_LOGI("camera", "Adresse I2C: 0x3C");
+
                     lv_label_set_text(id(camera_status_label), "INFO");
                     lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x4682B4), 0);
                 - delay: 2s
                 - lambda: |-
-                    lv_label_set_text(id(camera_status_label), "LIVE");
-                    lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x00FF00), 0);
+                    if (id(tab5_cam).is_streaming()) {
+                      lv_label_set_text(id(camera_status_label), "LIVE");
+                      lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x00FF00), 0);
+                    } else {
+                      lv_label_set_text(id(camera_status_label), "READY");
+                      lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0xFF8800), 0);
+                    }
             widgets:
               - label:
                   text: "INFO"

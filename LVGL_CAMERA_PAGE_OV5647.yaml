@@ -109,10 +109,26 @@ lvgl:
             on_click:
               then:
                 - lambda: |-
-                    ESP_LOGI("camera", "📊 OV5647 VGA");
-                    ESP_LOGI("camera", "Résolution: 640x480");
+                    ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
+                    ESP_LOGI("camera", "Sensor: OV5647");
+                    ESP_LOGI("camera", "Résolution configurée: 640x480 (VGA)");
+
+                    // Résolution runtime
+                    int w = id(tab5_cam).get_image_width();
+                    int h = id(tab5_cam).get_image_height();
+                    if (w > 0 && h > 0) {
+                      ESP_LOGI("camera", "Résolution runtime: %dx%d", w, h);
+                      ESP_LOGI("camera", "Streaming: ACTIF");
+                    } else {
+                      ESP_LOGI("camera", "Streaming: ARRÊTÉ");
+                    }
+
+                    ESP_LOGI("camera", "Format: RGB565 RAW8");
+                    ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
                     ESP_LOGI("camera", "Bayer: GBRG");
-                    ESP_LOGI("camera", "Binning: 4x4");
+                    ESP_LOGI("camera", "Binning: 4x4 (de 2592x1944)");
+                    ESP_LOGI("camera", "MIPI: 2-lane");
+                    ESP_LOGI("camera", "Adresse I2C: 0x36");
             widgets:
               - label:
                   text: "INFO"
