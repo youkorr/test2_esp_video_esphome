@@ -245,42 +245,53 @@ lvgl:
 
 ## 🔧 Configuration Complète
 
-### Étape 1: Définir la Caméra
+### Étape 1: Définir le Bus I2C
+
+**IMPORTANT:** Les noms de bus I2C sont configurables. Les exemples utilisent `bsp_bus` mais vous pouvez utiliser n'importe quel nom.
+
+```yaml
+i2c:
+  id: bsp_bus              # ← Utilisez le nom de VOTRE bus I2C
+  sda: GPIO8               # Adapter à votre hardware
+  scl: GPIO9
+  frequency: 400kHz
+```
+
+### Étape 2: Définir la Caméra
 
 ```yaml
 mipi_dsi_cam:
   id: tab5_cam
-  i2c_id: bsp_bus
-  sensor_type: ov02c10        # ou ov5647, sc202cs
-  xclk_pin: GPIO36
-  xclk_freq: 24000000
-  sensor_addr: 0x3C           # 0x3C (OV02C10), 0x36 (OV5647), 0x30 (SC202CS)
-  resolution: "800x480"       # Adapter selon le sensor
+  i2c_id: bsp_bus          # ← Même nom que votre bus I2C ci-dessus
+  sensor_type: ov02c10     # ou ov5647, sc202cs
+  sensor_addr: 0x36        # Tous les sensors MIPI-CSI utilisent 0x36
+  resolution: "800x480"    # Adapter selon le sensor
   pixel_format: RGB565
   framerate: 30
 ```
 
-### Étape 2: Créer la Page LVGL
+**Note:** Les paramètres `xclk_pin` et `xclk_freq` sont maintenant gérés par le composant `esp_video`, pas par `mipi_dsi_cam`.
+
+### Étape 3: Configurer LVGL Camera Display
+
+```yaml
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  update_interval: 100ms     # 10 FPS (évite watchdog timeout, voir WATCHDOG_TIMEOUT_LVGL_FIX.md)
+```
+
+### Étape 4: Créer la Page LVGL
 
 Copiez le contenu du fichier YAML correspondant à votre sensor:
 - `LVGL_CAMERA_PAGE_OV02C10.yaml`
 - `LVGL_CAMERA_PAGE_OV5647.yaml`
 - `LVGL_CAMERA_PAGE_SC202CS.yaml`
 
-### Étape 3: Configurer le Canvas dans Display
+**Note:** Le canvas se configure automatiquement via `lvgl_camera_display`, pas besoin de `configure_canvas()`.
 
-```yaml
-display:
-  - platform: ili9xxx
-    model: st7796
-    id: camera_display
-    # ... autres paramètres ...
-    lambda: |-
-      // Configurer le canvas au démarrage
-      id(tab5_cam).configure_canvas(id(camera_canvas));
-```
-
-### Étape 4: Créer le Lien Page d'Accueil → Caméra
+### Étape 5: Créer le Lien Page d'Accueil → Caméra
 
 ```yaml
 lvgl:

@@ -137,7 +137,7 @@ lvgl:
                     ESP_LOGI("camera", "Canvas: 800x480 plein écran");
                     ESP_LOGI("camera", "Bayer: BGGR");
                     ESP_LOGI("camera", "MIPI: 2-lane");
-                    ESP_LOGI("camera", "Adresse I2C: 0x3C");
+                    ESP_LOGI("camera", "Adresse I2C: 0x36");
 
                     lv_label_set_text(id(camera_status_label), "INFO");
                     lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x4682B4), 0);
@@ -174,21 +174,26 @@ lvgl:
 # ============================================
 # À mettre dans votre configuration principale:
 
+# NOTE: Les noms de bus I2C sont configurables
+# Remplacez 'bsp_bus' par le nom de votre bus I2C
+
 # mipi_dsi_cam:
 #   id: tab5_cam
-#   i2c_id: bsp_bus
+#   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: ov02c10
-#   xclk_pin: GPIO36
-#   xclk_freq: 24000000
-#   sensor_addr: 0x3C           # OV02C10 = 0x3C
-#   resolution: "800x480"       # Custom format
+#   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
+#   resolution: "800x480"      # Custom format
 #   pixel_format: RGB565
 #   framerate: 30
+
+# lvgl_camera_display:
+#   id: camera_display
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
 
 # display:
 #   - platform: ili9xxx
 #     model: st7796
-#     ...
-#     lambda: |-
-#       // Configurer le canvas au démarrage
-#       id(tab5_cam).configure_canvas(id(camera_canvas));
+#     id: main_display
+#     data_rate: 80MHz

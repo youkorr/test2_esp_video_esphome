@@ -128,7 +128,7 @@ lvgl:
                     ESP_LOGI("camera", "Bayer: BGGR");
                     ESP_LOGI("camera", "Binning: 2x2 (de 1600x1200)");
                     ESP_LOGI("camera", "MIPI: 1-lane");
-                    ESP_LOGI("camera", "Adresse I2C: 0x30");
+                    ESP_LOGI("camera", "Adresse I2C: 0x36");
             widgets:
               - label:
                   text: "INFO"
@@ -192,16 +192,23 @@ lvgl:
 # ============================================
 # CONFIGURATION CAMÉRA SC202CS
 # ============================================
+# NOTE: Les noms de bus I2C sont configurables
+# Remplacez 'bsp_bus' par le nom de votre bus I2C
+
 # mipi_dsi_cam:
 #   id: tab5_cam
-#   i2c_id: bsp_bus
+#   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: sc202cs
-#   xclk_pin: GPIO36
-#   xclk_freq: 24000000
-#   sensor_addr: 0x30           # SC202CS = 0x30
-#   resolution: "VGA"           # Utilise custom format VGA
+#   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
+#   resolution: "VGA"          # Utilise custom format VGA
 #   pixel_format: RGB565
 #   framerate: 30
+
+# lvgl_camera_display:
+#   id: camera_display
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
 
 # NOTES:
 # - VGA (640x480) recommandé pour petits écrans (4-5")
