@@ -564,6 +564,57 @@ bool MipiDSICamComponent::start_streaming() {
   // RGB565 natif du CSI (pas de conversion, pas de copie)
   uint32_t fourcc = V4L2_PIX_FMT_RGB565;
 
+  // Énumérer les formats supportés par le capteur (ESP-IDF 5.5.1 peut avoir des restrictions)
+  ESP_LOGI(TAG, "Checking supported formats for %s...", this->sensor_name_.c_str());
+  struct v4l2_fmtdesc fmtdesc;
+  bool format_supported = false;
+  for (int i = 0; i < 10; i++) {
+    memset(&fmtdesc, 0, sizeof(fmtdesc));
+    fmtdesc.index = i;
+    fmtdesc.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(this->video_fd_, VIDIOC_ENUM_FMT, &fmtdesc) < 0) {
+      break;  // Pas d'autres formats
+    }
+    char fourcc_str[5];
+    fourcc_str[0] = (fmtdesc.pixelformat >> 0) & 0xFF;
+    fourcc_str[1] = (fmtdesc.pixelformat >> 8) & 0xFF;
+    fourcc_str[2] = (fmtdesc.pixelformat >> 16) & 0xFF;
+    fourcc_str[3] = (fmtdesc.pixelformat >> 24) & 0xFF;
+    fourcc_str[4] = '\0';
+    ESP_LOGI(TAG, "  Format[%d]: %s (%s)", i, fmtdesc.description, fourcc_str);
+    if (fmtdesc.pixelformat == fourcc) {
+      format_supported = true;
+    }
+  }
+
+  if (!format_supported) {
+    ESP_LOGW(TAG, "RGB565 may not be supported by sensor, trying anyway...");
+  }
+
+  // Énumérer les tailles de frame supportées pour RGB565
+  ESP_LOGI(TAG, "Checking supported frame sizes for RGB565...");
+  struct v4l2_frmsizeenum frmsize;
+  bool size_found = false;
+  for (int i = 0; i < 20; i++) {
+    memset(&frmsize, 0, sizeof(frmsize));
+    frmsize.index = i;
+    frmsize.pixel_format = fourcc;
+    if (ioctl(this->video_fd_, VIDIOC_ENUM_FRAMESIZES, &frmsize) < 0) {
+      break;
+    }
+    if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+      ESP_LOGI(TAG, "  Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+      if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
+        size_found = true;
+      }
+    }
+  }
+
+  if (!size_found) {
+    ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in supported list", width, height);
+    ESP_LOGW(TAG, "⚠️  Trying to set anyway (driver may adjust)...");
+  }
+
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -575,6 +626,11 @@ bool MipiDSICamComponent::start_streaming() {
   // SET le format pour que le driver calcule sizeimage
   if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) < 0) {
     ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
+    ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
+    ESP_LOGE(TAG, "This may indicate:");
+    ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
+    ESP_LOGE(TAG, "  2. ESP-IDF 5.5.1 has stricter format validation");
+    ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
