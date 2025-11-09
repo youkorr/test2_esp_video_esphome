@@ -30,6 +30,8 @@ extern "C" {
 
 // OV02C10 custom format configurations (800x480 et 1280x800)
 #include "ov02c10_custom_formats.h"
+// OV5647 custom format configurations (VGA 640x480 et 1024x600)
+#include "ov5647_custom_formats.h"
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -577,6 +579,34 @@ bool MipiDSICamComponent::start_streaming() {
     } else if (width == 800 && height == 480) {
       custom_format = &ov02c10_format_800x480_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x480 RAW10 @ 30fps");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+      }
+    }
+  }
+  // ============================================================================
+
+  // ============================================================================
+  // Custom Format Support (OV5647 @ VGA 640x480 ou 1024x600)
+  // ============================================================================
+  if (this->sensor_name_ == "ov5647") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom selon la résolution
+    if (width == 640 && height == 480) {
+      custom_format = &ov5647_format_640x480_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps");
+    } else if (width == 1024 && height == 600) {
+      custom_format = &ov5647_format_1024x600_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
