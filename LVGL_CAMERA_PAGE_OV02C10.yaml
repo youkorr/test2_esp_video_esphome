@@ -1,0 +1,165 @@
+# Page LVGL simplifiée pour caméra OV02C10
+# Résolution: 800x480 (plein écran)
+# Contrôles: BACK, START, STOP, INFO
+
+lvgl:
+  pages:
+    - id: camera_page
+      bg_color: 0x000000  # Fond noir
+
+      widgets:
+        # ============================================
+        # CANVAS CAMÉRA - PLEIN ÉCRAN
+        # ============================================
+        - canvas:
+            id: camera_canvas
+            width: 800
+            height: 480
+            x: 0
+            y: 0
+            bg_color: 0x000000
+
+        # ============================================
+        # BOUTONS DE CONTRÔLE - EN HAUT À DROITE
+        # ============================================
+
+        # Bouton RETOUR
+        - button:
+            id: btn_camera_back
+            width: 100
+            height: 45
+            x: 680
+            y: 10
+            bg_color: 0x333333
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "🔙 Arrêt du streaming et retour");
+                    id(tab5_cam).stop_streaming();
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton START
+        - button:
+            id: btn_start_streaming
+            width: 100
+            height: 45
+            x: 680
+            y: 65
+            bg_color: 0x00AA00  # Vert
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶️  Démarrage du streaming");
+                    if (id(tab5_cam).start_streaming()) {
+                      lv_label_set_text(id(camera_status_label), "LIVE");
+                      lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x00FF00), 0);
+                    } else {
+                      lv_label_set_text(id(camera_status_label), "ERROR");
+                      lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0xFF0000), 0);
+                    }
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton STOP
+        - button:
+            id: btn_stop_streaming
+            width: 100
+            height: 45
+            x: 680
+            y: 120
+            bg_color: 0xCC0000  # Rouge
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "⏹️  Arrêt du streaming");
+                    id(tab5_cam).stop_streaming();
+                    lv_label_set_text(id(camera_status_label), "STOPPED");
+                    lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0xFF8800), 0);
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton INFO
+        - button:
+            id: btn_camera_info
+            width: 100
+            height: 45
+            x: 680
+            y: 175
+            bg_color: 0x4682B4  # Bleu
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
+                    ESP_LOGI("camera", "Sensor: OV02C10");
+                    ESP_LOGI("camera", "Résolution: %dx%d",
+                      id(tab5_cam).get_image_width(),
+                      id(tab5_cam).get_image_height());
+                    ESP_LOGI("camera", "Format: RGB565");
+                    ESP_LOGI("camera", "Canvas: 800x480");
+                    ESP_LOGI("camera", "Bayer: BGGR");
+                    lv_label_set_text(id(camera_status_label), "INFO");
+                    lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x4682B4), 0);
+                - delay: 2s
+                - lambda: |-
+                    lv_label_set_text(id(camera_status_label), "LIVE");
+                    lv_obj_set_style_text_color(id(camera_status_label), lv_color_hex(0x00FF00), 0);
+            widgets:
+              - label:
+                  text: "INFO"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # ============================================
+        # LABEL DE STATUS - EN BAS À DROITE
+        # ============================================
+        - label:
+            id: camera_status_label
+            text: "READY"
+            x: 730
+            y: 450
+            text_color: 0xFF8800
+            text_font: nunito_24
+            text_align: CENTER
+
+# ============================================
+# CONFIGURATION CAMÉRA ASSOCIÉE
+# ============================================
+# À mettre dans votre configuration principale:
+
+# mipi_dsi_cam:
+#   id: tab5_cam
+#   i2c_id: bsp_bus
+#   sensor_type: ov02c10
+#   xclk_pin: GPIO36
+#   xclk_freq: 24000000
+#   sensor_addr: 0x3C           # OV02C10 = 0x3C
+#   resolution: "800x480"       # Custom format
+#   pixel_format: RGB565
+#   framerate: 30
+
+# display:
+#   - platform: ili9xxx
+#     model: st7796
+#     ...
+#     lambda: |-
+#       // Configurer le canvas au démarrage
+#       id(tab5_cam).configure_canvas(id(camera_canvas));
