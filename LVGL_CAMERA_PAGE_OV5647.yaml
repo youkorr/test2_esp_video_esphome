@@ -10,6 +10,30 @@ lvgl:
     - id: camera_page_vga
       bg_color: 0x000000  # Fond noir
 
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Page caméra OV5647 VGA chargée");
+
+            // Configurer le canvas pour la caméra
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              lv_obj_set_size(canvas, 640, 480);  // VGA
+              lv_obj_set_pos(canvas, 80, 0);      // Centré sur écran 800x480
+
+              // Important: lier le canvas à la caméra
+              id(tab5_cam).configure_canvas(canvas);
+
+              ESP_LOGI("camera", "✅ Canvas configuré: 640x480 centré (x=80)");
+            } else {
+              ESP_LOGE("camera", "❌ Canvas introuvable!");
+            }
+
+            // Optionnel: démarrer automatiquement le streaming
+            // Décommentez pour auto-start:
+            // if (id(tab5_cam).start_streaming()) {
+            //   lv_label_set_text(id(status_label), "VGA");
+            // }
+
       widgets:
         # Canvas caméra - VGA centré sur écran 800x480
         - canvas:

@@ -38,6 +38,58 @@ Toutes les pages utilisent la même interface minimaliste:
 3. **STOP** (rouge) - Arrête le streaming
 4. **INFO** (bleu) - Affiche les informations dans les logs ESP
 
+## 🔄 Event `on_load` - IMPORTANT!
+
+Toutes les pages utilisent l'événement `on_load` pour configurer automatiquement le canvas quand la page se charge:
+
+```yaml
+lvgl:
+  pages:
+    - id: camera_page
+      bg_color: 0x000000
+
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Page caméra chargée");
+
+            // Récupérer le canvas
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              // Définir taille et position
+              lv_obj_set_size(canvas, 800, 480);
+              lv_obj_set_pos(canvas, 0, 0);
+
+              // CRITIQUE: lier le canvas à la caméra
+              id(tab5_cam).configure_canvas(canvas);
+
+              ESP_LOGI("camera", "✅ Canvas configuré");
+            }
+
+            // Optionnel: auto-démarrage du streaming
+            // if (id(tab5_cam).start_streaming()) {
+            //   lv_label_set_text(id(status_label), "LIVE");
+            // }
+```
+
+### Pourquoi `on_load` est Important
+
+1. **Configuration automatique** - Le canvas est configuré dès le chargement de la page
+2. **Pas besoin de `display.lambda`** - Tout se fait dans la page LVGL
+3. **Flexibilité** - Vous pouvez changer la taille du canvas dynamiquement
+4. **Auto-start optionnel** - Décommentez le code pour démarrer automatiquement le streaming
+
+### Avec ou Sans Auto-Start?
+
+**Sans auto-start (par défaut):**
+- L'utilisateur doit appuyer sur **START** pour démarrer
+- Plus de contrôle
+- Économise de la batterie/CPU
+
+**Avec auto-start (décommentez le code):**
+- La vidéo démarre automatiquement au chargement de la page
+- Expérience plus fluide
+- Consomme plus de ressources
+
 ## 📐 Configurations par Sensor
 
 ### OV02C10 - Custom Formats
@@ -381,14 +433,20 @@ lvgl:
 
 **Causes possibles:**
 1. Streaming pas démarré → Appuyez sur **START**
-2. Canvas pas configuré → Ajoutez `configure_canvas()` dans `display.lambda`
+2. Canvas pas configuré → Vérifiez que `on_load` appelle `configure_canvas()`
 3. Résolution incorrecte → Vérifiez que custom format existe
 
 **Solution:**
 ```yaml
-display:
-  lambda: |-
-    id(tab5_cam).configure_canvas(id(camera_canvas));
+lvgl:
+  pages:
+    - id: camera_page
+      on_load:
+        - lambda: |-
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              id(tab5_cam).configure_canvas(canvas);
+            }
 ```
 
 ### Problème: Boutons ne Répondent Pas
@@ -425,20 +483,37 @@ mipi_dsi_cam:
   pixel_format: RGB565
   framerate: 30
 
-# Display
+# Display (pas besoin de lambda pour la caméra!)
 display:
   - platform: ili9xxx
     model: st7796
     id: camera_display
     data_rate: 80MHz
-    lambda: |-
-      id(tab5_cam).configure_canvas(id(camera_canvas));
 
 # Page LVGL
 lvgl:
   pages:
     - id: camera_page
       bg_color: 0x000000
+
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Page caméra OV02C10 chargée");
+
+            // Configurer le canvas
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              lv_obj_set_size(canvas, 800, 480);
+              lv_obj_set_pos(canvas, 0, 0);
+              id(tab5_cam).configure_canvas(canvas);
+              ESP_LOGI("camera", "✅ Canvas configuré: 800x480");
+            }
+
+            // Optionnel: démarrage automatique
+            // if (id(tab5_cam).start_streaming()) {
+            //   lv_label_set_text(id(status), "LIVE");
+            //   lv_obj_set_style_text_color(id(status), lv_color_hex(0x00FF00), 0);
+            // }
 
       widgets:
         # Canvas plein écran
