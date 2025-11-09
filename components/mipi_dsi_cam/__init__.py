@@ -5,8 +5,7 @@ from esphome.const import CONF_ID
 from esphome import automation
 
 # Dépendances requises
-DEPENDENCIES = ["esp_video"]
-AUTO_LOAD = ["imlib"]  # Charge automatiquement imlib (nécessaire pour zero-copy drawing)
+DEPENDENCIES = ["esp_video", "imlib"]  # imlib doit être ajouté explicitement dans YAML
 CODEOWNERS = ["@youkorr"]
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
