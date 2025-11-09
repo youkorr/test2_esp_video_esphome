@@ -610,6 +610,31 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
+  // Si RGB565 n'a aucune résolution, vérifier RAW8 (conversion ISP possible)
+  if (!size_found) {
+    ESP_LOGW(TAG, "⚠️  No sizes found for RGB565 - checking native RAW8 formats...");
+    for (int i = 0; i < 20; i++) {
+      memset(&frmsize, 0, sizeof(frmsize));
+      frmsize.index = i;
+      frmsize.pixel_format = V4L2_PIX_FMT_SBGGR8;  // RAW8 BGGR (Format[0] des logs)
+      if (ioctl(this->video_fd_, VIDIOC_ENUM_FRAMESIZES, &frmsize) < 0) {
+        break;
+      }
+      if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+        ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+      } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
+        ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
+                 frmsize.stepwise.min_width, frmsize.stepwise.min_height,
+                 frmsize.stepwise.max_width, frmsize.stepwise.max_height,
+                 frmsize.stepwise.step_width, frmsize.stepwise.step_height);
+      }
+    }
+    ESP_LOGW(TAG, "");
+    ESP_LOGW(TAG, "💡 ESP-IDF 5.5.1: RGB565 requires ISP conversion from RAW");
+    ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
+    ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
+  }
+
   if (!size_found) {
     ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in supported list", width, height);
     ESP_LOGW(TAG, "⚠️  Trying to set anyway (driver may adjust)...");
