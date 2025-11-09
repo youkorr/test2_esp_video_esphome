@@ -65,11 +65,15 @@ static const ov02c10_reginfo_t ov02c10_1280x800_raw10_30fps[] = {
 };
 
 static const esp_cam_sensor_isp_info_t ov02c10_1280x800_isp_info = {
-    .isp_v_blanking_lines = 16,
-    .ae_enable = true,
-    .ae_gain_range = {1.0, 16.0},
-    .ae_exposure_range = {16, 1000},
-    .awb_enable = true,
+    .isp_v1_info = {
+        .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+        .pclk = 38250000,     // HTS × VTS × FPS = 1500 × 850 × 30
+        .hts = 1500,          // Horizontal Total Size (from register 0x380c-0d)
+        .vts = 850,           // Vertical Total Size (from register 0x380e-0f)
+        .exp_def = 0x500,     // Default exposure value
+        .gain_def = 0x100,    // Default gain value (1x)
+        .bayer_type = ESP_CAM_SENSOR_BAYER_RGGB,  // OV02C10 Bayer pattern
+    }
 };
 
 static const esp_cam_sensor_format_t ov02c10_format_1280x800_raw10_30fps = {
@@ -134,11 +138,15 @@ static const ov02c10_reginfo_t ov02c10_800x480_raw10_30fps[] = {
 };
 
 static const esp_cam_sensor_isp_info_t ov02c10_800x480_isp_info = {
-    .isp_v_blanking_lines = 16,
-    .ae_enable = true,
-    .ae_gain_range = {1.0, 16.0},
-    .ae_exposure_range = {16, 1000},
-    .awb_enable = true,
+    .isp_v1_info = {
+        .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+        .pclk = 16569000,     // HTS × VTS × FPS = 1050 × 526 × 30
+        .hts = 1050,          // Horizontal Total Size (from register 0x380c-0d)
+        .vts = 526,           // Vertical Total Size (from register 0x380e-0f)
+        .exp_def = 0x300,     // Default exposure value
+        .gain_def = 0x100,    // Default gain value (1x)
+        .bayer_type = ESP_CAM_SENSOR_BAYER_RGGB,  // OV02C10 Bayer pattern
+    }
 };
 
 static const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = {
