@@ -5,7 +5,8 @@ from esphome.const import CONF_ID
 from esphome import automation
 
 # Dépendances requises
-DEPENDENCIES = ["esp_video", "imlib"]  # imlib doit être ajouté explicitement dans YAML
+DEPENDENCIES = ["esp_video"]
+# Note: imlib est compilé directement via CMakeLists.txt (pas de dépendance Python)
 CODEOWNERS = ["@youkorr"]
 
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")

@@ -1,18 +1,17 @@
-# imlib - Configuration requise pour mipi_dsi_cam
+# imlib - Bibliothèque de dessin zero-copy pour mipi_dsi_cam
 
-## Problème
+## Comment ça fonctionne
 
-ESPHome ne peut pas charger automatiquement `imlib` via `AUTO_LOAD` en raison de limitations du système de cache des composants externes.
+`imlib` est une **bibliothèque C pure** compilée automatiquement par ESP-IDF via le `CMakeLists.txt` de `mipi_dsi_cam`.
 
-## Solution
+**Vous n'avez RIEN à ajouter dans votre YAML** - `imlib` est compilé automatiquement.
 
-**Ajouter explicitement `imlib:` dans votre fichier YAML** :
+## ✅ Configuration correcte
 
 ```yaml
 # ============================================================================
-# IMPORTANT: Ajouter imlib AVANT mipi_dsi_cam
+# PAS BESOIN de déclarer imlib: - il est compilé automatiquement
 # ============================================================================
-imlib:  # ← Requis pour les fonctions de dessin zero-copy
 
 esp_video:
   i2c_id: bsp_bus
