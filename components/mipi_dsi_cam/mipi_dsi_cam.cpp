@@ -26,6 +26,7 @@ extern "C" {
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
+#include "imlib.h"      // Bibliothèque de dessin zero-copy RGB565
 }
 
 namespace esphome {
@@ -834,6 +835,13 @@ void MipiDSICamComponent::stop_streaming() {
   // 3. Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
   this->image_buffer_ = nullptr;
 
+  // 4. Libérer la structure imlib si allouée
+  if (this->imlib_image_) {
+    free(this->imlib_image_);
+    this->imlib_image_ = nullptr;
+    this->imlib_image_valid_ = false;
+  }
+
   // 5. Fermer le device
   if (this->video_fd_ >= 0) {
     close(this->video_fd_);
@@ -1292,14 +1300,24 @@ image_t* MipiDSICamComponent::get_imlib_image() {
     return nullptr;
   }
 
+  // Allouer la structure imlib au premier appel
+  if (!this->imlib_image_) {
+    this->imlib_image_ = (image_t*)malloc(sizeof(image_t));
+    if (!this->imlib_image_) {
+      ESP_LOGE(TAG, "Failed to allocate imlib image structure");
+      return nullptr;
+    }
+    memset(this->imlib_image_, 0, sizeof(image_t));
+  }
+
   // Initialiser la structure imlib image_t pour pointer vers le buffer V4L2 (zero-copy)
-  this->imlib_image_.w = this->image_width_;
-  this->imlib_image_.h = this->image_height_;
-  this->imlib_image_.pixfmt = PIXFORMAT_RGB565;
-  this->imlib_image_.pixels = this->image_buffer_;
+  this->imlib_image_->w = this->image_width_;
+  this->imlib_image_->h = this->image_height_;
+  this->imlib_image_->pixfmt = PIXFORMAT_RGB565;
+  this->imlib_image_->pixels = this->image_buffer_;
   this->imlib_image_valid_ = true;
 
-  return &this->imlib_image_;
+  return this->imlib_image_;
 }
 
 void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {

@@ -6,14 +6,9 @@
 #include <string>
 #include <vector>
 
-// imlib for zero-copy RGB565 drawing operations
-#ifdef __cplusplus
-extern "C" {
-#endif
-#include "imlib.h"
-#ifdef __cplusplus
-}
-#endif
+// Forward declaration pour imlib (défini dans .cpp pour éviter dépendance header)
+struct image;
+typedef struct image image_t;
 
 // Définition du type ISP config basée sur le code source ESP-Video
 #ifndef ESP_VIDEO_ISP_CONFIG_DEFINED
@@ -159,7 +154,7 @@ class MipiDSICamComponent : public Component {
   uint32_t frame_sequence_{0};
 
   // imlib image wrapper (zero-copy, pointe vers image_buffer_)
-  image_t imlib_image_{};
+  image_t *imlib_image_{nullptr};  // Pointeur vers structure imlib (allouée dans .cpp)
   bool imlib_image_valid_{false};
 
   bool check_pipeline_health_();
