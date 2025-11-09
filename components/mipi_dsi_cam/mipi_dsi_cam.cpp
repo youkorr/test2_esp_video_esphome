@@ -1281,6 +1281,69 @@ bool MipiDSICamComponent::set_sharpness(int value) {
   return true;
 }
 
+// ============================================================================
+// imlib - Méthodes de dessin zero-copy sur buffer RGB565
+// ============================================================================
+
+image_t* MipiDSICamComponent::get_imlib_image() {
+  if (!this->streaming_active_ || !this->image_buffer_ || this->image_buffer_size_ == 0) {
+    ESP_LOGW(TAG, "Cannot get imlib image: no active frame buffer");
+    this->imlib_image_valid_ = false;
+    return nullptr;
+  }
+
+  // Initialiser la structure imlib image_t pour pointer vers le buffer V4L2 (zero-copy)
+  this->imlib_image_.w = this->image_width_;
+  this->imlib_image_.h = this->image_height_;
+  this->imlib_image_.pixfmt = PIXFORMAT_RGB565;
+  this->imlib_image_.pixels = this->image_buffer_;
+  this->imlib_image_valid_ = true;
+
+  return &this->imlib_image_;
+}
+
+void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return;
+
+  imlib_draw_string(img, x, y, text, color, scale, 1, 1, 0, false, false, PIXFORMAT_RGB565, nullptr);
+}
+
+void MipiDSICamComponent::draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return;
+
+  imlib_draw_line(img, x0, y0, x1, y1, color, thickness);
+}
+
+void MipiDSICamComponent::draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness, bool fill) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return;
+
+  imlib_draw_rectangle(img, x, y, w, h, color, thickness, fill);
+}
+
+void MipiDSICamComponent::draw_circle(int cx, int cy, int radius, uint16_t color, int thickness, bool fill) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return;
+
+  imlib_draw_circle(img, cx, cy, radius, color, thickness, fill);
+}
+
+int MipiDSICamComponent::get_pixel(int x, int y) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return 0;
+
+  return imlib_get_pixel(img, x, y);
+}
+
+void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
+  image_t *img = this->get_imlib_image();
+  if (!img) return;
+
+  imlib_set_pixel(img, x, y, color);
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 

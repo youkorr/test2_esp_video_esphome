@@ -6,6 +6,15 @@
 #include <string>
 #include <vector>
 
+// imlib for zero-copy RGB565 drawing operations
+#ifdef __cplusplus
+extern "C" {
+#endif
+#include "imlib.h"
+#ifdef __cplusplus
+}
+#endif
+
 // Définition du type ISP config basée sur le code source ESP-Video
 #ifndef ESP_VIDEO_ISP_CONFIG_DEFINED
 #define ESP_VIDEO_ISP_CONFIG_DEFINED
@@ -88,6 +97,15 @@ class MipiDSICamComponent : public Component {
   bool set_hue(int value);           // -180 à 180, défaut: 0
   bool set_sharpness(int value);     // 0 à 255 (filter/sharpness control)
 
+  // imlib - Dessin zero-copy sur buffer RGB565 (améliore fluidité)
+  image_t* get_imlib_image();  // Retourne image_t wrappant le buffer caméra actuel
+  void draw_string(int x, int y, const char *text, uint16_t color, float scale = 1.0f);
+  void draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness = 1);
+  void draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness = 1, bool fill = false);
+  void draw_circle(int cx, int cy, int radius, uint16_t color, int thickness = 1, bool fill = false);
+  int get_pixel(int x, int y);  // Lire pixel RGB565 à (x,y)
+  void set_pixel(int x, int y, uint16_t color);  // Écrire pixel RGB565 à (x,y)
+
  protected:
   std::string sensor_name_{"sc202cs"};
   int i2c_id_{0};
@@ -129,6 +147,10 @@ class MipiDSICamComponent : public Component {
   uint16_t image_width_{0};
   uint16_t image_height_{0};
   uint32_t frame_sequence_{0};
+
+  // imlib image wrapper (zero-copy, pointe vers image_buffer_)
+  image_t imlib_image_{};
+  bool imlib_image_valid_{false};
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();

@@ -5,7 +5,7 @@ from esphome.const import CONF_ID
 from esphome import automation
 
 # Dépendances requises
-DEPENDENCIES = ["esp_video"]
+DEPENDENCIES = ["esp_video", "imlib"]
 AUTO_LOAD = []
 CODEOWNERS = ["@youkorr"]
 
