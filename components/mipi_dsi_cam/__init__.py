@@ -29,9 +29,9 @@ CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FORMAT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
-CONF_MIRROR_X = "mirror_x"  # Accepté mais ignoré
-CONF_MIRROR_Y = "mirror_y"  # Accepté mais ignoré
-CONF_ROTATION = "rotation"  # Accepté mais ignoré
+CONF_MIRROR_X = "mirror_x"  # Hardware PPA transform (M5Stack-style)
+CONF_MIRROR_Y = "mirror_y"  # Hardware PPA transform
+CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
 CONF_FILENAME = "filename"
 CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
@@ -114,6 +114,14 @@ async def to_code(config):
     cg.add(var.set_pixel_format(config[CONF_PIXEL_FORMAT]))
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
+
+    # Configuration mirror/rotate (PPA hardware M5Stack-style)
+    if CONF_MIRROR_X in config:
+        cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
+    if CONF_MIRROR_Y in config:
+        cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
+    if CONF_ROTATION in config:
+        cg.add(var.set_rotation(config[CONF_ROTATION]))
 
     # Configuration des gains RGB CCM si présents
     if CONF_RGB_GAINS in config:

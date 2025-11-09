@@ -58,6 +58,11 @@ class MipiDSICamComponent : public Component {
   void set_framerate(int f) { framerate_ = f; }
   void set_jpeg_quality(int q) { jpeg_quality_ = q; }
 
+  // Configuration mirror/rotate (PPA hardware si disponible)
+  void set_mirror_x(bool enable) { mirror_x_ = enable; }
+  void set_mirror_y(bool enable) { mirror_y_ = enable; }
+  void set_rotation(int degrees) { rotation_ = degrees; }  // 0, 90, 180, 270
+
   // Configuration des gains RGB CCM depuis YAML
   void set_rgb_gains_config(float red, float green, float blue) {
     rgb_gains_red_ = red;
@@ -118,6 +123,11 @@ class MipiDSICamComponent : public Component {
   std::string pixel_format_{"JPEG"};
   int framerate_{30};
   int jpeg_quality_{10};
+
+  // Configuration mirror/rotate (M5Stack-style PPA hardware)
+  bool mirror_x_{false};
+  bool mirror_y_{false};
+  int rotation_{0};  // 0, 90, 180, 270 degrees
 
   // Configuration CCM RGB gains depuis YAML
   bool rgb_gains_enabled_{false};
