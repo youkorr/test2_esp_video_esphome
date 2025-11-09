@@ -1,10 +1,14 @@
 # imlib - Bibliothèque de dessin zero-copy pour mipi_dsi_cam
 
-## Comment ça fonctionne
+## ⚠️ Statut actuel
 
-`imlib` est une **bibliothèque C pure** compilée automatiquement par ESP-IDF via le `CMakeLists.txt` de `mipi_dsi_cam`.
+**imlib est DÉSACTIVÉ par défaut** en raison de problèmes d'ordre de compilation entre PlatformIO et ESP-IDF.
 
-**Vous n'avez RIEN à ajouter dans votre YAML** - `imlib` est compilé automatiquement.
+Les fonctions de dessin (`draw_string`, `draw_line`, etc.) sont disponibles mais ne font rien pour l'instant.
+
+## Comment ça fonctionne (quand activé)
+
+`imlib` est une **bibliothèque C pure** qui sera compilée par ESP-IDF pour fournir des fonctions de dessin optimisées RGB565.
 
 ## ✅ Configuration correcte
 

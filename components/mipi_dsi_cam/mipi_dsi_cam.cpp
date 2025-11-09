@@ -26,8 +26,18 @@ extern "C" {
 #include "esp_ipa_types.h"
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
-#include "imlib.h"      // Bibliothèque de dessin zero-copy RGB565
 }
+
+// imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
+// Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
+#ifdef ENABLE_IMLIB_DRAWING
+  extern "C" {
+    #include "imlib.h"
+  }
+  #define IMLIB_AVAILABLE 1
+#else
+  #define IMLIB_AVAILABLE 0
+#endif
 
 namespace esphome {
 namespace mipi_dsi_cam {
@@ -835,12 +845,14 @@ void MipiDSICamComponent::stop_streaming() {
   // 3. Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
   this->image_buffer_ = nullptr;
 
-  // 4. Libérer la structure imlib si allouée
+  // 4. Libérer la structure imlib si allouée (seulement si imlib activé)
+#if IMLIB_AVAILABLE
   if (this->imlib_image_) {
     free(this->imlib_image_);
     this->imlib_image_ = nullptr;
     this->imlib_image_valid_ = false;
   }
+#endif
 
   // 5. Fermer le device
   if (this->video_fd_ >= 0) {
@@ -1293,6 +1305,8 @@ bool MipiDSICamComponent::set_sharpness(int value) {
 // imlib - Méthodes de dessin zero-copy sur buffer RGB565
 // ============================================================================
 
+#if IMLIB_AVAILABLE
+
 image_t* MipiDSICamComponent::get_imlib_image() {
   if (!this->streaming_active_ || !this->image_buffer_ || this->image_buffer_size_ == 0) {
     ESP_LOGW(TAG, "Cannot get imlib image: no active frame buffer");
@@ -1361,6 +1375,40 @@ void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
 
   imlib_set_pixel(img, x, y, color);
 }
+
+#else  // IMLIB_AVAILABLE == 0
+
+// Stubs imlib (imlib désactivé) - retournent sans erreur
+image_t* MipiDSICamComponent::get_imlib_image() {
+  ESP_LOGW(TAG, "imlib drawing disabled (compile with -DENABLE_IMLIB_DRAWING to enable)");
+  return nullptr;
+}
+
+void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {
+  // Stub - ne fait rien
+}
+
+void MipiDSICamComponent::draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness) {
+  // Stub - ne fait rien
+}
+
+void MipiDSICamComponent::draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness, bool fill) {
+  // Stub - ne fait rien
+}
+
+void MipiDSICamComponent::draw_circle(int cx, int cy, int radius, uint16_t color, int thickness, bool fill) {
+  // Stub - ne fait rien
+}
+
+int MipiDSICamComponent::get_pixel(int x, int y) {
+  return 0;  // Stub - retourne noir
+}
+
+void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
+  // Stub - ne fait rien
+}
+
+#endif  // IMLIB_AVAILABLE
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
