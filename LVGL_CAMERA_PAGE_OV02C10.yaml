@@ -10,20 +10,7 @@ lvgl:
       on_load:
         - lambda: |-
             ESP_LOGI("camera", "📸 Page caméra OV02C10 chargée");
-
-            // Configurer le canvas pour la caméra
-            auto canvas = id(camera_canvas);
-            if (canvas != nullptr) {
-              lv_obj_set_size(canvas, 800, 480);  // Plein écran
-              lv_obj_set_pos(canvas, 0, 0);
-
-              // Important: lier le canvas à la caméra
-              id(tab5_cam).configure_canvas(canvas);
-
-              ESP_LOGI("camera", "✅ Canvas configuré: 800x480 plein écran");
-            } else {
-              ESP_LOGE("camera", "❌ Canvas introuvable!");
-            }
+            ESP_LOGI("camera", "Canvas: 800x480 plein écran");
 
             // Optionnel: démarrer automatiquement le streaming
             // Décommentez les lignes ci-dessous pour auto-start:

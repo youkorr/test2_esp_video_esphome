@@ -13,20 +13,7 @@ lvgl:
       on_load:
         - lambda: |-
             ESP_LOGI("camera", "📸 Page caméra SC202CS VGA chargée");
-
-            // Configurer le canvas pour la caméra
-            auto canvas = id(camera_canvas);
-            if (canvas != nullptr) {
-              lv_obj_set_size(canvas, 640, 480);  // VGA
-              lv_obj_set_pos(canvas, 80, 0);      // Centré sur écran 800x480
-
-              // Important: lier le canvas à la caméra
-              id(tab5_cam).configure_canvas(canvas);
-
-              ESP_LOGI("camera", "✅ Canvas configuré: 640x480 centré (x=80)");
-            } else {
-              ESP_LOGE("camera", "❌ Canvas introuvable!");
-            }
+            ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
 
             // Optionnel: démarrer automatiquement le streaming
             // Décommentez pour auto-start:
