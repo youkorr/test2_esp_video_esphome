@@ -32,6 +32,8 @@ extern "C" {
 #include "ov02c10_custom_formats.h"
 // OV5647 custom format configurations (VGA 640x480 et 1024x600)
 #include "ov5647_custom_formats.h"
+// SC202CS custom format configurations (VGA 640x480)
+#include "sc202cs_custom_formats.h"
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -603,10 +605,10 @@ bool MipiDSICamComponent::start_streaming() {
     // Sélectionner le format custom selon la résolution
     if (width == 640 && height == 480) {
       custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
     } else if (width == 1024 && height == 600) {
       custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
@@ -617,6 +619,31 @@ bool MipiDSICamComponent::start_streaming() {
       } else {
         ESP_LOGI(TAG, "✅ Custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+      }
+    }
+  }
+  // ============================================================================
+
+  // ============================================================================
+  // Custom Format Support (SC202CS @ VGA 640x480)
+  // ============================================================================
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom VGA
+    if (width == 640 && height == 480) {
+      custom_format = &sc202cs_format_vga_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (SC202CS)");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native VGA (%ux%u)", width, height);
       }
     }
   }
