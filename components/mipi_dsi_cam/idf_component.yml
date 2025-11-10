@@ -1,0 +1,4 @@
+dependencies:
+  idf: ">=5.3"
+  esp_video: {}
+  imlib: {}

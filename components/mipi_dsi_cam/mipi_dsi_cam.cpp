@@ -758,7 +758,7 @@ bool MipiDSICamComponent::start_streaming() {
   // Note: Si custom format RAW10 appliqué, ISP convertira RAW10→RGB565
   uint32_t fourcc = V4L2_PIX_FMT_RGB565;
 
-  // Énumérer les formats supportés par le capteur (ESP-IDF 5.5.1 peut avoir des restrictions)
+  // Énumérer les formats supportés par le capteur (ESP-IDF 5.4.2+ peut avoir des restrictions)
   ESP_LOGI(TAG, "Checking supported formats for %s...", this->sensor_name_.c_str());
   struct v4l2_fmtdesc fmtdesc;
   bool format_supported = false;
@@ -824,7 +824,7 @@ bool MipiDSICamComponent::start_streaming() {
       }
     }
     ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 ESP-IDF 5.5.1: RGB565 requires ISP conversion from RAW");
+    ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
     ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
     ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
@@ -848,7 +848,7 @@ bool MipiDSICamComponent::start_streaming() {
     ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
     ESP_LOGE(TAG, "This may indicate:");
     ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
-    ESP_LOGE(TAG, "  2. ESP-IDF 5.5.1 has stricter format validation");
+    ESP_LOGE(TAG, "  2. ESP-IDF 5.4.2+ has stricter format validation");
     ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
     close(this->video_fd_);
     this->video_fd_ = -1;
