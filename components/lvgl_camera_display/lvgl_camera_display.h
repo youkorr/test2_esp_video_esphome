@@ -21,6 +21,9 @@ class LVGLCameraDisplay : public Component {
 
   float get_setup_priority() const override { return setup_priority::LATE; }
 
+  // Static callback for LVGL timer
+  static void lvgl_timer_callback_(lv_timer_t *timer);
+
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
   lv_obj_t *canvas_obj_{nullptr};
@@ -35,6 +38,9 @@ class LVGLCameraDisplay : public Component {
 
   uint32_t last_fps_time_{0};
 
+  lv_timer_t *lvgl_timer_{nullptr};
+
+  void update_camera_frame_();
   void update_canvas_();
 };
 
