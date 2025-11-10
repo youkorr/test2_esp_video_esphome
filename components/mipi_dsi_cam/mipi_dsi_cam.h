@@ -163,6 +163,11 @@ class MipiDSICamComponent : public Component {
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();
+
+  // PPA (Pixel-Processing Accelerator) hardware transform functions
+  bool init_ppa_();
+  bool apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer);
+  void cleanup_ppa_();
 };
 
 using MipiDsiCam = MipiDSICamComponent;

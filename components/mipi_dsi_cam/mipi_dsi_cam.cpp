@@ -945,6 +945,20 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
+  // Allouer buffer séparé pour PPA si mirror/rotate activés
+  if (this->ppa_enabled_) {
+    this->image_buffer_ = (uint8_t*)heap_caps_malloc(
+        this->image_buffer_size_,
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM
+    );
+    if (!this->image_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate PPA image buffer (%u bytes)", this->image_buffer_size_);
+      this->stop_streaming();
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ PPA buffer allocated: %u bytes @ %p", this->image_buffer_size_, this->image_buffer_);
+  }
+
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
   // Logs détaillés commentés pour réduire verbosité
@@ -1033,8 +1047,21 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Zero-copy: pointer directement vers le buffer V4L2 RGB565
-  this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  // 2. Appliquer transformation PPA si configurée, sinon zero-copy
+  if (this->ppa_enabled_) {
+    // Copier V4L2 buffer vers notre buffer PPA alloué
+    uint8_t *v4l2_src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+    memcpy(this->image_buffer_, v4l2_src, this->image_buffer_size_);
+
+    // Appliquer transformation PPA in-place (mirror/rotate hardware)
+    if (!this->apply_ppa_transform_(this->image_buffer_, this->image_buffer_)) {
+      ESP_LOGE(TAG, "PPA transform failed");
+      // Continuer avec l'image non-transformée plutôt que d'échouer
+    }
+  } else {
+    // Zero-copy: pointer directement vers le buffer V4L2 RGB565
+    this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  }
   uint32_t t3 = esp_timer_get_time();
 
   this->frame_sequence_++;
@@ -1117,8 +1144,18 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
-  this->image_buffer_ = nullptr;
+  // 3. Cleanup PPA et libérer buffer si alloué
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    // Libérer le buffer PPA alloué
+    heap_caps_free(this->image_buffer_);
+    this->image_buffer_ = nullptr;
+
+    // Cleanup PPA client
+    this->cleanup_ppa_();
+  } else {
+    // Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
+    this->image_buffer_ = nullptr;
+  }
 
   // 4. Libérer la structure imlib si allouée (seulement si imlib activé)
 #if IMLIB_AVAILABLE
