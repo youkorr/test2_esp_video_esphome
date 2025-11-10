@@ -210,7 +210,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_vga_isp_info = {
         .pclk = 28800000,     // Approximate pixel clock for VGA @ 30fps
         .hts = 1500,          // Horizontal Total Size (adjusted for VGA)
         .vts = 990,           // Vertical Total Size (for 30fps)
-        .exp_def = 0x3dc,     // Default exposure (optimized for VGA)
+        .exp_def = 0x180,     // 384 - reduced from 0x3dc (988) which was way too bright
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // SC202CS is BGGR
     }
