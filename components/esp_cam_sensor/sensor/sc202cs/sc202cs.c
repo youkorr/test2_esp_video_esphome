@@ -880,7 +880,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .vts      = 1250,
              .hts      = 1920,
              .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x300,  // 768 (60% of max) - was 0x4dc (99%) which caused oversaturation
+             .exp_def    = 0x250,  // 592 (47% of max) - reduced from 0x300 (too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -890,7 +890,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .vts      = 1250,
              .hts      = 1920,
              .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x300,  // 768 (60% of max) - was 0x4dc (99%) which caused oversaturation
+             .exp_def    = 0x250,  // 592 (47% of max) - reduced from 0x300 (too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -900,7 +900,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .vts      = 1250,
              .hts      = 1920,
              .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x300,  // 768 (60% of max) - was 0x4dc (99%) which caused oversaturation
+             .exp_def    = 0x250,  // 592 (47% of max) - reduced from 0x300 (too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -910,7 +910,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .vts      = 1250,
              .hts      = 1920,
              .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x300,  // 768 (60% of max) - was 0x4dc (99%) which caused oversaturation
+             .exp_def    = 0x250,  // 592 (47% of max) - reduced from 0x300 (too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
 };
