@@ -89,7 +89,7 @@ static const esp_cam_sensor_format_t ov02c10_format_1280x800_raw10_30fps = {
     .isp_info = &ov02c10_1280x800_isp_info,
     .mipi_info = {
         .mipi_clk = 400000000,  // 400MHz MIPI clock
-        .lane_num = 2,
+        .lane_num = 1,
         .line_sync_en = false,
     },
     .reserved = NULL,
@@ -162,7 +162,7 @@ static const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = {
     .isp_info = &ov02c10_800x480_isp_info,
     .mipi_info = {
         .mipi_clk = 300000000,  // 300MHz MIPI clock (réduit pour 800x480)
-        .lane_num = 2,
+        .lane_num = 1,
         .line_sync_en = false,
     },
     .reserved = NULL,
