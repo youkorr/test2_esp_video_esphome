@@ -24,7 +24,7 @@ extern "C" {
 #include "esp_video_isp_ioctl.h"
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
-#include "esp_ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
+#include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
