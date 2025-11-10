@@ -27,6 +27,7 @@ CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 CONF_XCLK_PIN = "xclk_pin"
 CONF_XCLK_FREQ = "xclk_freq"
+CONF_ENABLE_XCLK_INIT = "enable_xclk_init"
 
 # Constante pour indiquer qu'il n'y a pas d'horloge externe contrôlée par GPIO
 # Utilisez xclk_pin: -1 pour les cartes avec oscillateur externe sur le PCB
@@ -72,6 +73,8 @@ CONFIG_SCHEMA = cv.All(
         # XCLK pin accepte: "GPIO36", 36, -1, ou "NO_CLOCK"
         cv.Optional(CONF_XCLK_PIN, default="GPIO36"): cv.Any(cv.string, cv.int_range(min=-1, max=48)),
         cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_range(min=1000000, max=40000000),  # 1-40 MHz
+        # Enable XCLK initialization via LEDC (for non-M5Stack boards)
+        cv.Optional(CONF_ENABLE_XCLK_INIT, default=False): cv.boolean,
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -95,6 +98,7 @@ async def to_code(config):
     # Cast explicite en gpio_num_t pour éviter l'erreur de compilation
     cg.add(var.set_xclk_pin(cg.RawExpression(f"static_cast<gpio_num_t>({xclk_pin})")))
     cg.add(var.set_xclk_freq(xclk_freq))
+    cg.add(var.set_enable_xclk_init(config[CONF_ENABLE_XCLK_INIT]))
 
     # Logs silencieux sauf erreurs
     logging.debug(f"[ESP-Video] I2C bus: '{config[CONF_I2C_ID]}'")
