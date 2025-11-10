@@ -124,6 +124,10 @@ class MipiDSICamComponent : public Component {
   bool mirror_y_{false};
   int rotation_{0};  // 0, 90, 180, 270 degrees
 
+  // PPA (Pixel-Processing Accelerator) hardware handles
+  void *ppa_client_handle_{nullptr};
+  bool ppa_enabled_{false};
+
   // Configuration CCM RGB gains depuis YAML
   bool rgb_gains_enabled_{false};
   float rgb_gains_red_{1.0f};
