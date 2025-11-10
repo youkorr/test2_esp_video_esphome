@@ -188,10 +188,7 @@ if os.path.exists(esp_sccb_intf_dir):
 
 # Liste des fichiers JSON à embarquer
 json_files_to_embed = [
-    {
-        "path": os.path.join(esp_cam_sensor_dir, "sensor/ov5647/cfg/ov5647_default.json"),
-        "symbol": "ov5647_ipa_config_json",
-    },
+
     {
         "path": os.path.join(esp_cam_sensor_dir, "sensor/ov02c10/cfg/ov02c10_default.json"),
         "symbol": "ov02c10_ipa_config_json",
