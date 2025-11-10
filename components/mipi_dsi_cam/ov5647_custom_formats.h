@@ -148,6 +148,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3705, 0x1a},
 
     // AEC/AGC settings
+    {0x3503, 0x00},  // Enable auto exposure and auto gain (0x00 = both auto, 0x03 = both manual)
     {0x3f05, 0x02},
     {0x3f06, 0x10},
     {0x3f01, 0x0a},
@@ -349,6 +350,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x3705, 0x1a},
 
     // AEC/AGC settings
+    {0x3503, 0x00},  // Enable auto exposure and auto gain (0x00 = both auto, 0x03 = both manual)
     {0x3f05, 0x02},
     {0x3f06, 0x10},
     {0x3f01, 0x0a},

@@ -194,6 +194,7 @@ static const sc202cs_reginfo_t sc202cs_vga_640x480_raw8_30fps[] = {
     {0x3e00, 0x00},  // Exposure high
     {0x3e01, 0x3d},  // Exposure mid (optimized for VGA)
     {0x3e02, 0xc0},  // Exposure low
+    {0x3e08, 0x1f},  // AEC/AGC enable (0x1f = enable auto exposure & auto gain)
     {0x3e09, 0x00},  // Gain
 
     // Digital gain
