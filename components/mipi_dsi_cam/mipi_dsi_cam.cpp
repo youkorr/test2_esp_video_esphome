@@ -181,6 +181,71 @@ static bool h264_apply_basic_params_(int /*fps*/) {
   return true;
 }
 
+static bool isp_apply_color_correction_() {
+  int fd = -1;
+  if (!open_node_(ESP_VIDEO_ISP1_DEVICE_NAME, &fd)) return false;
+
+  // Values from working M5Stack Tab5 implementation
+  // brightness: 60, contrast: 145, saturation: 135 (per channel)
+  struct v4l2_control ctrl;
+  bool success = true;
+
+  // Set brightness (60)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_BRIGHTNESS;
+  ctrl.value = 60;
+  if (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(BRIGHTNESS)") < 0) {
+    success = false;
+  }
+
+  // Set contrast (145)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_CONTRAST;
+  ctrl.value = 145;
+  if (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(CONTRAST)") < 0) {
+    success = false;
+  }
+
+  // Set saturation (135)
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_SATURATION;
+  ctrl.value = 135;
+  if (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(SATURATION)") < 0) {
+    success = false;
+  }
+
+  close_fd_(fd);
+
+  if (success) {
+    ESP_LOGI(TAG, "✓ ISP color correction applied (brightness=60, contrast=145, saturation=135)");
+  }
+
+  return success;
+}
+
+static bool sensor_enable_auto_white_balance_() {
+  int fd = -1;
+  if (!open_node_(ESP_VIDEO_MIPI_CSI_DEVICE_NAME, &fd)) return false;
+
+  // Enable Auto White Balance on sensor (V4L2_CID_AUTO_WHITE_BALANCE = 1)
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
+  ctrl.value = 1;  // Enable AWB
+
+  bool success = (safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(AUTO_WHITE_BALANCE)") >= 0);
+
+  close_fd_(fd);
+
+  if (success) {
+    ESP_LOGI(TAG, "✓ Sensor Auto White Balance enabled");
+  } else {
+    ESP_LOGW(TAG, "⚠ Sensor Auto White Balance not supported (fallback to ISP color correction)");
+  }
+
+  return success;
+}
+
 void MipiDSICamComponent::cleanup_pipeline_() {
   // Le pipeline est géré par le composant esp_video
   this->pipeline_started_ = false;
@@ -340,6 +405,16 @@ void MipiDSICamComponent::setup() {
     this->mark_failed();
     return;
   }
+
+  // Configurer ISP color correction (brightness, contrast, saturation)
+  if (isp_available) {
+    if (!isp_apply_color_correction_()) {
+      ESP_LOGW(TAG, "WARNING: ISP color correction not fully applied");
+    }
+  }
+
+  // Activer Auto White Balance sur le sensor
+  (void)sensor_enable_auto_white_balance_();
 
   // Configurer l'encodeur JPEG si nécessaire
   if (wants_jpeg_(this->pixel_format_)) {

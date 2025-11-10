@@ -23,7 +23,7 @@
 
 #define OV5647_PID         0x5647
 #define OV5647_SENSOR_NAME "OV5647"
-#define OV5647_AE_TARGET_DEFAULT (0x30)  // Reduced from 0x50 (80) to 0x30 (48) to fix red tint and noise
+#define OV5647_AE_TARGET_DEFAULT (0x36)  // Optimal value (54) - matches working M5Stack implementation
 
 #ifndef portTICK_RATE_MS
 #define portTICK_RATE_MS portTICK_PERIOD_MS
