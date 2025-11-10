@@ -214,6 +214,7 @@ bool MipiDSICamComponent::init_ppa_() {
 
   ppa_client_config_t ppa_config = {};
   ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
+  ppa_config.max_pending_trans_num = 1;
 
   esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
   if (ret != ESP_OK) {
@@ -267,19 +268,14 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.scale_y = 1.0f;
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
-  srm_config.rgb_swap = PPA_SRM_COLOR_RGB_SWAP_NONE;
+  srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
   srm_config.byte_swap = false;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
-  // Exécuter transformation hardware
-  ppa_trans_data_t trans_data = {};
-  trans_data.srm = srm_config;
-  ppa_event_data_t event_data = {};
-
+  // Exécuter transformation hardware (M5Stack API: 2 parameters)
   esp_err_t ret = ppa_do_scale_rotate_mirror(
       (ppa_client_handle_t)this->ppa_client_handle_,
-      &trans_data,
-      &event_data,
-      portMAX_DELAY  // Attendre fin transformation
+      &srm_config
   );
 
   if (ret != ESP_OK) {
