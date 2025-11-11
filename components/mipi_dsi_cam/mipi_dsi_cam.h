@@ -166,7 +166,7 @@ class MipiDSICamComponent : public Component {
   // Buffer pool system (triple buffering pour éviter tearing)
   struct esp_video_buffer *buffer_pool_{nullptr};  // Pool de 3 buffers RGB565
   struct esp_video_buffer_element *current_buffer_{nullptr};  // Buffer actuellement capturé
-  portMUX_TYPE buffer_mutex_{portMUX_INITIALIZER_UNLOCKED};  // Spinlock pour thread-safety
+  portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)
 
   // Legacy pointer (deprecated, pointe vers current_buffer_ si disponible)
   uint8_t *image_buffer_{nullptr};

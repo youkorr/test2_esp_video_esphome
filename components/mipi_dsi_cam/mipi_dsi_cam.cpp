@@ -299,6 +299,9 @@ void MipiDSICamComponent::cleanup_ppa_() {
 // ============================================================================
 
 void MipiDSICamComponent::setup() {
+  // Initialiser le spinlock pour le buffer pool
+  vPortCPUInitializeMutex(&this->buffer_mutex_);
+
   // Vérifier mémoire disponible
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (free_heap < MIN_FREE_HEAP * 2) {
