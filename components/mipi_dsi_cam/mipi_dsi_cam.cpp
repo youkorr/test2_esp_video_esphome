@@ -1018,6 +1018,7 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
+  // IMPORTANT: Toujours activer AWB au démarrage pour éviter problème blanc→jaune
   if (this->set_white_balance_mode(true)) {
     ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
   } else {
@@ -1026,26 +1027,12 @@ bool MipiDSICamComponent::start_streaming() {
     this->set_white_balance_temp(5500);
   }
 
-  // Auto-boost brightness (basé sur config testov5647 qui fonctionnait)
-  if (this->set_brightness(60)) {  // 60 au lieu de 0 (défaut) - valeur de testov5647
-    ESP_LOGI(TAG, "✓ Brightness boosted to 60 (from testov5647 working config)");
-  } else {
-    ESP_LOGW(TAG, "⚠️  Failed to boost brightness");
-  }
-
-  // Auto-boost contraste (basé sur config testov5647: 145)
-  if (this->set_contrast(145)) {  // 145 - valeur exacte de testov5647
-    ESP_LOGI(TAG, "✓ Contrast set to 145 (from testov5647 working config)");
-  } else {
-    ESP_LOGW(TAG, "⚠️  Failed to set contrast");
-  }
-
-  // Auto-boost saturation (basé sur config testov5647: 135)
-  if (this->set_saturation(135)) {  // 135 - valeur exacte de testov5647
-    ESP_LOGI(TAG, "✓ Saturation set to 135 (from testov5647 working config)");
-  } else {
-    ESP_LOGW(TAG, "⚠️  Failed to set saturation");
-  }
+  // NOTE: Brightness/Contrast/Saturation auto-application désactivée
+  // Utilisez les contrôles YAML number avec initial_value pour ajuster:
+  //   - Brightness: initial_value: 60 (testov5647)
+  //   - Contrast: initial_value: 145 (testov5647)
+  //   - Saturation: initial_value: 135 (testov5647)
+  // Voir CAMERA_CONTROLS_YAML.md pour la configuration complète
 
   return true;
 }
