@@ -214,7 +214,7 @@ bool MipiDSICamComponent::init_ppa_() {
 
   ppa_client_config_t ppa_config = {};
   ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
-  ppa_config.max_pending_trans_num = 4;  // Increased from 1 to 4 for concurrent web stream + LVGL display
+  ppa_config.max_pending_trans_num = 16;  // Increased to 16 for concurrent web stream + LVGL display + multiple clients
 
   esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
   if (ret != ESP_OK) {
@@ -1000,17 +1000,47 @@ bool MipiDSICamComponent::start_streaming() {
   // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
   // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
+  // Attendre que streaming soit stable (100ms)
+  vTaskDelay(pdMS_TO_TICKS(100));
+
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
-    // Attendre que streaming soit stable (100ms)
-    vTaskDelay(pdMS_TO_TICKS(100));
-
     if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
       // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
       //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
     } else {
       ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
     }
+  }
+
+  // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
+  if (this->set_white_balance_mode(true)) {
+    ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
+    // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
+    this->set_white_balance_temp(5500);
+  }
+
+  // Auto-boost brightness (basé sur config testov5647 qui fonctionnait)
+  if (this->set_brightness(60)) {  // 60 au lieu de 0 (défaut) - valeur de testov5647
+    ESP_LOGI(TAG, "✓ Brightness boosted to 60 (from testov5647 working config)");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Failed to boost brightness");
+  }
+
+  // Auto-boost contraste (basé sur config testov5647: 145)
+  if (this->set_contrast(145)) {  // 145 - valeur exacte de testov5647
+    ESP_LOGI(TAG, "✓ Contrast set to 145 (from testov5647 working config)");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Failed to set contrast");
+  }
+
+  // Auto-boost saturation (basé sur config testov5647: 135)
+  if (this->set_saturation(135)) {  // 135 - valeur exacte de testov5647
+    ESP_LOGI(TAG, "✓ Saturation set to 135 (from testov5647 working config)");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Failed to set saturation");
   }
 
   return true;
