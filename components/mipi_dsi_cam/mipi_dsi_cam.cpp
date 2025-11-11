@@ -1004,6 +1004,17 @@ bool MipiDSICamComponent::start_streaming() {
   // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
   // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
+  // Ouvrir le device ISP pour les contrôles V4L2 (brightness, contrast, saturation, AWB, WB)
+  // Note: /dev/video0 (CSI) est utilisé pour capture, /dev/video20 (ISP) pour contrôles
+  this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
+  if (this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Failed to open ISP device %s for V4L2 controls: %s",
+             ESP_VIDEO_ISP1_DEVICE_NAME, strerror(errno));
+    ESP_LOGW(TAG, "Brightness/Contrast/Saturation/AWB controls will not be available");
+  } else {
+    ESP_LOGI(TAG, "✓ ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+  }
+
   // Attendre que streaming soit stable (100ms)
   vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -1183,10 +1194,16 @@ void MipiDSICamComponent::stop_streaming() {
   }
 #endif
 
-  // 5. Fermer le device
+  // 5. Fermer le device CSI
   if (this->video_fd_ >= 0) {
     close(this->video_fd_);
     this->video_fd_ = -1;
+  }
+
+  // 6. Fermer le device ISP (contrôles V4L2)
+  if (this->isp_fd_ >= 0) {
+    close(this->isp_fd_);
+    this->isp_fd_ = -1;
   }
 
   this->streaming_active_ = false;
@@ -1216,8 +1233,8 @@ void MipiDSICamComponent::stop_streaming() {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_exposure(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set exposure: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set exposure: ISP device not open");
     return false;
   }
 
@@ -1230,7 +1247,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_AUTO;
     ctrl.value = V4L2_EXPOSURE_AUTO;  // Auto exposure
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGE(TAG, "Failed to enable auto exposure: %s", strerror(errno));
       return false;
     }
@@ -1240,7 +1257,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_AUTO;
     ctrl.value = V4L2_EXPOSURE_MANUAL;  // Manual exposure
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGW(TAG, "Failed to disable auto exposure: %s", strerror(errno));
       // Continue anyway, try to set exposure value
     }
@@ -1249,7 +1266,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
     ctrl.value = value;
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGE(TAG, "Failed to set exposure to %d: %s", value, strerror(errno));
       return false;
     }
@@ -1273,8 +1290,8 @@ bool MipiDSICamComponent::set_exposure(int value) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_gain(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set gain: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set gain: ISP device not open");
     return false;
   }
 
@@ -1284,7 +1301,7 @@ bool MipiDSICamComponent::set_gain(int value) {
   ctrl.id = V4L2_CID_GAIN;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set gain to %d: %s", value, strerror(errno));
     return false;
   }
@@ -1300,8 +1317,8 @@ bool MipiDSICamComponent::set_gain(int value) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set white balance mode: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance mode: ISP device not open");
     return false;
   }
 
@@ -1310,7 +1327,7 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
   ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
   ctrl.value = auto_mode ? 1 : 0;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set white balance mode: %s", strerror(errno));
     return false;
   }
@@ -1335,8 +1352,8 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set white balance temperature: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance temperature: ISP device not open");
     return false;
   }
 
@@ -1345,7 +1362,7 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
   ctrl.id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
   ctrl.value = kelvin;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set white balance temperature to %dK: %s", kelvin, strerror(errno));
     return false;
   }
@@ -1380,8 +1397,8 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set CCM matrix: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set CCM matrix: ISP device not open");
     return false;
   }
 
@@ -1409,7 +1426,7 @@ bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
   ctrls.count = 1;
   ctrls.controls = &ctrl;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
     ESP_LOGE(TAG, "Failed to set CCM matrix: %s", strerror(errno));
     return false;
   }
@@ -1478,8 +1495,8 @@ bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set WB gains: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set WB gains: ISP device not open");
     return false;
   }
 
@@ -1502,7 +1519,7 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
   ctrls.count = 1;
   ctrls.controls = &ctrl;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
     ESP_LOGE(TAG, "Failed to set WB gains: %s", strerror(errno));
     return false;
   }
@@ -1520,8 +1537,8 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
  * @param value Valeur de luminosité (-128 à 127, défaut: 0)
  */
 bool MipiDSICamComponent::set_brightness(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set brightness: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set brightness: ISP device not open");
     return false;
   }
 
@@ -1529,12 +1546,12 @@ bool MipiDSICamComponent::set_brightness(int value) {
   ctrl.id = V4L2_CID_BRIGHTNESS;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set brightness: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  ESP_LOGI(TAG, "✓ Brightness set to %d", value);
   return true;
 }
 
@@ -1543,8 +1560,8 @@ bool MipiDSICamComponent::set_brightness(int value) {
  * @param value Valeur de contraste (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_contrast(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set contrast: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set contrast: ISP device not open");
     return false;
   }
 
@@ -1552,12 +1569,12 @@ bool MipiDSICamComponent::set_contrast(int value) {
   ctrl.id = V4L2_CID_CONTRAST;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set contrast: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  ESP_LOGI(TAG, "✓ Contrast set to %d", value);
   return true;
 }
 
@@ -1566,8 +1583,8 @@ bool MipiDSICamComponent::set_contrast(int value) {
  * @param value Valeur de saturation (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_saturation(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set saturation: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set saturation: ISP device not open");
     return false;
   }
 
@@ -1575,12 +1592,12 @@ bool MipiDSICamComponent::set_saturation(int value) {
   ctrl.id = V4L2_CID_SATURATION;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set saturation: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  ESP_LOGI(TAG, "✓ Saturation set to %d", value);
   return true;
 }
 
@@ -1589,8 +1606,8 @@ bool MipiDSICamComponent::set_saturation(int value) {
  * @param value Valeur de teinte (-180 à 180, défaut: 0)
  */
 bool MipiDSICamComponent::set_hue(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set hue: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set hue: ISP device not open");
     return false;
   }
 
@@ -1598,12 +1615,12 @@ bool MipiDSICamComponent::set_hue(int value) {
   ctrl.id = V4L2_CID_HUE;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set hue: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  ESP_LOGI(TAG, "✓ Hue set to %d", value);
   return true;
 }
 
@@ -1612,8 +1629,8 @@ bool MipiDSICamComponent::set_hue(int value) {
  * @param value Valeur de netteté (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_sharpness(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set sharpness: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set sharpness: ISP device not open");
     return false;
   }
 
@@ -1621,12 +1638,12 @@ bool MipiDSICamComponent::set_sharpness(int value) {
   ctrl.id = V4L2_CID_SHARPNESS;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set sharpness: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
+  ESP_LOGI(TAG, "✓ Sharpness set to %d", value);
   return true;
 }
 

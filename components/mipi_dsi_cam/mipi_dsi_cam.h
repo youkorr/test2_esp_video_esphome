@@ -145,7 +145,8 @@ class MipiDSICamComponent : public Component {
 
   // État du streaming vidéo continu
   bool streaming_active_{false};
-  int video_fd_{-1};
+  int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames
+  int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
   struct {
     void *start;
     size_t length;
