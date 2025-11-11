@@ -30,7 +30,7 @@ number:
     id: camera_brightness
     min_value: -128
     max_value: 127
-    step: 1
+    step: 1                 # ← REQUIS par ESPHome
     initial_value: 60       # Valeur de testov5647
     optimistic: true
     icon: "mdi:brightness-6"
