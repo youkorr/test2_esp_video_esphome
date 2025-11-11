@@ -190,9 +190,9 @@ static const sc202cs_reginfo_t sc202cs_vga_640x480_raw8_30fps[] = {
     {0x393e, 0xc0},
     {0x39dd, 0x41},
 
-    // Exposure settings
+    // Exposure settings (matching SC2336 working config)
     {0x3e00, 0x00},  // Exposure high
-    {0x3e01, 0x3d},  // Exposure mid (optimized for VGA)
+    {0x3e01, 0x4d},  // Exposure mid = 77 (from SC2336)
     {0x3e02, 0xc0},  // Exposure low
     {0x3e08, 0x1f},  // AEC/AGC enable (0x1f = enable auto exposure & auto gain)
     {0x3e09, 0x00},  // Gain
@@ -211,8 +211,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_vga_isp_info = {
         .pclk = 28800000,     // Approximate pixel clock for VGA @ 30fps
         .hts = 1500,          // Horizontal Total Size (adjusted for VGA)
         .vts = 990,           // Vertical Total Size (for 30fps)
-        .exp_def = 0x180,     // 384 - reduced from 0x3dc (988) which was way too bright
-        .gain_def = 0x100,    // Default gain (1x)
+        .exp_def = 0x4dc,     // 1244 - matching SC2336 working config
+        .gain_def = 0,        // No default gain - matching SC2336
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // SC202CS is BGGR
     }
 };

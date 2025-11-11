@@ -220,7 +220,7 @@ static const esp_cam_sensor_isp_info_t ov5647_640x480_isp_info = {
         .pclk = 32432000,     // HTS × VTS × FPS = 1896 × 1080 × 30 / 2
         .hts = 1896,          // Horizontal Total Size
         .vts = 1080,          // Vertical Total Size
-        .exp_def = 0x200,     // 512 - reduced from 0x300 (768) to fix overexposure
+        .exp_def = 0x300,     // 768 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
     }
@@ -422,7 +422,7 @@ static const esp_cam_sensor_isp_info_t ov5647_1024x600_isp_info = {
         .pclk = 94224000,     // HTS × VTS × FPS = 2416 × 1300 × 30
         .hts = 2416,          // Horizontal Total Size
         .vts = 1300,          // Vertical Total Size
-        .exp_def = 0x350,     // 848 - reduced from 0x500 (1280) to fix overexposure
+        .exp_def = 0x500,     // 1280 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
     }
