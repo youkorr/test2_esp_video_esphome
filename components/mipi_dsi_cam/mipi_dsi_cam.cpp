@@ -214,7 +214,7 @@ bool MipiDSICamComponent::init_ppa_() {
 
   ppa_client_config_t ppa_config = {};
   ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
-  ppa_config.max_pending_trans_num = 1;
+  ppa_config.max_pending_trans_num = 4;  // Increased from 1 to 4 for concurrent web stream + LVGL display
 
   esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
   if (ret != ESP_OK) {
