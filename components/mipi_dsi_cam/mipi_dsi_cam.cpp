@@ -1868,6 +1868,38 @@ void MipiDSICamComponent::release_buffer(struct esp_video_buffer_element *elemen
   portEXIT_CRITICAL(&this->buffer_mutex_);
 }
 
+/**
+ * @brief Retourne le pointeur vers les données du buffer element
+ *
+ * Wrapper pour esp_video_buffer_element_get_buffer() afin que lvgl_camera_display
+ * n'ait pas besoin d'inclure esp_video_buffer.h directement.
+ *
+ * @param element Buffer element
+ * @return Pointeur vers les données RGB565, ou nullptr si element invalide
+ */
+uint8_t* MipiDSICamComponent::get_buffer_data(struct esp_video_buffer_element *element) {
+  if (element == nullptr) {
+    return nullptr;
+  }
+  return esp_video_buffer_element_get_buffer(element);
+}
+
+/**
+ * @brief Retourne l'index du buffer element dans le pool
+ *
+ * Wrapper pour esp_video_buffer_element_get_index() afin que lvgl_camera_display
+ * n'ait pas besoin d'inclure esp_video_buffer.h directement.
+ *
+ * @param element Buffer element
+ * @return Index du buffer (0-2 pour triple buffering), ou 0 si element invalide
+ */
+uint32_t MipiDSICamComponent::get_buffer_index(struct esp_video_buffer_element *element) {
+  if (element == nullptr) {
+    return 0;
+  }
+  return esp_video_buffer_element_get_index(element);
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 

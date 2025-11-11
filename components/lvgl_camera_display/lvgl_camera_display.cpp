@@ -2,10 +2,6 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-extern "C" {
-#include "esp_video/private_include/esp_video_buffer.h"
-}
-
 namespace esphome {
 namespace lvgl_camera_display {
 
@@ -145,7 +141,7 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
-  uint8_t* img_data = esp_video_buffer_element_get_buffer(buffer);
+  uint8_t* img_data = this->camera_->get_buffer_data(buffer);
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
 
@@ -156,7 +152,7 @@ void LVGLCameraDisplay::update_canvas_() {
   if (this->first_update_) {
     ESP_LOGI(TAG, "🖼️  Premier update canvas (buffer pool):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
-    ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, esp_video_buffer_element_get_index(buffer));
+    ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
     this->first_update_ = false;

@@ -83,6 +83,10 @@ class MipiDSICamComponent : public Component {
   struct esp_video_buffer_element* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
   void release_buffer(struct esp_video_buffer_element *element);  // Libère buffer après affichage
 
+  // Helper functions pour accéder aux buffer elements (wrapper pour éviter include esp_video_buffer.h)
+  uint8_t* get_buffer_data(struct esp_video_buffer_element *element);  // Retourne pointeur vers données
+  uint32_t get_buffer_index(struct esp_video_buffer_element *element);  // Retourne index du buffer
+
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
   uint16_t get_image_width() const { return image_width_; }
