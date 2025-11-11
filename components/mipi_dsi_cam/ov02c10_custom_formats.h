@@ -70,9 +70,9 @@ static const esp_cam_sensor_isp_info_t ov02c10_1280x800_isp_info = {
         .pclk = 38250000,     // HTS × VTS × FPS = 1500 × 850 × 30
         .hts = 1500,          // Horizontal Total Size (from register 0x380c-0d)
         .vts = 850,           // Vertical Total Size (from register 0x380e-0f)
-        .exp_def = 0x500,     // Default exposure value
+        .exp_def = 0x300,     // Default exposure value (reduced for better auto-exposure)
         .gain_def = 0x100,    // Default gain value (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_RGGB,  // OV02C10 Bayer pattern
+        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // OV02C10 is BGGR, not RGGB!
     }
 };
 
@@ -89,7 +89,7 @@ static const esp_cam_sensor_format_t ov02c10_format_1280x800_raw10_30fps = {
     .isp_info = &ov02c10_1280x800_isp_info,
     .mipi_info = {
         .mipi_clk = 400000000,  // 400MHz MIPI clock
-        .lane_num = 2,
+        .lane_num = 1,
         .line_sync_en = false,
     },
     .reserved = NULL,
@@ -143,9 +143,9 @@ static const esp_cam_sensor_isp_info_t ov02c10_800x480_isp_info = {
         .pclk = 16569000,     // HTS × VTS × FPS = 1050 × 526 × 30
         .hts = 1050,          // Horizontal Total Size (from register 0x380c-0d)
         .vts = 526,           // Vertical Total Size (from register 0x380e-0f)
-        .exp_def = 0x300,     // Default exposure value
+        .exp_def = 0x200,     // Default exposure value (reduced for 800x480)
         .gain_def = 0x100,    // Default gain value (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_RGGB,  // OV02C10 Bayer pattern
+        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // OV02C10 is BGGR, not RGGB!
     }
 };
 
@@ -162,7 +162,7 @@ static const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = {
     .isp_info = &ov02c10_800x480_isp_info,
     .mipi_info = {
         .mipi_clk = 300000000,  // 300MHz MIPI clock (réduit pour 800x480)
-        .lane_num = 2,
+        .lane_num = 1,
         .line_sync_en = false,
     },
     .reserved = NULL,

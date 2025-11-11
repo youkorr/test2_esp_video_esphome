@@ -194,12 +194,25 @@ void ESPVideoComponent::setup() {
 
   // ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
 
-  // NOTE: XCLK initialization disabled for now
-  // The M5Stack Tab5 BSP may already initialize XCLK elsewhere
-  // Manual LEDC init was causing conflicts and crashes
-  // TODO: Investigate if XCLK is already initialized by BSP
-  // ESP_LOGW(TAG, "⚠️  XCLK init via LEDC is DISABLED (testing safe mode)");
-  // ESP_LOGW(TAG, "   Assuming XCLK is initialized by M5Stack BSP or hardware");
+  // Initialize XCLK via LEDC if enabled (for non-M5Stack boards)
+  // M5Stack Tab5 BSP already initializes XCLK, so this should be disabled for M5Stack
+  if (this->enable_xclk_init_ && this->xclk_pin_ != (gpio_num_t)-1) {
+    ESP_LOGI(TAG, "🔧 Initializing XCLK for non-M5Stack board (GPIO%d @ %u Hz)",
+             this->xclk_pin_, this->xclk_freq_);
+
+    esp_err_t xclk_ret = init_xclk_ledc(this->xclk_pin_, this->xclk_freq_);
+    if (xclk_ret != ESP_OK) {
+      ESP_LOGE(TAG, "❌ XCLK initialization failed: %s", esp_err_to_name(xclk_ret));
+      ESP_LOGE(TAG, "   Sensor detection will fail (Chip ID = 0x0000)");
+      this->mark_failed();
+      return;
+    }
+
+    // Wait for sensor to stabilize with XCLK
+    vTaskDelay(pdMS_TO_TICKS(50));  // 50ms delay
+  } else if (!this->enable_xclk_init_) {
+    ESP_LOGI(TAG, "ℹ️  XCLK init disabled - assuming BSP or hardware provides XCLK");
+  }
 
   // ESP_LOGI(TAG, "");
   // ESP_LOGI(TAG, "========================================");

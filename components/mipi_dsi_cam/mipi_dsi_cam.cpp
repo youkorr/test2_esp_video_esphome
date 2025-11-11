@@ -24,12 +24,17 @@ extern "C" {
 #include "esp_video_isp_ioctl.h"
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
+#include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
 
 // OV02C10 custom format configurations (800x480 et 1280x800)
 #include "ov02c10_custom_formats.h"
+// OV5647 custom format configurations (VGA 640x480 et 1024x600)
+#include "ov5647_custom_formats.h"
+// SC202CS custom format configurations (VGA 640x480)
+#include "sc202cs_custom_formats.h"
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -197,6 +202,101 @@ bool MipiDSICamComponent::check_pipeline_health_() {
   return true;
 }
 
+// ============================================================================
+// PPA (Pixel-Processing Accelerator) Hardware Transform Functions
+// ============================================================================
+
+bool MipiDSICamComponent::init_ppa_() {
+  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
+    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
+    return true;  // Pas besoin de PPA
+  }
+
+  ppa_client_config_t ppa_config = {};
+  ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
+  ppa_config.max_pending_trans_num = 1;
+
+  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  this->ppa_enabled_ = true;
+  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
+           this->mirror_x_, this->mirror_y_, this->rotation_);
+  return true;
+}
+
+bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
+  if (!this->ppa_enabled_ || !this->ppa_client_handle_) {
+    return true;  // Pas de transformation
+  }
+
+  ppa_srm_oper_config_t srm_config = {};
+
+  // Input configuration
+  srm_config.in.buffer = src_buffer;
+  srm_config.in.pic_w = this->image_width_;
+  srm_config.in.pic_h = this->image_height_;
+  srm_config.in.block_w = this->image_width_;
+  srm_config.in.block_h = this->image_height_;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  // Output configuration
+  srm_config.out.buffer = dst_buffer;
+  srm_config.out.buffer_size = this->image_buffer_size_;
+  srm_config.out.pic_w = this->image_width_;  // Pas de scale
+  srm_config.out.pic_h = this->image_height_;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  // Transformation configuration
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  if (this->rotation_ == 90) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+  } else if (this->rotation_ == 180) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
+  } else if (this->rotation_ == 270) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
+  }
+
+  srm_config.scale_x = 1.0f;  // Pas de scale
+  srm_config.scale_y = 1.0f;
+  srm_config.mirror_x = this->mirror_x_;
+  srm_config.mirror_y = this->mirror_y_;
+  srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
+  srm_config.byte_swap = false;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
+
+  // Exécuter transformation hardware (M5Stack API: 2 parameters)
+  esp_err_t ret = ppa_do_scale_rotate_mirror(
+      (ppa_client_handle_t)this->ppa_client_handle_,
+      &srm_config
+  );
+
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "PPA transform failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  return true;
+}
+
+void MipiDSICamComponent::cleanup_ppa_() {
+  if (this->ppa_client_handle_) {
+    ppa_unregister_client((ppa_client_handle_t)this->ppa_client_handle_);
+    this->ppa_client_handle_ = nullptr;
+    this->ppa_enabled_ = false;
+    ESP_LOGI(TAG, "✓ PPA hardware transform cleanup");
+  }
+}
+
+// ============================================================================
+
 void MipiDSICamComponent::setup() {
   // Vérifier mémoire disponible
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
@@ -267,6 +367,11 @@ void MipiDSICamComponent::setup() {
 
   this->pipeline_started_ = true;
   this->last_health_check_ = millis();
+
+  // Initialiser PPA (Pixel-Processing Accelerator) si mirror/rotate configurés
+  if (!this->init_ppa_()) {
+    ESP_LOGW(TAG, "PPA initialization failed, mirror/rotate will not be available");
+  }
 
   // Messages simples de succès
   ESP_LOGI(TAG, "esp-cam-sensor: ok (%s)", this->sensor_name_.c_str());
@@ -592,11 +697,64 @@ bool MipiDSICamComponent::start_streaming() {
   }
   // ============================================================================
 
+  // ============================================================================
+  // Custom Format Support (OV5647 @ VGA 640x480 ou 1024x600)
+  // ============================================================================
+  if (this->sensor_name_ == "ov5647") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom selon la résolution
+    if (width == 640 && height == 480) {
+      custom_format = &ov5647_format_640x480_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+    } else if (width == 1024 && height == 600) {
+      custom_format = &ov5647_format_1024x600_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+      }
+    }
+  }
+  // ============================================================================
+
+  // ============================================================================
+  // Custom Format Support (SC202CS @ VGA 640x480)
+  // ============================================================================
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom VGA
+    if (width == 640 && height == 480) {
+      custom_format = &sc202cs_format_vga_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (SC202CS)");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native VGA (%ux%u)", width, height);
+      }
+    }
+  }
+  // ============================================================================
+
   // RGB565 natif du CSI (pas de conversion, pas de copie)
   // Note: Si custom format RAW10 appliqué, ISP convertira RAW10→RGB565
   uint32_t fourcc = V4L2_PIX_FMT_RGB565;
 
-  // Énumérer les formats supportés par le capteur (ESP-IDF 5.5.1 peut avoir des restrictions)
+  // Énumérer les formats supportés par le capteur (ESP-IDF 5.4.2+ peut avoir des restrictions)
   ESP_LOGI(TAG, "Checking supported formats for %s...", this->sensor_name_.c_str());
   struct v4l2_fmtdesc fmtdesc;
   bool format_supported = false;
@@ -662,7 +820,7 @@ bool MipiDSICamComponent::start_streaming() {
       }
     }
     ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 ESP-IDF 5.5.1: RGB565 requires ISP conversion from RAW");
+    ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
     ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
     ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
@@ -686,7 +844,7 @@ bool MipiDSICamComponent::start_streaming() {
     ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
     ESP_LOGE(TAG, "This may indicate:");
     ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
-    ESP_LOGE(TAG, "  2. ESP-IDF 5.5.1 has stricter format validation");
+    ESP_LOGE(TAG, "  2. ESP-IDF 5.4.2+ has stricter format validation");
     ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
     close(this->video_fd_);
     this->video_fd_ = -1;
@@ -783,6 +941,20 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
+  // Allouer buffer séparé pour PPA si mirror/rotate activés
+  if (this->ppa_enabled_) {
+    this->image_buffer_ = (uint8_t*)heap_caps_malloc(
+        this->image_buffer_size_,
+        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM
+    );
+    if (!this->image_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate PPA image buffer (%u bytes)", this->image_buffer_size_);
+      this->stop_streaming();
+      return false;
+    }
+    ESP_LOGI(TAG, "✓ PPA buffer allocated: %u bytes @ %p", this->image_buffer_size_, this->image_buffer_);
+  }
+
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
   // Logs détaillés commentés pour réduire verbosité
@@ -871,8 +1043,21 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Zero-copy: pointer directement vers le buffer V4L2 RGB565
-  this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  // 2. Appliquer transformation PPA si configurée, sinon zero-copy
+  if (this->ppa_enabled_) {
+    // Copier V4L2 buffer vers notre buffer PPA alloué
+    uint8_t *v4l2_src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+    memcpy(this->image_buffer_, v4l2_src, this->image_buffer_size_);
+
+    // Appliquer transformation PPA in-place (mirror/rotate hardware)
+    if (!this->apply_ppa_transform_(this->image_buffer_, this->image_buffer_)) {
+      ESP_LOGE(TAG, "PPA transform failed");
+      // Continuer avec l'image non-transformée plutôt que d'échouer
+    }
+  } else {
+    // Zero-copy: pointer directement vers le buffer V4L2 RGB565
+    this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
+  }
   uint32_t t3 = esp_timer_get_time();
 
   this->frame_sequence_++;
@@ -955,8 +1140,18 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
-  this->image_buffer_ = nullptr;
+  // 3. Cleanup PPA et libérer buffer si alloué
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    // Libérer le buffer PPA alloué
+    heap_caps_free(this->image_buffer_);
+    this->image_buffer_ = nullptr;
+
+    // Cleanup PPA client
+    this->cleanup_ppa_();
+  } else {
+    // Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
+    this->image_buffer_ = nullptr;
+  }
 
   // 4. Libérer la structure imlib si allouée (seulement si imlib activé)
 #if IMLIB_AVAILABLE

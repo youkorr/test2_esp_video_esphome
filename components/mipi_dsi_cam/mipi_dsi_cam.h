@@ -2,7 +2,6 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esphome/components/number/number.h"
 #include <string>
 #include <vector>
 
@@ -124,6 +123,10 @@ class MipiDSICamComponent : public Component {
   bool mirror_y_{false};
   int rotation_{0};  // 0, 90, 180, 270 degrees
 
+  // PPA (Pixel-Processing Accelerator) hardware handles
+  void *ppa_client_handle_{nullptr};
+  bool ppa_enabled_{false};
+
   // Configuration CCM RGB gains depuis YAML
   bool rgb_gains_enabled_{false};
   float rgb_gains_red_{1.0f};
@@ -159,6 +162,11 @@ class MipiDSICamComponent : public Component {
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();
+
+  // PPA (Pixel-Processing Accelerator) hardware transform functions
+  bool init_ppa_();
+  bool apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer);
+  void cleanup_ppa_();
 };
 
 using MipiDsiCam = MipiDSICamComponent;
@@ -195,81 +203,6 @@ class StopStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComp
     this->parent_->stop_streaming();
     ESP_LOGI("mipi_dsi_cam", "⏹️  Streaming vidéo arrêté");
   }
-};
-
-// ============================================================================
-// Number Components pour contrôles caméra
-// ============================================================================
-
-class CamBrightnessNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override { camera_->set_brightness((int)value); }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamContrastNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override { camera_->set_contrast((int)value); }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamSaturationNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override { camera_->set_saturation((int)value); }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamHueNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override { camera_->set_hue((int)value); }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamFilterNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override { camera_->set_sharpness((int)value); }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamRedGainNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override {
-    // Récupérer les valeurs actuelles de green et blue (par défaut 1.0)
-    camera_->set_rgb_gains(value, 1.0f, 1.0f);
-  }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamGreenGainNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override {
-    camera_->set_rgb_gains(1.0f, value, 1.0f);
-  }
-  MipiDSICamComponent *camera_{nullptr};
-};
-
-class CamBlueGainNumber : public number::Number, public Component {
- public:
-  void set_camera(MipiDSICamComponent *camera) { camera_ = camera; }
- protected:
-  void control(float value) override {
-    camera_->set_rgb_gains(1.0f, 1.0f, value);
-  }
-  MipiDSICamComponent *camera_{nullptr};
 };
 
 }  // namespace mipi_dsi_cam

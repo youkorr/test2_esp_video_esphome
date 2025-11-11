@@ -60,12 +60,12 @@ if CAMERA_SC202CS
 
     choice CAMERA_SC202CS_ABS_GAIN_MAP_PRIORITY
         prompt "Gain map select"
-        default CAMERA_SC202CS_DIG_GAIN_PRIORITY
+        default CAMERA_SC202CS_ANA_GAIN_PRIORITY
         help
             The map of gains affects the size of the noise and the smoothness of the brightness change.
             Compared with digital gain, analog gain has less noise.
             Choose the appropriate gain map to balance the smoothness of the noise and brightness change.
-    
+
         config CAMERA_SC202CS_ANA_GAIN_PRIORITY
             bool "Analog Gain Priority"
         config CAMERA_SC202CS_DIG_GAIN_PRIORITY

@@ -34,12 +34,14 @@ class ESPVideoComponent : public Component {
   // Setters pour XCLK (requis pour la détection des capteurs MIPI-CSI)
   void set_xclk_pin(gpio_num_t pin) { this->xclk_pin_ = pin; }
   void set_xclk_freq(uint32_t freq) { this->xclk_freq_ = freq; }
+  void set_enable_xclk_init(bool enable) { this->enable_xclk_init_ = enable; }
 
  protected:
   bool initialized_{false};
   i2c::I2CBus *i2c_bus_{nullptr};
   gpio_num_t xclk_pin_{GPIO_NUM_36};     // Default XCLK pin for ESP32-P4
   uint32_t xclk_freq_{24000000};         // Default 24MHz for MIPI-CSI sensors
+  bool enable_xclk_init_{false};         // Enable XCLK initialization via LEDC (for non-M5Stack boards)
 };
 
 }  // namespace esp_video

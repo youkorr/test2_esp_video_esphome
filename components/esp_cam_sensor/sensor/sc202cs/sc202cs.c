@@ -879,9 +879,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
-                             // format reg_list, the default values ​​are used here.
-             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
+             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -890,9 +889,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
-                             // format reg_list, the default values ​​are used here.
-             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
+             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -901,9 +899,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
-                             // format reg_list, the default values ​​are used here.
-             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
+             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -912,9 +909,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
-                             // format reg_list, the default values ​​are used here.
-             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
+             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
 };

@@ -1,0 +1,216 @@
+# Page LVGL simplifiée pour caméra SC202CS
+# Résolutions disponibles: 640x480 (VGA) ou 720P
+# Contrôles: BACK, START, STOP, INFO
+
+# ============================================
+# VERSION 1: VGA 640x480 (recommandé pour petits écrans)
+# ============================================
+lvgl:
+  pages:
+    - id: camera_page_vga
+      bg_color: 0x000000
+
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Page caméra SC202CS VGA chargée");
+            ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
+
+            // Optionnel: démarrer automatiquement le streaming
+            // Décommentez pour auto-start:
+            // if (id(tab5_cam).start_streaming()) {
+            //   lv_label_set_text(id(status_label), "VGA");
+            // }
+
+      widgets:
+        # Canvas VGA centré sur écran 800x480
+        - canvas:
+            id: camera_canvas
+            width: 640
+            height: 480
+            x: 80   # Centré: (800-640)/2 = 80
+            y: 0
+            bg_color: 0x000000
+
+        # Bouton RETOUR
+        - button:
+            id: btn_camera_back
+            width: 70
+            height: 45
+            x: 5
+            y: 10
+            bg_color: 0x333333
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "🔙 Retour");
+                    id(tab5_cam).stop_streaming();
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_18
+                  text_align: CENTER
+
+        # Bouton START
+        - button:
+            id: btn_start
+            width: 70
+            height: 45
+            x: 5
+            y: 65
+            bg_color: 0x00AA00
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶️  START SC202CS");
+                    if (id(tab5_cam).start_streaming()) {
+                      lv_label_set_text(id(status_label), "VGA");
+                    }
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_18
+                  text_align: CENTER
+
+        # Bouton STOP
+        - button:
+            id: btn_stop
+            width: 70
+            height: 45
+            x: 5
+            y: 120
+            bg_color: 0xCC0000
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    id(tab5_cam).stop_streaming();
+                    lv_label_set_text(id(status_label), "STOP");
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_18
+                  text_align: CENTER
+
+        # Bouton INFO
+        - button:
+            id: btn_info
+            width: 70
+            height: 45
+            x: 5
+            y: 175
+            bg_color: 0x4682B4
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
+                    ESP_LOGI("camera", "Sensor: SC202CS");
+                    ESP_LOGI("camera", "Résolution configurée: 640x480 (VGA)");
+
+                    // Résolution runtime
+                    int w = id(tab5_cam).get_image_width();
+                    int h = id(tab5_cam).get_image_height();
+                    if (w > 0 && h > 0) {
+                      ESP_LOGI("camera", "Résolution runtime: %dx%d", w, h);
+                      ESP_LOGI("camera", "Streaming: ACTIF");
+                    } else {
+                      ESP_LOGI("camera", "Streaming: ARRÊTÉ");
+                    }
+
+                    ESP_LOGI("camera", "Format: RGB565 RAW8");
+                    ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
+                    ESP_LOGI("camera", "Bayer: BGGR");
+                    ESP_LOGI("camera", "Binning: 2x2 (de 1600x1200)");
+                    ESP_LOGI("camera", "MIPI: 1-lane");
+                    ESP_LOGI("camera", "Adresse I2C: 0x36");
+            widgets:
+              - label:
+                  text: "INFO"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_18
+                  text_align: CENTER
+
+        # Status
+        - label:
+            id: status_label
+            text: "READY"
+            x: 40
+            y: 450
+            text_color: 0xFF8800
+            text_font: nunito_20
+
+# ============================================
+# VERSION 2: 720P plein écran (pour écrans 800x480 ou plus)
+# ============================================
+# ATTENTION: 720P (1280x720) sera mis à l'échelle sur écran 800x480
+# Le canvas doit faire 800x480 mais la caméra capture en 1280x720
+#
+# lvgl:
+#   pages:
+#     - id: camera_page_720p
+#       bg_color: 0x000000
+#
+#       widgets:
+#         # Canvas plein écran
+#         - canvas:
+#             id: camera_canvas
+#             width: 800
+#             height: 480
+#             x: 0
+#             y: 0
+#             bg_color: 0x000000
+#
+#         # Boutons en overlay
+#         - button:
+#             id: btn_back
+#             width: 70
+#             height: 45
+#             x: 720
+#             y: 10
+#             bg_color: 0x333333
+#             bg_opa: 200  # Semi-transparent
+#             radius: 8
+#             on_click:
+#               then:
+#                 - lambda: |-
+#                     id(tab5_cam).stop_streaming();
+#                 - lvgl.page.show: page_home
+#             widgets:
+#               - label:
+#                   text: "BACK"
+#                   text_color: 0xFFFFFF
+#                   text_font: nunito_18
+#
+#         # ... (autres boutons)
+
+# ============================================
+# CONFIGURATION CAMÉRA SC202CS
+# ============================================
+# NOTE: Les noms de bus I2C sont configurables
+# Remplacez 'bsp_bus' par le nom de votre bus I2C
+
+# mipi_dsi_cam:
+#   id: tab5_cam
+#   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
+#   sensor_type: sc202cs
+#   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
+#   resolution: "VGA"          # Utilise custom format VGA
+#   pixel_format: RGB565
+#   framerate: 30
+
+# lvgl_camera_display:
+#   id: camera_display
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
+
+# NOTES:
+# - VGA (640x480) recommandé pour petits écrans (4-5")
+# - Mémoire VGA: ~600 KB vs 1.8 MB pour 720P
+# - SC202CS utilise 1-lane MIPI (vs 2-lane pour OV5647/OV02C10)

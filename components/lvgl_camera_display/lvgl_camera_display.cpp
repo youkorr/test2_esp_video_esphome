@@ -25,93 +25,86 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Intervalle pour 30 FPS
-  this->update_interval_ = 33;  // ms
+  // Créer un timer LVGL pour les mises à jour de la caméra
+  // Ceci garantit des updates réguliers même si ESPHome loop() est lent
+  this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
+  if (this->lvgl_timer_ == nullptr) {
+    ESP_LOGE(TAG, "❌ Échec création du timer LVGL");
+    this->mark_failed();
+    return;
+  }
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
-  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS)",
+  ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
 }
 
 void LVGLCameraDisplay::loop() {
-  uint32_t now = millis();
+  // Loop() est maintenant vide car nous utilisons un timer LVGL
+  // Le timer LVGL appelle lvgl_timer_callback_() à intervalle régulier
+  // Ceci est plus fiable que de dépendre de la fréquence de loop()
+}
 
-  // Profiling: mesurer la fréquence réelle d'appel de loop()
-  static uint32_t last_loop_call = 0;
-  static uint32_t loop_call_count = 0;
-  static uint32_t total_loop_interval_ms = 0;
-
-  if (last_loop_call > 0) {
-    uint32_t loop_interval = now - last_loop_call;
-    total_loop_interval_ms += loop_interval;
-    loop_call_count++;
-
-    // Log tous les 1000 appels pour voir la fréquence réelle
-    if (loop_call_count == 1000) {
-      float avg_loop_interval = total_loop_interval_ms / 1000.0f;
-      float loop_frequency = 1000.0f / avg_loop_interval;
-      ESP_LOGW(TAG, "⚠️  loop() frequency: %.1f Hz (avg interval: %.2fms)",
-               loop_frequency, avg_loop_interval);
-      loop_call_count = 0;
-      total_loop_interval_ms = 0;
-    }
+// Callback du timer LVGL (appelé périodiquement par LVGL)
+void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
+  LVGLCameraDisplay *display = static_cast<LVGLCameraDisplay *>(timer->user_data);
+  if (display != nullptr) {
+    display->update_camera_frame_();
   }
-  last_loop_call = now;
+}
 
-  // Vérifier si c'est le moment de mettre à jour
-  if (now - this->last_update_ < this->update_interval_) {
+// Mise à jour de la frame caméra (appelée par le timer LVGL)
+void LVGLCameraDisplay::update_camera_frame_() {
+  // Si la caméra est en streaming, capturer ET mettre à jour le canvas
+  if (!this->camera_->is_streaming()) {
     return;
   }
 
-  this->last_update_ = now;
+  // Statistiques de frames manquées
+  static uint32_t attempts = 0;
+  static uint32_t skipped = 0;
 
-  // Si la caméra est en streaming, capturer ET mettre à jour le canvas
-  if (this->camera_->is_streaming()) {
-    // Statistiques de frames manquées
-    static uint32_t attempts = 0;
-    static uint32_t skipped = 0;
+  uint32_t t1 = millis();
+  bool frame_captured = this->camera_->capture_frame();
+  uint32_t t2 = millis();
 
-    uint32_t t1 = millis();
-    bool frame_captured = this->camera_->capture_frame();
-    uint32_t t2 = millis();
+  attempts++;
+  if (!frame_captured) {
+    skipped++;
+    return;
+  }
 
-    attempts++;
-    if (!frame_captured) skipped++;
+  this->update_canvas_();
+  uint32_t t3 = millis();
+  this->frame_count_++;
 
-    if (frame_captured) {
-      this->update_canvas_();
-      uint32_t t3 = millis();
-      this->frame_count_++;
+  // Accumuler les temps pour statistiques
+  static uint32_t last_time = 0;
+  static uint32_t total_capture_ms = 0;
+  static uint32_t total_canvas_ms = 0;
 
-      // Accumuler les temps pour statistiques
-      static uint32_t last_time = 0;
-      static uint32_t total_capture_ms = 0;
-      static uint32_t total_canvas_ms = 0;
+  total_capture_ms += (t2 - t1);
+  total_canvas_ms += (t3 - t2);
 
-      total_capture_ms += (t2 - t1);
-      total_canvas_ms += (t3 - t2);
+  // Logger performance toutes les 100 frames
+  if (this->frame_count_ % 100 == 0) {
+    uint32_t now_time = millis();
 
-      // Logger performance toutes les 100 frames
-      if (this->frame_count_ % 100 == 0) {
-        uint32_t now_time = millis();
-
-        if (last_time > 0) {
-          float elapsed = (now_time - last_time) / 1000.0f;  // secondes
-          float fps = 100.0f / elapsed;
-          float avg_capture = total_capture_ms / 100.0f;
-          float avg_canvas = total_canvas_ms / 100.0f;
-          float skip_rate = (skipped * 100.0f) / attempts;
-          ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
-                   this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
-        }
-        last_time = now_time;
-        total_capture_ms = 0;
-        total_canvas_ms = 0;
-        attempts = 0;
-        skipped = 0;
-      }
+    if (last_time > 0) {
+      float elapsed = (now_time - last_time) / 1000.0f;  // secondes
+      float fps = 100.0f / elapsed;
+      float avg_capture = total_capture_ms / 100.0f;
+      float avg_canvas = total_canvas_ms / 100.0f;
+      float skip_rate = (skipped * 100.0f) / attempts;
+      ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
+               this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
     }
+    last_time = now_time;
+    total_capture_ms = 0;
+    total_canvas_ms = 0;
+    attempts = 0;
+    skipped = 0;
   }
 }
 
