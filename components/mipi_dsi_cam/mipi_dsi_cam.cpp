@@ -27,7 +27,7 @@ extern "C" {
 #include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
-#include "esp_video/private_include/esp_video_buffer.h"  // Buffer pool system
+#include "../esp_video/private_include/esp_video_buffer.h"  // Buffer pool system (relative path)
 }
 
 // OV02C10 custom format configurations (800x480 et 1280x800)
