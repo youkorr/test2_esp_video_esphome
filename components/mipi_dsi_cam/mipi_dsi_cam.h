@@ -5,12 +5,12 @@
 #include <string>
 #include <vector>
 
-// Include pour esp_video_buffer (buffer pool system)
+// Forward declarations (définis dans .cpp pour éviter dépendances header)
 extern "C" {
-#include "esp_video/private_include/esp_video_buffer.h"
+struct esp_video_buffer;
+struct esp_video_buffer_element;
 }
 
-// Forward declaration pour imlib (défini dans .cpp pour éviter dépendance header)
 struct image;
 typedef struct image image_t;
 
