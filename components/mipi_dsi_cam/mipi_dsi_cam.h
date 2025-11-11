@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 
+// Include pour esp_video_buffer (buffer pool system)
+extern "C" {
+#include "esp_video/private_include/esp_video_buffer.h"
+}
+
 // Forward declaration pour imlib (défini dans .cpp pour éviter dépendance header)
 struct image;
 typedef struct image image_t;
@@ -68,11 +73,17 @@ class MipiDSICamComponent : public Component {
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
-  // API pour lvgl_camera_display (streaming continu)
+  // API pour lvgl_camera_display (streaming continu avec buffer pool)
   bool is_streaming() const { return streaming_active_; }
   bool start_streaming();
   void stop_streaming();
   bool capture_frame();
+
+  // Buffer pool APIs (thread-safe, zero-tearing)
+  struct esp_video_buffer_element* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
+  void release_buffer(struct esp_video_buffer_element *element);  // Libère buffer après affichage
+
+  // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
   uint16_t get_image_width() const { return image_width_; }
   uint16_t get_image_height() const { return image_height_; }
@@ -151,7 +162,14 @@ class MipiDSICamComponent : public Component {
     void *start;
     size_t length;
   } v4l2_buffers_[2];
-  uint8_t *image_buffer_{nullptr};  // Pointeur vers le buffer V4L2 actif (zero-copy, pas d'allocation)
+
+  // Buffer pool system (triple buffering pour éviter tearing)
+  struct esp_video_buffer *buffer_pool_{nullptr};  // Pool de 3 buffers RGB565
+  struct esp_video_buffer_element *current_buffer_{nullptr};  // Buffer actuellement capturé
+  portMUX_TYPE buffer_mutex_{portMUX_INITIALIZER_UNLOCKED};  // Spinlock pour thread-safety
+
+  // Legacy pointer (deprecated, pointe vers current_buffer_ si disponible)
+  uint8_t *image_buffer_{nullptr};
   size_t image_buffer_size_{0};
   uint16_t image_width_{0};
   uint16_t image_height_{0};
