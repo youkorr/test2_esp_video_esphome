@@ -698,7 +698,7 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (OV5647 @ VGA 640x480 ou 1024x600)
+  // Custom Format Support (OV5647 @ VGA 640x480, 800x640, ou 1024x600)
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
@@ -707,6 +707,9 @@ bool MipiDSICamComponent::start_streaming() {
     if (width == 640 && height == 480) {
       custom_format = &ov5647_format_640x480_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+    } else if (width == 800 && height == 640) {
+      custom_format = &ov5647_format_800x640_raw8_50fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647 - testov5647 working config)");
     } else if (width == 1024 && height == 600) {
       custom_format = &ov5647_format_1024x600_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
@@ -719,7 +722,8 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
       } else {
         ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u @ %d fps",
+                 width, height, custom_format->fps);
       }
     }
   }
