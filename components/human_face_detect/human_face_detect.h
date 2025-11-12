@@ -4,12 +4,13 @@
 #include "esphome/core/log.h"
 
 namespace esphome {
-namespace human_face_detect {
 
-// Forward declaration de la caméra
+// Forward declaration de la caméra (en dehors du namespace human_face_detect)
 namespace mipi_dsi_cam {
 class MipiDSICamComponent;
 }
+
+namespace human_face_detect {
 
 /**
  * @brief Human Face Detection Component (Optional)
@@ -32,7 +33,7 @@ class HumanFaceDetectComponent : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
   // Configuration
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { camera_ = camera; }
+  void set_camera(esphome::mipi_dsi_cam::MipiDSICamComponent *camera) { camera_ = camera; }
   void set_enable_detection(bool enable) { enable_detection_ = enable; }
   void set_confidence_threshold(float threshold) { confidence_threshold_ = threshold; }
   void set_model_type(int model_type) { model_type_ = model_type; }
@@ -57,7 +58,7 @@ class HumanFaceDetectComponent : public Component {
   bool get_face_box(int index, int &x, int &y, int &w, int &h, float &confidence);
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  esphome::mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
 
   bool enable_detection_{false};
   bool initialized_{false};
