@@ -721,20 +721,26 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
     // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
-    esp_cam_sensor_format_t custom_format_copy = ov5647_format_800x640_raw8_50fps;
+    // Copier la structure format ET la structure ISP info pour pouvoir modifier le Bayer pattern
+    static esp_cam_sensor_isp_info_t custom_isp_info;
+    static esp_cam_sensor_format_t custom_format_copy;
+
+    custom_format_copy = ov5647_format_800x640_raw8_50fps;
+    custom_isp_info = ov5647_800x640_isp_info;
 
     // ★ Appliquer le Bayer pattern configuré via YAML
-    esp_cam_sensor_bayer_t bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;  // Défaut
     if (this->bayer_pattern_ == "RGGB") {
-      bayer_type = ESP_CAM_SENSOR_BAYER_RGGB;
+      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_RGGB;
     } else if (this->bayer_pattern_ == "GRBG") {
-      bayer_type = ESP_CAM_SENSOR_BAYER_GRBG;
+      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_GRBG;
     } else if (this->bayer_pattern_ == "GBRG") {
-      bayer_type = ESP_CAM_SENSOR_BAYER_GBRG;
+      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_GBRG;
     } else if (this->bayer_pattern_ == "BGGR") {
-      bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;
+      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;
     }
-    custom_format_copy.isp_info->bayer_type = bayer_type;
+
+    // Pointer vers notre copie modifiée
+    custom_format_copy.isp_info = &custom_isp_info;
 
     ESP_LOGI(TAG, "🧪 TEST MODE: Forcing testov5647 800x640 registers (requested: %ux%u)", width, height);
     ESP_LOGI(TAG, "   Sensor configuration: testov5647 working config");
