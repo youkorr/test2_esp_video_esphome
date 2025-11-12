@@ -110,12 +110,20 @@ static bool map_resolution_(const std::string &res, uint32_t &w, uint32_t &h) {
   return false;
 }
 
-static uint32_t map_pixfmt_fourcc_(const std::string &fmt) {
+static uint32_t map_pixfmt_fourcc_(const std::string &fmt, const std::string &bayer_pattern = "BGGR") {
   if (fmt == "RGB565") return V4L2_PIX_FMT_RGB565;
   if (fmt == "YUYV")   return V4L2_PIX_FMT_YUYV;
   if (fmt == "UYVY")   return V4L2_PIX_FMT_UYVY;
   if (fmt == "NV12")   return V4L2_PIX_FMT_NV12;
   if (fmt == "MJPEG" || fmt == "JPEG") return V4L2_PIX_FMT_MJPEG;
+  if (fmt == "RAW8") {
+    // Utiliser le pattern Bayer configuré
+    if (bayer_pattern == "RGGB") return V4L2_PIX_FMT_SRGGB8;
+    if (bayer_pattern == "GRBG") return V4L2_PIX_FMT_SGRBG8;
+    if (bayer_pattern == "GBRG") return V4L2_PIX_FMT_SGBRG8;
+    if (bayer_pattern == "BGGR") return V4L2_PIX_FMT_SBGGR8;
+    return V4L2_PIX_FMT_SBGGR8;  // Défaut: BGGR
+  }
   return V4L2_PIX_FMT_YUYV;
 }
 
@@ -713,17 +721,31 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
     // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
-    const esp_cam_sensor_format_t *custom_format = &ov5647_format_800x640_raw8_50fps;
+    esp_cam_sensor_format_t custom_format_copy = ov5647_format_800x640_raw8_50fps;
+
+    // ★ Appliquer le Bayer pattern configuré via YAML
+    esp_cam_sensor_bayer_t bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;  // Défaut
+    if (this->bayer_pattern_ == "RGGB") {
+      bayer_type = ESP_CAM_SENSOR_BAYER_RGGB;
+    } else if (this->bayer_pattern_ == "GRBG") {
+      bayer_type = ESP_CAM_SENSOR_BAYER_GRBG;
+    } else if (this->bayer_pattern_ == "GBRG") {
+      bayer_type = ESP_CAM_SENSOR_BAYER_GBRG;
+    } else if (this->bayer_pattern_ == "BGGR") {
+      bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;
+    }
+    custom_format_copy.isp_info->bayer_type = bayer_type;
 
     ESP_LOGI(TAG, "🧪 TEST MODE: Forcing testov5647 800x640 registers (requested: %ux%u)", width, height);
-    ESP_LOGI(TAG, "   This applies the working testov5647 sensor configuration");
+    ESP_LOGI(TAG, "   Sensor configuration: testov5647 working config");
+    ESP_LOGI(TAG, "   Bayer pattern: %s (configured via YAML)", this->bayer_pattern_.c_str());
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &custom_format_copy) != 0) {
       ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
       ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
     } else {
-      ESP_LOGI(TAG, "✅ testov5647 800x640 registers applied successfully!");
+      ESP_LOGI(TAG, "✅ testov5647 800x640 registers + Bayer %s applied successfully!", this->bayer_pattern_.c_str());
     }
   }
   // ============================================================================

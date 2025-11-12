@@ -37,6 +37,7 @@ CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
 CONF_GREEN_GAIN = "green"
 CONF_BLUE_GAIN = "blue"
+CONF_BAYER_PATTERN = "bayer_pattern"  # RGGB, GRBG, GBRG, BGGR
 
 def validate_and_normalize_config(config):
     """Normalise la configuration pour accepter l'ancienne et la nouvelle syntaxe"""
@@ -90,6 +91,8 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_GREEN_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
             cv.Optional(CONF_BLUE_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
         }),
+        # Pattern Bayer pour sensors RAW8 (RGGB, GRBG, GBRG, BGGR)
+        cv.Optional(CONF_BAYER_PATTERN, default="BGGR"): cv.one_of("RGGB", "GRBG", "GBRG", "BGGR", upper=True),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_and_normalize_config
 )
@@ -131,6 +134,9 @@ async def to_code(config):
             rgb_config[CONF_GREEN_GAIN],
             rgb_config[CONF_BLUE_GAIN]
         ))
+
+    # Configuration du pattern Bayer
+    cg.add(var.set_bayer_pattern(config[CONF_BAYER_PATTERN]))
 
 # Action pour capturer un snapshot
 @automation.register_action(

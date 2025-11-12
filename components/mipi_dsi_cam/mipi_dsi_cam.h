@@ -72,6 +72,9 @@ class MipiDSICamComponent : public Component {
     rgb_gains_enabled_ = true;
   }
 
+  // Configuration du pattern Bayer (RGGB, GRBG, GBRG, BGGR)
+  void set_bayer_pattern(const std::string &pattern) { bayer_pattern_ = pattern; }
+
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
@@ -149,6 +152,9 @@ class MipiDSICamComponent : public Component {
   float rgb_gains_red_{1.0f};
   float rgb_gains_green_{1.0f};
   float rgb_gains_blue_{1.0f};
+
+  // Pattern Bayer pour sensors RAW8 (RGGB, GRBG, GBRG, BGGR)
+  std::string bayer_pattern_{"BGGR"};
 
   // Tous en pointeurs void* pour éviter les types incomplets
   void *sensor_dev_{nullptr};
