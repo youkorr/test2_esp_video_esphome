@@ -126,11 +126,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x380a, (480 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 480 & 0xFF},         // Output vertical height low
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (2 >> 8) & 0x07},   // Timing vertical offset high
-    {0x3813, 2 & 0xFF},          // Timing vertical offset low
+    // Timing offset (center the image properly)
+    // After 4x binning: 2592/4=648 pixels, want 640 → offset (648-640)/2 = 4
+    {0x3810, (4 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 4 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (3 >> 8) & 0x07},   // Timing vertical offset high (centered)
+    {0x3813, 3 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
@@ -328,11 +329,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x380a, (600 >> 8) & 0x7F},
     {0x380b, 600 & 0xFF},
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},
-    {0x3811, 8 & 0xFF},
-    {0x3812, (4 >> 8) & 0x07},
-    {0x3813, 4 & 0xFF},
+    // Timing offset (center the image properly)
+    // After 2x binning: 2048/2=1024 pixels (already correct)
+    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high (centered)
+    {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
