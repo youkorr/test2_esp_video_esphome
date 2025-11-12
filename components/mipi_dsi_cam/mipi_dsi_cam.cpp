@@ -207,25 +207,32 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
-    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
-    return true;  // Pas besoin de PPA
-  }
-
-  ppa_client_config_t ppa_config = {};
-  ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
-  ppa_config.max_pending_trans_num = 16;  // Increased to 16 for concurrent web stream + LVGL display + multiple clients
-
-  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  this->ppa_enabled_ = true;
-  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
-           this->mirror_x_, this->mirror_y_, this->rotation_);
+  // ★ PPA COMPLÈTEMENT DÉSACTIVÉ pour test qualité image
+  // Le PPA peut dégrader la qualité avec ses transformations
+  ESP_LOGI(TAG, "🧪 TEST: PPA disabled (testing image quality without transformations)");
+  this->ppa_enabled_ = false;
   return true;
+
+  // Code PPA original désactivé pour test
+  // if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
+  //   ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
+  //   return true;
+  // }
+  //
+  // ppa_client_config_t ppa_config = {};
+  // ppa_config.oper_type = PPA_OPERATION_SRM;
+  // ppa_config.max_pending_trans_num = 16;
+  //
+  // esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
+  // if (ret != ESP_OK) {
+  //   ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+  //   return false;
+  // }
+  //
+  // this->ppa_enabled_ = true;
+  // ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
+  //          this->mirror_x_, this->mirror_y_, this->rotation_);
+  // return true;
 }
 
 bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
@@ -1096,14 +1103,14 @@ bool MipiDSICamComponent::capture_frame() {
   int buffer_idx = buf.index;
   uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-  // 3. Appliquer PPA si nécessaire (in-place transformation)
+  // 3. ★ PPA DÉSACTIVÉ pour test qualité image
+  // Le PPA (mirror/rotate) peut dégrader la qualité, test sans PPA
   uint32_t t3 = esp_timer_get_time();
-  if (this->ppa_enabled_) {
-    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
-      ESP_LOGE(TAG, "PPA transform failed");
-      // Continuer avec l'image non-transformée
-    }
-  }
+  // if (this->ppa_enabled_) {
+  //   if (!this->apply_ppa_transform_(frame_data, frame_data)) {
+  //     ESP_LOGE(TAG, "PPA transform failed");
+  //   }
+  // }
   uint32_t t4 = esp_timer_get_time();
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
