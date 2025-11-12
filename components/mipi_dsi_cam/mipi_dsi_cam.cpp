@@ -721,38 +721,19 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
     // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
-    // Copier la structure format ET la structure ISP info pour pouvoir modifier le Bayer pattern
-    // Note: Utiliser memcpy car la structure a des membres const (pas d'opérateur= disponible)
-    static esp_cam_sensor_isp_info_t custom_isp_info;
-    static esp_cam_sensor_format_t custom_format_copy;
-
-    memcpy(&custom_format_copy, &ov5647_format_800x640_raw8_50fps, sizeof(esp_cam_sensor_format_t));
-    memcpy(&custom_isp_info, &ov5647_800x640_isp_info, sizeof(esp_cam_sensor_isp_info_t));
-
-    // ★ Appliquer le Bayer pattern configuré via YAML
-    if (this->bayer_pattern_ == "RGGB") {
-      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_RGGB;
-    } else if (this->bayer_pattern_ == "GRBG") {
-      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_GRBG;
-    } else if (this->bayer_pattern_ == "GBRG") {
-      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_GBRG;
-    } else if (this->bayer_pattern_ == "BGGR") {
-      custom_isp_info.isp_v1_info.bayer_type = ESP_CAM_SENSOR_BAYER_BGGR;
-    }
-
-    // Pointer vers notre copie modifiée
-    custom_format_copy.isp_info = &custom_isp_info;
+    // Le pattern Bayer est BGGR (défini par le hardware du sensor, non modifiable)
+    const esp_cam_sensor_format_t *custom_format = &ov5647_format_800x640_raw8_50fps;
 
     ESP_LOGI(TAG, "🧪 TEST MODE: Forcing testov5647 800x640 registers (requested: %ux%u)", width, height);
     ESP_LOGI(TAG, "   Sensor configuration: testov5647 working config");
-    ESP_LOGI(TAG, "   Bayer pattern: %s (configured via YAML)", this->bayer_pattern_.c_str());
+    ESP_LOGI(TAG, "   Bayer pattern: BGGR (OV5647 hardware)");
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &custom_format_copy) != 0) {
+    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
       ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
       ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
     } else {
-      ESP_LOGI(TAG, "✅ testov5647 800x640 registers + Bayer %s applied successfully!", this->bayer_pattern_.c_str());
+      ESP_LOGI(TAG, "✅ testov5647 800x640 registers applied successfully!");
     }
   }
   // ============================================================================
