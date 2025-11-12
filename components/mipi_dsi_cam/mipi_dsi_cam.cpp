@@ -1065,12 +1065,27 @@ bool MipiDSICamComponent::start_streaming() {
     this->set_white_balance_temp(5500);
   }
 
-  // NOTE: Brightness/Contrast/Saturation auto-application désactivée
-  // Utilisez les contrôles YAML number avec initial_value pour ajuster:
-  //   - Brightness: initial_value: 60 (testov5647)
-  //   - Contrast: initial_value: 145 (testov5647)
-  //   - Saturation: initial_value: 135 (testov5647)
-  // Voir CAMERA_CONTROLS_YAML.md pour la configuration complète
+  // ★ IMPORTANT: Appliquer les paramètres ISP de testov5647 pour image nette
+  // Ces valeurs donnaient une bonne qualité d'image dans l'ancien dépôt
+  ESP_LOGI(TAG, "Applying testov5647 ISP settings for sharp image...");
+
+  if (this->set_brightness(60)) {
+    ESP_LOGI(TAG, "  ✓ Brightness: 60 (testov5647 value)");
+  } else {
+    ESP_LOGW(TAG, "  ⚠️  Failed to set brightness");
+  }
+
+  if (this->set_contrast(145)) {
+    ESP_LOGI(TAG, "  ✓ Contrast: 145 (testov5647 value)");
+  } else {
+    ESP_LOGW(TAG, "  ⚠️  Failed to set contrast");
+  }
+
+  if (this->set_saturation(135)) {
+    ESP_LOGI(TAG, "  ✓ Saturation: 135 (testov5647 value)");
+  } else {
+    ESP_LOGW(TAG, "  ⚠️  Failed to set saturation");
+  }
 
   return true;
 }
