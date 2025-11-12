@@ -2,6 +2,8 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include <vector>
+#include <string>
 
 namespace esphome {
 
@@ -68,8 +70,20 @@ class HumanFaceDetectComponent : public Component {
   // Résultats de détection
   int face_count_{0};
 
-  // ESP-DL handle (opaque pointer)
-  void *model_handle_{nullptr};
+  // ESP-DL detector
+  void *detector_{nullptr};  // Pointer to MSRMNPDetector (kept as void* to avoid header dependency)
+
+  // Detection results storage
+  struct FaceBox {
+    int x, y, w, h;
+    float confidence;
+  };
+  std::vector<FaceBox> detected_faces_;
+
+  // Model paths configuration
+  std::string model_dir_{"/sdcard"};
+  std::string msr_model_filename_{"human_face_detect_msr_s8_v1.espdl"};
+  std::string mnp_model_filename_{"human_face_detect_mnp_s8_v1.espdl"};
 
   bool init_model_();
   void cleanup_model_();
