@@ -39,6 +39,9 @@ class HumanFaceDetectComponent : public Component {
   void set_enable_detection(bool enable) { enable_detection_ = enable; }
   void set_confidence_threshold(float threshold) { confidence_threshold_ = threshold; }
   void set_model_type(int model_type) { model_type_ = model_type; }
+  void set_model_dir(const std::string &dir) { model_dir_ = dir; }
+  void set_msr_model_filename(const std::string &filename) { msr_model_filename_ = filename; }
+  void set_mnp_model_filename(const std::string &filename) { mnp_model_filename_ = filename; }
 
   // API publique
   bool is_detection_enabled() const { return enable_detection_ && initialized_; }

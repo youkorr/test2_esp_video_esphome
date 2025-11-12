@@ -26,6 +26,9 @@ CONF_CAMERA = "camera"
 CONF_ENABLE_DETECTION = "enable_detection"
 CONF_CONFIDENCE_THRESHOLD = "confidence_threshold"
 CONF_MODEL_TYPE = "model_type"
+CONF_MODEL_DIR = "model_dir"
+CONF_MSR_MODEL_FILE = "msr_model_file"
+CONF_MNP_MODEL_FILE = "mnp_model_file"
 
 human_face_detect_ns = cg.esphome_ns.namespace("human_face_detect")
 HumanFaceDetectComponent = human_face_detect_ns.class_("HumanFaceDetectComponent", cg.Component)
@@ -41,6 +44,9 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_ENABLE_DETECTION, default=False): cv.boolean,
     cv.Optional(CONF_CONFIDENCE_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_MODEL_TYPE, default="MSRMNP_S8_V1"): cv.enum(MODEL_TYPES),
+    cv.Optional(CONF_MODEL_DIR, default="/sdcard"): cv.string,
+    cv.Optional(CONF_MSR_MODEL_FILE, default="human_face_detect_msr_s8_v1.espdl"): cv.string,
+    cv.Optional(CONF_MNP_MODEL_FILE, default="human_face_detect_mnp_s8_v1.espdl"): cv.string,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -56,6 +62,11 @@ async def to_code(config):
     cg.add(var.set_enable_detection(config[CONF_ENABLE_DETECTION]))
     cg.add(var.set_confidence_threshold(config[CONF_CONFIDENCE_THRESHOLD]))
     cg.add(var.set_model_type(config[CONF_MODEL_TYPE]))
+
+    # Model paths configuration
+    cg.add(var.set_model_dir(config[CONF_MODEL_DIR]))
+    cg.add(var.set_msr_model_filename(config[CONF_MSR_MODEL_FILE]))
+    cg.add(var.set_mnp_model_filename(config[CONF_MNP_MODEL_FILE]))
 
     # -----------------------------------------------------------------------
     # Vérification du framework
