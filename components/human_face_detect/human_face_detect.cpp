@@ -6,6 +6,7 @@
 #include "esp_spiffs.h"
 #include "esp_vfs.h"
 #include <sys/stat.h>
+#include "esp_task_wdt.h"  // For watchdog management during model loading
 #endif
 
 namespace esphome {
@@ -27,21 +28,47 @@ void HumanFaceDetectComponent::setup() {
     return;
   }
 
+#ifdef USE_ESP_IDF
+  // Disable watchdog during SPIFFS mount and model loading (can take several seconds)
+  ESP_LOGI(TAG, "Disabling watchdog for model loading (this may take 10-15 seconds)...");
+  esp_task_wdt_deinit();
+#endif
+
   // Mount SPIFFS to access embedded model files
+  ESP_LOGI(TAG, "Step 1/2: Mounting SPIFFS...");
   if (!this->mount_spiffs_()) {
     ESP_LOGW(TAG, "Failed to mount SPIFFS - face detection unavailable");
     ESP_LOGW(TAG, "Models should be embedded in SPIFFS partition or placed on SD card");
     this->initialized_ = false;
+
+#ifdef USE_ESP_IDF
+    // Re-enable watchdog
+    esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
+    esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+#endif
     return;
   }
 
   // Initialiser le modèle ESP-DL
+  ESP_LOGI(TAG, "Step 2/2: Loading ESP-DL models (this takes time)...");
   if (!this->init_model_()) {
     ESP_LOGW(TAG, "Face detection model not available - component disabled");
     this->initialized_ = false;
-    // Ne pas marquer comme failed - c'est optionnel
+
+#ifdef USE_ESP_IDF
+    // Re-enable watchdog
+    esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
+    esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+#endif
     return;
   }
+
+#ifdef USE_ESP_IDF
+  // Re-enable watchdog after successful initialization
+  ESP_LOGI(TAG, "Re-enabling watchdog...");
+  esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
+  esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+#endif
 
   this->initialized_ = true;
   ESP_LOGI(TAG, "Face detection initialized successfully");
@@ -66,46 +93,57 @@ void HumanFaceDetectComponent::dump_config() {
 
 bool HumanFaceDetectComponent::init_model_() {
 #ifdef ESPHOME_HAS_ESP_DL
-  ESP_LOGI(TAG, "Initializing ESP-DL face detection models...");
-  ESP_LOGI(TAG, "  Model directory: %s", this->model_dir_.c_str());
-  ESP_LOGI(TAG, "  MSR model: %s", this->msr_model_filename_.c_str());
-  ESP_LOGI(TAG, "  MNP model: %s", this->mnp_model_filename_.c_str());
+  ESP_LOGI(TAG, "  → Initializing ESP-DL face detection models...");
+  ESP_LOGI(TAG, "     Model directory: %s", this->model_dir_.c_str());
+  ESP_LOGI(TAG, "     MSR model: %s", this->msr_model_filename_.c_str());
+  ESP_LOGI(TAG, "     MNP model: %s", this->mnp_model_filename_.c_str());
 
   // Build full paths to model files
   std::string msr_path = this->model_dir_ + "/" + this->msr_model_filename_;
   std::string mnp_path = this->model_dir_ + "/" + this->mnp_model_filename_;
 
-  // Verify model files exist (SD card must be mounted)
+  ESP_LOGI(TAG, "  → Checking if model files exist...");
+  ESP_LOGI(TAG, "     MSR path: %s", msr_path.c_str());
+
+  // Verify model files exist (SPIFFS must be mounted)
   FILE *f_msr = fopen(msr_path.c_str(), "r");
   if (f_msr == nullptr) {
-    ESP_LOGE(TAG, "❌ MSR model file not found: %s", msr_path.c_str());
-    ESP_LOGE(TAG, "   Make sure SD card is mounted and models are present");
+    ESP_LOGE(TAG, "  ❌ MSR model file not found: %s", msr_path.c_str());
+    ESP_LOGE(TAG, "     errno: %d (%s)", errno, strerror(errno));
+    ESP_LOGE(TAG, "     Make sure SPIFFS partition contains models");
+    ESP_LOGW(TAG, "  💡 To disable face detection, set enable_detection: false");
     return false;
   }
   fclose(f_msr);
+  ESP_LOGI(TAG, "  ✓ MSR model file found");
 
+  ESP_LOGI(TAG, "     MNP path: %s", mnp_path.c_str());
   FILE *f_mnp = fopen(mnp_path.c_str(), "r");
   if (f_mnp == nullptr) {
-    ESP_LOGE(TAG, "❌ MNP model file not found: %s", mnp_path.c_str());
-    ESP_LOGE(TAG, "   Make sure SD card is mounted and models are present");
+    ESP_LOGE(TAG, "  ❌ MNP model file not found: %s", mnp_path.c_str());
+    ESP_LOGE(TAG, "     errno: %d (%s)", errno, strerror(errno));
+    ESP_LOGE(TAG, "     Make sure SPIFFS partition contains models");
+    ESP_LOGW(TAG, "  💡 To disable face detection, set enable_detection: false");
     return false;
   }
   fclose(f_mnp);
+  ESP_LOGI(TAG, "  ✓ MNP model file found");
 
-  ESP_LOGI(TAG, "✓ Model files found on SD card");
+  ESP_LOGI(TAG, "  → Loading models into ESP-DL (THIS MAY TAKE 10-15 SECONDS)...");
 
   try {
-    // Create MSR+MNP detector
+    // Create MSR+MNP detector (this is slow!)
+    ESP_LOGI(TAG, "     Creating MSRMNPDetector...");
     auto *detector = new MSRMNPDetector(msr_path.c_str(), mnp_path.c_str());
     this->detector_ = static_cast<void *>(detector);
 
-    ESP_LOGI(TAG, "✅ ESP-DL face detection initialized successfully");
-    ESP_LOGI(TAG, "   Confidence threshold: %.2f", this->confidence_threshold_);
-    ESP_LOGI(TAG, "   Model type: MSRMNP_S8_V1");
+    ESP_LOGI(TAG, "  ✅ ESP-DL face detection initialized successfully!");
+    ESP_LOGI(TAG, "     Confidence threshold: %.2f", this->confidence_threshold_);
+    ESP_LOGI(TAG, "     Model type: MSRMNP_S8_V1");
     return true;
 
   } catch (const std::exception &e) {
-    ESP_LOGE(TAG, "❌ Failed to initialize face detection: %s", e.what());
+    ESP_LOGE(TAG, "  ❌ Failed to initialize face detection: %s", e.what());
     this->detector_ = nullptr;
     return false;
   }
@@ -123,14 +161,15 @@ bool HumanFaceDetectComponent::init_model_() {
 
 bool HumanFaceDetectComponent::mount_spiffs_() {
 #ifdef USE_ESP_IDF
+  ESP_LOGI(TAG, "  → Checking if SPIFFS already mounted...");
   // Check if SPIFFS is already mounted
   struct stat st;
   if (stat("/spiffs", &st) == 0) {
-    ESP_LOGI(TAG, "SPIFFS already mounted at /spiffs");
+    ESP_LOGI(TAG, "  ✓ SPIFFS already mounted at /spiffs");
     return true;
   }
 
-  ESP_LOGI(TAG, "Mounting SPIFFS partition for embedded models...");
+  ESP_LOGI(TAG, "  → Attempting to mount SPIFFS partition 'spiffs'...");
 
   esp_vfs_spiffs_conf_t conf = {
       .base_path = "/spiffs",
@@ -140,30 +179,34 @@ bool HumanFaceDetectComponent::mount_spiffs_() {
   };
 
   esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  ESP_LOGI(TAG, "  → esp_vfs_spiffs_register returned: %s", esp_err_to_name(ret));
+
   if (ret != ESP_OK) {
     if (ret == ESP_FAIL) {
-      ESP_LOGE(TAG, "Failed to mount SPIFFS partition");
-      ESP_LOGE(TAG, "Make sure 'spiffs' partition exists in partitions.csv");
+      ESP_LOGE(TAG, "  ❌ Failed to mount SPIFFS partition");
+      ESP_LOGE(TAG, "     Make sure 'spiffs' partition exists in partitions.csv");
     } else if (ret == ESP_ERR_NOT_FOUND) {
-      ESP_LOGE(TAG, "SPIFFS partition not found in partition table");
-      ESP_LOGE(TAG, "Add 'spiffs' partition to partitions.csv or use SD card");
+      ESP_LOGE(TAG, "  ❌ SPIFFS partition 'spiffs' not found in partition table");
+      ESP_LOGE(TAG, "     Add to YAML: esp32.partitions = partitions.csv");
     } else {
-      ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+      ESP_LOGE(TAG, "  ❌ Failed to initialize SPIFFS: %s", esp_err_to_name(ret));
     }
+    ESP_LOGW(TAG, "  💡 To disable face detection, set enable_detection: false in YAML");
     return false;
   }
 
+  ESP_LOGI(TAG, "  → Getting SPIFFS partition info...");
   // Check SPIFFS status
   size_t total = 0, used = 0;
   ret = esp_spiffs_info(conf.partition_label, &total, &used);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to get SPIFFS partition info (%s)", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "  ❌ Failed to get SPIFFS partition info: %s", esp_err_to_name(ret));
     esp_vfs_spiffs_unregister(conf.partition_label);
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ SPIFFS mounted successfully");
-  ESP_LOGI(TAG, "   Partition size: %d KB, Used: %d KB", total / 1024, used / 1024);
+  ESP_LOGI(TAG, "  ✅ SPIFFS mounted successfully!");
+  ESP_LOGI(TAG, "     Size: %d KB, Used: %d KB", total / 1024, used / 1024);
   return true;
 #else
   ESP_LOGE(TAG, "SPIFFS requires ESP-IDF framework");
