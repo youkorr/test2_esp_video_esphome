@@ -133,23 +133,13 @@ int HumanFaceDetectComponent::detect_faces() {
     return -1;
   }
 
-  // TODO: Get current RGB frame from camera
-  // The mipi_dsi_cam component needs to expose a method like:
-  //   bool get_rgb_frame(uint8_t **data, size_t *width, size_t *height, pixel_format *format);
-  //
-  // For now, this is a placeholder showing the structure
-
-  ESP_LOGW(TAG, "⚠️  Camera frame capture not yet implemented");
-  ESP_LOGW(TAG, "Need to add method in mipi_dsi_cam:");
-  ESP_LOGW(TAG, "  bool get_current_rgb_frame(uint8_t **data, int *width, int *height);");
-
-  // Example of what the implementation would look like:
-  /*
+  // Get current RGB frame from camera
+  esphome::mipi_dsi_cam::SimpleBufferElement *buffer = nullptr;
   uint8_t *rgb_data = nullptr;
   int width = 0, height = 0;
 
-  if (!this->camera_->get_current_rgb_frame(&rgb_data, &width, &height)) {
-    ESP_LOGE(TAG, "Failed to get camera frame");
+  if (!this->camera_->get_current_rgb_frame(&buffer, &rgb_data, &width, &height)) {
+    ESP_LOGW(TAG, "Failed to get camera frame (streaming inactive or no buffer)");
     return -1;
   }
 
@@ -163,6 +153,9 @@ int HumanFaceDetectComponent::detect_faces() {
   // Run detection
   auto *detector = static_cast<MSRMNPDetector *>(this->detector_);
   std::list<dl::detect::result_t> &results = detector->run(img);
+
+  // Release buffer immediately after detection (no longer needed)
+  this->camera_->release_buffer(buffer);
 
   // Store results and filter by confidence threshold
   this->detected_faces_.clear();
@@ -179,12 +172,9 @@ int HumanFaceDetectComponent::detect_faces() {
   }
 
   this->face_count_ = this->detected_faces_.size();
-  ESP_LOGI(TAG, "Detected %d face(s)", this->face_count_);
-  return this->face_count_;
-  */
+  ESP_LOGI(TAG, "Detected %d face(s) with confidence >= %.2f", this->face_count_, this->confidence_threshold_);
 
-  this->face_count_ = 0;
-  return 0;  // Placeholder until camera integration is complete
+  return this->face_count_;
 #else
   ESP_LOGW(TAG, "ESP-IDF required for face detection");
   return -1;

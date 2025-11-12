@@ -89,6 +89,30 @@ class MipiDSICamComponent : public Component {
   uint8_t* get_buffer_data(SimpleBufferElement *element);  // Retourne pointeur vers données
   uint32_t get_buffer_index(SimpleBufferElement *element);  // Retourne index du buffer
 
+  /**
+   * @brief Get current RGB565 frame for face detection or image processing
+   * @param[out] buffer_out Pointer to acquired buffer element (must be released with release_buffer())
+   * @param[out] data Pointer to RGB565 data
+   * @param[out] width Frame width in pixels
+   * @param[out] height Frame height in pixels
+   * @return true if frame available, false if not streaming or no buffer available
+   *
+   * @note IMPORTANT: Caller MUST call release_buffer(buffer_out) when done processing!
+   *
+   * Example usage:
+   * @code
+   * SimpleBufferElement* buffer = nullptr;
+   * uint8_t* data = nullptr;
+   * int width, height;
+   * if (camera->get_current_rgb_frame(&buffer, &data, &width, &height)) {
+   *   // Process frame data (RGB565 format)
+   *   // ...
+   *   camera->release_buffer(buffer);  // ← REQUIRED!
+   * }
+   * @endcode
+   */
+  bool get_current_rgb_frame(SimpleBufferElement **buffer_out, uint8_t **data, int *width, int *height);
+
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
   uint16_t get_image_width() const { return image_width_; }

@@ -1885,6 +1885,46 @@ uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
   return element->index;
 }
 
+/**
+ * @brief Get current RGB565 frame for face detection or image processing
+ *
+ * Convenience method that combines acquire_buffer() with data/dimensions extraction.
+ * IMPORTANT: Caller MUST call release_buffer(buffer_out) when done processing!
+ *
+ * @param[out] buffer_out Pointer to acquired buffer element (must be released)
+ * @param[out] data Pointer to RGB565 data
+ * @param[out] width Frame width in pixels
+ * @param[out] height Frame height in pixels
+ * @return true if frame available, false if not streaming or no buffer available
+ */
+bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out, uint8_t **data, int *width,
+                                                 int *height) {
+  if (buffer_out == nullptr || data == nullptr || width == nullptr || height == nullptr) {
+    ESP_LOGE(TAG, "get_current_rgb_frame: nullptr parameter");
+    return false;
+  }
+
+  if (!this->streaming_active_) {
+    ESP_LOGW(TAG, "get_current_rgb_frame: not streaming");
+    return false;
+  }
+
+  // Acquire current buffer
+  SimpleBufferElement *buffer = this->acquire_buffer();
+  if (buffer == nullptr) {
+    ESP_LOGW(TAG, "get_current_rgb_frame: no buffer available");
+    return false;
+  }
+
+  // Extract data and dimensions
+  *buffer_out = buffer;
+  *data = buffer->data;
+  *width = static_cast<int>(this->image_width_);
+  *height = static_cast<int>(this->image_height_);
+
+  return true;
+}
+
 }  // namespace mipi_dsi_cam
 }  // namespace esphome
 
