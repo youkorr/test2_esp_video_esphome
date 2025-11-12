@@ -128,7 +128,20 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
-  uint8_t* img_data = this->camera_->get_image_data();
+  // Libérer l'ancien buffer affiché (si présent)
+  if (this->displayed_buffer_ != nullptr) {
+    this->camera_->release_buffer(this->displayed_buffer_);
+    this->displayed_buffer_ = nullptr;
+  }
+
+  // Acquérir le nouveau buffer depuis le pool
+  mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
+  if (buffer == nullptr) {
+    // Pas de buffer disponible - garder l'affichage précédent
+    return;
+  }
+
+  uint8_t* img_data = this->camera_->get_buffer_data(buffer);
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
 
@@ -137,16 +150,19 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   if (this->first_update_) {
-    ESP_LOGI(TAG, "🖼️  Premier update canvas:");
+    ESP_LOGI(TAG, "🖼️  Premier update canvas (buffer pool):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
-    ESP_LOGI(TAG, "   Buffer: %p", img_data);
-    ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X", 
+    ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
+    ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
     this->first_update_ = false;
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
+
+  // Tracker ce buffer pour le libérer au prochain update
+  this->displayed_buffer_ = buffer;
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 

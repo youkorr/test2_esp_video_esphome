@@ -24,6 +24,13 @@ typedef struct {
 namespace esphome {
 namespace mipi_dsi_cam {
 
+// Simple buffer element pour triple buffering (remplace esp_video_buffer)
+struct SimpleBufferElement {
+  uint8_t *data;      // Pointeur vers données RGB565
+  bool allocated;     // true = en cours d'utilisation
+  uint32_t index;     // Index du buffer (0, 1, 2)
+};
+
 class MipiDSICamComponent : public Component {
  public:
   void setup() override;
@@ -68,11 +75,21 @@ class MipiDSICamComponent : public Component {
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
-  // API pour lvgl_camera_display (streaming continu)
+  // API pour lvgl_camera_display (streaming continu avec buffer pool)
   bool is_streaming() const { return streaming_active_; }
   bool start_streaming();
   void stop_streaming();
   bool capture_frame();
+
+  // Buffer pool APIs (thread-safe, zero-tearing)
+  SimpleBufferElement* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
+  void release_buffer(SimpleBufferElement *element);  // Libère buffer après affichage
+
+  // Helper functions pour accéder aux buffer elements
+  uint8_t* get_buffer_data(SimpleBufferElement *element);  // Retourne pointeur vers données
+  uint32_t get_buffer_index(SimpleBufferElement *element);  // Retourne index du buffer
+
+  // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
   uint16_t get_image_width() const { return image_width_; }
   uint16_t get_image_height() const { return image_height_; }
@@ -145,12 +162,16 @@ class MipiDSICamComponent : public Component {
 
   // État du streaming vidéo continu
   bool streaming_active_{false};
-  int video_fd_{-1};
-  struct {
-    void *start;
-    size_t length;
-  } v4l2_buffers_[2];
-  uint8_t *image_buffer_{nullptr};  // Pointeur vers le buffer V4L2 actif (zero-copy, pas d'allocation)
+  int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames
+  int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
+
+  // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
+  SimpleBufferElement simple_buffers_[3];  // Triple buffering
+  int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
+  portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)
+
+  // Legacy pointer (deprecated, pointe vers current_buffer_ si disponible)
+  uint8_t *image_buffer_{nullptr};
   size_t image_buffer_size_{0};
   uint16_t image_width_{0};
   uint16_t image_height_{0};

@@ -110,12 +110,20 @@ static bool map_resolution_(const std::string &res, uint32_t &w, uint32_t &h) {
   return false;
 }
 
-static uint32_t map_pixfmt_fourcc_(const std::string &fmt) {
+static uint32_t map_pixfmt_fourcc_(const std::string &fmt, const std::string &bayer_pattern = "BGGR") {
   if (fmt == "RGB565") return V4L2_PIX_FMT_RGB565;
   if (fmt == "YUYV")   return V4L2_PIX_FMT_YUYV;
   if (fmt == "UYVY")   return V4L2_PIX_FMT_UYVY;
   if (fmt == "NV12")   return V4L2_PIX_FMT_NV12;
   if (fmt == "MJPEG" || fmt == "JPEG") return V4L2_PIX_FMT_MJPEG;
+  if (fmt == "RAW8") {
+    // Utiliser le pattern Bayer configuré
+    if (bayer_pattern == "RGGB") return V4L2_PIX_FMT_SRGGB8;
+    if (bayer_pattern == "GRBG") return V4L2_PIX_FMT_SGRBG8;
+    if (bayer_pattern == "GBRG") return V4L2_PIX_FMT_SGBRG8;
+    if (bayer_pattern == "BGGR") return V4L2_PIX_FMT_SBGGR8;
+    return V4L2_PIX_FMT_SBGGR8;  // Défaut: BGGR
+  }
   return V4L2_PIX_FMT_YUYV;
 }
 
@@ -207,25 +215,32 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
-    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
-    return true;  // Pas besoin de PPA
-  }
-
-  ppa_client_config_t ppa_config = {};
-  ppa_config.oper_type = PPA_OPERATION_SRM;  // Scale-Rotate-Mirror
-  ppa_config.max_pending_trans_num = 1;
-
-  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  this->ppa_enabled_ = true;
-  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
-           this->mirror_x_, this->mirror_y_, this->rotation_);
+  // ★ PPA COMPLÈTEMENT DÉSACTIVÉ pour test qualité image
+  // Le PPA peut dégrader la qualité avec ses transformations
+  ESP_LOGI(TAG, "🧪 TEST: PPA disabled (testing image quality without transformations)");
+  this->ppa_enabled_ = false;
   return true;
+
+  // Code PPA original désactivé pour test
+  // if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
+  //   ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
+  //   return true;
+  // }
+  //
+  // ppa_client_config_t ppa_config = {};
+  // ppa_config.oper_type = PPA_OPERATION_SRM;
+  // ppa_config.max_pending_trans_num = 16;
+  //
+  // esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
+  // if (ret != ESP_OK) {
+  //   ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+  //   return false;
+  // }
+  //
+  // this->ppa_enabled_ = true;
+  // ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
+  //          this->mirror_x_, this->mirror_y_, this->rotation_);
+  // return true;
 }
 
 bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
@@ -298,6 +313,9 @@ void MipiDSICamComponent::cleanup_ppa_() {
 // ============================================================================
 
 void MipiDSICamComponent::setup() {
+  // Initialiser le spinlock pour le buffer pool (affectation directe de la macro)
+  this->buffer_mutex_ = portMUX_INITIALIZER_UNLOCKED;
+
   // Vérifier mémoire disponible
   size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
   if (free_heap < MIN_FREE_HEAP * 2) {
@@ -698,29 +716,24 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (OV5647 @ VGA 640x480 ou 1024x600)
+  // Custom Format Support (OV5647)
+  // ★ TEST: Force 800x640 testov5647 registers for ALL resolutions
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
+    // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
+    // Le pattern Bayer est BGGR (défini par le hardware du sensor, non modifiable)
+    const esp_cam_sensor_format_t *custom_format = &ov5647_format_800x640_raw8_50fps;
 
-    // Sélectionner le format custom selon la résolution
-    if (width == 640 && height == 480) {
-      custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
-    } else if (width == 1024 && height == 600) {
-      custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
-    }
+    ESP_LOGI(TAG, "🧪 TEST MODE: Forcing testov5647 800x640 registers (requested: %ux%u)", width, height);
+    ESP_LOGI(TAG, "   Sensor configuration: testov5647 working config");
+    ESP_LOGI(TAG, "   Bayer pattern: BGGR (OV5647 hardware)");
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-      } else {
-        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
-      }
+    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+      ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+      ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+    } else {
+      ESP_LOGI(TAG, "✅ testov5647 800x640 registers applied successfully!");
     }
   }
   // ============================================================================
@@ -861,73 +874,96 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  // Note: fmt.fmt.pix.sizeimage peut retourner 0 avec certains drivers V4L2
-  // La vraie taille sera récupérée des buffers V4L2 plus tard
-  this->image_buffer_size_ = 0;
 
-  // ESP_LOGI(TAG, "Format: %ux%u, RGB565",
-  //          this->image_width_, this->image_height_);
+  // Calculer la taille du buffer (RGB565 = 2 bytes/pixel)
+  this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
+  ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
+           this->image_width_, this->image_height_,
+           this->image_buffer_size_, this->image_buffer_size_ / 1024);
 
-  // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
-  // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
+  // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
+  // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
+  // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
+  const size_t cache_line_size = 64;
+
+  ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
+  ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
+           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
+  ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
+
+  for (int i = 0; i < 3; i++) {
+    this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
+        cache_line_size,
+        this->image_buffer_size_,
+        MALLOC_CAP_SPIRAM);
+
+    if (this->simple_buffers_[i].data == nullptr) {
+      ESP_LOGE(TAG, "❌ Failed to allocate aligned buffer %d (size: %u bytes, align: %u)",
+               i, this->image_buffer_size_, cache_line_size);
+      ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+               heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+      // Libérer les buffers déjà alloués
+      for (int j = 0; j < i; j++) {
+        heap_caps_free(this->simple_buffers_[j].data);
+        this->simple_buffers_[j].data = nullptr;
+      }
+      close(this->video_fd_);
+      this->video_fd_ = -1;
+      return false;
+    }
+    this->simple_buffers_[i].allocated = false;
+    this->simple_buffers_[i].index = i;
+    ESP_LOGI(TAG, "  ✓ Buffer[%d]: %p (aligned to %u bytes)",
+             i, this->simple_buffers_[i].data, cache_line_size);
+  }
+  this->current_buffer_index_ = -1;
   this->image_buffer_ = nullptr;
-  // ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
 
-  // 4. Demander 2 buffers V4L2 en mode MMAP
+  // 4. Demander 3 buffers V4L2 en mode USERPTR (au lieu de MMAP)
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
-  req.count = 2;
+  req.count = 3;  // 3 buffers pour triple buffering
   req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  req.memory = V4L2_MEMORY_MMAP;
+  req.memory = V4L2_MEMORY_USERPTR;  // ★ USERPTR au lieu de MMAP!
 
   if (ioctl(this->video_fd_, VIDIOC_REQBUFS, &req) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_REQBUFS failed: %s", strerror(errno));
+    ESP_LOGE(TAG, "VIDIOC_REQBUFS (USERPTR mode) failed: %s", strerror(errno));
+    // Libérer les buffers SPIRAM
+    for (int i = 0; i < 3; i++) {
+      heap_caps_free(this->simple_buffers_[i].data);
+      this->simple_buffers_[i].data = nullptr;
+    }
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
+  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode: %u buffers requested", req.count);
 
-  // 7. Mapper et queuer les buffers
-  for (unsigned int i = 0; i < 2; i++) {
+  // 5. Queuer les buffers avec nos pointeurs SPIRAM
+  for (unsigned int i = 0; i < 3; i++) {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    buf.memory = V4L2_MEMORY_USERPTR;
     buf.index = i;
-
-    if (ioctl(this->video_fd_, VIDIOC_QUERYBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QUERYBUF[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
-      return false;
-    }
-
-    this->v4l2_buffers_[i].length = buf.length;
-    this->v4l2_buffers_[i].start = mmap(NULL, buf.length,
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_SHARED, this->video_fd_, buf.m.offset);
-
-    if (this->v4l2_buffers_[i].start == MAP_FAILED) {
-      ESP_LOGE(TAG, "mmap[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
-      return false;
-    }
-
-    // ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
-    //          i, buf.length, this->v4l2_buffers_[i].start);
-
-    // Utiliser la taille réelle du buffer V4L2 (au lieu de fmt.fmt.pix.sizeimage qui peut être 0)
-    if (i == 0) {
-      this->image_buffer_size_ = buf.length;
-      // ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
-    }
+    buf.m.userptr = (unsigned long)this->simple_buffers_[i].data;  // ★ Notre buffer SPIRAM
+    buf.length = this->image_buffer_size_;
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
+      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] (USERPTR) failed: %s", i, strerror(errno));
+      // Libérer les buffers SPIRAM
+      for (int j = 0; j < 3; j++) {
+        heap_caps_free(this->simple_buffers_[j].data);
+        this->simple_buffers_[j].data = nullptr;
+      }
+      close(this->video_fd_);
+      this->video_fd_ = -1;
       return false;
     }
+    ESP_LOGI(TAG, "  ✓ Buffer[%u] queued: userptr=%p, length=%u",
+             i, (void*)buf.m.userptr, buf.length);
   }
 
   // 8. DÉMARRER LE STREAMING
@@ -1000,11 +1036,23 @@ bool MipiDSICamComponent::start_streaming() {
   // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
   // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
+  // Ouvrir le device ISP pour les contrôles V4L2 (brightness, contrast, saturation, AWB, WB)
+  // Note: /dev/video0 (CSI) est utilisé pour capture, /dev/video20 (ISP) pour contrôles
+  this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
+  if (this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Failed to open ISP device %s for V4L2 controls: %s",
+             ESP_VIDEO_ISP1_DEVICE_NAME, strerror(errno));
+    ESP_LOGW(TAG, "Brightness/Contrast/Saturation/AWB controls will not be available");
+  } else {
+    ESP_LOGI(TAG, "✓ ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+  }
+
+  // Les buffers SPIRAM ont déjà été alloués et passés à V4L2 en mode USERPTR
+  // V4L2 écrit maintenant directement dans nos buffers SPIRAM - pas de memcpy nécessaire!
+  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode active - zero-copy to SPIRAM");
+
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
-    // Attendre que streaming soit stable (100ms)
-    vTaskDelay(pdMS_TO_TICKS(100));
-
     if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
       // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
       //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
@@ -1012,6 +1060,23 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
     }
   }
+
+  // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
+  // IMPORTANT: Toujours activer AWB au démarrage pour éviter problème blanc→jaune
+  if (this->set_white_balance_mode(true)) {
+    ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+  } else {
+    ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
+    // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
+    this->set_white_balance_temp(5500);
+  }
+
+  // NOTE: Brightness/Contrast/Saturation auto-application désactivée
+  // Utilisez les contrôles YAML number avec initial_value pour ajuster:
+  //   - Brightness: initial_value: 60 (testov5647)
+  //   - Contrast: initial_value: 145 (testov5647)
+  //   - Saturation: initial_value: 135 (testov5647)
+  // Voir CAMERA_CONTROLS_YAML.md pour la configuration complète
 
   return true;
 }
@@ -1026,12 +1091,12 @@ bool MipiDSICamComponent::capture_frame() {
   static uint32_t total_copy_us = 0;
   static uint32_t total_qbuf_us = 0;
 
-  // 1. Dequeue un buffer rempli
+  // 1. Dequeue un buffer rempli (USERPTR mode)
   uint32_t t1 = esp_timer_get_time();
   struct v4l2_buffer buf;
   memset(&buf, 0, sizeof(buf));
   buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf.memory = V4L2_MEMORY_MMAP;
+  buf.memory = V4L2_MEMORY_USERPTR;  // ★ USERPTR au lieu de MMAP
 
   if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
     if (errno == EAGAIN) {
@@ -1043,53 +1108,65 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Appliquer transformation PPA si configurée, sinon zero-copy
-  if (this->ppa_enabled_) {
-    // Copier V4L2 buffer vers notre buffer PPA alloué
-    uint8_t *v4l2_src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
-    memcpy(this->image_buffer_, v4l2_src, this->image_buffer_size_);
+  // 2. V4L2 a déjà écrit directement dans notre buffer SPIRAM!
+  // Pas de memcpy nécessaire - le buffer est prêt à être utilisé
+  int buffer_idx = buf.index;
+  uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-    // Appliquer transformation PPA in-place (mirror/rotate hardware)
-    if (!this->apply_ppa_transform_(this->image_buffer_, this->image_buffer_)) {
-      ESP_LOGE(TAG, "PPA transform failed");
-      // Continuer avec l'image non-transformée plutôt que d'échouer
-    }
-  } else {
-    // Zero-copy: pointer directement vers le buffer V4L2 RGB565
-    this->image_buffer_ = (uint8_t*)this->v4l2_buffers_[buf.index].start;
-  }
+  // 3. ★ PPA DÉSACTIVÉ pour test qualité image
+  // Le PPA (mirror/rotate) peut dégrader la qualité, test sans PPA
   uint32_t t3 = esp_timer_get_time();
+  // if (this->ppa_enabled_) {
+  //   if (!this->apply_ppa_transform_(frame_data, frame_data)) {
+  //     ESP_LOGE(TAG, "PPA transform failed");
+  //   }
+  // }
+  uint32_t t4 = esp_timer_get_time();
+
+  // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  // Marquer l'ancien buffer comme disponible pour V4L2
+  if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
+    this->simple_buffers_[this->current_buffer_index_].allocated = false;
+  }
+  // Marquer le nouveau buffer comme actuellement affiché
+  this->simple_buffers_[buffer_idx].allocated = true;
+  this->current_buffer_index_ = buffer_idx;
+  this->image_buffer_ = frame_data;  // Legacy API pointer
+  portEXIT_CRITICAL(&this->buffer_mutex_);
 
   this->frame_sequence_++;
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame captured (zero-copy):");
+    ESP_LOGI(TAG, "✅ First frame captured (V4L2 USERPTR - zero-copy to SPIRAM):");
     ESP_LOGI(TAG, "   Buffer size: %u bytes (%ux%u × 2 = RGB565)",
              this->image_buffer_size_, this->image_width_, this->image_height_);
-    ESP_LOGI(TAG, "   Buffer address: %p (V4L2 MMAP)", this->image_buffer_);
-    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, Pointer assignment=%uus",
-             (uint32_t)(t2-t1), (uint32_t)(t3-t2));
+    ESP_LOGI(TAG, "   SPIRAM buffer: %p (index=%d)", frame_data, buffer_idx);
+    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, PPA=%uus",
+             (uint32_t)(t2-t1), (uint32_t)(t4-t3));
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
-             this->image_buffer_[0], this->image_buffer_[1],
-             this->image_buffer_[2], this->image_buffer_[3],
-             this->image_buffer_[4], this->image_buffer_[5]);
+             frame_data[0], frame_data[1],
+             frame_data[2], frame_data[3],
+             frame_data[4], frame_data[5]);
   }
 
   // Profiling détaillé toutes les 100 frames
   profile_count++;
   total_dqbuf_us += (t2 - t1);
-  total_copy_us += (t3 - t2);  // "copy" = pointer assignment (zero-copy, should be ~0us)
+  total_copy_us += (t4 - t3);  // PPA transformation time (no memcpy!)
 
-  // 3. Re-queue le buffer immédiatement
-  uint32_t t4 = esp_timer_get_time();
+  // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
+  uint32_t t5 = esp_timer_get_time();
+  buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
+  buf.length = this->image_buffer_size_;
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
     ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
     return false;
   }
-  uint32_t t5 = esp_timer_get_time();
+  uint32_t t6 = esp_timer_get_time();
 
-  total_qbuf_us += (t5 - t4);
+  total_qbuf_us += (t6 - t5);
 
   if (profile_count == 100) {
     // Logs de profiling commentés pour réduire verbosité
@@ -1122,7 +1199,7 @@ void MipiDSICamComponent::stop_streaming() {
 
   // ESP_LOGI(TAG, "=== STOP STREAMING ===");
 
-  // 1. Arrêter le streaming
+  // 1. Arrêter le streaming V4L2
   if (this->video_fd_ >= 0) {
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(this->video_fd_, VIDIOC_STREAMOFF, &type) < 0) {
@@ -1130,30 +1207,28 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 2. Libérer les buffers mappés
-  for (int i = 0; i < 2; i++) {
-    if (this->v4l2_buffers_[i].start != nullptr &&
-        this->v4l2_buffers_[i].start != MAP_FAILED) {
-      munmap(this->v4l2_buffers_[i].start, this->v4l2_buffers_[i].length);
-      this->v4l2_buffers_[i].start = nullptr;
-      this->v4l2_buffers_[i].length = 0;
+  // 2. Libérer les buffers SPIRAM (USERPTR mode - pas de munmap nécessaire)
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  this->current_buffer_index_ = -1;
+  portEXIT_CRITICAL(&this->buffer_mutex_);
+
+  for (int i = 0; i < 3; i++) {
+    if (this->simple_buffers_[i].data != nullptr) {
+      heap_caps_free(this->simple_buffers_[i].data);
+      this->simple_buffers_[i].data = nullptr;
+      this->simple_buffers_[i].allocated = false;
     }
   }
 
-  // 3. Cleanup PPA et libérer buffer si alloué
-  if (this->ppa_enabled_ && this->image_buffer_) {
-    // Libérer le buffer PPA alloué
-    heap_caps_free(this->image_buffer_);
-    this->image_buffer_ = nullptr;
+  // Reset legacy pointer
+  this->image_buffer_ = nullptr;
 
-    // Cleanup PPA client
+  // 4. Cleanup PPA si activé
+  if (this->ppa_enabled_) {
     this->cleanup_ppa_();
-  } else {
-    // Reset image_buffer pointer (it pointed to V4L2 buffer, now unmapped)
-    this->image_buffer_ = nullptr;
   }
 
-  // 4. Libérer la structure imlib si allouée (seulement si imlib activé)
+  // 5. Libérer la structure imlib si allouée (seulement si imlib activé)
 #if IMLIB_AVAILABLE
   if (this->imlib_image_) {
     free(this->imlib_image_);
@@ -1162,10 +1237,16 @@ void MipiDSICamComponent::stop_streaming() {
   }
 #endif
 
-  // 5. Fermer le device
+  // 6. Fermer le device CSI
   if (this->video_fd_ >= 0) {
     close(this->video_fd_);
     this->video_fd_ = -1;
+  }
+
+  // 7. Fermer le device ISP (contrôles V4L2)
+  if (this->isp_fd_ >= 0) {
+    close(this->isp_fd_);
+    this->isp_fd_ = -1;
   }
 
   this->streaming_active_ = false;
@@ -1195,8 +1276,8 @@ void MipiDSICamComponent::stop_streaming() {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_exposure(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set exposure: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set exposure: ISP device not open");
     return false;
   }
 
@@ -1209,7 +1290,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_AUTO;
     ctrl.value = V4L2_EXPOSURE_AUTO;  // Auto exposure
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGE(TAG, "Failed to enable auto exposure: %s", strerror(errno));
       return false;
     }
@@ -1219,7 +1300,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_AUTO;
     ctrl.value = V4L2_EXPOSURE_MANUAL;  // Manual exposure
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGW(TAG, "Failed to disable auto exposure: %s", strerror(errno));
       // Continue anyway, try to set exposure value
     }
@@ -1228,7 +1309,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
     ctrl.id = V4L2_CID_EXPOSURE_ABSOLUTE;
     ctrl.value = value;
 
-    if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
       ESP_LOGE(TAG, "Failed to set exposure to %d: %s", value, strerror(errno));
       return false;
     }
@@ -1252,8 +1333,8 @@ bool MipiDSICamComponent::set_exposure(int value) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_gain(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set gain: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set gain: ISP device not open");
     return false;
   }
 
@@ -1263,7 +1344,7 @@ bool MipiDSICamComponent::set_gain(int value) {
   ctrl.id = V4L2_CID_GAIN;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set gain to %d: %s", value, strerror(errno));
     return false;
   }
@@ -1279,8 +1360,8 @@ bool MipiDSICamComponent::set_gain(int value) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set white balance mode: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance mode: ISP device not open");
     return false;
   }
 
@@ -1289,7 +1370,7 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
   ctrl.id = V4L2_CID_AUTO_WHITE_BALANCE;
   ctrl.value = auto_mode ? 1 : 0;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set white balance mode: %s", strerror(errno));
     return false;
   }
@@ -1314,8 +1395,8 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set white balance temperature: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set white balance temperature: ISP device not open");
     return false;
   }
 
@@ -1324,7 +1405,7 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
   ctrl.id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
   ctrl.value = kelvin;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set white balance temperature to %dK: %s", kelvin, strerror(errno));
     return false;
   }
@@ -1359,8 +1440,8 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set CCM matrix: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set CCM matrix: ISP device not open");
     return false;
   }
 
@@ -1388,7 +1469,7 @@ bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
   ctrls.count = 1;
   ctrls.controls = &ctrl;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
     ESP_LOGE(TAG, "Failed to set CCM matrix: %s", strerror(errno));
     return false;
   }
@@ -1457,8 +1538,8 @@ bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
  * @return true si succès, false si erreur
  */
 bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set WB gains: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set WB gains: ISP device not open");
     return false;
   }
 
@@ -1481,7 +1562,7 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
   ctrls.count = 1;
   ctrls.controls = &ctrl;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) < 0) {
     ESP_LOGE(TAG, "Failed to set WB gains: %s", strerror(errno));
     return false;
   }
@@ -1499,8 +1580,8 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
  * @param value Valeur de luminosité (-128 à 127, défaut: 0)
  */
 bool MipiDSICamComponent::set_brightness(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set brightness: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set brightness: ISP device not open");
     return false;
   }
 
@@ -1508,12 +1589,12 @@ bool MipiDSICamComponent::set_brightness(int value) {
   ctrl.id = V4L2_CID_BRIGHTNESS;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set brightness: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  ESP_LOGI(TAG, "✓ Brightness set to %d", value);
   return true;
 }
 
@@ -1522,8 +1603,8 @@ bool MipiDSICamComponent::set_brightness(int value) {
  * @param value Valeur de contraste (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_contrast(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set contrast: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set contrast: ISP device not open");
     return false;
   }
 
@@ -1531,12 +1612,12 @@ bool MipiDSICamComponent::set_contrast(int value) {
   ctrl.id = V4L2_CID_CONTRAST;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set contrast: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  ESP_LOGI(TAG, "✓ Contrast set to %d", value);
   return true;
 }
 
@@ -1545,8 +1626,8 @@ bool MipiDSICamComponent::set_contrast(int value) {
  * @param value Valeur de saturation (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_saturation(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set saturation: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set saturation: ISP device not open");
     return false;
   }
 
@@ -1554,12 +1635,12 @@ bool MipiDSICamComponent::set_saturation(int value) {
   ctrl.id = V4L2_CID_SATURATION;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set saturation: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  ESP_LOGI(TAG, "✓ Saturation set to %d", value);
   return true;
 }
 
@@ -1568,8 +1649,8 @@ bool MipiDSICamComponent::set_saturation(int value) {
  * @param value Valeur de teinte (-180 à 180, défaut: 0)
  */
 bool MipiDSICamComponent::set_hue(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set hue: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set hue: ISP device not open");
     return false;
   }
 
@@ -1577,12 +1658,12 @@ bool MipiDSICamComponent::set_hue(int value) {
   ctrl.id = V4L2_CID_HUE;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set hue: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  ESP_LOGI(TAG, "✓ Hue set to %d", value);
   return true;
 }
 
@@ -1591,8 +1672,8 @@ bool MipiDSICamComponent::set_hue(int value) {
  * @param value Valeur de netteté (0 à 255, défaut: 128)
  */
 bool MipiDSICamComponent::set_sharpness(int value) {
-  if (!this->streaming_active_ || this->video_fd_ < 0) {
-    ESP_LOGW(TAG, "Cannot set sharpness: streaming not active");
+  if (!this->streaming_active_ || this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "Cannot set sharpness: ISP device not open");
     return false;
   }
 
@@ -1600,12 +1681,12 @@ bool MipiDSICamComponent::set_sharpness(int value) {
   ctrl.id = V4L2_CID_SHARPNESS;
   ctrl.value = value;
 
-  if (ioctl(this->video_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
     ESP_LOGE(TAG, "Failed to set sharpness: %s", strerror(errno));
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ Sharpness (filter) set to %d", value);
+  ESP_LOGI(TAG, "✓ Sharpness set to %d", value);
   return true;
 }
 
@@ -1717,6 +1798,84 @@ void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
 }
 
 #endif  // IMLIB_AVAILABLE
+
+// ============================================================================
+// Buffer Pool APIs (pour lvgl_camera_display)
+// ============================================================================
+
+/**
+ * @brief Acquiert un buffer du pool pour affichage
+ *
+ * Cette fonction retourne le buffer actuellement capturé (current_buffer_).
+ * Le buffer reste marqué "allocated" jusqu'à ce que release_buffer() soit appelé.
+ *
+ * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
+ *
+ * @return Pointeur vers buffer element, ou nullptr si aucun buffer disponible
+ */
+SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
+  if (!this->streaming_active_) {
+    return nullptr;
+  }
+
+  SimpleBufferElement *buffer = nullptr;
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  if (this->current_buffer_index_ >= 0) {
+    buffer = &this->simple_buffers_[this->current_buffer_index_];
+  }
+  portEXIT_CRITICAL(&this->buffer_mutex_);
+
+  return buffer;
+}
+
+/**
+ * @brief Libère un buffer après affichage
+ *
+ * Marque le buffer comme "free" pour qu'il puisse être réutilisé par capture_frame().
+ * Ne PAS libérer current_buffer_index_ - seulement les anciens buffers dont l'affichage est terminé.
+ *
+ * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
+ *
+ * @param element Buffer element à libérer
+ */
+void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
+  if (element == nullptr) {
+    return;
+  }
+
+  // Ne PAS libérer current_buffer_index_ (il est encore utilisé pour capture)
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  if (element->index != this->current_buffer_index_) {
+    element->allocated = false;
+  }
+  portEXIT_CRITICAL(&this->buffer_mutex_);
+}
+
+/**
+ * @brief Retourne le pointeur vers les données du buffer element
+ *
+ * @param element Buffer element
+ * @return Pointeur vers les données RGB565, ou nullptr si element invalide
+ */
+uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
+  if (element == nullptr) {
+    return nullptr;
+  }
+  return element->data;
+}
+
+/**
+ * @brief Retourne l'index du buffer element dans le pool
+ *
+ * @param element Buffer element
+ * @return Index du buffer (0-2 pour triple buffering), ou 0 si element invalide
+ */
+uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
+  if (element == nullptr) {
+    return 0;
+  }
+  return element->index;
+}
 
 }  // namespace mipi_dsi_cam
 }  // namespace esphome

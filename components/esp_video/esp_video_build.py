@@ -37,6 +37,12 @@ esp_video_sources = [
     "src/esp_video_isp_stubs.c",
 ]
 
+# Ajouter le chemin d'include private_include de esp_video
+esp_video_private_include = os.path.join(component_dir, "private_include")
+if os.path.exists(esp_video_private_include):
+    env.Append(CPPPATH=[esp_video_private_include])
+    print(f"[ESP-Video Build] 📁 Include privé ajouté: {esp_video_private_include}")
+
 for src in esp_video_sources:
     src_path = os.path.join(component_dir, src)
     if os.path.exists(src_path):
