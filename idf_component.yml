@@ -1,0 +1,7 @@
+## Dépendances IDF Component Manager
+## Ce fichier déclare les composants externes requis par ce projet ESPHome
+
+dependencies:
+  # ESP-DL (Espressif Deep Learning Library)
+  # Requis par: components/human_face_detect
+  espressif/esp-dl: "^3.1.0"
