@@ -4,11 +4,6 @@
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "../mipi_dsi_cam/mipi_dsi_cam.h"
 
-// Forward declaration pour esp_video_buffer
-extern "C" {
-struct esp_video_buffer_element;
-}
-
 namespace esphome {
 namespace lvgl_camera_display {
 
@@ -46,7 +41,7 @@ class LVGLCameraDisplay : public Component {
   lv_timer_t *lvgl_timer_{nullptr};
 
   // Buffer pool tracking (pour release après affichage)
-  struct esp_video_buffer_element *displayed_buffer_{nullptr};
+  mipi_dsi_cam::SimpleBufferElement *displayed_buffer_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();

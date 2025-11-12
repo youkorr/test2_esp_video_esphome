@@ -27,7 +27,6 @@ extern "C" {
 #include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
-#include "esp_video_buffer.h"  // Buffer pool system (now in CPPPATH via esp_video_build.py)
 }
 
 // OV02C10 custom format configurations (800x480 et 1280x800)
@@ -1022,28 +1021,32 @@ bool MipiDSICamComponent::start_streaming() {
   // Attendre que streaming soit stable (100ms)
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // Créer buffer pool (triple buffering pour éviter tearing)
+  // Créer buffer pool simple (triple buffering manuel)
   // 3 buffers: 1 pour capture, 1 pour affichage LVGL, 1 buffer libre
-  struct esp_video_buffer_info pool_info = {};
-  pool_info.count = 3;  // Triple buffering
-  pool_info.size = this->image_buffer_size_;
-  pool_info.align_size = 64;  // Cache-aligned
-  pool_info.caps = MALLOC_CAP_8BIT;  // Generic 8-bit accessible memory (internal or SPIRAM with cache)
-  pool_info.memory_type = V4L2_MEMORY_USERPTR;  // User-allocated buffers
-
-  ESP_LOGI(TAG, "Creating buffer pool: 3 × %u bytes = %u KB total",
+  ESP_LOGI(TAG, "Creating simple buffer pool: 3 × %u bytes = %u KB total",
            this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
 
-  this->buffer_pool_ = esp_video_buffer_create(&pool_info);
-  if (this->buffer_pool_ == nullptr) {
-    ESP_LOGE(TAG, "❌ Failed to create buffer pool (3 × %u bytes)", this->image_buffer_size_);
-    ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
-             heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    this->stop_streaming();
-    return false;
+  for (int i = 0; i < 3; i++) {
+    this->simple_buffers_[i].data = (uint8_t*)heap_caps_malloc(this->image_buffer_size_, MALLOC_CAP_8BIT);
+    if (this->simple_buffers_[i].data == nullptr) {
+      ESP_LOGE(TAG, "❌ Failed to allocate buffer %d (size: %u bytes)", i, this->image_buffer_size_);
+      ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+               heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+      // Libérer les buffers déjà alloués
+      for (int j = 0; j < i; j++) {
+        heap_caps_free(this->simple_buffers_[j].data);
+        this->simple_buffers_[j].data = nullptr;
+      }
+      this->stop_streaming();
+      return false;
+    }
+    this->simple_buffers_[i].allocated = false;
+    this->simple_buffers_[i].index = i;
+    ESP_LOGD(TAG, "  Buffer[%d] allocated @ %p", i, this->simple_buffers_[i].data);
   }
-  ESP_LOGI(TAG, "✓ Buffer pool created: 3 buffers × %u bytes = %u KB total",
+  this->current_buffer_index_ = -1;  // Aucun buffer capturé pour l'instant
+  ESP_LOGI(TAG, "✓ Simple buffer pool created: 3 buffers × %u bytes = %u KB total",
            this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
@@ -1103,20 +1106,19 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Trouver un buffer libre dans le pool
-  struct esp_video_buffer_element *free_buffer = nullptr;
+  // 2. Trouver un buffer libre dans le pool simple
+  int free_buffer_idx = -1;
   portENTER_CRITICAL(&this->buffer_mutex_);
-  for (uint32_t i = 0; i < this->buffer_pool_->info.count; i++) {
-    struct esp_video_buffer_element *elem = ESP_VIDEO_BUFFER_ELEMENT(this->buffer_pool_, i);
-    if (ELEMENT_IS_FREE(elem)) {
-      ELEMENT_SET_ALLOCATED(elem);
-      free_buffer = elem;
+  for (int i = 0; i < 3; i++) {
+    if (!this->simple_buffers_[i].allocated) {
+      this->simple_buffers_[i].allocated = true;
+      free_buffer_idx = i;
       break;
     }
   }
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
-  if (free_buffer == nullptr) {
+  if (free_buffer_idx == -1) {
     // Pas de buffer libre - skip cette frame (LVGL affiche encore la précédente)
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
       ESP_LOGE(TAG, "VIDIOC_QBUF failed after skip: %s", strerror(errno));
@@ -1126,7 +1128,7 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 3. Copier V4L2 buffer vers buffer pool + appliquer PPA si nécessaire
   uint8_t *v4l2_src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
-  uint8_t *pool_dst = ELEMENT_BUFFER(free_buffer);
+  uint8_t *pool_dst = this->simple_buffers_[free_buffer_idx].data;
 
   if (this->ppa_enabled_) {
     // Copier V4L2 → pool buffer puis appliquer PPA in-place
@@ -1140,15 +1142,14 @@ bool MipiDSICamComponent::capture_frame() {
     memcpy(pool_dst, v4l2_src, this->image_buffer_size_);
   }
 
-  esp_video_buffer_element_set_valid_size(free_buffer, this->image_buffer_size_);
   uint32_t t3 = esp_timer_get_time();
 
-  // 4. Libérer l'ancien buffer et mettre à jour current_buffer_
+  // 4. Libérer l'ancien buffer et mettre à jour current_buffer_index_
   portENTER_CRITICAL(&this->buffer_mutex_);
-  if (this->current_buffer_ != nullptr) {
-    ELEMENT_SET_FREE(this->current_buffer_);
+  if (this->current_buffer_index_ >= 0) {
+    this->simple_buffers_[this->current_buffer_index_].allocated = false;
   }
-  this->current_buffer_ = free_buffer;
+  this->current_buffer_index_ = free_buffer_idx;
   this->image_buffer_ = pool_dst;  // Legacy API pointer
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
@@ -1232,17 +1233,17 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 3. Détruire le buffer pool
-  if (this->buffer_pool_ != nullptr) {
-    portENTER_CRITICAL(&this->buffer_mutex_);
-    this->current_buffer_ = nullptr;
-    portEXIT_CRITICAL(&this->buffer_mutex_);
+  // 3. Libérer les buffers simples du pool
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  this->current_buffer_index_ = -1;
+  portEXIT_CRITICAL(&this->buffer_mutex_);
 
-    esp_err_t err = esp_video_buffer_destroy(this->buffer_pool_);
-    if (err != ESP_OK) {
-      ESP_LOGW(TAG, "Failed to destroy buffer pool: %d", err);
+  for (int i = 0; i < 3; i++) {
+    if (this->simple_buffers_[i].data != nullptr) {
+      heap_caps_free(this->simple_buffers_[i].data);
+      this->simple_buffers_[i].data = nullptr;
+      this->simple_buffers_[i].allocated = false;
     }
-    this->buffer_pool_ = nullptr;
   }
 
   // Reset legacy pointer
@@ -1838,14 +1839,16 @@ void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
  *
  * @return Pointeur vers buffer element, ou nullptr si aucun buffer disponible
  */
-struct esp_video_buffer_element* MipiDSICamComponent::acquire_buffer() {
-  if (!this->streaming_active_ || this->buffer_pool_ == nullptr) {
+SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
+  if (!this->streaming_active_) {
     return nullptr;
   }
 
-  struct esp_video_buffer_element *buffer = nullptr;
+  SimpleBufferElement *buffer = nullptr;
   portENTER_CRITICAL(&this->buffer_mutex_);
-  buffer = this->current_buffer_;  // Retourne le buffer actuellement capturé
+  if (this->current_buffer_index_ >= 0) {
+    buffer = &this->simple_buffers_[this->current_buffer_index_];
+  }
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
   return buffer;
@@ -1855,21 +1858,21 @@ struct esp_video_buffer_element* MipiDSICamComponent::acquire_buffer() {
  * @brief Libère un buffer après affichage
  *
  * Marque le buffer comme "free" pour qu'il puisse être réutilisé par capture_frame().
- * Ne PAS libérer current_buffer_ - seulement les anciens buffers dont l'affichage est terminé.
+ * Ne PAS libérer current_buffer_index_ - seulement les anciens buffers dont l'affichage est terminé.
  *
  * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
  *
  * @param element Buffer element à libérer
  */
-void MipiDSICamComponent::release_buffer(struct esp_video_buffer_element *element) {
-  if (element == nullptr || this->buffer_pool_ == nullptr) {
+void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
+  if (element == nullptr) {
     return;
   }
 
-  // Ne PAS libérer current_buffer_ (il est encore utilisé pour capture)
+  // Ne PAS libérer current_buffer_index_ (il est encore utilisé pour capture)
   portENTER_CRITICAL(&this->buffer_mutex_);
-  if (element != this->current_buffer_) {
-    ELEMENT_SET_FREE(element);
+  if (element->index != this->current_buffer_index_) {
+    element->allocated = false;
   }
   portEXIT_CRITICAL(&this->buffer_mutex_);
 }
@@ -1877,33 +1880,27 @@ void MipiDSICamComponent::release_buffer(struct esp_video_buffer_element *elemen
 /**
  * @brief Retourne le pointeur vers les données du buffer element
  *
- * Wrapper pour esp_video_buffer_element_get_buffer() afin que lvgl_camera_display
- * n'ait pas besoin d'inclure esp_video_buffer.h directement.
- *
  * @param element Buffer element
  * @return Pointeur vers les données RGB565, ou nullptr si element invalide
  */
-uint8_t* MipiDSICamComponent::get_buffer_data(struct esp_video_buffer_element *element) {
+uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
   if (element == nullptr) {
     return nullptr;
   }
-  return esp_video_buffer_element_get_buffer(element);
+  return element->data;
 }
 
 /**
  * @brief Retourne l'index du buffer element dans le pool
  *
- * Wrapper pour esp_video_buffer_element_get_index() afin que lvgl_camera_display
- * n'ait pas besoin d'inclure esp_video_buffer.h directement.
- *
  * @param element Buffer element
  * @return Index du buffer (0-2 pour triple buffering), ou 0 si element invalide
  */
-uint32_t MipiDSICamComponent::get_buffer_index(struct esp_video_buffer_element *element) {
+uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
   if (element == nullptr) {
     return 0;
   }
-  return esp_video_buffer_element_get_index(element);
+  return element->index;
 }
 
 }  // namespace mipi_dsi_cam

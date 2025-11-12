@@ -5,12 +5,7 @@
 #include <string>
 #include <vector>
 
-// Forward declarations (définis dans .cpp pour éviter dépendances header)
-extern "C" {
-struct esp_video_buffer;
-struct esp_video_buffer_element;
-}
-
+// Forward declaration pour imlib (défini dans .cpp pour éviter dépendance header)
 struct image;
 typedef struct image image_t;
 
@@ -28,6 +23,13 @@ typedef struct {
 
 namespace esphome {
 namespace mipi_dsi_cam {
+
+// Simple buffer element pour triple buffering (remplace esp_video_buffer)
+struct SimpleBufferElement {
+  uint8_t *data;      // Pointeur vers données RGB565
+  bool allocated;     // true = en cours d'utilisation
+  uint32_t index;     // Index du buffer (0, 1, 2)
+};
 
 class MipiDSICamComponent : public Component {
  public:
@@ -80,12 +82,12 @@ class MipiDSICamComponent : public Component {
   bool capture_frame();
 
   // Buffer pool APIs (thread-safe, zero-tearing)
-  struct esp_video_buffer_element* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
-  void release_buffer(struct esp_video_buffer_element *element);  // Libère buffer après affichage
+  SimpleBufferElement* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
+  void release_buffer(SimpleBufferElement *element);  // Libère buffer après affichage
 
-  // Helper functions pour accéder aux buffer elements (wrapper pour éviter include esp_video_buffer.h)
-  uint8_t* get_buffer_data(struct esp_video_buffer_element *element);  // Retourne pointeur vers données
-  uint32_t get_buffer_index(struct esp_video_buffer_element *element);  // Retourne index du buffer
+  // Helper functions pour accéder aux buffer elements
+  uint8_t* get_buffer_data(SimpleBufferElement *element);  // Retourne pointeur vers données
+  uint32_t get_buffer_index(SimpleBufferElement *element);  // Retourne index du buffer
 
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
@@ -167,9 +169,9 @@ class MipiDSICamComponent : public Component {
     size_t length;
   } v4l2_buffers_[2];
 
-  // Buffer pool system (triple buffering pour éviter tearing)
-  struct esp_video_buffer *buffer_pool_{nullptr};  // Pool de 3 buffers RGB565
-  struct esp_video_buffer_element *current_buffer_{nullptr};  // Buffer actuellement capturé
+  // Buffer pool system (triple buffering simple - sans esp_video_buffer)
+  SimpleBufferElement simple_buffers_[3];  // Triple buffering
+  int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
   portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)
 
   // Legacy pointer (deprecated, pointe vers current_buffer_ si disponible)
