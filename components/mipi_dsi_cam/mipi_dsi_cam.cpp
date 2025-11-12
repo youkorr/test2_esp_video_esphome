@@ -4,7 +4,6 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
-#include "esp_cache.h"  // Pour esp_cache_get_dcache_line_size()
 
 #include <string.h>
 #include <vector>
@@ -878,12 +877,8 @@ bool MipiDSICamComponent::start_streaming() {
 
   // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
-  size_t cache_line_size = 0;
-  esp_err_t ret = esp_cache_get_dcache_line_size(&cache_line_size);
-  if (ret != ESP_OK || cache_line_size == 0) {
-    ESP_LOGW(TAG, "⚠️  esp_cache_get_dcache_line_size() failed, using default 64 bytes");
-    cache_line_size = 64;
-  }
+  // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
+  const size_t cache_line_size = 64;
 
   ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
   ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
