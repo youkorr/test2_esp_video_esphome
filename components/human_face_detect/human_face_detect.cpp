@@ -22,8 +22,9 @@ void HumanFaceDetectComponent::setup() {
 
   // Initialiser le modèle ESP-DL
   if (!this->init_model_()) {
-    ESP_LOGE(TAG, "Failed to initialize face detection model");
-    this->mark_failed();
+    ESP_LOGW(TAG, "Face detection model not available - component disabled");
+    this->initialized_ = false;
+    // Ne pas marquer comme failed - c'est optionnel
     return;
   }
 
