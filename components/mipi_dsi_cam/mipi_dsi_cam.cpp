@@ -1027,13 +1027,19 @@ bool MipiDSICamComponent::start_streaming() {
   struct esp_video_buffer_info pool_info = {};
   pool_info.count = 3;  // Triple buffering
   pool_info.size = this->image_buffer_size_;
-  pool_info.align_size = 64;  // Cache-aligned pour DMA
-  pool_info.caps = MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM;  // DMA-capable, utiliser SPIRAM si disponible
+  pool_info.align_size = 64;  // Cache-aligned
+  pool_info.caps = MALLOC_CAP_SPIRAM;  // SPIRAM pour éviter saturation RAM interne
   pool_info.memory_type = V4L2_MEMORY_USERPTR;  // User-allocated buffers
+
+  ESP_LOGI(TAG, "Creating buffer pool: 3 × %u bytes = %u KB total",
+           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
 
   this->buffer_pool_ = esp_video_buffer_create(&pool_info);
   if (this->buffer_pool_ == nullptr) {
     ESP_LOGE(TAG, "❌ Failed to create buffer pool (3 × %u bytes)", this->image_buffer_size_);
+    ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
+             heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
     this->stop_streaming();
     return false;
   }
