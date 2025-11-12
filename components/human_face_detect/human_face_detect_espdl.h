@@ -6,7 +6,11 @@
 
 #pragma once
 
-#ifdef USE_ESP_IDF
+// Only compile if ESP-IDF and ESP-DL are available
+#if defined(USE_ESP_IDF) && __has_include("dl_detect_base.hpp")
+
+// Define macro to indicate ESP-DL is available
+#define ESPHOME_HAS_ESP_DL 1
 
 #include "dl_detect_base.hpp"
 #include "dl_detect_mnp_postprocessor.hpp"
@@ -71,4 +75,4 @@ class MSRMNPDetector : public dl::detect::Detect {
 }  // namespace human_face_detect
 }  // namespace esphome
 
-#endif  // USE_ESP_IDF
+#endif  // defined(USE_ESP_IDF) && __has_include("dl_detect_base.hpp")

@@ -1,9 +1,6 @@
 #include "human_face_detect.h"
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
-
-#ifdef USE_ESP_IDF
-#include "human_face_detect_espdl.h"
-#endif
+#include "human_face_detect_espdl.h"  // Includes ESP-DL conditionally via __has_include
 
 namespace esphome {
 namespace human_face_detect {
@@ -54,7 +51,7 @@ void HumanFaceDetectComponent::dump_config() {
 }
 
 bool HumanFaceDetectComponent::init_model_() {
-#ifdef USE_ESP_IDF
+#ifdef ESPHOME_HAS_ESP_DL
   ESP_LOGI(TAG, "Initializing ESP-DL face detection models...");
   ESP_LOGI(TAG, "  Model directory: %s", this->model_dir_.c_str());
   ESP_LOGI(TAG, "  MSR model: %s", this->msr_model_filename_.c_str());
@@ -111,7 +108,7 @@ bool HumanFaceDetectComponent::init_model_() {
 }
 
 void HumanFaceDetectComponent::cleanup_model_() {
-#ifdef USE_ESP_IDF
+#ifdef ESPHOME_HAS_ESP_DL
   if (this->detector_ != nullptr) {
     auto *detector = static_cast<MSRMNPDetector *>(this->detector_);
     delete detector;
@@ -127,7 +124,7 @@ int HumanFaceDetectComponent::detect_faces() {
     return -1;
   }
 
-#ifdef USE_ESP_IDF
+#ifdef ESPHOME_HAS_ESP_DL
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not set!");
     return -1;
@@ -176,7 +173,8 @@ int HumanFaceDetectComponent::detect_faces() {
 
   return this->face_count_;
 #else
-  ESP_LOGW(TAG, "ESP-IDF required for face detection");
+  ESP_LOGW(TAG, "ESP-DL library not available - face detection disabled");
+  ESP_LOGW(TAG, "Install ESP-DL component via 'idf.py add-dependency espressif/esp-dl^3.1.0'");
   return -1;
 #endif
 }

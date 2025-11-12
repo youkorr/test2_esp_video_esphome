@@ -5,7 +5,8 @@
 
 #include "human_face_detect_espdl.h"
 
-#ifdef USE_ESP_IDF
+// Only compile if ESP-DL is available (checked in header)
+#ifdef ESPHOME_HAS_ESP_DL
 
 #include "esphome/core/log.h"
 
@@ -146,4 +147,4 @@ std::list<dl::detect::result_t> &MSRMNPDetector::run(const dl::image::img_t &img
 }  // namespace human_face_detect
 }  // namespace esphome
 
-#endif  // USE_ESP_IDF
+#endif  // ESPHOME_HAS_ESP_DL
