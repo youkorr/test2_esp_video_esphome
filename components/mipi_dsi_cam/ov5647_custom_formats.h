@@ -224,7 +224,7 @@ static const esp_cam_sensor_isp_info_t ov5647_640x480_isp_info = {
         .vts = 1080,          // Vertical Total Size
         .exp_def = 0x300,     // 768 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
@@ -426,7 +426,7 @@ static const esp_cam_sensor_isp_info_t ov5647_1024x600_isp_info = {
         .vts = 1300,          // Vertical Total Size
         .exp_def = 0x500,     // 1280 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
@@ -582,7 +582,7 @@ static const esp_cam_sensor_isp_info_t ov5647_800x640_isp_info = {
         .vts = 984,           // Vertical Total Size (from testov5647)
         .exp_def = 0x300,     // 768 - let AEC handle exposure
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // BGGR pattern
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally with 0x3821=0x03)
     }
 };
 
