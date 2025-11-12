@@ -164,12 +164,8 @@ class MipiDSICamComponent : public Component {
   bool streaming_active_{false};
   int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames
   int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
-  struct {
-    void *start;
-    size_t length;
-  } v4l2_buffers_[2];
 
-  // Buffer pool system (triple buffering simple - sans esp_video_buffer)
+  // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
   SimpleBufferElement simple_buffers_[3];  // Triple buffering
   int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
   portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)

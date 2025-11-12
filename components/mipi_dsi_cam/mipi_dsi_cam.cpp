@@ -869,73 +869,100 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
-  // Note: fmt.fmt.pix.sizeimage peut retourner 0 avec certains drivers V4L2
-  // La vraie taille sera récupérée des buffers V4L2 plus tard
-  this->image_buffer_size_ = 0;
 
-  // ESP_LOGI(TAG, "Format: %ux%u, RGB565",
-  //          this->image_width_, this->image_height_);
+  // Calculer la taille du buffer (RGB565 = 2 bytes/pixel)
+  this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
+  ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
+           this->image_width_, this->image_height_,
+           this->image_buffer_size_, this->image_buffer_size_ / 1024);
 
-  // 3. PAS d'allocation de buffer séparé - on utilise les buffers V4L2 directement (zero-copy)
-  // image_buffer_ pointera vers le buffer V4L2 actif dans capture_frame()
+  // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
+  // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
+  size_t cache_line_size = 0;
+  esp_err_t ret = esp_cache_get_dcache_line_size(&cache_line_size);
+  if (ret != ESP_OK || cache_line_size == 0) {
+    ESP_LOGW(TAG, "⚠️  esp_cache_get_dcache_line_size() failed, using default 64 bytes");
+    cache_line_size = 64;
+  }
+
+  ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
+  ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
+           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
+  ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
+
+  for (int i = 0; i < 3; i++) {
+    this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
+        cache_line_size,
+        this->image_buffer_size_,
+        MALLOC_CAP_SPIRAM);
+
+    if (this->simple_buffers_[i].data == nullptr) {
+      ESP_LOGE(TAG, "❌ Failed to allocate aligned buffer %d (size: %u bytes, align: %u)",
+               i, this->image_buffer_size_, cache_line_size);
+      ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
+               heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+               heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+      // Libérer les buffers déjà alloués
+      for (int j = 0; j < i; j++) {
+        heap_caps_free(this->simple_buffers_[j].data);
+        this->simple_buffers_[j].data = nullptr;
+      }
+      close(this->video_fd_);
+      this->video_fd_ = -1;
+      return false;
+    }
+    this->simple_buffers_[i].allocated = false;
+    this->simple_buffers_[i].index = i;
+    ESP_LOGI(TAG, "  ✓ Buffer[%d]: %p (aligned to %u bytes)",
+             i, this->simple_buffers_[i].data, cache_line_size);
+  }
+  this->current_buffer_index_ = -1;
   this->image_buffer_ = nullptr;
-  // ESP_LOGI(TAG, "✓ Zero-copy mode: using V4L2 MMAP buffers directly (no PPA, no separate buffer)");
 
-  // 4. Demander 2 buffers V4L2 en mode MMAP
+  // 4. Demander 3 buffers V4L2 en mode USERPTR (au lieu de MMAP)
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
-  req.count = 2;
+  req.count = 3;  // 3 buffers pour triple buffering
   req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  req.memory = V4L2_MEMORY_MMAP;
+  req.memory = V4L2_MEMORY_USERPTR;  // ★ USERPTR au lieu de MMAP!
 
   if (ioctl(this->video_fd_, VIDIOC_REQBUFS, &req) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_REQBUFS failed: %s", strerror(errno));
+    ESP_LOGE(TAG, "VIDIOC_REQBUFS (USERPTR mode) failed: %s", strerror(errno));
+    // Libérer les buffers SPIRAM
+    for (int i = 0; i < 3; i++) {
+      heap_caps_free(this->simple_buffers_[i].data);
+      this->simple_buffers_[i].data = nullptr;
+    }
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
   }
 
-  // ESP_LOGI(TAG, "✓ %u V4L2 buffers requested", req.count);
+  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode: %u buffers requested", req.count);
 
-  // 7. Mapper et queuer les buffers
-  for (unsigned int i = 0; i < 2; i++) {
+  // 5. Queuer les buffers avec nos pointeurs SPIRAM
+  for (unsigned int i = 0; i < 3; i++) {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
+    buf.memory = V4L2_MEMORY_USERPTR;
     buf.index = i;
-
-    if (ioctl(this->video_fd_, VIDIOC_QUERYBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QUERYBUF[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
-      return false;
-    }
-
-    this->v4l2_buffers_[i].length = buf.length;
-    this->v4l2_buffers_[i].start = mmap(NULL, buf.length,
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_SHARED, this->video_fd_, buf.m.offset);
-
-    if (this->v4l2_buffers_[i].start == MAP_FAILED) {
-      ESP_LOGE(TAG, "mmap[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
-      return false;
-    }
-
-    // ESP_LOGI(TAG, "✓ Buffer[%u] mapped: %u bytes @ %p",
-    //          i, buf.length, this->v4l2_buffers_[i].start);
-
-    // Utiliser la taille réelle du buffer V4L2 (au lieu de fmt.fmt.pix.sizeimage qui peut être 0)
-    if (i == 0) {
-      this->image_buffer_size_ = buf.length;
-      // ESP_LOGI(TAG, "✓ Image buffer size set to %u bytes (from V4L2 buffer)", this->image_buffer_size_);
-    }
+    buf.m.userptr = (unsigned long)this->simple_buffers_[i].data;  // ★ Notre buffer SPIRAM
+    buf.length = this->image_buffer_size_;
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] failed: %s", i, strerror(errno));
-      this->stop_streaming();
+      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] (USERPTR) failed: %s", i, strerror(errno));
+      // Libérer les buffers SPIRAM
+      for (int j = 0; j < 3; j++) {
+        heap_caps_free(this->simple_buffers_[j].data);
+        this->simple_buffers_[j].data = nullptr;
+      }
+      close(this->video_fd_);
+      this->video_fd_ = -1;
       return false;
     }
+    ESP_LOGI(TAG, "  ✓ Buffer[%u] queued: userptr=%p, length=%u",
+             i, (void*)buf.m.userptr, buf.length);
   }
 
   // 8. DÉMARRER LE STREAMING
@@ -1019,54 +1046,9 @@ bool MipiDSICamComponent::start_streaming() {
     ESP_LOGI(TAG, "✓ ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
   }
 
-  // Attendre que streaming soit stable (100ms)
-  vTaskDelay(pdMS_TO_TICKS(100));
-
-  // Créer buffer pool simple (triple buffering manuel)
-  // 3 buffers: 1 pour capture, 1 pour affichage LVGL, 1 buffer libre
-  // ★ IMPORTANT: Utiliser heap_caps_aligned_alloc() avec cache line alignment pour SPIRAM
-  // (comme l'exemple Waveshare ESP32-P4)
-  size_t cache_line_size = 0;
-  esp_err_t ret = esp_cache_get_dcache_line_size(&cache_line_size);
-  if (ret != ESP_OK || cache_line_size == 0) {
-    ESP_LOGW(TAG, "⚠️  esp_cache_get_dcache_line_size() failed, using default 64 bytes");
-    cache_line_size = 64;
-  }
-
-  ESP_LOGI(TAG, "Creating cache-aligned buffer pool:");
-  ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
-           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
-  ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
-  ESP_LOGI(TAG, "  Memory: SPIRAM (cache-aligned)");
-
-  for (int i = 0; i < 3; i++) {
-    this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
-        cache_line_size,
-        this->image_buffer_size_,
-        MALLOC_CAP_SPIRAM);
-
-    if (this->simple_buffers_[i].data == nullptr) {
-      ESP_LOGE(TAG, "❌ Failed to allocate aligned buffer %d (size: %u bytes, align: %u)",
-               i, this->image_buffer_size_, cache_line_size);
-      ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
-               heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
-               heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-      // Libérer les buffers déjà alloués
-      for (int j = 0; j < i; j++) {
-        heap_caps_free(this->simple_buffers_[j].data);
-        this->simple_buffers_[j].data = nullptr;
-      }
-      this->stop_streaming();
-      return false;
-    }
-    this->simple_buffers_[i].allocated = false;
-    this->simple_buffers_[i].index = i;
-    ESP_LOGI(TAG, "  ✓ Buffer[%d]: %p (aligned to %u bytes)",
-             i, this->simple_buffers_[i].data, cache_line_size);
-  }
-  this->current_buffer_index_ = -1;  // Aucun buffer capturé pour l'instant
-  ESP_LOGI(TAG, "✓ Simple buffer pool created: 3 buffers × %u bytes = %u KB total",
-           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
+  // Les buffers SPIRAM ont déjà été alloués et passés à V4L2 en mode USERPTR
+  // V4L2 écrit maintenant directement dans nos buffers SPIRAM - pas de memcpy nécessaire!
+  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode active - zero-copy to SPIRAM");
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
@@ -1108,12 +1090,12 @@ bool MipiDSICamComponent::capture_frame() {
   static uint32_t total_copy_us = 0;
   static uint32_t total_qbuf_us = 0;
 
-  // 1. Dequeue un buffer rempli
+  // 1. Dequeue un buffer rempli (USERPTR mode)
   uint32_t t1 = esp_timer_get_time();
   struct v4l2_buffer buf;
   memset(&buf, 0, sizeof(buf));
   buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf.memory = V4L2_MEMORY_MMAP;
+  buf.memory = V4L2_MEMORY_USERPTR;  // ★ USERPTR au lieu de MMAP
 
   if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
     if (errno == EAGAIN) {
@@ -1125,83 +1107,65 @@ bool MipiDSICamComponent::capture_frame() {
   }
   uint32_t t2 = esp_timer_get_time();
 
-  // 2. Trouver un buffer libre dans le pool simple
-  int free_buffer_idx = -1;
-  portENTER_CRITICAL(&this->buffer_mutex_);
-  for (int i = 0; i < 3; i++) {
-    if (!this->simple_buffers_[i].allocated) {
-      this->simple_buffers_[i].allocated = true;
-      free_buffer_idx = i;
-      break;
-    }
-  }
-  portEXIT_CRITICAL(&this->buffer_mutex_);
+  // 2. V4L2 a déjà écrit directement dans notre buffer SPIRAM!
+  // Pas de memcpy nécessaire - le buffer est prêt à être utilisé
+  int buffer_idx = buf.index;
+  uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-  if (free_buffer_idx == -1) {
-    // Pas de buffer libre - skip cette frame (LVGL affiche encore la précédente)
-    if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QBUF failed after skip: %s", strerror(errno));
-    }
-    return false;
-  }
-
-  // 3. Copier V4L2 buffer vers buffer pool + appliquer PPA si nécessaire
-  uint8_t *v4l2_src = (uint8_t*)this->v4l2_buffers_[buf.index].start;
-  uint8_t *pool_dst = this->simple_buffers_[free_buffer_idx].data;
-
+  // 3. Appliquer PPA si nécessaire (in-place transformation)
+  uint32_t t3 = esp_timer_get_time();
   if (this->ppa_enabled_) {
-    // Copier V4L2 → pool buffer puis appliquer PPA in-place
-    memcpy(pool_dst, v4l2_src, this->image_buffer_size_);
-    if (!this->apply_ppa_transform_(pool_dst, pool_dst)) {
+    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
       ESP_LOGE(TAG, "PPA transform failed");
       // Continuer avec l'image non-transformée
     }
-  } else {
-    // Copier directement V4L2 → pool buffer
-    memcpy(pool_dst, v4l2_src, this->image_buffer_size_);
   }
+  uint32_t t4 = esp_timer_get_time();
 
-  uint32_t t3 = esp_timer_get_time();
-
-  // 4. Libérer l'ancien buffer et mettre à jour current_buffer_index_
+  // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
   portENTER_CRITICAL(&this->buffer_mutex_);
-  if (this->current_buffer_index_ >= 0) {
+  // Marquer l'ancien buffer comme disponible pour V4L2
+  if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
     this->simple_buffers_[this->current_buffer_index_].allocated = false;
   }
-  this->current_buffer_index_ = free_buffer_idx;
-  this->image_buffer_ = pool_dst;  // Legacy API pointer
+  // Marquer le nouveau buffer comme actuellement affiché
+  this->simple_buffers_[buffer_idx].allocated = true;
+  this->current_buffer_index_ = buffer_idx;
+  this->image_buffer_ = frame_data;  // Legacy API pointer
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
   this->frame_sequence_++;
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame captured (buffer pool):");
+    ESP_LOGI(TAG, "✅ First frame captured (V4L2 USERPTR - zero-copy to SPIRAM):");
     ESP_LOGI(TAG, "   Buffer size: %u bytes (%ux%u × 2 = RGB565)",
              this->image_buffer_size_, this->image_width_, this->image_height_);
-    ESP_LOGI(TAG, "   Pool buffer address: %p (triple-buffered)", pool_dst);
-    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, Copy+PPA=%uus",
-             (uint32_t)(t2-t1), (uint32_t)(t3-t2));
+    ESP_LOGI(TAG, "   SPIRAM buffer: %p (index=%d)", frame_data, buffer_idx);
+    ESP_LOGI(TAG, "   Timing: DQBUF=%uus, PPA=%uus",
+             (uint32_t)(t2-t1), (uint32_t)(t4-t3));
     ESP_LOGI(TAG, "   First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
-             pool_dst[0], pool_dst[1],
-             pool_dst[2], pool_dst[3],
-             pool_dst[4], pool_dst[5]);
+             frame_data[0], frame_data[1],
+             frame_data[2], frame_data[3],
+             frame_data[4], frame_data[5]);
   }
 
   // Profiling détaillé toutes les 100 frames
   profile_count++;
   total_dqbuf_us += (t2 - t1);
-  total_copy_us += (t3 - t2);  // Copy + PPA transformation time
+  total_copy_us += (t4 - t3);  // PPA transformation time (no memcpy!)
 
-  // 3. Re-queue le buffer immédiatement
-  uint32_t t4 = esp_timer_get_time();
+  // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
+  uint32_t t5 = esp_timer_get_time();
+  buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
+  buf.length = this->image_buffer_size_;
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
     ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
     return false;
   }
-  uint32_t t5 = esp_timer_get_time();
+  uint32_t t6 = esp_timer_get_time();
 
-  total_qbuf_us += (t5 - t4);
+  total_qbuf_us += (t6 - t5);
 
   if (profile_count == 100) {
     // Logs de profiling commentés pour réduire verbosité
@@ -1234,7 +1198,7 @@ void MipiDSICamComponent::stop_streaming() {
 
   // ESP_LOGI(TAG, "=== STOP STREAMING ===");
 
-  // 1. Arrêter le streaming
+  // 1. Arrêter le streaming V4L2
   if (this->video_fd_ >= 0) {
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(this->video_fd_, VIDIOC_STREAMOFF, &type) < 0) {
@@ -1242,17 +1206,7 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 2. Libérer les buffers mappés
-  for (int i = 0; i < 2; i++) {
-    if (this->v4l2_buffers_[i].start != nullptr &&
-        this->v4l2_buffers_[i].start != MAP_FAILED) {
-      munmap(this->v4l2_buffers_[i].start, this->v4l2_buffers_[i].length);
-      this->v4l2_buffers_[i].start = nullptr;
-      this->v4l2_buffers_[i].length = 0;
-    }
-  }
-
-  // 3. Libérer les buffers simples du pool
+  // 2. Libérer les buffers SPIRAM (USERPTR mode - pas de munmap nécessaire)
   portENTER_CRITICAL(&this->buffer_mutex_);
   this->current_buffer_index_ = -1;
   portEXIT_CRITICAL(&this->buffer_mutex_);
