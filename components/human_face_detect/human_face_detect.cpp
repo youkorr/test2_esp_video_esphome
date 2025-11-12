@@ -64,6 +64,25 @@ bool HumanFaceDetectComponent::init_model_() {
   std::string msr_path = this->model_dir_ + "/" + this->msr_model_filename_;
   std::string mnp_path = this->model_dir_ + "/" + this->mnp_model_filename_;
 
+  // Verify model files exist (SD card must be mounted)
+  FILE *f_msr = fopen(msr_path.c_str(), "r");
+  if (f_msr == nullptr) {
+    ESP_LOGE(TAG, "❌ MSR model file not found: %s", msr_path.c_str());
+    ESP_LOGE(TAG, "   Make sure SD card is mounted and models are present");
+    return false;
+  }
+  fclose(f_msr);
+
+  FILE *f_mnp = fopen(mnp_path.c_str(), "r");
+  if (f_mnp == nullptr) {
+    ESP_LOGE(TAG, "❌ MNP model file not found: %s", mnp_path.c_str());
+    ESP_LOGE(TAG, "   Make sure SD card is mounted and models are present");
+    return false;
+  }
+  fclose(f_mnp);
+
+  ESP_LOGI(TAG, "✓ Model files found on SD card");
+
   try {
     // Create MSR+MNP detector
     auto *detector = new MSRMNPDetector(msr_path.c_str(), mnp_path.c_str());
