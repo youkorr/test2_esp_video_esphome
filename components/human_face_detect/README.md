@@ -10,10 +10,17 @@ Composant ESPHome pour la détection de visages humains sur ESP32-P4, basé sur 
 
 - ESP32-P4 (AI acceleration)
 - esp-idf framework
-- esp-dl library (Espressif Deep Learning)
-- Modèles de détection :
-  - MSR (Multi-Scale Region) : entrée 120x160 RGB
-  - MNP (Multi-Neck Post-processing) : entrée 48x48 RGB
+- esp-dl library v3.1.0+ (automatiquement téléchargé via idf_component.yml)
+- Modèles de détection (à télécharger séparément) :
+  - MSR (Multi-Scale Region) : entrée 120x160 RGB (~500 KB)
+  - MNP (Multi-Neck Post-processing) : entrée 48x48 RGB (~50 KB)
+
+**Installation des modèles** :
+```bash
+cd components/human_face_detect/models/p4/
+wget https://raw.githubusercontent.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/main/examples/ESP-IDF/11_esp_brookesia_phone/components/human_face_detect/models/p4/human_face_detect_msr_s8_v1.espdl
+wget https://raw.githubusercontent.com/waveshareteam/ESP32-P4-WIFI6-Touch-LCD-7B/main/examples/ESP-IDF/11_esp_brookesia_phone/components/human_face_detect/models/p4/human_face_detect_mnp_s8_v1.espdl
+```
 
 ## 🎯 Fonctionnalités Prévues
 
