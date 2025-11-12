@@ -508,15 +508,21 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (from testov5647: X start 500, Y start 0, size 2124x1954)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
+    // Crop window (CENTERED: 800x640 from 2592x1944 sensor)
+    // Native area: 2592x1944
+    // With 4x binning: need 3200x2560 input → crop to 2560x2048 centered
+    // X start: (2592 - 2560) / 2 = 16
+    {0x3800, (16 >> 8) & 0x0F},   // X address start high (centered)
+    {0x3801, 16 & 0xFF},          // X address start low
+    // Y start: (1944 - 2048) → use full height
     {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
-    {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1954 - 1) & 0xFF},         // Y address end low
+    // X end: 16 + 2560 - 1 = 2575
+    {0x3804, ((2575) >> 8) & 0x0F},  // X address end high
+    {0x3805, (2575) & 0xFF},         // X address end low
+    // Y end: 1943 (full height)
+    {0x3806, ((1943) >> 8) & 0x07},  // Y address end high
+    {0x3807, (1943) & 0xFF},         // Y address end low
 
     // Output size: 800x640
     {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
@@ -524,10 +530,11 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x380a, (640 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 640 & 0xFF},         // Output vertical height low
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
+    // Timing offset (center the image properly)
+    // After 4x binning: 2560/4=640 pixels (exact), 2048/4=512 lines, want 640
+    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high (centered)
     {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
