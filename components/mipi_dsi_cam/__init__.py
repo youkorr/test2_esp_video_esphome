@@ -138,6 +138,19 @@ async def to_code(config):
     # Configuration du pattern Bayer
     cg.add(var.set_bayer_pattern(config[CONF_BAYER_PATTERN]))
 
+    # Build flags pour ESP32-P4 avec ESP-IDF 5.x
+    cg.add_build_flag("-DBOARD_HAS_PSRAM")
+    cg.add_build_flag("-DUSE_ESP32_VARIANT_ESP32P4")
+    cg.add_build_flag("-DCONFIG_CAMERA_CORE0=1")
+
+    # Build flags spécifiques au sensor OV5647
+    if config[CONF_SENSOR_TYPE].lower() == "ov5647":
+        cg.add_build_flag("-DCONFIG_CAMERA_OV5647=1")
+        cg.add_build_flag("-DCONFIG_CAMERA_OV5647_ANA_GAIN_PRIORITY=1")
+        cg.add_build_flag("-DCONFIG_CAMERA_OV5647_ABSOLUTE_GAIN_LIMIT=63008")
+        cg.add_build_flag("-DCONFIG_CAMERA_OV5647_MAX_SUPPORT=1")
+        cg.add_build_flag("-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DAFAULT=0")
+
 # Action pour capturer un snapshot
 @automation.register_action(
     "mipi_dsi_cam.capture_snapshot",
