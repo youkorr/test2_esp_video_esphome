@@ -1,5 +1,6 @@
 #include "camera_web_server.h"
 #include "esphome/core/log.h"
+#include "../human_face_detect/human_face_detect.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_timer.h>
@@ -206,6 +207,9 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
+  // Draw face detection boxes on RGB565 buffer before JPEG encoding
+  server->draw_face_boxes_rgb565_(image_data, server->camera_->get_image_width(), server->camera_->get_image_height());
+
   // Encoder RGB565 → JPEG avec hardware encoder ESP32-P4
   jpeg_encode_cfg_t encode_config = {};
   encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
@@ -284,6 +288,9 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
              server->camera_->get_image_height(),
              image_size);
 
+    // Draw face detection boxes on RGB565 buffer before JPEG encoding
+    server->draw_face_boxes_rgb565_(image_data, server->camera_->get_image_width(), server->camera_->get_image_height());
+
     // Encoder RGB565 → JPEG
     jpeg_encode_cfg_t encode_config = {};
     encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
@@ -354,6 +361,72 @@ esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
            server->camera_->get_image_height());
 
   return httpd_resp_send(req, json, strlen(json));
+}
+
+// Draw face detection boxes directly on RGB565 buffer
+void CameraWebServer::draw_face_boxes_rgb565_(uint8_t *rgb_data, uint16_t width, uint16_t height) {
+  // Check if face detector is configured and enabled
+  if (this->face_detector_ == nullptr || !this->face_detector_->is_detection_enabled()) {
+    return;
+  }
+
+  // Get number of detected faces
+  int face_count = this->face_detector_->get_face_count();
+  if (face_count <= 0) {
+    return;
+  }
+
+  // RGB565 little-endian: Green = 0x07E0 (0b0000011111100000)
+  const uint16_t color_green = 0x07E0;
+  const int border_width = 3;
+
+  uint16_t *rgb565_buffer = reinterpret_cast<uint16_t *>(rgb_data);
+
+  for (int i = 0; i < face_count; i++) {
+    int x, y, w, h;
+    float confidence;
+
+    if (this->face_detector_->get_face_box(i, x, y, w, h, confidence)) {
+      // Ensure bounds are within image
+      if (x < 0) x = 0;
+      if (y < 0) y = 0;
+      if (x + w > width) w = width - x;
+      if (y + h > height) h = height - y;
+
+      // Draw rectangle with specified border width
+      for (int bw = 0; bw < border_width; bw++) {
+        // Top horizontal line
+        if (y + bw < height) {
+          for (int px = x; px < x + w && px < width; px++) {
+            rgb565_buffer[(y + bw) * width + px] = color_green;
+          }
+        }
+
+        // Bottom horizontal line
+        if (y + h - 1 - bw >= 0 && y + h - 1 - bw < height) {
+          for (int px = x; px < x + w && px < width; px++) {
+            rgb565_buffer[(y + h - 1 - bw) * width + px] = color_green;
+          }
+        }
+
+        // Left vertical line
+        if (x + bw < width) {
+          for (int py = y; py < y + h && py < height; py++) {
+            rgb565_buffer[py * width + (x + bw)] = color_green;
+          }
+        }
+
+        // Right vertical line
+        if (x + w - 1 - bw >= 0 && x + w - 1 - bw < width) {
+          for (int py = y; py < y + h && py < height; py++) {
+            rgb565_buffer[py * width + (x + w - 1 - bw)] = color_green;
+          }
+        }
+      }
+
+      ESP_LOGV(TAG, "Drew face box %d: x=%d y=%d w=%d h=%d conf=%.2f", i, x, y, w, h, confidence);
+    }
+  }
 }
 
 #else  // !USE_ESP_IDF

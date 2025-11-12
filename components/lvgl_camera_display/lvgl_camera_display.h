@@ -5,6 +5,12 @@
 #include "../mipi_dsi_cam/mipi_dsi_cam.h"
 
 namespace esphome {
+
+// Forward declaration
+namespace human_face_detect {
+class HumanFaceDetectComponent;
+}
+
 namespace lvgl_camera_display {
 
 class LVGLCameraDisplay : public Component {
@@ -16,6 +22,7 @@ class LVGLCameraDisplay : public Component {
   void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
+  void set_face_detector(human_face_detect::HumanFaceDetectComponent *detector) { this->face_detector_ = detector; }
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -26,6 +33,7 @@ class LVGLCameraDisplay : public Component {
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  human_face_detect::HumanFaceDetectComponent *face_detector_{nullptr};
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
 
@@ -45,6 +53,7 @@ class LVGLCameraDisplay : public Component {
 
   void update_camera_frame_();
   void update_canvas_();
+  void draw_face_boxes_();
 };
 
 }  // namespace lvgl_camera_display
