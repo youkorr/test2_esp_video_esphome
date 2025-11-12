@@ -100,3 +100,10 @@ async def to_code(config):
     # Note importante pour l'utilisateur
     if config[CONF_ENABLE_DETECTION]:
         cg.add_library("esp-dl", None)  # Ajouter dépendance esp-dl
+
+        # Add ESP-DL include paths for managed components
+        # These paths are where ESP-IDF Component Manager installs esp-dl
+        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include")
+        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/layer")
+        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/model")
+        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/detect")

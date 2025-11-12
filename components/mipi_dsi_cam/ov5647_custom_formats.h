@@ -502,27 +502,27 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x380e, (984 >> 8) & 0xFF},
     {0x380f, 984 & 0xFF},
 
-    // Binning configuration
-    {0x3814, 0x31},  // Horizontal subsample
-    {0x3815, 0x31},  // Vertical subsample
+    // Binning configuration (2x2 for 800x640 - changed from 4x4)
+    {0x3814, 0x11},  // Horizontal subsample (2x binning instead of 4x)
+    {0x3815, 0x11},  // Vertical subsample (2x binning instead of 4x)
     {0x3708, 0x64},
     {0x3709, 0x52},
 
     // Crop window (CENTERED: 800x640 from 2592x1944 sensor)
     // Native area: 2592x1944
-    // With 4x binning: need 3200x2560 input → crop to 2560x2048 centered
-    // X start: (2592 - 2560) / 2 = 16
-    {0x3800, (16 >> 8) & 0x0F},   // X address start high (centered)
-    {0x3801, 16 & 0xFF},          // X address start low
-    // Y start: (1944 - 2048) → use full height
-    {0x3802, (0 >> 8) & 0x07},     // Y address start high
-    {0x3803, 0 & 0xFF},            // Y address start low
-    // X end: 16 + 2560 - 1 = 2575
-    {0x3804, ((2575) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2575) & 0xFF},         // X address end low
-    // Y end: 1943 (full height)
-    {0x3806, ((1943) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1943) & 0xFF},         // Y address end low
+    // With 2x binning: need 1600x1280 input
+    // X: (2592 - 1600) / 2 = 496 pixels from left to center
+    {0x3800, (496 >> 8) & 0x0F},   // X address start high (centered)
+    {0x3801, 496 & 0xFF},          // X address start low
+    // Y: (1944 - 1280) / 2 = 332 pixels from top to center
+    {0x3802, (332 >> 8) & 0x07},     // Y address start high
+    {0x3803, 332 & 0xFF},            // Y address start low
+    // X end: 496 + 1600 - 1 = 2095
+    {0x3804, ((2095) >> 8) & 0x0F},  // X address end high
+    {0x3805, (2095) & 0xFF},         // X address end low
+    // Y end: 332 + 1280 - 1 = 1611
+    {0x3806, ((1611) >> 8) & 0x07},  // Y address end high
+    {0x3807, (1611) & 0xFF},         // Y address end low
 
     // Output size: 800x640
     {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
@@ -531,12 +531,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x380b, 640 & 0xFF},         // Output vertical height low
 
     // Timing offset (center the image properly)
-    // After 4x binning: 2560/4=640 pixels (exact), 2048/4=512 lines, want 640
-    // Using offset 4,4 like VGA to center the image (fixes right-side shift)
-    {0x3810, (4 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
-    {0x3811, 4 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (4 >> 8) & 0x07},   // Timing vertical offset high (centered)
-    {0x3813, 4 & 0xFF},          // Timing vertical offset low
+    // After 2x binning: 1600/2=800 pixels (exact), 1280/2=640 lines (exact)
+    // No offset needed since math is exact
+    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high
+    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
+    {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
