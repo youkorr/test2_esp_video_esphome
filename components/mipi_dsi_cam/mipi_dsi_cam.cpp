@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
+#include "esp_cache.h"  // Pour esp_cache_get_dcache_line_size()
 
 #include <string.h>
 #include <vector>
@@ -1023,13 +1024,30 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Créer buffer pool simple (triple buffering manuel)
   // 3 buffers: 1 pour capture, 1 pour affichage LVGL, 1 buffer libre
-  ESP_LOGI(TAG, "Creating simple buffer pool: 3 × %u bytes = %u KB total",
+  // ★ IMPORTANT: Utiliser heap_caps_aligned_alloc() avec cache line alignment pour SPIRAM
+  // (comme l'exemple Waveshare ESP32-P4)
+  size_t cache_line_size = 0;
+  esp_err_t ret = esp_cache_get_dcache_line_size(&cache_line_size);
+  if (ret != ESP_OK || cache_line_size == 0) {
+    ESP_LOGW(TAG, "⚠️  esp_cache_get_dcache_line_size() failed, using default 64 bytes");
+    cache_line_size = 64;
+  }
+
+  ESP_LOGI(TAG, "Creating cache-aligned buffer pool:");
+  ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
            this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
+  ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
+  ESP_LOGI(TAG, "  Memory: SPIRAM (cache-aligned)");
 
   for (int i = 0; i < 3; i++) {
-    this->simple_buffers_[i].data = (uint8_t*)heap_caps_malloc(this->image_buffer_size_, MALLOC_CAP_8BIT);
+    this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
+        cache_line_size,
+        this->image_buffer_size_,
+        MALLOC_CAP_SPIRAM);
+
     if (this->simple_buffers_[i].data == nullptr) {
-      ESP_LOGE(TAG, "❌ Failed to allocate buffer %d (size: %u bytes)", i, this->image_buffer_size_);
+      ESP_LOGE(TAG, "❌ Failed to allocate aligned buffer %d (size: %u bytes, align: %u)",
+               i, this->image_buffer_size_, cache_line_size);
       ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
                heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
@@ -1043,7 +1061,8 @@ bool MipiDSICamComponent::start_streaming() {
     }
     this->simple_buffers_[i].allocated = false;
     this->simple_buffers_[i].index = i;
-    ESP_LOGD(TAG, "  Buffer[%d] allocated @ %p", i, this->simple_buffers_[i].data);
+    ESP_LOGI(TAG, "  ✓ Buffer[%d]: %p (aligned to %u bytes)",
+             i, this->simple_buffers_[i].data, cache_line_size);
   }
   this->current_buffer_index_ = -1;  // Aucun buffer capturé pour l'instant
   ESP_LOGI(TAG, "✓ Simple buffer pool created: 3 buffers × %u bytes = %u KB total",
