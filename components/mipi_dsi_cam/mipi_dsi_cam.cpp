@@ -722,11 +722,12 @@ bool MipiDSICamComponent::start_streaming() {
   if (this->sensor_name_ == "ov5647") {
     // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
     // Copier la structure format ET la structure ISP info pour pouvoir modifier le Bayer pattern
+    // Note: Utiliser memcpy car la structure a des membres const (pas d'opérateur= disponible)
     static esp_cam_sensor_isp_info_t custom_isp_info;
     static esp_cam_sensor_format_t custom_format_copy;
 
-    custom_format_copy = ov5647_format_800x640_raw8_50fps;
-    custom_isp_info = ov5647_800x640_isp_info;
+    memcpy(&custom_format_copy, &ov5647_format_800x640_raw8_50fps, sizeof(esp_cam_sensor_format_t));
+    memcpy(&custom_isp_info, &ov5647_800x640_isp_info, sizeof(esp_cam_sensor_isp_info_t));
 
     // ★ Appliquer le Bayer pattern configuré via YAML
     if (this->bayer_pattern_ == "RGGB") {
