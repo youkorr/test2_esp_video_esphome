@@ -532,10 +532,11 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
 
     // Timing offset (center the image properly)
     // After 4x binning: 2560/4=640 pixels (exact), 2048/4=512 lines, want 640
-    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
-    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high (centered)
-    {0x3813, 0 & 0xFF},          // Timing vertical offset low
+    // Using offset 4,4 like VGA to center the image (fixes right-side shift)
+    {0x3810, (4 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 4 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (4 >> 8) & 0x07},   // Timing vertical offset high (centered)
+    {0x3813, 4 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
