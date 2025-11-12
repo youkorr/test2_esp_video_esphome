@@ -63,7 +63,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
     {0x303c, 0x11},  // PLLS control
     {0x3106, 0xf5},
-    {0x3821, 0x01},  // Horizontal binning
+    {0x3821, 0x03},  // Horizontal binning + mirror (fix: sensor appears right-shifted)
     {0x3820, 0x41},  // Vertical binning
     {0x3827, 0xec},
     {0x370c, 0x0f},
@@ -265,7 +265,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x3036, ((OV5647_IDI_CLOCK_RATE_1024x600_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
     {0x303c, 0x11},
     {0x3106, 0xf5},
-    {0x3821, 0x01},  // Horizontal binning (2x)
+    {0x3821, 0x03},  // Horizontal binning (2x) + mirror (fix: sensor appears right-shifted)
     {0x3820, 0x41},  // Vertical binning (2x)
     {0x3827, 0xec},
     {0x370c, 0x0f},
