@@ -1028,7 +1028,7 @@ bool MipiDSICamComponent::start_streaming() {
   pool_info.count = 3;  // Triple buffering
   pool_info.size = this->image_buffer_size_;
   pool_info.align_size = 64;  // Cache-aligned
-  pool_info.caps = MALLOC_CAP_SPIRAM;  // SPIRAM pour éviter saturation RAM interne
+  pool_info.caps = MALLOC_CAP_8BIT;  // Generic 8-bit accessible memory (internal or SPIRAM with cache)
   pool_info.memory_type = V4L2_MEMORY_USERPTR;  // User-allocated buffers
 
   ESP_LOGI(TAG, "Creating buffer pool: 3 × %u bytes = %u KB total",
