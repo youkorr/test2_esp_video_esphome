@@ -2,6 +2,12 @@
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
 #include "human_face_detect_espdl.h"  // Includes ESP-DL conditionally via __has_include
 
+#ifdef USE_ESP_IDF
+#include "esp_spiffs.h"
+#include "esp_vfs.h"
+#include <sys/stat.h>
+#endif
+
 namespace esphome {
 namespace human_face_detect {
 
@@ -18,6 +24,14 @@ void HumanFaceDetectComponent::setup() {
 
   if (!this->enable_detection_) {
     ESP_LOGI(TAG, "Face detection disabled (enable_detection: false)");
+    return;
+  }
+
+  // Mount SPIFFS to access embedded model files
+  if (!this->mount_spiffs_()) {
+    ESP_LOGW(TAG, "Failed to mount SPIFFS - face detection unavailable");
+    ESP_LOGW(TAG, "Models should be embedded in SPIFFS partition or placed on SD card");
+    this->initialized_ = false;
     return;
   }
 
@@ -103,6 +117,56 @@ bool HumanFaceDetectComponent::init_model_() {
   ESP_LOGW(TAG, "     - %s", this->msr_model_filename_.c_str());
   ESP_LOGW(TAG, "     - %s", this->mnp_model_filename_.c_str());
   ESP_LOGW(TAG, "  3. ESP32-P4 target with sufficient PSRAM");
+  return false;
+#endif
+}
+
+bool HumanFaceDetectComponent::mount_spiffs_() {
+#ifdef USE_ESP_IDF
+  // Check if SPIFFS is already mounted
+  struct stat st;
+  if (stat("/spiffs", &st) == 0) {
+    ESP_LOGI(TAG, "SPIFFS already mounted at /spiffs");
+    return true;
+  }
+
+  ESP_LOGI(TAG, "Mounting SPIFFS partition for embedded models...");
+
+  esp_vfs_spiffs_conf_t conf = {
+      .base_path = "/spiffs",
+      .partition_label = "spiffs",  // Must match partition table
+      .max_files = 5,
+      .format_if_mount_failed = false  // Don't format - we need pre-populated data
+  };
+
+  esp_err_t ret = esp_vfs_spiffs_register(&conf);
+  if (ret != ESP_OK) {
+    if (ret == ESP_FAIL) {
+      ESP_LOGE(TAG, "Failed to mount SPIFFS partition");
+      ESP_LOGE(TAG, "Make sure 'spiffs' partition exists in partitions.csv");
+    } else if (ret == ESP_ERR_NOT_FOUND) {
+      ESP_LOGE(TAG, "SPIFFS partition not found in partition table");
+      ESP_LOGE(TAG, "Add 'spiffs' partition to partitions.csv or use SD card");
+    } else {
+      ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+    }
+    return false;
+  }
+
+  // Check SPIFFS status
+  size_t total = 0, used = 0;
+  ret = esp_spiffs_info(conf.partition_label, &total, &used);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to get SPIFFS partition info (%s)", esp_err_to_name(ret));
+    esp_vfs_spiffs_unregister(conf.partition_label);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✅ SPIFFS mounted successfully");
+  ESP_LOGI(TAG, "   Partition size: %d KB, Used: %d KB", total / 1024, used / 1024);
+  return true;
+#else
+  ESP_LOGE(TAG, "SPIFFS requires ESP-IDF framework");
   return false;
 #endif
 }

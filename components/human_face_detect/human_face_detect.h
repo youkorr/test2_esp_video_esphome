@@ -84,11 +84,12 @@ class HumanFaceDetectComponent : public Component {
   std::vector<FaceBox> detected_faces_;
 
   // Model paths configuration
-  std::string model_dir_{"/sdcard"};
+  std::string model_dir_{"/spiffs"};  // Changed from /sdcard to /spiffs (embedded models)
   std::string msr_model_filename_{"human_face_detect_msr_s8_v1.espdl"};
   std::string mnp_model_filename_{"human_face_detect_mnp_s8_v1.espdl"};
 
   bool init_model_();
+  bool mount_spiffs_();  // Mount SPIFFS partition for embedded models
   void cleanup_model_();
 };
 
