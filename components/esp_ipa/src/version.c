@@ -60,22 +60,22 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    /* Configuration IPA stable - 5 algorithmes disponibles */
+    /* Configuration IPA stable - 4 algorithmes (CCM disabled for OV5647 red tint fix) */
     static const char *ipa_names[] = {
         "awb.gray",                /* Auto White Balance */
         "denoising.gain_feedback", /* Réduction bruit */
         "sharpen.freq_feedback",   /* Netteté */
         "gamma.lumma_feedback",    /* Correction gamma */
-        "cc.linear",               /* Color Correction Matrix */
+        // "cc.linear" DISABLED: CCM causes red tint on OV5647 (amplifies red 2.0x)
     };
 
     static const esp_ipa_config_t ipa_config = {
-        .ipa_nums = 5,     /* 5 IPAs disponibles (pas d'AEC/AGC dans cette version) */
+        .ipa_nums = 4,     /* 4 IPAs (CCM disabled to fix red tint on OV5647) */
         .ipa_names = ipa_names,
     };
 
     if (cam_name) {
-        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CC (5 algos, no AEC)", cam_name);
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
         return &ipa_config;
     }
 
