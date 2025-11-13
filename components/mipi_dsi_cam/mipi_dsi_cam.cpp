@@ -245,26 +245,25 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   ppa_srm_oper_config_t srm_config = {};
 
-  // Calculate crop dimensions and scale factor
+  // Calculate cropped dimensions
   int crop_width = this->image_width_ - this->crop_offset_x_;
   int crop_height = this->image_height_;
-  float scale_x = (crop_width > 0) ? (float)this->image_width_ / crop_width : 1.0f;
 
   // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = this->image_width_;
   srm_config.in.pic_h = this->image_height_;
-  srm_config.in.block_w = crop_width;  // Width to extract
+  srm_config.in.block_w = crop_width;  // Width to extract (skip crop_offset_x from left)
   srm_config.in.block_h = crop_height;
   srm_config.in.block_offset_x = this->crop_offset_x_;  // Skip pixels from left
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output configuration (upscale back to original size)
+  // Output configuration (keep cropped size, NO upscaling)
   srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = this->image_buffer_size_;
-  srm_config.out.pic_w = this->image_width_;  // Keep original width (upscale)
-  srm_config.out.pic_h = this->image_height_;
+  srm_config.out.buffer_size = crop_width * crop_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = crop_width;  // Output cropped width (no upscale)
+  srm_config.out.pic_h = crop_height;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -279,17 +278,12 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = scale_x;  // Scale to compensate crop
+  srm_config.scale_x = 1.0f;  // No scale (keep original aspect)
   srm_config.scale_y = 1.0f;  // No vertical scale
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
-
-  // CRITICAL: Enable byte_swap for LVGL little-endian to fix green tint
-  // RGB565 ISP output is big-endian, but LVGL expects little-endian
-  // Without byte_swap: SC202CS shows green tint, OV5647 shows incorrect colors
-  srm_config.byte_swap = true;  // true = swap bytes for LVGL little-endian
-
+  srm_config.byte_swap = false;  // false = no byte swap (green tint is from lighting)
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
   // Exécuter transformation hardware (M5Stack API: 2 parameters)
