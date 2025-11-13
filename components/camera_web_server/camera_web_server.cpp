@@ -1,6 +1,6 @@
 #include "camera_web_server.h"
 #include "esphome/core/log.h"
-#include "../human_face_detect/human_face_detect.h"
+#include "human_face_detect.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_timer.h>

@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
+import os
 
 DEPENDENCIES = ["lvgl", "mipi_dsi_cam"]
 AUTO_LOAD = ["mipi_dsi_cam"]
@@ -32,6 +33,11 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
+
+    # Add include path for human_face_detect component
+    component_dir = os.path.dirname(__file__)
+    human_face_detect_dir = os.path.join(component_dir, "..", "human_face_detect")
+    cg.add_build_flag(f"-I{human_face_detect_dir}")
 
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))

@@ -1,7 +1,7 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include "../human_face_detect/human_face_detect.h"
+#include "human_face_detect.h"
 
 namespace esphome {
 namespace lvgl_camera_display {
