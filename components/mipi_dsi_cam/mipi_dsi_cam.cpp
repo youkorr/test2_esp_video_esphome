@@ -215,32 +215,27 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // ★ PPA COMPLÈTEMENT DÉSACTIVÉ pour test qualité image
-  // Le PPA peut dégrader la qualité avec ses transformations
-  ESP_LOGI(TAG, "🧪 TEST: PPA disabled (testing image quality without transformations)");
-  this->ppa_enabled_ = false;
-  return true;
+  // Enable PPA if crop offset, mirror, or rotation is configured
+  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 && this->crop_offset_x_ == 0) {
+    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop configured)");
+    this->ppa_enabled_ = false;
+    return true;
+  }
 
-  // Code PPA original désactivé pour test
-  // if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
-  //   ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
-  //   return true;
-  // }
-  //
-  // ppa_client_config_t ppa_config = {};
-  // ppa_config.oper_type = PPA_OPERATION_SRM;
-  // ppa_config.max_pending_trans_num = 16;
-  //
-  // esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
-  // if (ret != ESP_OK) {
-  //   ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
-  //   return false;
-  // }
-  //
-  // this->ppa_enabled_ = true;
-  // ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
-  //          this->mirror_x_, this->mirror_y_, this->rotation_);
-  // return true;
+  ppa_client_config_t ppa_config = {};
+  ppa_config.oper_type = PPA_OPERATION_SRM;
+  ppa_config.max_pending_trans_num = 16;
+
+  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  this->ppa_enabled_ = true;
+  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
+           this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+  return true;
 }
 
 bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
@@ -250,21 +245,25 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   ppa_srm_oper_config_t srm_config = {};
 
-  // Input configuration
+  // Calculate cropped dimensions
+  int crop_width = this->image_width_ - this->crop_offset_x_;
+  int crop_height = this->image_height_;
+
+  // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = this->image_width_;
   srm_config.in.pic_h = this->image_height_;
-  srm_config.in.block_w = this->image_width_;
-  srm_config.in.block_h = this->image_height_;
-  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_w = crop_width;  // Width to extract (skip crop_offset_x from left)
+  srm_config.in.block_h = crop_height;
+  srm_config.in.block_offset_x = this->crop_offset_x_;  // Skip pixels from left
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output configuration
+  // Output configuration (keep cropped size, NO upscaling)
   srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = this->image_buffer_size_;
-  srm_config.out.pic_w = this->image_width_;  // Pas de scale
-  srm_config.out.pic_h = this->image_height_;
+  srm_config.out.buffer_size = crop_width * crop_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = crop_width;  // Output cropped width (no upscale)
+  srm_config.out.pic_h = crop_height;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -279,12 +278,12 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = 1.0f;  // Pas de scale
-  srm_config.scale_y = 1.0f;
+  srm_config.scale_x = 1.0f;  // No scale (keep original aspect)
+  srm_config.scale_y = 1.0f;  // No vertical scale
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
-  srm_config.byte_swap = false;
+  srm_config.byte_swap = false;  // false = no byte swap (green tint is from lighting)
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
   // Exécuter transformation hardware (M5Stack API: 2 parameters)
@@ -716,24 +715,32 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (OV5647)
-  // ★ TEST: Force 800x640 testov5647 registers for ALL resolutions
+  // Custom Format Support (OV5647) - All resolutions supported
   // ============================================================================
   if (this->sensor_name_ == "ov5647") {
-    // TOUJOURS utiliser les registres 800x640 de testov5647 pour tester
-    // Le pattern Bayer est BGGR (défini par le hardware du sensor, non modifiable)
-    const esp_cam_sensor_format_t *custom_format = &ov5647_format_800x640_raw8_50fps;
+    const esp_cam_sensor_format_t *custom_format = nullptr;
 
-    ESP_LOGI(TAG, "🧪 TEST MODE: Forcing testov5647 800x640 registers (requested: %ux%u)", width, height);
-    ESP_LOGI(TAG, "   Sensor configuration: testov5647 working config");
-    ESP_LOGI(TAG, "   Bayer pattern: BGGR (OV5647 hardware)");
+    // Sélectionner le format selon la résolution demandée
+    if (width == 640 && height == 480) {
+      custom_format = &ov5647_format_640x480_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+    } else if (width == 800 && height == 640) {
+      custom_format = &ov5647_format_800x640_raw8_50fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
+    } else if (width == 1024 && height == 600) {
+      custom_format = &ov5647_format_1024x600_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
+    }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-      ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-      ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-    } else {
-      ESP_LOGI(TAG, "✅ testov5647 800x640 registers applied successfully!");
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
+      }
     }
   }
   // ============================================================================
@@ -1062,13 +1069,18 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
-  // IMPORTANT: Toujours activer AWB au démarrage pour éviter problème blanc→jaune
-  if (this->set_white_balance_mode(true)) {
-    ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+  // IMPORTANT: AWB ne fonctionne PAS sur SC202CS (Invalid argument)
+  // SC202CS gère automatiquement la balance des blancs via ses propres registres
+  if (this->sensor_name_ != "sc202cs") {
+    if (this->set_white_balance_mode(true)) {
+      ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+    } else {
+      ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
+      // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
+      this->set_white_balance_temp(5500);
+    }
   } else {
-    ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
-    // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
-    this->set_white_balance_temp(5500);
+    ESP_LOGI(TAG, "✓ SC202CS: Using sensor built-in AWB (V4L2 AWB not supported)");
   }
 
   // NOTE: Brightness/Contrast/Saturation auto-application désactivée
@@ -1113,14 +1125,13 @@ bool MipiDSICamComponent::capture_frame() {
   int buffer_idx = buf.index;
   uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-  // 3. ★ PPA DÉSACTIVÉ pour test qualité image
-  // Le PPA (mirror/rotate) peut dégrader la qualité, test sans PPA
+  // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
-  // if (this->ppa_enabled_) {
-  //   if (!this->apply_ppa_transform_(frame_data, frame_data)) {
-  //     ESP_LOGE(TAG, "PPA transform failed");
-  //   }
-  // }
+  if (this->ppa_enabled_) {
+    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
+      ESP_LOGE(TAG, "PPA transform failed");
+    }
+  }
   uint32_t t4 = esp_timer_get_time();
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
@@ -1875,6 +1886,46 @@ uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
     return 0;
   }
   return element->index;
+}
+
+/**
+ * @brief Get current RGB565 frame for face detection or image processing
+ *
+ * Convenience method that combines acquire_buffer() with data/dimensions extraction.
+ * IMPORTANT: Caller MUST call release_buffer(buffer_out) when done processing!
+ *
+ * @param[out] buffer_out Pointer to acquired buffer element (must be released)
+ * @param[out] data Pointer to RGB565 data
+ * @param[out] width Frame width in pixels
+ * @param[out] height Frame height in pixels
+ * @return true if frame available, false if not streaming or no buffer available
+ */
+bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out, uint8_t **data, int *width,
+                                                 int *height) {
+  if (buffer_out == nullptr || data == nullptr || width == nullptr || height == nullptr) {
+    ESP_LOGE(TAG, "get_current_rgb_frame: nullptr parameter");
+    return false;
+  }
+
+  if (!this->streaming_active_) {
+    ESP_LOGW(TAG, "get_current_rgb_frame: not streaming");
+    return false;
+  }
+
+  // Acquire current buffer
+  SimpleBufferElement *buffer = this->acquire_buffer();
+  if (buffer == nullptr) {
+    ESP_LOGW(TAG, "get_current_rgb_frame: no buffer available");
+    return false;
+  }
+
+  // Extract data and dimensions
+  *buffer_out = buffer;
+  *data = buffer->data;
+  *width = static_cast<int>(this->image_width_);
+  *height = static_cast<int>(this->image_height_);
+
+  return true;
 }
 
 }  // namespace mipi_dsi_cam

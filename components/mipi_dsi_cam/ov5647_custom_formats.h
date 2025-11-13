@@ -126,11 +126,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x380a, (480 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 480 & 0xFF},         // Output vertical height low
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (2 >> 8) & 0x07},   // Timing vertical offset high
-    {0x3813, 2 & 0xFF},          // Timing vertical offset low
+    // Timing offset (center the image properly)
+    // After 4x binning: 2592/4=648 pixels, want 640 → offset (648-640)/2 = 4
+    {0x3810, (4 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 4 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (3 >> 8) & 0x07},   // Timing vertical offset high (centered)
+    {0x3813, 3 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
@@ -224,7 +225,7 @@ static const esp_cam_sensor_isp_info_t ov5647_640x480_isp_info = {
         .vts = 1080,          // Vertical Total Size
         .exp_def = 0x300,     // 768 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
@@ -328,11 +329,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x380a, (600 >> 8) & 0x7F},
     {0x380b, 600 & 0xFF},
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},
-    {0x3811, 8 & 0xFF},
-    {0x3812, (4 >> 8) & 0x07},
-    {0x3813, 4 & 0xFF},
+    // Timing offset (center the image properly)
+    // After 2x binning: 2048/2=1024 pixels (already correct)
+    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
+    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high (centered)
+    {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
@@ -426,7 +428,7 @@ static const esp_cam_sensor_isp_info_t ov5647_1024x600_isp_info = {
         .vts = 1300,          // Vertical Total Size
         .exp_def = 0x500,     // 1280 - restored to original value, let AEC handle it
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
@@ -582,7 +584,7 @@ static const esp_cam_sensor_isp_info_t ov5647_800x640_isp_info = {
         .vts = 984,           // Vertical Total Size (from testov5647)
         .exp_def = 0x300,     // 768 - let AEC handle exposure
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // BGGR pattern
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally with 0x3821=0x03)
     }
 };
 
