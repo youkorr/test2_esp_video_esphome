@@ -370,6 +370,7 @@ esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
 
 // Draw face detection boxes directly on RGB565 buffer
 void CameraWebServer::draw_face_boxes_rgb565_(uint8_t *rgb_data, uint16_t width, uint16_t height) {
+#ifdef HAS_HUMAN_FACE_DETECT
   // Check if face detector is configured and enabled
   if (this->face_detector_ == nullptr || !this->face_detector_->is_detection_enabled()) {
     return;
@@ -432,6 +433,7 @@ void CameraWebServer::draw_face_boxes_rgb565_(uint8_t *rgb_data, uint16_t width,
       ESP_LOGV(TAG, "Drew face box %d: x=%d y=%d w=%d h=%d conf=%.2f", i, x, y, w, h, confidence);
     }
   }
+#endif  // HAS_HUMAN_FACE_DETECT
 }
 
 #else  // !USE_ESP_IDF

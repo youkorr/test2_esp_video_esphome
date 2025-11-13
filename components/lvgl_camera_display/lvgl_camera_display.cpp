@@ -186,6 +186,7 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 }
 
 void LVGLCameraDisplay::draw_face_boxes_() {
+#ifdef HAS_HUMAN_FACE_DETECT
   // Check if face detector is configured and enabled
   if (this->face_detector_ == nullptr || !this->face_detector_->is_detection_enabled()) {
     return;
@@ -232,6 +233,7 @@ void LVGLCameraDisplay::draw_face_boxes_() {
       ESP_LOGV(TAG, "Face %d: x=%d y=%d w=%d h=%d conf=%.2f", i, x, y, w, h, confidence);
     }
   }
+#endif  // HAS_HUMAN_FACE_DETECT
 }
 
 }  // namespace lvgl_camera_display
