@@ -215,32 +215,27 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // ★ PPA COMPLÈTEMENT DÉSACTIVÉ pour test qualité image
-  // Le PPA peut dégrader la qualité avec ses transformations
-  ESP_LOGI(TAG, "🧪 TEST: PPA disabled (testing image quality without transformations)");
-  this->ppa_enabled_ = false;
-  return true;
+  // Enable PPA if crop offset, mirror, or rotation is configured
+  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 && this->crop_offset_x_ == 0) {
+    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop configured)");
+    this->ppa_enabled_ = false;
+    return true;
+  }
 
-  // Code PPA original désactivé pour test
-  // if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0) {
-  //   ESP_LOGI(TAG, "PPA not needed (no mirror/rotate configured)");
-  //   return true;
-  // }
-  //
-  // ppa_client_config_t ppa_config = {};
-  // ppa_config.oper_type = PPA_OPERATION_SRM;
-  // ppa_config.max_pending_trans_num = 16;
-  //
-  // esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
-  // if (ret != ESP_OK) {
-  //   ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
-  //   return false;
-  // }
-  //
-  // this->ppa_enabled_ = true;
-  // ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d)",
-  //          this->mirror_x_, this->mirror_y_, this->rotation_);
-  // return true;
+  ppa_client_config_t ppa_config = {};
+  ppa_config.oper_type = PPA_OPERATION_SRM;
+  ppa_config.max_pending_trans_num = 16;
+
+  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  this->ppa_enabled_ = true;
+  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
+           this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+  return true;
 }
 
 bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
@@ -250,20 +245,25 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   ppa_srm_oper_config_t srm_config = {};
 
-  // Input configuration
+  // Calculate crop dimensions and scale factor
+  int crop_width = this->image_width_ - this->crop_offset_x_;
+  int crop_height = this->image_height_;
+  float scale_x = (crop_width > 0) ? (float)this->image_width_ / crop_width : 1.0f;
+
+  // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = this->image_width_;
   srm_config.in.pic_h = this->image_height_;
-  srm_config.in.block_w = this->image_width_;
-  srm_config.in.block_h = this->image_height_;
-  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_w = crop_width;  // Width to extract
+  srm_config.in.block_h = crop_height;
+  srm_config.in.block_offset_x = this->crop_offset_x_;  // Skip pixels from left
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output configuration
+  // Output configuration (upscale back to original size)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = this->image_buffer_size_;
-  srm_config.out.pic_w = this->image_width_;  // Pas de scale
+  srm_config.out.pic_w = this->image_width_;  // Keep original width (upscale)
   srm_config.out.pic_h = this->image_height_;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
@@ -279,8 +279,8 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = 1.0f;  // Pas de scale
-  srm_config.scale_y = 1.0f;
+  srm_config.scale_x = scale_x;  // Scale to compensate crop
+  srm_config.scale_y = 1.0f;  // No vertical scale
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
@@ -1121,14 +1121,13 @@ bool MipiDSICamComponent::capture_frame() {
   int buffer_idx = buf.index;
   uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-  // 3. ★ PPA DÉSACTIVÉ pour test qualité image
-  // Le PPA (mirror/rotate) peut dégrader la qualité, test sans PPA
+  // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
-  // if (this->ppa_enabled_) {
-  //   if (!this->apply_ppa_transform_(frame_data, frame_data)) {
-  //     ESP_LOGE(TAG, "PPA transform failed");
-  //   }
-  // }
+  if (this->ppa_enabled_) {
+    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
+      ESP_LOGE(TAG, "PPA transform failed");
+    }
+  }
   uint32_t t4 = esp_timer_get_time();
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)

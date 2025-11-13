@@ -63,6 +63,7 @@ class MipiDSICamComponent : public Component {
   void set_mirror_x(bool enable) { mirror_x_ = enable; }
   void set_mirror_y(bool enable) { mirror_y_ = enable; }
   void set_rotation(int degrees) { rotation_ = degrees; }  // 0, 90, 180, 270
+  void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset (pixels)
 
   // Configuration des gains RGB CCM depuis YAML
   void set_rgb_gains_config(float red, float green, float blue) {
@@ -163,6 +164,7 @@ class MipiDSICamComponent : public Component {
   bool mirror_x_{false};
   bool mirror_y_{false};
   int rotation_{0};  // 0, 90, 180, 270 degrees
+  int crop_offset_x_{0};  // PPA crop offset in pixels (from left)
 
   // PPA (Pixel-Processing Accelerator) hardware handles
   void *ppa_client_handle_{nullptr};
