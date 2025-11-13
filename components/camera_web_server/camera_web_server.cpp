@@ -1,6 +1,11 @@
 #include "camera_web_server.h"
 #include "esphome/core/log.h"
+
+// Only include human_face_detect if the header is available
+#if __has_include("human_face_detect.h")
 #include "human_face_detect.h"
+#define HAS_HUMAN_FACE_DETECT
+#endif
 
 #ifdef USE_ESP_IDF
 #include <esp_timer.h>

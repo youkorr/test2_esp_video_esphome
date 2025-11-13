@@ -34,11 +34,6 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Add include path for human_face_detect component
-    component_dir = os.path.dirname(__file__)
-    human_face_detect_dir = os.path.join(component_dir, "..", "human_face_detect")
-    cg.add_build_flag(f"-I{human_face_detect_dir}")
-
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
 
@@ -47,5 +42,10 @@ async def to_code(config):
 
     # Optional face detector
     if CONF_FACE_DETECTOR in config:
+        # Only add include path when face detector is actually used
+        component_dir = os.path.dirname(__file__)
+        human_face_detect_dir = os.path.join(component_dir, "..", "human_face_detect")
+        cg.add_build_flag(f"-I{human_face_detect_dir}")
+
         face_detector = await cg.get_variable(config[CONF_FACE_DETECTOR])
         cg.add(var.set_face_detector(face_detector))

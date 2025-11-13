@@ -1,7 +1,12 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+
+// Only include human_face_detect if the header is available
+#if __has_include("human_face_detect.h")
 #include "human_face_detect.h"
+#define HAS_HUMAN_FACE_DETECT
+#endif
 
 namespace esphome {
 namespace lvgl_camera_display {
