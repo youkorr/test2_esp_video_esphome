@@ -106,7 +106,9 @@ async def to_code(config):
 
         # Add include paths for ESP-DL headers
         cg.add_build_flag(f"-I{esp_dl_dir}")
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl")                   # For dl_define.hpp
         cg.add_build_flag(f"-I{esp_dl_dir}/dl/base")
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/tool/include")      # For dl_tool.hpp
         cg.add_build_flag(f"-I{esp_dl_dir}/dl/model/include")
         cg.add_build_flag(f"-I{esp_dl_dir}/vision/detect")
         cg.add_build_flag(f"-I{esp_dl_dir}/vision/image")
