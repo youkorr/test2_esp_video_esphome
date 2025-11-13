@@ -31,7 +31,7 @@ MSRDetector::MSRDetector(const char *model_path) {
   // Confidence threshold: 0.5, IOU threshold: 0.5, max detections: 10
   // Anchors: 2 feature maps with different scales
   m_postprocessor = new dl::detect::MSRPostprocessor(
-      m_model, 0.5, 0.5, 10,
+      m_model, m_image_preprocessor, 0.5, 0.5, 10,
       {{8, 8, 9, 9, {{16, 16}, {32, 32}}},   // Feature map 1: stride 8, anchors 16x16, 32x32
        {16, 16, 9, 9, {{64, 64}, {128, 128}}}}  // Feature map 2: stride 16, anchors 64x64, 128x128
   );
@@ -54,7 +54,7 @@ MNPDetector::MNPDetector(const char *model_path) {
   // MNP postprocessor with single feature map
   // Confidence threshold: 0.5, IOU threshold: 0.5, max detections: 10
   // Single feature map: stride 1, 48x48 anchor
-  postprocessor_ = new dl::detect::MNPPostprocessor(model_, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+  postprocessor_ = new dl::detect::MNPPostprocessor(model_, image_preprocessor_, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
 
   ESP_LOGI(TAG, "MNP detector initialized with model: %s", model_path);
 }
@@ -98,11 +98,7 @@ std::list<dl::detect::result_t> &MNPDetector::run(const dl::image::img_t &img,
     // Run model inference
     model_->run();
 
-    // Postprocess results
-    postprocessor_->set_resize_scale_x(image_preprocessor_->get_resize_scale_x());
-    postprocessor_->set_resize_scale_y(image_preprocessor_->get_resize_scale_y());
-    postprocessor_->set_top_left_x(image_preprocessor_->get_top_left_x());
-    postprocessor_->set_top_left_y(image_preprocessor_->get_top_left_y());
+    // Postprocess results (ImagePreprocessor already passed to constructor)
     postprocessor_->postprocess();
   }
 
