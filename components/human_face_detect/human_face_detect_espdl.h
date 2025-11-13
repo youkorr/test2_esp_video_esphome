@@ -70,6 +70,11 @@ class MSRMNPDetector : public dl::detect::Detect {
    * @return List of detected faces with bounding boxes
    */
   std::list<dl::detect::result_t> &run(const dl::image::img_t &img) override;
+
+  // Pure virtual function implementations required by dl::detect::Detect
+  dl::detect::Detect &set_score_thr(float score_thr, int idx) override;
+  dl::detect::Detect &set_nms_thr(float nms_thr, int idx) override;
+  dl::Model *get_raw_model(int idx) override;
 };
 
 }  // namespace human_face_detect

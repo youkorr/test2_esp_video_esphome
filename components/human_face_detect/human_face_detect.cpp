@@ -130,22 +130,21 @@ bool HumanFaceDetectComponent::init_model_() {
 
   ESP_LOGI(TAG, "  → Loading models into ESP-DL (THIS MAY TAKE 10-15 SECONDS)...");
 
-  try {
-    // Create MSR+MNP detector (this is slow!)
-    ESP_LOGI(TAG, "     Creating MSRMNPDetector...");
-    auto *detector = new MSRMNPDetector(msr_path.c_str(), mnp_path.c_str());
-    this->detector_ = static_cast<void *>(detector);
+  // Create MSR+MNP detector (this is slow!)
+  ESP_LOGI(TAG, "     Creating MSRMNPDetector...");
+  auto *detector = new MSRMNPDetector(msr_path.c_str(), mnp_path.c_str());
 
-    ESP_LOGI(TAG, "  ✅ ESP-DL face detection initialized successfully!");
-    ESP_LOGI(TAG, "     Confidence threshold: %.2f", this->confidence_threshold_);
-    ESP_LOGI(TAG, "     Model type: MSRMNP_S8_V1");
-    return true;
-
-  } catch (const std::exception &e) {
-    ESP_LOGE(TAG, "  ❌ Failed to initialize face detection: %s", e.what());
-    this->detector_ = nullptr;
+  if (detector == nullptr) {
+    ESP_LOGE(TAG, "  ❌ Failed to create MSRMNPDetector");
     return false;
   }
+
+  this->detector_ = static_cast<void *>(detector);
+
+  ESP_LOGI(TAG, "  ✅ ESP-DL face detection initialized successfully!");
+  ESP_LOGI(TAG, "     Confidence threshold: %.2f", this->confidence_threshold_);
+  ESP_LOGI(TAG, "     Model type: MSRMNP_S8_V1");
+  return true;
 #else
   ESP_LOGW(TAG, "⚠️  ESP-IDF required for face detection");
   ESP_LOGW(TAG, "Component requires:");
@@ -251,7 +250,7 @@ int HumanFaceDetectComponent::detect_faces() {
   img.data = rgb_data;
   img.width = width;
   img.height = height;
-  img.pix_type = dl::image::IMAGE_PIX_TYPE_RGB565_BIG_ENDIAN;
+  img.pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565;
 
   // Run detection
   auto *detector = static_cast<MSRMNPDetector *>(this->detector_);
