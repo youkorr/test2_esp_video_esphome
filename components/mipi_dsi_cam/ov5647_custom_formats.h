@@ -508,15 +508,17 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (from testov5647: X start 500, Y start 0, size 2124x1954)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
+    // Crop window (centered: X start 234 for perfect centering)
+    // Sensor: 2592 pixels wide, crop: 2124 pixels
+    // Center: (2592 - 2124) / 2 = 234 pixels offset
+    {0x3800, (234 >> 8) & 0x0F},   // X address start high (centered)
+    {0x3801, 234 & 0xFF},          // X address start low
     {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
-    {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1954 - 1) & 0xFF},         // Y address end low
+    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
+    {0x3805, (2357) & 0xFF},         // X address end low
+    {0x3806, ((1953) >> 8) & 0x07},  // Y address end high (1954 - 1)
+    {0x3807, (1953) & 0xFF},         // Y address end low
 
     // Output size: 800x640
     {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
@@ -524,9 +526,9 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x380a, (640 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 640 & 0xFF},         // Output vertical height low
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
+    // Timing offset (reduced to 0 for better centering)
+    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high
+    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
     {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
     {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
