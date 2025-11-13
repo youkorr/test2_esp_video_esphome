@@ -284,7 +284,12 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
-  srm_config.byte_swap = false;
+
+  // CRITICAL: Enable byte_swap for LVGL little-endian to fix green tint
+  // RGB565 ISP output is big-endian, but LVGL expects little-endian
+  // Without byte_swap: SC202CS shows green tint, OV5647 shows incorrect colors
+  srm_config.byte_swap = true;  // true = swap bytes for LVGL little-endian
+
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
   // Exécuter transformation hardware (M5Stack API: 2 parameters)
