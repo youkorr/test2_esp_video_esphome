@@ -36,7 +36,7 @@ typedef struct {
 // ============================================================================
 // Configuration : VGA 640×480 @ 30fps RAW8
 // ============================================================================
-// Based on SC202CS native 1600×1200 with 2×2 binning + crop
+// // cleaned_0x18_FT_SC2356_24Minput_576Mbps_1lane_8bit_1280x720_30fps
 // Optimized for small LCD displays
 
 static const sc202cs_reginfo_t sc202cs_vga_640x480_raw8_30fps[] = {
@@ -190,9 +190,9 @@ static const sc202cs_reginfo_t sc202cs_vga_640x480_raw8_30fps[] = {
     {0x393e, 0xc0},
     {0x39dd, 0x41},
 
-    // Exposure settings (matching SC2336 working config)
+ 
     {0x3e00, 0x00},  // Exposure high
-    {0x3e01, 0x4d},  // Exposure mid = 77 (from SC2336)
+    {0x3e01, 0x4d},  // Exposure mid = 77 
     {0x3e02, 0xc0},  // Exposure low
     {0x3e08, 0x1f},  // AEC/AGC enable (0x1f = enable auto exposure & auto gain)
     {0x3e09, 0x00},  // Gain
