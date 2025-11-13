@@ -327,6 +327,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
 
     if (ret != ESP_OK) {
       ESP_LOGW(TAG, "JPEG encoding failed in stream: %d", ret);
+      vTaskDelay(pdMS_TO_TICKS(100));  // Delay pour éviter boucle infinie qui monopolise CPU
       continue;
     }
 
