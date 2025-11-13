@@ -29,9 +29,11 @@ void HumanFaceDetectComponent::setup() {
   }
 
 #ifdef USE_ESP_IDF
-  // Disable watchdog during SPIFFS mount and model loading (can take several seconds)
-  ESP_LOGI(TAG, "Disabling watchdog for model loading (this may take 10-15 seconds)...");
-  esp_task_wdt_deinit();
+  // Remove current task from watchdog during SPIFFS mount and model loading (can take several seconds)
+  // Do NOT call esp_task_wdt_deinit() as it disables watchdog for ALL tasks globally!
+  ESP_LOGI(TAG, "Removing task from watchdog for model loading (this may take 10-15 seconds)...");
+  TaskHandle_t current_task = xTaskGetCurrentTaskHandle();
+  esp_task_wdt_delete(current_task);  // Remove only this task, not global disable
 #endif
 
   // Mount SPIFFS to access embedded model files
@@ -42,9 +44,8 @@ void HumanFaceDetectComponent::setup() {
     this->initialized_ = false;
 
 #ifdef USE_ESP_IDF
-    // Re-enable watchdog
-    esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
-    esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+    // Re-add task to watchdog
+    esp_task_wdt_add(current_task);
 #endif
     return;
   }
@@ -56,18 +57,16 @@ void HumanFaceDetectComponent::setup() {
     this->initialized_ = false;
 
 #ifdef USE_ESP_IDF
-    // Re-enable watchdog
-    esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
-    esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+    // Re-add task to watchdog
+    esp_task_wdt_add(current_task);
 #endif
     return;
   }
 
 #ifdef USE_ESP_IDF
-  // Re-enable watchdog after successful initialization
-  ESP_LOGI(TAG, "Re-enabling watchdog...");
-  esp_task_wdt_init(CONFIG_ESP_TASK_WDT_TIMEOUT_S, true);
-  esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+  // Re-add task to watchdog after successful initialization
+  ESP_LOGI(TAG, "Re-adding task to watchdog...");
+  esp_task_wdt_add(current_task);
 #endif
 
   this->initialized_ = true;
