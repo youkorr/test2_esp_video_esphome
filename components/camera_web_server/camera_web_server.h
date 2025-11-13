@@ -36,7 +36,7 @@ class CameraWebServer : public Component {
   jpeg_encoder_handle_t jpeg_handle_{nullptr};
   uint8_t *jpeg_buffer_{nullptr};
   size_t jpeg_buffer_size_{0};
-  int jpeg_quality_{80};  // 0-100
+  int jpeg_quality_{90};  // 0-100
 
   esp_err_t start_server_();
   void stop_server_();
