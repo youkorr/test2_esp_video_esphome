@@ -62,9 +62,12 @@ void CameraWebServer::loop() {
 }
 
 esp_err_t CameraWebServer::init_jpeg_encoder_() {
+  ESP_LOGI(TAG, "Initializing JPEG encoder...");
+
   // Initialiser le moteur JPEG encoder hardware ESP32-P4
+  // Timeout réduit à 1000ms pour éviter watchdog timeout
   jpeg_encode_engine_cfg_t encode_cfg = {
-      .timeout_ms = 5000,
+      .timeout_ms = 1000,
   };
 
   esp_err_t ret = jpeg_new_encoder_engine(&encode_cfg, &this->jpeg_handle_);
@@ -296,6 +299,11 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     // Draw face detection boxes on RGB565 buffer before JPEG encoding
     server->draw_face_boxes_rgb565_(image_data, server->camera_->get_image_width(), server->camera_->get_image_height());
 
+    ESP_LOGI(TAG, "Starting JPEG encoding: %ux%u, buffer size=%u",
+             server->camera_->get_image_width(),
+             server->camera_->get_image_height(),
+             image_size);
+
     // Encoder RGB565 → JPEG
     jpeg_encode_cfg_t encode_config = {};
     encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
@@ -304,6 +312,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     encode_config.height = server->camera_->get_image_height();
     encode_config.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
 
+    ESP_LOGI(TAG, "Calling jpeg_encoder_process...");
     uint32_t jpeg_size = 0;
     esp_err_t ret = jpeg_encoder_process(
         server->jpeg_handle_,
@@ -314,6 +323,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
         server->jpeg_buffer_size_,
         &jpeg_size
     );
+    ESP_LOGI(TAG, "jpeg_encoder_process returned: %d (jpeg_size=%u)", ret, jpeg_size);
 
     if (ret != ESP_OK) {
       ESP_LOGW(TAG, "JPEG encoding failed in stream: %d", ret);
