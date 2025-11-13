@@ -10,12 +10,6 @@
 #endif
 
 namespace esphome {
-
-// Forward declaration
-namespace human_face_detect {
-class HumanFaceDetectComponent;
-}
-
 namespace camera_web_server {
 
 class CameraWebServer : public Component {
@@ -28,11 +22,9 @@ class CameraWebServer : public Component {
   void set_port(uint16_t port) { port_ = port; }
   void set_enable_stream(bool enable) { enable_stream_ = enable; }
   void set_enable_snapshot(bool enable) { enable_snapshot_ = enable; }
-  void set_face_detector(human_face_detect::HumanFaceDetectComponent *detector) { face_detector_ = detector; }
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
-  human_face_detect::HumanFaceDetectComponent *face_detector_{nullptr};
   uint16_t port_{8080};
   bool enable_stream_{true};
   bool enable_snapshot_{true};
@@ -55,9 +47,6 @@ class CameraWebServer : public Component {
   static esp_err_t stream_handler_(httpd_req_t *req);
   static esp_err_t snapshot_handler_(httpd_req_t *req);
   static esp_err_t status_handler_(httpd_req_t *req);
-
-  // Face detection box drawing on RGB565 buffer
-  void draw_face_boxes_rgb565_(uint8_t *rgb_data, uint16_t width, uint16_t height);
 #endif
 };
 

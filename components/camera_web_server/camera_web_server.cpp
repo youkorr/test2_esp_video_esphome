@@ -1,12 +1,6 @@
 #include "camera_web_server.h"
 #include "esphome/core/log.h"
 
-// Only include human_face_detect if the header is available
-#if __has_include("human_face_detect.h")
-#include "human_face_detect.h"
-#define HAS_HUMAN_FACE_DETECT
-#endif
-
 #ifdef USE_ESP_IDF
 #include <esp_timer.h>
 #include <sys/time.h>
@@ -62,12 +56,9 @@ void CameraWebServer::loop() {
 }
 
 esp_err_t CameraWebServer::init_jpeg_encoder_() {
-  ESP_LOGI(TAG, "Initializing JPEG encoder...");
-
   // Initialiser le moteur JPEG encoder hardware ESP32-P4
-  // Timeout réduit à 1000ms pour éviter watchdog timeout
   jpeg_encode_engine_cfg_t encode_cfg = {
-      .timeout_ms = 1000,
+      .timeout_ms = 5000,
   };
 
   esp_err_t ret = jpeg_new_encoder_engine(&encode_cfg, &this->jpeg_handle_);
@@ -215,9 +206,6 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  // Draw face detection boxes on RGB565 buffer before JPEG encoding
-  server->draw_face_boxes_rgb565_(image_data, server->camera_->get_image_width(), server->camera_->get_image_height());
-
   // Encoder RGB565 → JPEG avec hardware encoder ESP32-P4
   jpeg_encode_cfg_t encode_config = {};
   encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
@@ -296,14 +284,6 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
              server->camera_->get_image_height(),
              image_size);
 
-    // Draw face detection boxes on RGB565 buffer before JPEG encoding
-    server->draw_face_boxes_rgb565_(image_data, server->camera_->get_image_width(), server->camera_->get_image_height());
-
-    ESP_LOGI(TAG, "Starting JPEG encoding: %ux%u, buffer size=%u",
-             server->camera_->get_image_width(),
-             server->camera_->get_image_height(),
-             image_size);
-
     // Encoder RGB565 → JPEG
     jpeg_encode_cfg_t encode_config = {};
     encode_config.src_type = JPEG_ENCODE_IN_FORMAT_RGB565;
@@ -312,7 +292,6 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     encode_config.height = server->camera_->get_image_height();
     encode_config.sub_sample = JPEG_DOWN_SAMPLING_YUV422;
 
-    ESP_LOGI(TAG, "Calling jpeg_encoder_process...");
     uint32_t jpeg_size = 0;
     esp_err_t ret = jpeg_encoder_process(
         server->jpeg_handle_,
@@ -323,11 +302,9 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
         server->jpeg_buffer_size_,
         &jpeg_size
     );
-    ESP_LOGI(TAG, "jpeg_encoder_process returned: %d (jpeg_size=%u)", ret, jpeg_size);
 
     if (ret != ESP_OK) {
       ESP_LOGW(TAG, "JPEG encoding failed in stream: %d", ret);
-      vTaskDelay(pdMS_TO_TICKS(100));  // Delay pour éviter boucle infinie qui monopolise CPU
       continue;
     }
 
@@ -377,74 +354,6 @@ esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
            server->camera_->get_image_height());
 
   return httpd_resp_send(req, json, strlen(json));
-}
-
-// Draw face detection boxes directly on RGB565 buffer
-void CameraWebServer::draw_face_boxes_rgb565_(uint8_t *rgb_data, uint16_t width, uint16_t height) {
-#ifdef HAS_HUMAN_FACE_DETECT
-  // Check if face detector is configured and enabled
-  if (this->face_detector_ == nullptr || !this->face_detector_->is_detection_enabled()) {
-    return;
-  }
-
-  // Get number of detected faces
-  int face_count = this->face_detector_->get_face_count();
-  if (face_count <= 0) {
-    return;
-  }
-
-  // RGB565 little-endian: Green = 0x07E0 (0b0000011111100000)
-  const uint16_t color_green = 0x07E0;
-  const int border_width = 3;
-
-  uint16_t *rgb565_buffer = reinterpret_cast<uint16_t *>(rgb_data);
-
-  for (int i = 0; i < face_count; i++) {
-    int x, y, w, h;
-    float confidence;
-
-    if (this->face_detector_->get_face_box(i, x, y, w, h, confidence)) {
-      // Ensure bounds are within image
-      if (x < 0) x = 0;
-      if (y < 0) y = 0;
-      if (x + w > width) w = width - x;
-      if (y + h > height) h = height - y;
-
-      // Draw rectangle with specified border width
-      for (int bw = 0; bw < border_width; bw++) {
-        // Top horizontal line
-        if (y + bw < height) {
-          for (int px = x; px < x + w && px < width; px++) {
-            rgb565_buffer[(y + bw) * width + px] = color_green;
-          }
-        }
-
-        // Bottom horizontal line
-        if (y + h - 1 - bw >= 0 && y + h - 1 - bw < height) {
-          for (int px = x; px < x + w && px < width; px++) {
-            rgb565_buffer[(y + h - 1 - bw) * width + px] = color_green;
-          }
-        }
-
-        // Left vertical line
-        if (x + bw < width) {
-          for (int py = y; py < y + h && py < height; py++) {
-            rgb565_buffer[py * width + (x + bw)] = color_green;
-          }
-        }
-
-        // Right vertical line
-        if (x + w - 1 - bw >= 0 && x + w - 1 - bw < width) {
-          for (int py = y; py < y + h && py < height; py++) {
-            rgb565_buffer[py * width + (x + w - 1 - bw)] = color_green;
-          }
-        }
-      }
-
-      ESP_LOGV(TAG, "Drew face box %d: x=%d y=%d w=%d h=%d conf=%.2f", i, x, y, w, h, confidence);
-    }
-  }
-#endif  // HAS_HUMAN_FACE_DETECT
 }
 
 #else  // !USE_ESP_IDF

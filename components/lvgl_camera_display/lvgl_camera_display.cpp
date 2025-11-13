@@ -2,12 +2,6 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// Only include human_face_detect if the header is available
-#if __has_include("human_face_detect.h")
-#include "human_face_detect.h"
-#define HAS_HUMAN_FACE_DETECT
-#endif
-
 namespace esphome {
 namespace lvgl_camera_display {
 
@@ -167,9 +161,6 @@ void LVGLCameraDisplay::update_canvas_() {
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
-  // Draw face detection boxes if available
-  this->draw_face_boxes_();
-
   // Tracker ce buffer pour le libérer au prochain update
   this->displayed_buffer_ = buffer;
 }
@@ -183,57 +174,6 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Taille canvas: %dx%d", w, h);
   }
-}
-
-void LVGLCameraDisplay::draw_face_boxes_() {
-#ifdef HAS_HUMAN_FACE_DETECT
-  // Check if face detector is configured and enabled
-  if (this->face_detector_ == nullptr || !this->face_detector_->is_detection_enabled()) {
-    return;
-  }
-
-  if (this->canvas_obj_ == nullptr) {
-    return;
-  }
-
-  // Get number of detected faces
-  int face_count = this->face_detector_->get_face_count();
-  if (face_count <= 0) {
-    return;
-  }
-
-  // Draw rectangle for each detected face
-  lv_draw_rect_dsc_t rect_dsc;
-  lv_draw_rect_dsc_init(&rect_dsc);
-  rect_dsc.bg_opa = LV_OPA_TRANSP;           // Transparent background
-  rect_dsc.border_color = lv_color_hex(0x00FF00);  // Green border
-  rect_dsc.border_width = 3;                  // Border width
-  rect_dsc.border_opa = LV_OPA_100;          // Opaque border
-  rect_dsc.radius = 0;                        // Square corners
-
-  for (int i = 0; i < face_count; i++) {
-    int x, y, w, h;
-    float confidence;
-
-    if (this->face_detector_->get_face_box(i, x, y, w, h, confidence)) {
-      // Draw rectangle around detected face
-      lv_canvas_draw_rect(this->canvas_obj_, x, y, w, h, &rect_dsc);
-
-      // Draw confidence text (optional, can be commented if too verbose)
-      char conf_text[16];
-      snprintf(conf_text, sizeof(conf_text), "%.0f%%", confidence * 100);
-
-      lv_draw_label_dsc_t label_dsc;
-      lv_draw_label_dsc_init(&label_dsc);
-      label_dsc.color = lv_color_hex(0x00FF00);  // Green text
-      label_dsc.font = &lv_font_montserrat_14;
-
-      lv_canvas_draw_text(this->canvas_obj_, x, y - 20, w, &label_dsc, conf_text);
-
-      ESP_LOGV(TAG, "Face %d: x=%d y=%d w=%d h=%d conf=%.2f", i, x, y, w, h, confidence);
-    }
-  }
-#endif  // HAS_HUMAN_FACE_DETECT
 }
 
 }  // namespace lvgl_camera_display
