@@ -60,7 +60,20 @@ class HumanFaceDetectComponent : public Component {
    * @param confidence Sortie : niveau de confiance (0.0-1.0)
    * @return true si succès
    */
-  bool get_face_box(int index, int &x, int &y, int &w, int &h, float &confidence);
+  inline bool get_face_box(int index, int &x, int &y, int &w, int &h, float &confidence) {
+    if (index < 0 || index >= static_cast<int>(this->detected_faces_.size())) {
+      return false;
+    }
+
+    const FaceBox &face = this->detected_faces_[index];
+    x = face.x;
+    y = face.y;
+    w = face.w;
+    h = face.h;
+    confidence = face.confidence;
+
+    return true;
+  }
 
  protected:
   esphome::mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};

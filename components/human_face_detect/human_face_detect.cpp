@@ -286,20 +286,6 @@ int HumanFaceDetectComponent::detect_faces() {
 #endif
 }
 
-bool HumanFaceDetectComponent::get_face_box(int index, int &x, int &y, int &w, int &h, float &confidence) {
-  if (index < 0 || index >= static_cast<int>(this->detected_faces_.size())) {
-    return false;
-  }
-
-  const FaceBox &face = this->detected_faces_[index];
-  x = face.x;
-  y = face.y;
-  w = face.w;
-  h = face.h;
-  confidence = face.confidence;
-
-  return true;
-}
 
 }  // namespace human_face_detect
 }  // namespace esphome
