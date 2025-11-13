@@ -109,7 +109,11 @@ async def to_code(config):
         cg.add_build_flag(f"-I{esp_dl_dir}/dl")                   # For dl_define.hpp
         cg.add_build_flag(f"-I{esp_dl_dir}/dl/base")
         cg.add_build_flag(f"-I{esp_dl_dir}/dl/tool/include")      # For dl_tool.hpp
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/math/include")      # For dl_math.hpp
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/tensor/include")    # For tensor operations
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/module/include")    # For modules (softmax, etc)
         cg.add_build_flag(f"-I{esp_dl_dir}/dl/model/include")
         cg.add_build_flag(f"-I{esp_dl_dir}/vision/detect")
         cg.add_build_flag(f"-I{esp_dl_dir}/vision/image")
+        cg.add_build_flag(f"-I{esp_dl_dir}/vision/image/isa")     # For dl_image_color_isa.hpp
         cg.add_build_flag(f"-I{esp_dl_dir}/fbs_loader/include")
