@@ -3,5 +3,6 @@
 
 dependencies:
   # ESP-DL (Espressif Deep Learning Library)
-  # Requis par: components/human_face_detect
-  espressif/esp-dl: "^3.1.0"
+  # Maintenant disponible localement dans components/esp-dl/
+  # Plus besoin de le télécharger via Component Manager
+

@@ -97,13 +97,17 @@ async def to_code(config):
     for flag in flags:
         cg.add_build_flag(flag)
 
-    # Note importante pour l'utilisateur
+    # ESP-DL is now available locally in components/esp-dl/
+    # No need to install via Library Manager - ESPHome/ESP-IDF will find it automatically
     if config[CONF_ENABLE_DETECTION]:
-        cg.add_library("esp-dl", None)  # Ajouter dépendance esp-dl
+        # Add ESP-DL include paths from local components directory
+        # Calculate path: components/human_face_detect/../esp-dl = components/esp-dl
+        esp_dl_dir = os.path.join(component_dir, "..", "esp-dl")
 
-        # Add ESP-DL include paths for managed components
-        # These paths are where ESP-IDF Component Manager installs esp-dl
-        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include")
-        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/layer")
-        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/model")
-        cg.add_build_flag("-Imanaged_components/espressif__esp-dl/include/detect")
+        # Add include paths for ESP-DL headers
+        cg.add_build_flag(f"-I{esp_dl_dir}")
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/base")
+        cg.add_build_flag(f"-I{esp_dl_dir}/dl/model/include")
+        cg.add_build_flag(f"-I{esp_dl_dir}/vision/detect")
+        cg.add_build_flag(f"-I{esp_dl_dir}/vision/image")
+        cg.add_build_flag(f"-I{esp_dl_dir}/fbs_loader/include")
