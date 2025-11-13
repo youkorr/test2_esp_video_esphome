@@ -1,8 +1,0 @@
-## Dépendances IDF Component Manager
-## Ce fichier déclare les composants externes requis par ce projet ESPHome
-
-dependencies:
-  # ESP-DL (Espressif Deep Learning Library)
-  # Maintenant disponible localement dans components/esp-dl/
-  # Plus besoin de le télécharger via Component Manager
-

@@ -1,5 +1,0 @@
-# Ignore model files (must be downloaded separately)
-*.espdl
-
-# Keep the README
-!README.md

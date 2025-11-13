@@ -1,7 +1,0 @@
-version: "0.1.0"
-description: Human face detection model for ESPHome (based on Waveshare implementation)
-url: https://github.com/youkorr/test2_esp_video_esphome
-dependencies:
-  esp-dl:
-    path: ../esp-dl
-    override_path: ../esp-dl
