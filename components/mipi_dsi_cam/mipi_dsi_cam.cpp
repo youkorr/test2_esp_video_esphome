@@ -1075,13 +1075,18 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
-  // IMPORTANT: Toujours activer AWB au démarrage pour éviter problème blanc→jaune
-  if (this->set_white_balance_mode(true)) {
-    ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+  // IMPORTANT: AWB ne fonctionne PAS sur SC202CS (Invalid argument)
+  // SC202CS gère automatiquement la balance des blancs via ses propres registres
+  if (this->sensor_name_ != "sc202cs") {
+    if (this->set_white_balance_mode(true)) {
+      ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+    } else {
+      ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
+      // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
+      this->set_white_balance_temp(5500);
+    }
   } else {
-    ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
-    // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
-    this->set_white_balance_temp(5500);
+    ESP_LOGI(TAG, "✓ SC202CS: Using sensor built-in AWB (V4L2 AWB not supported)");
   }
 
   // NOTE: Brightness/Contrast/Saturation auto-application désactivée
