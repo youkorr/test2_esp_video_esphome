@@ -251,8 +251,6 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
-  srm_config.in.buffer_size = this->image_width_ * this->image_height_ * 2;  // RGB565 input size
-  srm_config.in.buffer_stride = this->image_width_ * 2;                      // bytes per line
   srm_config.in.pic_w = this->image_width_;
   srm_config.in.pic_h = this->image_height_;
   srm_config.in.block_w = crop_width;  // Width to extract (skip crop_offset_x from left)
@@ -264,11 +262,8 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   // Output configuration (keep cropped size, NO upscaling)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = crop_width * crop_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.buffer_stride = crop_width * 2;
   srm_config.out.pic_w = crop_width;  // Output cropped width (no upscale)
   srm_config.out.pic_h = crop_height;
-  srm_config.out.block_w = crop_width;
-  srm_config.out.block_h = crop_height;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -1132,19 +1127,12 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
-  
   if (this->ppa_enabled_) {
-      uint8_t *dst = this->image_buffer_;  // buffer dédié pour PPA
-  
-      if (!this->apply_ppa_transform_(frame_data, dst)) {
-          ESP_LOGE(TAG, "PPA transform failed");
-      } else {
-          frame_data = dst;   // on remplace la frame par la transformée
-      }
+    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
+      ESP_LOGE(TAG, "PPA transform failed");
+    }
   }
-  
   uint32_t t4 = esp_timer_get_time();
-
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
   portENTER_CRITICAL(&this->buffer_mutex_);
