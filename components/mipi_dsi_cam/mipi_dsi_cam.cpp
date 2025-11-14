@@ -1127,12 +1127,19 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
+  
   if (this->ppa_enabled_) {
-    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
-      ESP_LOGE(TAG, "PPA transform failed");
-    }
+      uint8_t *dst = this->image_buffer_;  // buffer dédié pour PPA
+  
+      if (!this->apply_ppa_transform_(frame_data, dst)) {
+          ESP_LOGE(TAG, "PPA transform failed");
+      } else {
+          frame_data = dst;   // on remplace la frame par la transformée
+      }
   }
+  
   uint32_t t4 = esp_timer_get_time();
+
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
   portENTER_CRITICAL(&this->buffer_mutex_);
