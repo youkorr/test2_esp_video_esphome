@@ -32,7 +32,6 @@ CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_MIRROR_X = "mirror_x"  # Hardware PPA transform (M5Stack-style)
 CONF_MIRROR_Y = "mirror_y"  # Hardware PPA transform
 CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
-CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset (pixels from left)
 CONF_FILENAME = "filename"
 CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
@@ -85,8 +84,6 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_MIRROR_X): cv.boolean,
         cv.Optional(CONF_MIRROR_Y): cv.boolean,
         cv.Optional(CONF_ROTATION): cv.int_,
-        # PPA crop offset (hardware crop via block_offset_x)
-        cv.Optional(CONF_CROP_OFFSET_X, default=0): cv.int_range(min=0, max=800),
         # Contrôles ISP avancés (CCM RGB gains pour correction couleur)
         cv.Optional(CONF_RGB_GAINS): cv.Schema({
             cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
@@ -125,9 +122,6 @@ async def to_code(config):
         cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
     if CONF_ROTATION in config:
         cg.add(var.set_rotation(config[CONF_ROTATION]))
-
-    # Configuration crop offset (PPA hardware crop)
-    cg.add(var.set_crop_offset_x(config[CONF_CROP_OFFSET_X]))
 
     # Configuration des gains RGB CCM si présents
     if CONF_RGB_GAINS in config:

@@ -40,13 +40,10 @@ void esp_ipa_print_version(void)
 /**
  * @brief Get IPA pipeline configuration for specified camera sensor
  *
- * Configuration IPA conditionnelle par capteur :
- * - OV5647 : AWB+Denoise+Sharpen+Gamma (4 algos, CCM désactivée pour fix teinte rouge)
- * - SC202CS, OV02C10, autres : AWB+Denoise+Sharpen+Gamma+CCM (5 algos complets)
+ * Configuration IPA pour SC202CS - Configuration STABLE
+ * Pipeline: Capteur (RAW8) → ISP → IPA (5 algorithmes) → RGB565
  *
- * Pipeline: Capteur (RAW8/RAW10) → ISP → IPA → RGB565
- *
- * Algorithmes disponibles (vérifiés dans libesp_ipa.a):
+ * Algorithmes actifs (vérifiés dans libesp_ipa.a):
  * - awb.gray: Auto White Balance (balance des blancs automatique)
  * - denoising.gain_feedback: Réduction du bruit
  * - sharpen.freq_feedback: Netteté de l'image
@@ -63,45 +60,25 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    // Configuration pour OV5647 : CCM désactivée pour éviter teinte rouge
-    static const char *ipa_names_ov5647[] = {
+    /* Configuration IPA stable - 4 algorithmes (CCM disabled for OV5647 red tint fix) */
+    static const char *ipa_names[] = {
         "awb.gray",                /* Auto White Balance */
         "denoising.gain_feedback", /* Réduction bruit */
         "sharpen.freq_feedback",   /* Netteté */
         "gamma.lumma_feedback",    /* Correction gamma */
-        // "cc.linear" DISABLED for OV5647: CCM causes red tint (amplifies red 2.0x)
+        // "cc.linear" DISABLED: CCM causes red tint on OV5647 (amplifies red 2.0x)
     };
 
-    static const esp_ipa_config_t ipa_config_ov5647 = {
-        .ipa_nums = 4,     /* 4 IPAs (CCM disabled to fix red tint) */
-        .ipa_names = ipa_names_ov5647,
+    static const esp_ipa_config_t ipa_config = {
+        .ipa_nums = 4,     /* 4 IPAs (CCM disabled to fix red tint on OV5647) */
+        .ipa_names = ipa_names,
     };
 
-    // Configuration complète pour SC202CS, OV02C10, et autres : CCM activée
-    static const char *ipa_names_full[] = {
-        "awb.gray",                /* Auto White Balance */
-        "denoising.gain_feedback", /* Réduction bruit */
-        "sharpen.freq_feedback",   /* Netteté */
-        "gamma.lumma_feedback",    /* Correction gamma */
-        "cc.linear",               /* Color Correction Matrix */
-    };
-
-    static const esp_ipa_config_t ipa_config_full = {
-        .ipa_nums = 5,     /* 5 IPAs complets */
-        .ipa_names = ipa_names_full,
-    };
-
-    // Sélection conditionnelle par capteur
     if (cam_name) {
-        if (strcmp(cam_name, "OV5647") == 0 || strcmp(cam_name, "ov5647") == 0) {
-            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
-            return &ipa_config_ov5647;
-        } else {
-            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
-            return &ipa_config_full;
-        }
+        ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
+        return &ipa_config;
     }
 
-    ESP_LOGW(TAG, "No camera name provided - using full IPA config with CCM");
-    return &ipa_config_full;
+    ESP_LOGW(TAG, "No camera name provided - using default IPA config");
+    return &ipa_config;
 }
