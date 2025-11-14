@@ -386,8 +386,8 @@ void MipiDSICamComponent::setup() {
   this->last_health_check_ = millis();
 
   // Initialiser PPA (Pixel-Processing Accelerator) si mirror/rotate configurés
-  if (!this->init_ppa_()) {
-    ESP_LOGW(TAG, "PPA initialization failed, mirror/rotate will not be available");
+  //if (!this->init_ppa_()) {
+    //ESP_LOGW(TAG, "PPA initialization failed, mirror/rotate will not be available");
   }
 
   // Messages simples de succès
