@@ -728,9 +728,12 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  // Si RGB565 n'a aucune résolution, vérifier RAW8 (conversion ISP possible)
+  // Si RGB565 n'a aucune résolution, vérifier RAW8 et configurer le sensor d'abord
+  uint32_t native_fourcc = 0;
+  bool native_size_found = false;
+
   if (!size_found) {
-    ESP_LOGW(TAG, "⚠️  No sizes found for RGB565 - checking native RAW8 formats...");
+    ESP_LOGI(TAG, "Checking native sensor formats (RAW8 BGGR)...");
     for (int i = 0; i < 20; i++) {
       memset(&frmsize, 0, sizeof(frmsize));
       frmsize.index = i;
@@ -740,21 +743,59 @@ bool MipiDSICamComponent::start_streaming() {
       }
       if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
         ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+        // Trouver la résolution qui correspond exactement
+        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
+          native_fourcc = V4L2_PIX_FMT_SBGGR8;
+          native_size_found = true;
+          ESP_LOGI(TAG, "  ✓ Found matching native sensor format: RAW8 BGGR %ux%u", width, height);
+        }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
                  frmsize.stepwise.min_width, frmsize.stepwise.min_height,
                  frmsize.stepwise.max_width, frmsize.stepwise.max_height,
                  frmsize.stepwise.step_width, frmsize.stepwise.step_height);
+        // Vérifier si notre résolution est dans la plage stepwise
+        if (width >= frmsize.stepwise.min_width && width <= frmsize.stepwise.max_width &&
+            height >= frmsize.stepwise.min_height && height <= frmsize.stepwise.max_height) {
+          native_fourcc = V4L2_PIX_FMT_SBGGR8;
+          native_size_found = true;
+          ESP_LOGI(TAG, "  ✓ Resolution %ux%u within stepwise range, using RAW8 BGGR", width, height);
+        }
       }
     }
-    ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
-    ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
-    ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
 
-  if (!size_found) {
-    ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in supported list", width, height);
+  // Configurer d'abord le format natif du sensor via VIDIOC_G_SENSOR_FMT/VIDIOC_S_SENSOR_FMT
+  if (native_size_found && native_fourcc != 0) {
+    ESP_LOGI(TAG, "Step 1: Query current sensor format...");
+
+    // Récupérer le format actuel du sensor
+    esp_cam_sensor_format_t sensor_fmt;
+    memset(&sensor_fmt, 0, sizeof(sensor_fmt));
+
+    if (ioctl(this->video_fd_, VIDIOC_G_SENSOR_FMT, &sensor_fmt) == 0) {
+      // Modifier la résolution dans le format actuel
+      ESP_LOGI(TAG, "  Current sensor format: %ux%u", sensor_fmt.width, sensor_fmt.height);
+      sensor_fmt.width = width;
+      sensor_fmt.height = height;
+
+      // Appliquer le format modifié au sensor
+      ESP_LOGI(TAG, "Step 2: Applying sensor format %ux%u to %s...", width, height, this->sensor_name_.c_str());
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sensor_fmt) < 0) {
+        ESP_LOGW(TAG, "Failed to set sensor format: %s", strerror(errno));
+        ESP_LOGW(TAG, "Sensor may not support %ux%u natively", width, height);
+      } else {
+        ESP_LOGI(TAG, "✓ Sensor format configured: %ux%u (native resolution)", width, height);
+        size_found = true;  // Marquer comme trouvé pour éviter les warnings
+      }
+    } else {
+      ESP_LOGW(TAG, "VIDIOC_G_SENSOR_FMT not supported: %s", strerror(errno));
+      ESP_LOGW(TAG, "Cannot configure sensor directly, using V4L2 format only");
+    }
+  }
+
+  if (!size_found && !native_size_found) {
+    ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in RGB565 or RAW8 formats", width, height);
     ESP_LOGW(TAG, "⚠️  Trying to set anyway (driver may adjust)...");
   }
 
