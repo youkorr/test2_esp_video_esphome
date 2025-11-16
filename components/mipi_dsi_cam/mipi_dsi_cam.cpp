@@ -18,7 +18,7 @@
 extern "C" {
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_types.h"
-#include "esp_cam_sensor/sensor/sc202cs/private_include/sc202cs_settings.h
+#include "esp_cam_sensor/sensor/sc202cs/private_include/sc202cs_settings.h"
 #include "esp_cam_sensor/sensor/sc202cs/include/sc202cs.h"
 #include "esp_cam_sensor/sensor/ov5647/private_include/ov5647_settings.h"
 #include "esp_cam_sensor/sensor/ov5647/include/ov5647.h"
