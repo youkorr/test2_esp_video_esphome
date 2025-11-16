@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import mipi_dsi_cam
 from esphome.const import CONF_ID, CONF_PORT
+import os
 
 DEPENDENCIES = ["mipi_dsi_cam", "network"]
 AUTO_LOAD = []
@@ -43,3 +44,7 @@ async def to_code(config):
     cg.add(var.set_gop(config[CONF_GOP]))
     cg.add(var.set_qp_min(config[CONF_QP_MIN]))
     cg.add(var.set_qp_max(config[CONF_QP_MAX]))
+
+    # Add build script for H.264 hardware encoder libraries
+    build_script = os.path.join(os.path.dirname(__file__), "webrtc_camera_build.py")
+    cg.add_platformio_option("extra_scripts", [f"post:{build_script}"])
