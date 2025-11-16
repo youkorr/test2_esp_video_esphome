@@ -10,8 +10,8 @@
 
 #include <stdint.h>
 #include "esp_cam_sensor_types.h"
-#include "../../esp_cam_sensor/sensor/sc202cs/include/sc202cs_types.h"
-#include "../../esp_cam_sensor/sensor/sc202cs/include/private_include/sc202cs_regs.h"
+//#include "../../esp_cam_sensor/sensor/sc202cs/include/sc202cs_types.h"
+//#include "../../esp_cam_sensor/sensor/sc202cs/include/private_include/sc202cs_regs.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,7 +21,7 @@ extern "C" {
 typedef struct {
     uint16_t addr;
     uint8_t val;
-//} sc202cs_reginfo_t;
+} sc202cs_reginfo_t;
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
