@@ -121,7 +121,10 @@ esp_err_t CameraWebServer::start_server_() {
   config.ctrl_port = this->port_ + 1;
   config.max_uri_handlers = 8;
   config.max_open_sockets = 3;
-  config.stack_size = 8192;
+  config.stack_size = 16384;  // Augmenté pour le streaming
+  config.lru_purge_enable = true;  // Purger automatiquement les anciennes connexions
+  config.recv_wait_timeout = 10;   // Timeout de 10s pour réception
+  config.send_wait_timeout = 10;   // Timeout de 10s pour envoi
 
   ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
 
@@ -256,13 +259,24 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 
-  httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
+  esp_err_t res = httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
+  if (res != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to set content type");
+    return ESP_FAIL;
+  }
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
   httpd_resp_set_hdr(req, "X-Framerate", "30");
 
   ESP_LOGI(TAG, "MJPEG stream started");
 
+  uint32_t frame_count = 0;
   while (true) {
+    // Yield periodically to avoid watchdog timeout
+    if (frame_count % 10 == 0) {
+      vTaskDelay(pdMS_TO_TICKS(1));  // Permet aux autres tasks de s'exécuter
+    }
+    frame_count++;
+
     // Capturer une frame
     if (!server->camera_->capture_frame()) {
       ESP_LOGW(TAG, "Failed to capture frame in stream");
