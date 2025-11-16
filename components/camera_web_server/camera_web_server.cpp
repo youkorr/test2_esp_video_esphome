@@ -259,15 +259,25 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 
+  ESP_LOGI(TAG, "[DEBUG] About to set response type");
+  vTaskDelay(pdMS_TO_TICKS(1));  // Yield to watchdog
+
   esp_err_t res = httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
   if (res != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to set content type");
+    ESP_LOGE(TAG, "Failed to set content type: %d", res);
     return ESP_FAIL;
   }
+
+  ESP_LOGI(TAG, "[DEBUG] About to set CORS header");
+  vTaskDelay(pdMS_TO_TICKS(1));  // Yield to watchdog
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+
+  ESP_LOGI(TAG, "[DEBUG] About to set framerate header");
+  vTaskDelay(pdMS_TO_TICKS(1));  // Yield to watchdog
   httpd_resp_set_hdr(req, "X-Framerate", "30");
 
-  ESP_LOGI(TAG, "MJPEG stream started");
+  ESP_LOGI(TAG, "MJPEG stream started - entering loop");
+  vTaskDelay(pdMS_TO_TICKS(1));  // Yield to watchdog
 
   uint32_t frame_count = 0;
   while (true) {
