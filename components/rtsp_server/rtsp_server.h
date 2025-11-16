@@ -10,7 +10,7 @@
 #include <vector>
 #include <map>
 #include "esp_h264_enc_single.h"
-#include "esp_h264_enc_single_sw.h"
+#include "esp_h264_enc_single_hw.h"
 #include "esp_h264_types.h"
 #endif
 

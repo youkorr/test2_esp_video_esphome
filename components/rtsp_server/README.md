@@ -30,12 +30,18 @@ Visionnage direct avec n'importe quel lecteur RTSP.
 ### 4. **Enregistrement vidéo**
 Capture avec FFmpeg, OBS, ou autres outils professionnels.
 
-## 🔧 Matériel requis
+## 🔧 Prérequis
 
+### Matériel
 - **ESP32-P4** (Function EV Board recommandé)
 - **Caméra MIPI-CSI** (OV5647, OV02C10, SC202CS)
 - **PSRAM** (pour buffers vidéo)
 - **Réseau stable** (WiFi ou Ethernet)
+
+### Logiciel
+- **ESP-IDF 5.4.2+** (requis pour encodeur H.264 matériel)
+- ESPHome avec support ESP32-P4
+- Composant `mipi_dsi_cam`
 
 ## 📦 Installation
 
@@ -395,6 +401,14 @@ ffmpeg:
 - Vérifier `platformio_options` pour PSRAM
 
 ## 📊 Performances
+
+### Encodeur H.264 matériel (ESP32-P4)
+
+L'encodeur matériel de l'ESP32-P4 offre des performances exceptionnelles:
+- **Résolution maximale**: 1920×1080 @ 30fps
+- **Accélération matérielle**: Support natif H.264 hardware
+- **Fonctionnalités avancées**: Dual-stream encoding, ROI optimization
+- **Performance**: Jusqu'à **60× plus rapide** que l'encodeur logiciel (ESP32-S3: 320×240@11fps max)
 
 ### Utilisation ressources ESP32-P4
 
