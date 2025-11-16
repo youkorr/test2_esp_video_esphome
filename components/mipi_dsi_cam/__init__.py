@@ -38,6 +38,9 @@ CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
 CONF_GREEN_GAIN = "green"
 CONF_BLUE_GAIN = "blue"
+CONF_CAMERA_CONTROLS = "camera_controls"
+CONF_CONTROL_ID = "id"
+CONF_INITIAL_VALUE = "initial_value"
 
 def validate_and_normalize_config(config):
     """Normalise la configuration pour accepter l'ancienne et la nouvelle syntaxe"""
@@ -93,6 +96,11 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_GREEN_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
             cv.Optional(CONF_BLUE_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
         }),
+        # Contrôles caméra V4L2 (exposition, gain, luminosité, etc.)
+        cv.Optional(CONF_CAMERA_CONTROLS): cv.ensure_list(cv.Schema({
+            cv.Required(CONF_CONTROL_ID): cv.string,
+            cv.Required(CONF_INITIAL_VALUE): cv.int_,
+        })),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_and_normalize_config
 )
@@ -137,6 +145,14 @@ async def to_code(config):
             rgb_config[CONF_GREEN_GAIN],
             rgb_config[CONF_BLUE_GAIN]
         ))
+
+    # Configuration des contrôles caméra V4L2 si présents
+    if CONF_CAMERA_CONTROLS in config:
+        for control in config[CONF_CAMERA_CONTROLS]:
+            cg.add(var.add_camera_control(
+                control[CONF_CONTROL_ID],
+                control[CONF_INITIAL_VALUE]
+            ))
 
     # Build flags pour ESP32-P4 avec ESP-IDF 5.x
     cg.add_build_flag("-DBOARD_HAS_PSRAM")

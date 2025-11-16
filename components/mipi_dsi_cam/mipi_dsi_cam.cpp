@@ -210,6 +210,56 @@ bool MipiDSICamComponent::check_pipeline_health_() {
   return true;
 }
 
+bool MipiDSICamComponent::apply_v4l2_control_(const std::string &control_id, int value) {
+  if (this->isp_fd_ < 0) {
+    ESP_LOGW(TAG, "ISP device not open, cannot apply control %s", control_id.c_str());
+    return false;
+  }
+
+  // Mapper les string IDs vers les constantes V4L2
+  uint32_t v4l2_id = 0;
+
+  if (control_id == "V4L2_CID_BRIGHTNESS") {
+    v4l2_id = V4L2_CID_BRIGHTNESS;
+  } else if (control_id == "V4L2_CID_CONTRAST") {
+    v4l2_id = V4L2_CID_CONTRAST;
+  } else if (control_id == "V4L2_CID_SATURATION") {
+    v4l2_id = V4L2_CID_SATURATION;
+  } else if (control_id == "V4L2_CID_HUE") {
+    v4l2_id = V4L2_CID_HUE;
+  } else if (control_id == "V4L2_CID_SHARPNESS") {
+    v4l2_id = V4L2_CID_SHARPNESS;
+  } else if (control_id == "V4L2_CID_EXPOSURE" || control_id == "V4L2_CID_EXPOSURE_ABSOLUTE") {
+    v4l2_id = V4L2_CID_EXPOSURE_ABSOLUTE;
+  } else if (control_id == "V4L2_CID_GAIN") {
+    v4l2_id = V4L2_CID_GAIN;
+  } else if (control_id == "V4L2_CID_AUTO_WHITE_BALANCE") {
+    v4l2_id = V4L2_CID_AUTO_WHITE_BALANCE;
+  } else if (control_id == "V4L2_CID_WHITE_BALANCE_TEMPERATURE") {
+    v4l2_id = V4L2_CID_WHITE_BALANCE_TEMPERATURE;
+  } else if (control_id == "V4L2_CID_EXPOSURE_AUTO") {
+    v4l2_id = V4L2_CID_EXPOSURE_AUTO;
+  } else if (control_id == "V4L2_CID_AUTOGAIN") {
+    v4l2_id = V4L2_CID_AUTOGAIN;
+  } else {
+    ESP_LOGW(TAG, "Unknown V4L2 control ID: %s", control_id.c_str());
+    return false;
+  }
+
+  // Appliquer le contrôle
+  struct v4l2_control ctrl;
+  memset(&ctrl, 0, sizeof(ctrl));
+  ctrl.id = v4l2_id;
+  ctrl.value = value;
+
+  if (ioctl(this->isp_fd_, VIDIOC_S_CTRL, &ctrl) < 0) {
+    ESP_LOGW(TAG, "Failed to set %s to %d: %s", control_id.c_str(), value, strerror(errno));
+    return false;
+  }
+
+  return true;
+}
+
 // ============================================================================
 // PPA (Pixel-Processing Accelerator) Hardware Transform Functions
 // ============================================================================
@@ -1081,6 +1131,18 @@ bool MipiDSICamComponent::start_streaming() {
     }
   } else {
     ESP_LOGI(TAG, "✓ SC202CS: Using sensor built-in AWB (V4L2 AWB not supported)");
+  }
+
+  // Appliquer les contrôles caméra V4L2 configurés dans YAML
+  if (!this->camera_controls_.empty()) {
+    ESP_LOGI(TAG, "Applying %u camera controls from YAML...", this->camera_controls_.size());
+    for (const auto &ctrl : this->camera_controls_) {
+      if (this->apply_v4l2_control_(ctrl.id, ctrl.value)) {
+        ESP_LOGI(TAG, "  ✓ %s = %d", ctrl.id.c_str(), ctrl.value);
+      } else {
+        ESP_LOGW(TAG, "  ⚠️  Failed to apply %s = %d", ctrl.id.c_str(), ctrl.value);
+      }
+    }
   }
 
   // NOTE: Brightness/Contrast/Saturation auto-application désactivée

@@ -73,6 +73,11 @@ class MipiDSICamComponent : public Component {
     rgb_gains_enabled_ = true;
   }
 
+  // Configuration des contrôles caméra V4L2 depuis YAML
+  void add_camera_control(const std::string &control_id, int initial_value) {
+    camera_controls_.push_back({control_id, initial_value});
+  }
+
   bool capture_snapshot_to_file(const std::string &path);
   bool is_pipeline_ready() const { return pipeline_started_; }
 
@@ -176,6 +181,13 @@ class MipiDSICamComponent : public Component {
   float rgb_gains_green_{1.0f};
   float rgb_gains_blue_{1.0f};
 
+  // Configuration des contrôles caméra V4L2 depuis YAML
+  struct CameraControl {
+    std::string id;
+    int value;
+  };
+  std::vector<CameraControl> camera_controls_;
+
   // Tous en pointeurs void* pour éviter les types incomplets
   void *sensor_dev_{nullptr};
   void *init_cfg_{nullptr};
@@ -209,6 +221,7 @@ class MipiDSICamComponent : public Component {
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();
+  bool apply_v4l2_control_(const std::string &control_id, int value);
 
   // PPA (Pixel-Processing Accelerator) hardware transform functions
   bool init_ppa_();
