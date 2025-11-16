@@ -728,75 +728,65 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  // Si RGB565 n'a aucune résolution, vérifier RAW8 et configurer le sensor d'abord
-  uint32_t native_fourcc = 0;
-  bool native_size_found = false;
+  // Configurer le sensor avec sa résolution native (indépendamment de VIDIOC_ENUM_FRAMESIZES)
+  // Le driver du sensor a ses propres formats prédéfinis qu'on peut interroger/configurer
+  bool sensor_configured = false;
 
-  if (!size_found) {
-    ESP_LOGI(TAG, "Checking native sensor formats (RAW8 BGGR)...");
-    for (int i = 0; i < 20; i++) {
-      memset(&frmsize, 0, sizeof(frmsize));
-      frmsize.index = i;
-      frmsize.pixel_format = V4L2_PIX_FMT_SBGGR8;  // RAW8 BGGR (Format[0] des logs)
-      if (ioctl(this->video_fd_, VIDIOC_ENUM_FRAMESIZES, &frmsize) < 0) {
-        break;
-      }
-      if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
-        ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
-        // Trouver la résolution qui correspond exactement
-        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
-          native_fourcc = V4L2_PIX_FMT_SBGGR8;
-          native_size_found = true;
-          ESP_LOGI(TAG, "  ✓ Found matching native sensor format: RAW8 BGGR %ux%u", width, height);
-        }
-      } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
-        ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
-                 frmsize.stepwise.min_width, frmsize.stepwise.min_height,
-                 frmsize.stepwise.max_width, frmsize.stepwise.max_height,
-                 frmsize.stepwise.step_width, frmsize.stepwise.step_height);
-        // Vérifier si notre résolution est dans la plage stepwise
-        if (width >= frmsize.stepwise.min_width && width <= frmsize.stepwise.max_width &&
-            height >= frmsize.stepwise.min_height && height <= frmsize.stepwise.max_height) {
-          native_fourcc = V4L2_PIX_FMT_SBGGR8;
-          native_size_found = true;
-          ESP_LOGI(TAG, "  ✓ Resolution %ux%u within stepwise range, using RAW8 BGGR", width, height);
-        }
-      }
-    }
-  }
+  ESP_LOGI(TAG, "Configuring sensor for %ux%u resolution...", width, height);
 
-  // Configurer d'abord le format natif du sensor via VIDIOC_G_SENSOR_FMT/VIDIOC_S_SENSOR_FMT
-  if (native_size_found && native_fourcc != 0) {
-    ESP_LOGI(TAG, "Step 1: Query current sensor format...");
+  // Récupérer le format actuel du sensor
+  esp_cam_sensor_format_t sensor_fmt;
+  memset(&sensor_fmt, 0, sizeof(sensor_fmt));
 
-    // Récupérer le format actuel du sensor
-    esp_cam_sensor_format_t sensor_fmt;
-    memset(&sensor_fmt, 0, sizeof(sensor_fmt));
+  if (ioctl(this->video_fd_, VIDIOC_G_SENSOR_FMT, &sensor_fmt) == 0) {
+    ESP_LOGI(TAG, "  Current sensor format: %ux%u", sensor_fmt.width, sensor_fmt.height);
 
-    if (ioctl(this->video_fd_, VIDIOC_G_SENSOR_FMT, &sensor_fmt) == 0) {
-      // Modifier la résolution dans le format actuel
-      ESP_LOGI(TAG, "  Current sensor format: %ux%u", sensor_fmt.width, sensor_fmt.height);
+    // Si la résolution actuelle ne correspond pas, la modifier
+    if (sensor_fmt.width != width || sensor_fmt.height != height) {
       sensor_fmt.width = width;
       sensor_fmt.height = height;
 
-      // Appliquer le format modifié au sensor
-      ESP_LOGI(TAG, "Step 2: Applying sensor format %ux%u to %s...", width, height, this->sensor_name_.c_str());
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sensor_fmt) < 0) {
-        ESP_LOGW(TAG, "Failed to set sensor format: %s", strerror(errno));
-        ESP_LOGW(TAG, "Sensor may not support %ux%u natively", width, height);
+      // Appliquer le nouveau format au sensor
+      ESP_LOGI(TAG, "  Applying sensor format %ux%u...", width, height);
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sensor_fmt) == 0) {
+        ESP_LOGI(TAG, "  ✓ Sensor configured for %ux%u", width, height);
+        sensor_configured = true;
+        size_found = true;  // Éviter les warnings
       } else {
-        ESP_LOGI(TAG, "✓ Sensor format configured: %ux%u (native resolution)", width, height);
-        size_found = true;  // Marquer comme trouvé pour éviter les warnings
+        ESP_LOGW(TAG, "  ✗ Failed to configure sensor: %s", strerror(errno));
+        ESP_LOGW(TAG, "  Sensor may not support %ux%u natively", width, height);
+
+        // Afficher les résolutions natives supportées par le driver du sensor
+        ESP_LOGI(TAG, "");
+        ESP_LOGI(TAG, "Native resolutions supported by %s driver:", this->sensor_name_.c_str());
+        if (this->sensor_name_ == "ov5647") {
+          ESP_LOGI(TAG, "  - 800x640   (RAW8  @ 50fps)");
+          ESP_LOGI(TAG, "  - 800x800   (RAW8  @ 50fps)");
+          ESP_LOGI(TAG, "  - 800x1280  (RAW8  @ 50fps)");
+          ESP_LOGI(TAG, "  - 1280x960  (RAW10 @ 45fps)");
+          ESP_LOGI(TAG, "  - 1920x1080 (RAW10 @ 30fps)");
+        } else if (this->sensor_name_ == "ov02c10") {
+          ESP_LOGI(TAG, "  - 1288x728  (RAW10 @ 30fps)");
+          ESP_LOGI(TAG, "  - 1920x1080 (RAW10 @ 30fps)");
+        } else if (this->sensor_name_ == "sc202cs") {
+          ESP_LOGI(TAG, "  - 1280x720  (RAW8  @ 30fps)");
+          ESP_LOGI(TAG, "  - 1600x900  (RAW10 @ 30fps)");
+          ESP_LOGI(TAG, "  - 1600x1200 (RAW8/RAW10 @ 30fps)");
+        }
+        ESP_LOGI(TAG, "");
       }
     } else {
-      ESP_LOGW(TAG, "VIDIOC_G_SENSOR_FMT not supported: %s", strerror(errno));
-      ESP_LOGW(TAG, "Cannot configure sensor directly, using V4L2 format only");
+      ESP_LOGI(TAG, "  ✓ Sensor already configured for %ux%u", width, height);
+      sensor_configured = true;
+      size_found = true;
     }
+  } else {
+    ESP_LOGW(TAG, "VIDIOC_G_SENSOR_FMT failed: %s", strerror(errno));
+    ESP_LOGW(TAG, "Cannot query sensor format, trying direct V4L2 configuration");
   }
 
-  if (!size_found && !native_size_found) {
-    ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in RGB565 or RAW8 formats", width, height);
-    ESP_LOGW(TAG, "⚠️  Trying to set anyway (driver may adjust)...");
+  if (!sensor_configured) {
+    ESP_LOGW(TAG, "⚠️  Sensor not configured, V4L2 format may fail");
   }
 
   struct v4l2_format fmt;
