@@ -390,6 +390,15 @@ void MipiDSICamComponent::setup() {
   if (h264_available) ESP_LOGI(TAG, "h264-encoder: ok");
   ESP_LOGI(TAG, "Camera ready: %s @ %s (%d fps)",
            this->pixel_format_.c_str(), this->resolution_.c_str(), this->framerate_);
+
+  // Démarrer le streaming automatiquement au setup pour éviter les blocages
+  // dans les handlers HTTP qui pourraient causer des watchdog timeouts
+  ESP_LOGI(TAG, "Starting video streaming...");
+  if (this->start_streaming()) {
+    ESP_LOGI(TAG, "Video streaming started successfully");
+  } else {
+    ESP_LOGW(TAG, "Failed to start video streaming - will retry on demand");
+  }
 }
 
 void MipiDSICamComponent::loop() {
