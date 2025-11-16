@@ -23,12 +23,8 @@ void RTSPServer::setup() {
   // Generate random SSRC
   rtp_ssrc_ = esp_random();
 
-  // Initialize H.264 encoder
-  if (init_h264_encoder_() != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize H.264 encoder");
-    mark_failed();
-    return;
-  }
+  // Note: H.264 encoder initialization is deferred until first client connects
+  // This is because camera dimensions are not available until streaming starts
 
   // Initialize RTP/RTCP sockets
   if (init_rtp_sockets_() != ESP_OK) {
@@ -46,6 +42,7 @@ void RTSPServer::setup() {
 
   ESP_LOGI(TAG, "RTSP Server setup complete");
   ESP_LOGI(TAG, "Stream URL: rtsp://<IP>:%d%s", rtsp_port_, stream_path_.c_str());
+  ESP_LOGI(TAG, "Note: H.264 encoder will initialize when first client connects");
 }
 
 void RTSPServer::loop() {
@@ -74,21 +71,39 @@ void RTSPServer::dump_config() {
 }
 
 esp_err_t RTSPServer::init_h264_encoder_() {
-  ESP_LOGI(TAG, "Initializing H.264 hardware encoder...");
+  ESP_LOGI(TAG, "Initializing H.264 software encoder...");
 
   if (!camera_) {
     ESP_LOGE(TAG, "Camera not set");
     return ESP_FAIL;
   }
 
+  // Check if camera is streaming and has valid dimensions
+  if (!camera_->is_streaming()) {
+    ESP_LOGW(TAG, "Camera not streaming yet, starting stream...");
+    if (!camera_->start_streaming()) {
+      ESP_LOGE(TAG, "Failed to start camera streaming");
+      return ESP_FAIL;
+    }
+    // Give camera time to initialize
+    delay(100);
+  }
+
   uint16_t width = camera_->get_image_width();
   uint16_t height = camera_->get_image_height();
+
+  // Verify dimensions are valid
+  if (width == 0 || height == 0) {
+    ESP_LOGE(TAG, "Invalid camera dimensions: %dx%d", width, height);
+    return ESP_FAIL;
+  }
 
   // Align to 16
   width = ((width + 15) >> 4) << 4;
   height = ((height + 15) >> 4) << 4;
 
-  ESP_LOGI(TAG, "Resolution: %dx%d", width, height);
+  ESP_LOGI(TAG, "Resolution: %dx%d (aligned from %dx%d)", width, height,
+           camera_->get_image_width(), camera_->get_image_height());
 
   // Allocate buffers
   yuv_buffer_size_ = width * height * 3 / 2;
@@ -431,6 +446,19 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
 
 void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
+
+  // Lazy initialization of H.264 encoder on first PLAY
+  if (!h264_encoder_) {
+    ESP_LOGI(TAG, "Initializing H.264 encoder (first client)...");
+    if (init_h264_encoder_() != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 encoder");
+      std::map<std::string, std::string> headers;
+      headers["CSeq"] = std::to_string(cseq);
+      send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
+      return;
+    }
+    ESP_LOGI(TAG, "H.264 encoder initialized successfully");
+  }
 
   session.state = RTSPState::PLAYING;
   streaming_active_ = true;
