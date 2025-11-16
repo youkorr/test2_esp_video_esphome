@@ -1135,12 +1135,9 @@ bool MipiDSICamComponent::capture_frame() {
   uint32_t t4 = esp_timer_get_time();
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
+  // Le buffer reste OUT de V4L2 jusqu'à ce que release_buffer() soit appelé
   portENTER_CRITICAL(&this->buffer_mutex_);
-  // Marquer l'ancien buffer comme disponible pour V4L2
-  if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
-    this->simple_buffers_[this->current_buffer_index_].allocated = false;
-  }
-  // Marquer le nouveau buffer comme actuellement affiché
+  // Marquer le nouveau buffer comme actuellement disponible (OUT de V4L2)
   this->simple_buffers_[buffer_idx].allocated = true;
   this->current_buffer_index_ = buffer_idx;
   this->image_buffer_ = frame_data;  // Legacy API pointer
@@ -1150,9 +1147,9 @@ bool MipiDSICamComponent::capture_frame() {
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame captured (V4L2 USERPTR - zero-copy to SPIRAM):");
-    ESP_LOGI(TAG, "   Buffer size: %u bytes (%ux%u × 2 = RGB565)",
-             this->image_buffer_size_, this->image_width_, this->image_height_);
+    ESP_LOGI(TAG, "✅ First frame captured (V4L2 USERPTR - pipeline mode):");
+    ESP_LOGI(TAG, "   Resolution: %ux%u @ 30fps (SC202CS)", this->image_width_, this->image_height_);
+    ESP_LOGI(TAG, "   Buffer size: %u bytes (RGB565 = 2 bytes/pixel)", this->image_buffer_size_);
     ESP_LOGI(TAG, "   SPIRAM buffer: %p (index=%d)", frame_data, buffer_idx);
     ESP_LOGI(TAG, "   Timing: DQBUF=%uus, PPA=%uus",
              (uint32_t)(t2-t1), (uint32_t)(t4-t3));
@@ -1160,24 +1157,13 @@ bool MipiDSICamComponent::capture_frame() {
              frame_data[0], frame_data[1],
              frame_data[2], frame_data[3],
              frame_data[4], frame_data[5]);
+    ESP_LOGI(TAG, "   ℹ️  Buffer pipeline: DQBUF → display → release_buffer() → QBUF");
   }
 
   // Profiling détaillé toutes les 100 frames
   profile_count++;
   total_dqbuf_us += (t2 - t1);
   total_copy_us += (t4 - t3);  // PPA transformation time (no memcpy!)
-
-  // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
-  uint32_t t5 = esp_timer_get_time();
-  buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
-  buf.length = this->image_buffer_size_;
-  if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
-    return false;
-  }
-  uint32_t t6 = esp_timer_get_time();
-
-  total_qbuf_us += (t6 - t5);
 
   if (profile_count == 100) {
     // Logs de profiling commentés pour réduire verbosité
@@ -1842,7 +1828,8 @@ SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
 /**
  * @brief Libère un buffer après affichage
  *
- * Marque le buffer comme "free" pour qu'il puisse être réutilisé par capture_frame().
+ * Re-queue le buffer dans V4L2 pour qu'il puisse être réutilisé par capture_frame().
+ * Ceci implémente le pipeline buffer comme dans Waveshare app_camera_pipeline.cpp.
  * Ne PAS libérer current_buffer_index_ - seulement les anciens buffers dont l'affichage est terminé.
  *
  * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
@@ -1854,12 +1841,32 @@ void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
     return;
   }
 
+  if (!this->streaming_active_ || this->video_fd_ < 0) {
+    return;
+  }
+
   // Ne PAS libérer current_buffer_index_ (il est encore utilisé pour capture)
   portENTER_CRITICAL(&this->buffer_mutex_);
-  if (element->index != this->current_buffer_index_) {
+  bool should_release = (element->index != this->current_buffer_index_);
+  if (should_release) {
     element->allocated = false;
   }
   portEXIT_CRITICAL(&this->buffer_mutex_);
+
+  // Re-queue le buffer dans V4L2 (pipeline comme Waveshare)
+  if (should_release) {
+    struct v4l2_buffer buf;
+    memset(&buf, 0, sizeof(buf));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_USERPTR;
+    buf.index = element->index;
+    buf.m.userptr = (unsigned long)element->data;
+    buf.length = this->image_buffer_size_;
+
+    if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
+      ESP_LOGW(TAG, "⚠️  VIDIOC_QBUF buffer[%u] failed in release: %s", element->index, strerror(errno));
+    }
+  }
 }
 
 /**
