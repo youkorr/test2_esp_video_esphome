@@ -18,6 +18,10 @@
 extern "C" {
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_types.h"
+#include "sc202cs_settings.h"
+#include "sc202cs.h"
+#include "ov5647_settings.h"
+#include "ov5647.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "esp_video_ioctl.h"
