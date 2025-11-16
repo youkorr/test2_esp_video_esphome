@@ -10,8 +10,8 @@
 
 #include <stdint.h>
 #include "esp_cam_sensor_types.h"
-#include "sc202cs_types.h"
-#include "sc202cs_regs.h"
+#include "../../esp_cam_sensor/sensor/sc202cs/include/sc202cs_types.h"
+#include "../../esp_cam_sensor/sensor/sc202cs/include/private_include/sc202cs_regs.h"
 
 #ifdef __cplusplus
 extern "C" {
