@@ -81,8 +81,8 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  uint16_t width = camera_->get_width();
-  uint16_t height = camera_->get_height();
+  uint16_t width = camera_->get_image_width();
+  uint16_t height = camera_->get_image_height();
 
   // Align to 16
   width = ((width + 15) >> 4) << 4;
@@ -473,8 +473,8 @@ std::string RTSPServer::generate_sdp_() {
   // Get local IP
   std::string local_ip = "0.0.0.0";  // Will be replaced with actual IP
 
-  uint16_t width = camera_->get_width();
-  uint16_t height = camera_->get_height();
+  uint16_t width = camera_->get_image_width();
+  uint16_t height = camera_->get_image_height();
 
   std::ostringstream sdp;
   sdp << "v=0\r\n";
@@ -582,15 +582,17 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (!camera_ || !h264_encoder_)
     return ESP_FAIL;
 
-  auto frame = camera_->get_current_frame();
-  if (!frame || frame->size() == 0)
-    return ESP_FAIL;
+  // Get current RGB565 frame (must be released after use)
+  mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
+  uint8_t* frame_data = nullptr;
+  int width, height;
 
-  uint16_t width = camera_->get_width();
-  uint16_t height = camera_->get_height();
+  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
+    return ESP_FAIL;
+  }
 
   // Convert RGB565 to YUV420
-  convert_rgb565_to_yuv420_(frame->data(), yuv_buffer_, width, height);
+  convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height);
 
   // Encode
   esp_h264_enc_in_frame_t in_frame = {};
@@ -605,6 +607,7 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   esp_h264_err_t ret = esp_h264_enc_process(h264_encoder_, &in_frame, &out_frame);
   if (ret != ESP_H264_ERR_OK) {
     ESP_LOGE(TAG, "H.264 encoding failed: %d", ret);
+    camera_->release_buffer(buffer);  // Release buffer before returning
     return ESP_FAIL;
   }
 
@@ -621,6 +624,9 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   frame_count_++;
   rtp_timestamp_ += 3000;  // 90kHz / 30fps
+
+  // Release buffer after processing
+  camera_->release_buffer(buffer);
 
   return ESP_OK;
 }

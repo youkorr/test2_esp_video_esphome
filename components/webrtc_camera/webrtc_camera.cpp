@@ -225,8 +225,8 @@ esp_err_t WebRTCCamera::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  uint16_t width = camera_->get_width();
-  uint16_t height = camera_->get_height();
+  uint16_t width = camera_->get_image_width();
+  uint16_t height = camera_->get_image_height();
 
   // Align dimensions to 16
   width = ((width + 15) >> 4) << 4;
@@ -368,18 +368,19 @@ esp_err_t WebRTCCamera::encode_and_send_frame_() {
     return ESP_FAIL;
   }
 
-  // Get frame from camera
-  auto frame = camera_->get_current_frame();
-  if (!frame || frame->size() == 0) {
+  // Get current RGB565 frame (must be released after use)
+  mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
+  uint8_t* frame_data = nullptr;
+  int width, height;
+
+  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
     return ESP_FAIL;
   }
 
-  uint16_t width = camera_->get_width();
-  uint16_t height = camera_->get_height();
-
   // Convert RGB565 to YUV420
-  if (convert_rgb565_to_yuv420_(frame->data(), yuv_buffer_, width, height) != ESP_OK) {
+  if (convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to convert RGB565 to YUV420");
+    camera_->release_buffer(buffer);  // Release buffer before returning
     return ESP_FAIL;
   }
 
@@ -398,6 +399,7 @@ esp_err_t WebRTCCamera::encode_and_send_frame_() {
   esp_h264_err_t ret = esp_h264_enc_process(h264_encoder_, &in_frame, &out_frame);
   if (ret != ESP_H264_ERR_OK) {
     ESP_LOGE(TAG, "H.264 encoding failed: %d", ret);
+    camera_->release_buffer(buffer);  // Release buffer before returning
     return ESP_FAIL;
   }
 
@@ -405,6 +407,7 @@ esp_err_t WebRTCCamera::encode_and_send_frame_() {
   if (send_h264_over_rtp_(out_frame.raw_data.buffer, out_frame.length,
                            out_frame.frame_type, out_frame.pts) != ESP_OK) {
     ESP_LOGW(TAG, "Failed to send RTP packet");
+    camera_->release_buffer(buffer);  // Release buffer before returning
     return ESP_FAIL;
   }
 
@@ -414,6 +417,9 @@ esp_err_t WebRTCCamera::encode_and_send_frame_() {
     ESP_LOGI(TAG, "Sent %d frames, type: %d, size: %d bytes",
              frame_count_, out_frame.frame_type, out_frame.length);
   }
+
+  // Release buffer after processing
+  camera_->release_buffer(buffer);
 
   return ESP_OK;
 }
