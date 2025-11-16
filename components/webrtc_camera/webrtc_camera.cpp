@@ -251,15 +251,15 @@ esp_err_t WebRTCCamera::init_h264_encoder_() {
     return ESP_ERR_NO_MEM;
   }
 
-  // Configure H.264 encoder
-  esp_h264_enc_cfg_hw_t cfg = {
-      .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,  // YUV420 format for HW encoder
+  // Configure H.264 encoder (software encoder using OpenH264)
+  esp_h264_enc_cfg_sw_t cfg = {
+      .pic_type = ESP_H264_RAW_FMT_I420,  // YUV420 planar (I420) for software encoder
       .gop = gop_,
       .fps = 30,
       .res = {.width = width, .height = height},
       .rc = {.bitrate = bitrate_, .qp_min = qp_min_, .qp_max = qp_max_}};
 
-  esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &h264_encoder_);
+  esp_h264_err_t ret = esp_h264_enc_sw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
     ESP_LOGE(TAG, "Failed to create H.264 encoder: %d", ret);
     cleanup_h264_encoder_();
