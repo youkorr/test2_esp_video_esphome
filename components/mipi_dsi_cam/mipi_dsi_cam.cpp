@@ -806,6 +806,12 @@ bool MipiDSICamComponent::start_streaming() {
       custom_format = &sc202cs_format_vga_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (SC202CS)");
     }
+    // ★ Sélectionner le format custom 720P avec EXPOSITION RÉDUITE (25%)
+    else if (width == 1280 && height == 720 && this->resolution_ == "720P_LOW_EXPOSURE") {
+      custom_format = &sc202cs_format_1280x720_low_exposure;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 720P 1280x720 RAW8 @ 30fps LOW EXPOSURE (SC202CS)");
+      ESP_LOGI(TAG, "   Exposition réduite à 25% (0x1370 au lieu de 0x4dc0)");
+    }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
     if (custom_format != nullptr) {
@@ -814,7 +820,7 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
       } else {
         ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for native VGA (%ux%u)", width, height);
+        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
       }
     }
   }
