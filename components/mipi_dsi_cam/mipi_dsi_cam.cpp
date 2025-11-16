@@ -390,15 +390,6 @@ void MipiDSICamComponent::setup() {
   if (h264_available) ESP_LOGI(TAG, "h264-encoder: ok");
   ESP_LOGI(TAG, "Camera ready: %s @ %s (%d fps)",
            this->pixel_format_.c_str(), this->resolution_.c_str(), this->framerate_);
-
-  // Démarrer le streaming automatiquement au setup pour éviter les blocages
-  // dans les handlers HTTP qui pourraient causer des watchdog timeouts
-  ESP_LOGI(TAG, "Starting video streaming...");
-  if (this->start_streaming()) {
-    ESP_LOGI(TAG, "Video streaming started successfully");
-  } else {
-    ESP_LOGW(TAG, "Failed to start video streaming - will retry on demand");
-  }
 }
 
 void MipiDSICamComponent::loop() {
@@ -737,67 +728,8 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  // Configurer le sensor avec sa résolution native (indépendamment de VIDIOC_ENUM_FRAMESIZES)
-  // Le driver du sensor a ses propres formats prédéfinis qu'on peut interroger/configurer
-  bool sensor_configured = false;
-
-  ESP_LOGI(TAG, "Configuring sensor for %ux%u resolution...", width, height);
-
-  // Récupérer le format actuel du sensor
-  esp_cam_sensor_format_t sensor_fmt;
-  memset(&sensor_fmt, 0, sizeof(sensor_fmt));
-
-  if (ioctl(this->video_fd_, VIDIOC_G_SENSOR_FMT, &sensor_fmt) == 0) {
-    ESP_LOGI(TAG, "  Current sensor format: %ux%u", sensor_fmt.width, sensor_fmt.height);
-
-    // Si la résolution actuelle ne correspond pas, la modifier
-    if (sensor_fmt.width != width || sensor_fmt.height != height) {
-      sensor_fmt.width = width;
-      sensor_fmt.height = height;
-
-      // Appliquer le nouveau format au sensor
-      ESP_LOGI(TAG, "  Applying sensor format %ux%u...", width, height);
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sensor_fmt) == 0) {
-        ESP_LOGI(TAG, "  ✓ Sensor configured for %ux%u", width, height);
-        sensor_configured = true;
-        size_found = true;  // Éviter les warnings
-      } else {
-        ESP_LOGW(TAG, "  ✗ Failed to configure sensor: %s", strerror(errno));
-        ESP_LOGW(TAG, "  Sensor may not support %ux%u natively", width, height);
-
-        // Afficher les résolutions natives supportées par le driver du sensor
-        ESP_LOGI(TAG, "");
-        ESP_LOGI(TAG, "Native resolutions supported by %s driver:", this->sensor_name_.c_str());
-        if (this->sensor_name_ == "ov5647") {
-          ESP_LOGI(TAG, "  - 800x640   (RAW8  @ 50fps)");
-          ESP_LOGI(TAG, "  - 800x800   (RAW8  @ 50fps)");
-          ESP_LOGI(TAG, "  - 800x1280  (RAW8  @ 50fps)");
-          ESP_LOGI(TAG, "  - 1280x960  (RAW10 @ 45fps)");
-          ESP_LOGI(TAG, "  - 1920x1080 (RAW10 @ 30fps)");
-        } else if (this->sensor_name_ == "ov02c10") {
-          ESP_LOGI(TAG, "  - 1288x728  (RAW10 @ 30fps)");
-          ESP_LOGI(TAG, "  - 1920x1080 (RAW10 @ 30fps)");
-        } else if (this->sensor_name_ == "sc202cs") {
-          ESP_LOGI(TAG, "  - 1280x720  (RAW8  @ 30fps)");
-          ESP_LOGI(TAG, "  - 1600x900  (RAW10 @ 30fps)");
-          ESP_LOGI(TAG, "  - 1600x1200 (RAW8/RAW10 @ 30fps)");
-        }
-        ESP_LOGI(TAG, "");
-      }
-    } else {
-      ESP_LOGI(TAG, "  ✓ Sensor already configured for %ux%u", width, height);
-      sensor_configured = true;
-      size_found = true;
-    }
-  } else {
-    ESP_LOGW(TAG, "VIDIOC_G_SENSOR_FMT failed: %s", strerror(errno));
-    ESP_LOGW(TAG, "Cannot query sensor format, trying direct V4L2 configuration");
-  }
-
-  if (!sensor_configured) {
-    ESP_LOGW(TAG, "⚠️  Sensor not configured, V4L2 format may fail");
-  }
-
+  // Essayer d'abord le format V4L2 sans reconfigurer le sensor
+  // (le sensor garde sa configuration entre les redémarrages de streaming)
   struct v4l2_format fmt;
   memset(&fmt, 0, sizeof(fmt));
   fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -808,16 +740,48 @@ bool MipiDSICamComponent::start_streaming() {
 
   // SET le format pour que le driver calcule sizeimage
   if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
+    // VIDIOC_S_FMT a échoué - essayer de configurer le sensor d'abord
+    ESP_LOGW(TAG, "VIDIOC_S_FMT failed: %s - trying to configure sensor first", strerror(errno));
+
+    // Récupérer et modifier le format du sensor
+    esp_cam_sensor_format_t sensor_fmt;
+    memset(&sensor_fmt, 0, sizeof(sensor_fmt));
+
+    if (ioctl(this->video_fd_, VIDIOC_G_SENSOR_FMT, &sensor_fmt) == 0) {
+      if (sensor_fmt.width != width || sensor_fmt.height != height) {
+        sensor_fmt.width = width;
+        sensor_fmt.height = height;
+
+        if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sensor_fmt) == 0) {
+          ESP_LOGI(TAG, "✓ Sensor reconfigured to %ux%u - retrying VIDIOC_S_FMT", width, height);
+
+          // Retry VIDIOC_S_FMT après config sensor
+          if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) == 0) {
+            goto fmt_success;  // Format appliqué avec succès après config sensor
+          }
+        }
+      }
+    }
+
+    // Si on arrive ici, ça a échoué même après config sensor
+    ESP_LOGE(TAG, "VIDIOC_S_FMT failed even after sensor configuration");
     ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
     ESP_LOGE(TAG, "This may indicate:");
-    ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
-    ESP_LOGE(TAG, "  2. ESP-IDF 5.4.2+ has stricter format validation");
-    ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
+    ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution", this->sensor_name_.c_str());
+    ESP_LOGE(TAG, "  2. Try a supported resolution:");
+    if (this->sensor_name_ == "ov5647") {
+      ESP_LOGE(TAG, "     800x640, 800x800, 800x1280, 1280x960, 1920x1080");
+    } else if (this->sensor_name_ == "ov02c10") {
+      ESP_LOGE(TAG, "     1288x728, 1920x1080");
+    } else if (this->sensor_name_ == "sc202cs") {
+      ESP_LOGE(TAG, "     1280x720, 1600x900, 1600x1200");
+    }
     close(this->video_fd_);
     this->video_fd_ = -1;
     return false;
   }
+
+fmt_success:  // Label pour sauter ici après succès
 
   // 3. Vérifier le format appliqué (le driver peut ajuster)
   if (ioctl(this->video_fd_, VIDIOC_G_FMT, &fmt) < 0) {
