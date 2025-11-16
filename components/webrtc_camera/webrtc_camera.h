@@ -8,9 +8,9 @@
 #include <esp_http_server.h>
 #include <esp_event.h>
 #include <lwip/sockets.h>
-#include "esp_h264/interface/include/esp_h264_enc_single.h"
-#include "esp_h264/hw/include/esp_h264_enc_single_hw.h"
-#include "esp_h264/interface/include/esp_h264_types.h"
+#include "esp_h264_enc_single.h"
+#include "esp_h264_enc_single_hw.h"
+#include "esp_h264_types.h"
 #endif
 
 namespace esphome {

@@ -9,9 +9,9 @@
 #include <string>
 #include <vector>
 #include <map>
-#include "esp_h264/interface/include/esp_h264_enc_single.h"
-#include "esp_h264/hw/include/esp_h264_enc_single_hw.h"
-#include "esp_h264/interface/include/esp_h264_types.h"
+#include "esp_h264_enc_single.h"
+#include "esp_h264_enc_single_hw.h"
+#include "esp_h264_types.h"
 #endif
 
 namespace esphome {
