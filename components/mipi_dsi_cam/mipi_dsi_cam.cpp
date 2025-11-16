@@ -796,18 +796,13 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ VGA 640x480)
+  // Custom Format Support (SC202CS) - Low Exposure 720P
   // ============================================================================
   if (this->sensor_name_ == "sc202cs") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
-    // Sélectionner le format custom VGA
-    if (width == 640 && height == 480) {
-      custom_format = &sc202cs_format_vga_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (SC202CS)");
-    }
-    // ★ Sélectionner le format custom 720P avec EXPOSITION RÉDUITE (25%)
-    else if (width == 1280 && height == 720 && this->resolution_ == "720P_LOW_EXPOSURE") {
+    // Sélectionner le format custom 720P avec EXPOSITION RÉDUITE (25%)
+    if (width == 1280 && height == 720 && this->resolution_ == "720P_LOW_EXPOSURE") {
       custom_format = &sc202cs_format_1280x720_low_exposure;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 720P 1280x720 RAW8 @ 30fps LOW EXPOSURE (SC202CS)");
       ESP_LOGI(TAG, "   Exposition réduite à 25% (0x1370 au lieu de 0x4dc0)");
