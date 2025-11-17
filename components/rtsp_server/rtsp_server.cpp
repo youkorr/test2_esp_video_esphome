@@ -119,21 +119,23 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   ESP_LOGI(TAG, "Resolution: %dx%d (aligned from %dx%d)", width, height,
            camera_->get_image_width(), camera_->get_image_height());
 
-  // Allocate buffers (standard allocation for software encoder)
+  // Allocate buffers with 64-byte alignment (required by hardware encoder DMA)
   yuv_buffer_size_ = width * height * 3 / 2;
-  yuv_buffer_ = (uint8_t *)heap_caps_malloc(yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  yuv_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!yuv_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate YUV buffer");
+    ESP_LOGE(TAG, "Failed to allocate YUV buffer (64-byte aligned)");
     return ESP_ERR_NO_MEM;
   }
+  ESP_LOGI(TAG, "YUV buffer allocated: %zu bytes @ %p (64-byte aligned)", yuv_buffer_size_, yuv_buffer_);
 
   h264_buffer_size_ = yuv_buffer_size_ * 2;
-  h264_buffer_ = (uint8_t *)heap_caps_malloc(h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  h264_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!h264_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate H.264 buffer");
+    ESP_LOGE(TAG, "Failed to allocate H.264 buffer (64-byte aligned)");
     free(yuv_buffer_);
     return ESP_ERR_NO_MEM;
   }
+  ESP_LOGI(TAG, "H.264 buffer allocated: %zu bytes @ %p (64-byte aligned)", h264_buffer_size_, h264_buffer_);
 
   // Allocate reusable RTP packet buffer (2KB) to reduce stack usage
   rtp_packet_buffer_ = (uint8_t *)heap_caps_malloc(2048, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
