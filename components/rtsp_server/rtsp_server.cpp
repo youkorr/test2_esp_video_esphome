@@ -750,15 +750,17 @@ esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t 
       uint8_t u_avg = (u0_r0 + u0_r1) >> 1;
       uint8_t v_avg = (v0_r0 + v0_r1) >> 1;
 
-      // Write to odd line: V Y0 Y1 (swap U/V to fix green tint)
+      // Write to line at row index (0,2,4...): U Y0 Y1
+      // According to O_UYY_E_VYY format: line 1,3,5... = U Y Y
       size_t odd_idx = (col / 2) * 3;
-      odd_line[odd_idx + 0] = v_avg;  // Swapped: was u_avg
+      odd_line[odd_idx + 0] = u_avg;
       odd_line[odd_idx + 1] = y0_r0;
       odd_line[odd_idx + 2] = y1_r0;
 
-      // Write to even line: U Y0 Y1 (swap U/V to fix green tint)
+      // Write to line at row index (1,3,5...): V Y0 Y1
+      // According to O_UYY_E_VYY format: line 2,4,6... = V Y Y
       size_t even_idx = (col / 2) * 3;
-      even_line[even_idx + 0] = u_avg;  // Swapped: was v_avg
+      even_line[even_idx + 0] = v_avg;
       even_line[even_idx + 1] = y0_r1;
       even_line[even_idx + 2] = y1_r1;
     }
@@ -848,9 +850,29 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
     return ESP_FAIL;
   }
 
+  // Debug: Log first frame info
+  if (frame_count_ == 0) {
+    ESP_LOGI(TAG, "First YUYV frame: %dx%d, expected size: %d bytes", width, height, width * height * 2);
+    ESP_LOGI(TAG, "First 16 bytes of YUYV: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             frame_data[0], frame_data[1], frame_data[2], frame_data[3],
+             frame_data[4], frame_data[5], frame_data[6], frame_data[7],
+             frame_data[8], frame_data[9], frame_data[10], frame_data[11],
+             frame_data[12], frame_data[13], frame_data[14], frame_data[15]);
+  }
+
   // Convert YUYV (YUV422) to O_UYY_E_VYY (YUV420) - FAST conversion!
   // This is 10x faster than RGB565→YUV conversion (no color space math, just rearrangement)
   convert_yuyv_to_o_uyy_e_vyy_(frame_data, yuv_buffer_, width, height);
+
+  // Debug: Log converted YUV buffer
+  if (frame_count_ == 0) {
+    ESP_LOGI(TAG, "Converted O_UYY_E_VYY buffer size: %zu bytes", yuv_buffer_size_);
+    ESP_LOGI(TAG, "First 16 bytes of O_UYY_E_VYY: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             yuv_buffer_[0], yuv_buffer_[1], yuv_buffer_[2], yuv_buffer_[3],
+             yuv_buffer_[4], yuv_buffer_[5], yuv_buffer_[6], yuv_buffer_[7],
+             yuv_buffer_[8], yuv_buffer_[9], yuv_buffer_[10], yuv_buffer_[11],
+             yuv_buffer_[12], yuv_buffer_[13], yuv_buffer_[14], yuv_buffer_[15]);
+  }
 
   // Release the camera buffer ASAP (we've copied to yuv_buffer_)
   camera_->release_buffer(buffer);
@@ -867,7 +889,11 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   esp_h264_err_t ret = esp_h264_enc_process(h264_encoder_, &in_frame, &out_frame);
   if (ret != ESP_H264_ERR_OK) {
-    ESP_LOGE(TAG, "H.264 encoding failed: %d", ret);
+    ESP_LOGE(TAG, "H.264 encoding failed: error code %d (frame %u, in_len=%u, out_len=%u)",
+             ret, frame_count_, in_frame.raw_data.len, out_frame.raw_data.len);
+    if (frame_count_ == 0) {
+      ESP_LOGE(TAG, "First frame encoding failed - check YUV format conversion!");
+    }
     return ESP_FAIL;
   }
 
