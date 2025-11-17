@@ -160,6 +160,8 @@ class RTSPServer : public Component {
   // Video streaming
   esp_err_t stream_video_();
   esp_err_t encode_and_stream_frame_();
+  esp_err_t convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t *o_uyy_e_vyy,
+                                          uint16_t width, uint16_t height);
   esp_err_t convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420,
                                        uint16_t width, uint16_t height);
   esp_err_t send_h264_rtp_(const uint8_t *data, size_t len, bool marker);
