@@ -85,7 +85,7 @@ void RTSPServer::dump_config() {
 }
 
 esp_err_t RTSPServer::init_h264_encoder_() {
-  ESP_LOGI(TAG, "Initializing H.264 software encoder (OpenH264)...");
+  ESP_LOGI(TAG, "Initializing H.264 HARDWARE encoder (ESP32-P4 accelerator)...");
 
   if (!camera_) {
     ESP_LOGE(TAG, "Camera not set");
@@ -147,9 +147,9 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   // Preallocate NAL units cache to reduce stack allocations
   nal_units_cache_.reserve(20);  // Typical IDR frame has 10-15 NAL units
 
-  // Configure encoder (software encoder - OpenH264)
-  esp_h264_enc_cfg_sw_t cfg = {
-      .pic_type = ESP_H264_RAW_FMT_I420,  // YUV420 planar (I420) - compatible avec notre conversion
+  // Configure encoder (HARDWARE encoder - ESP32-P4 H.264 accelerator)
+  esp_h264_enc_cfg_hw_t cfg = {
+      .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,  // YUV420 packed (required by hardware encoder)
       .gop = gop_,
       .fps = 30,
       .res = {.width = width, .height = height},
@@ -158,23 +158,23 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   ESP_LOGI(TAG, "Encoder config: %dx%d @ 30fps, GOP=%d, bitrate=%d, QP=%d-%d",
            width, height, gop_, bitrate_, qp_min_, qp_max_);
 
-  esp_h264_err_t ret = esp_h264_enc_sw_new(&cfg, &h264_encoder_);
+  esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
-    ESP_LOGE(TAG, "Failed to create H.264 software encoder: %d", ret);
+    ESP_LOGE(TAG, "Failed to create H.264 hardware encoder: %d", ret);
     cleanup_h264_encoder_();
     return ESP_FAIL;
   }
 
   ret = esp_h264_enc_open(h264_encoder_);
   if (ret != ESP_H264_ERR_OK) {
-    ESP_LOGE(TAG, "Failed to open H.264 encoder: %d", ret);
+    ESP_LOGE(TAG, "Failed to open H.264 hardware encoder: %d", ret);
     cleanup_h264_encoder_();
     return ESP_FAIL;
   }
 
-  ESP_LOGI(TAG, "H.264 software encoder initialized successfully (OpenH264)");
-  ESP_LOGI(TAG, "Note: Software encoder on ESP32-P4 @ 360MHz");
-  ESP_LOGI(TAG, "  Expected: 640x480 @ ~20-25 FPS, 800x640 @ ~10-15 FPS");
+  ESP_LOGI(TAG, "H.264 HARDWARE encoder initialized successfully!");
+  ESP_LOGI(TAG, "Note: Using ESP32-P4 hardware H.264 accelerator");
+  ESP_LOGI(TAG, "  Expected: 800x640 @ ~25-30 FPS (hardware acceleration)");
   return ESP_OK;
 }
 
@@ -699,30 +699,59 @@ esp_err_t RTSPServer::stream_video_() {
   return encode_and_stream_frame_();
 }
 
+// Convert RGB565 to O_UYY_E_VYY format (required by ESP32-P4 hardware encoder)
+// Format: odd lines = u y y u y y..., even lines = v y y v y y...
 esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420, uint16_t width,
                                                  uint16_t height) {
-  uint8_t *y_plane = yuv420;
-  uint8_t *u_plane = yuv420 + (width * height);
-  uint8_t *v_plane = u_plane + (width * height / 4);
+  const uint16_t *rgb = (const uint16_t *)rgb565;
 
-  for (uint16_t row = 0; row < height; row++) {
-    for (uint16_t col = 0; col < width; col++) {
-      uint16_t pixel = ((uint16_t *)rgb565)[row * width + col];
+  // Process 2 lines at a time (odd line gets U, even line gets V)
+  for (uint16_t row = 0; row < height; row += 2) {
+    uint8_t *odd_line = yuv420 + (row * width * 3 / 2);      // Odd line: u y y u y y...
+    uint8_t *even_line = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
 
-      uint8_t r = ((pixel >> 11) & 0x1F) << 3;
-      uint8_t g = ((pixel >> 5) & 0x3F) << 2;
-      uint8_t b = (pixel & 0x1F) << 3;
+    // Process 2 pixels at a time (UV subsampling)
+    for (uint16_t col = 0; col < width; col += 2) {
+      // Get 4 pixels (2x2 block)
+      uint16_t p00 = rgb[(row + 0) * width + (col + 0)];
+      uint16_t p01 = rgb[(row + 0) * width + (col + 1)];
+      uint16_t p10 = rgb[(row + 1) * width + (col + 0)];
+      uint16_t p11 = rgb[(row + 1) * width + (col + 1)];
 
-      int y = (66 * r + 129 * g + 25 * b + 128) >> 8;
-      int u = (-38 * r - 74 * g + 112 * b + 128) >> 8;
-      int v = (112 * r - 94 * g - 18 * b + 128) >> 8;
-
-      y_plane[row * width + col] = y + 16;
-
-      if (row % 2 == 0 && col % 2 == 0) {
-        u_plane[(row / 2) * (width / 2) + (col / 2)] = u + 128;
-        v_plane[(row / 2) * (width / 2) + (col / 2)] = v + 128;
+      // Convert each pixel to RGB
+      uint8_t r[4], g[4], b[4];
+      for (int i = 0; i < 4; i++) {
+        uint16_t p = (i == 0) ? p00 : (i == 1) ? p01 : (i == 2) ? p10 : p11;
+        r[i] = ((p >> 11) & 0x1F) << 3;
+        g[i] = ((p >> 5) & 0x3F) << 2;
+        b[i] = (p & 0x1F) << 3;
       }
+
+      // Calculate Y for all 4 pixels
+      int y[4];
+      for (int i = 0; i < 4; i++) {
+        y[i] = ((66 * r[i] + 129 * g[i] + 25 * b[i] + 128) >> 8) + 16;
+      }
+
+      // Calculate average U and V from 2x2 block
+      int r_avg = (r[0] + r[1] + r[2] + r[3]) / 4;
+      int g_avg = (g[0] + g[1] + g[2] + g[3]) / 4;
+      int b_avg = (b[0] + b[1] + b[2] + b[3]) / 4;
+
+      int u = ((-38 * r_avg - 74 * g_avg + 112 * b_avg + 128) >> 8) + 128;
+      int v = ((112 * r_avg - 94 * g_avg - 18 * b_avg + 128) >> 8) + 128;
+
+      // Write to odd line: u y0 y1
+      size_t odd_idx = (col / 2) * 3;
+      odd_line[odd_idx + 0] = u;
+      odd_line[odd_idx + 1] = y[0];
+      odd_line[odd_idx + 2] = y[1];
+
+      // Write to even line: v y2 y3
+      size_t even_idx = (col / 2) * 3;
+      even_line[even_idx + 0] = v;
+      even_line[even_idx + 1] = y[2];
+      even_line[even_idx + 2] = y[3];
     }
   }
 
