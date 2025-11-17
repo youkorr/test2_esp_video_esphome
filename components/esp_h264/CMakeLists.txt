@@ -8,6 +8,11 @@ set(component_srcs
     "sw/src/esp_h264_enc_sw_param.c"
     "sw/src/esp_h264_dec_sw.c"
     "sw/src/esp_h264_enc_single_sw.c"
+    "hw/src/esp_h264_enc_single_hw.c"
+    "hw/src/esp_h264_enc_dual_hw.c"
+    "hw/src/esp_h264_enc_hw_param.c"
+    "hw/src/h264_nal.c"
+    "hw/src/h264_rc.c"
     "interface/include/src/esp_h264_enc_param.c"
     "interface/include/src/esp_h264_enc_param_hw.c"
     "interface/include/src/esp_h264_enc_dual.c"
@@ -21,15 +26,22 @@ set(component_include_dirs
     "interface/include"
     "port/include"
     "sw/include"
+    "hw/include"
 )
 
 set(component_requires
     driver
 )
 
+set(component_priv_include_dirs
+    "hw/src"
+    "sw/src"
+)
+
 idf_component_register(
     SRCS ${component_srcs}
     INCLUDE_DIRS ${component_include_dirs}
+    PRIV_INCLUDE_DIRS ${component_priv_include_dirs}
     REQUIRES ${component_requires}
 )
 
