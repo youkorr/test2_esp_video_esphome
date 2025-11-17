@@ -852,17 +852,14 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   // Debug: Log first frame info
   if (frame_count_ == 0) {
-    ESP_LOGI(TAG, "First YUYV frame: %dx%d, expected size: %d bytes", width, height, width * height * 2);
-    ESP_LOGI(TAG, "First 16 bytes of YUYV: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
-             frame_data[0], frame_data[1], frame_data[2], frame_data[3],
-             frame_data[4], frame_data[5], frame_data[6], frame_data[7],
-             frame_data[8], frame_data[9], frame_data[10], frame_data[11],
-             frame_data[12], frame_data[13], frame_data[14], frame_data[15]);
+    ESP_LOGI(TAG, "First RGB565 frame: %dx%d, expected size: %d bytes", width, height, width * height * 2);
+    uint16_t *rgb = (uint16_t *)frame_data;
+    ESP_LOGI(TAG, "First 4 RGB565 pixels: %04X %04X %04X %04X", rgb[0], rgb[1], rgb[2], rgb[3]);
   }
 
-  // Convert YUYV (YUV422) to O_UYY_E_VYY (YUV420) - FAST conversion!
-  // This is 10x faster than RGB565→YUV conversion (no color space math, just rearrangement)
-  convert_yuyv_to_o_uyy_e_vyy_(frame_data, yuv_buffer_, width, height);
+  // Convert RGB565 to O_UYY_E_VYY (YUV420) for hardware encoder
+  // Note: YUYV from OV5647 has incorrect U/V values (all 0x10), so using RGB565 instead
+  convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height);
 
   // Debug: Log converted YUV buffer
   if (frame_count_ == 0) {

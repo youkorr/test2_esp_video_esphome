@@ -77,7 +77,7 @@ mipi_dsi_cam:
   sensor_type: ov5647      # Votre caméra détectée
   sensor_addr: 0x36        # Adresse I2C OV5647
   resolution: 800x640      # Résolution détectée dans vos logs
-  pixel_format: YUYV       # YUV422 format (optimized for H.264 encoding)
+  pixel_format: RGB565     # RGB565 works better than YUYV with OV5647
   framerate: 30            # 30 FPS
 
   # Bayer pattern for OV5647
