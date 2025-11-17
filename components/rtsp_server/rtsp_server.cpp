@@ -507,12 +507,12 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
   session.state = RTSPState::PLAYING;
   streaming_active_ = true;
 
-  // Create streaming task if not already running (with 16KB stack)
+  // Create streaming task if not already running (with large stack for H.264 encoding)
   if (streaming_task_handle_ == nullptr) {
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",        // Task name
-        4096,                 // Stack size in WORDS (4096 words = 16KB)
+        8192,                 // Stack size in WORDS (8192 words = 32KB)
         this,                 // Parameter passed to task
         5,                    // Priority (same as loopTask)
         &streaming_task_handle_,
@@ -527,7 +527,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
       send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
       return;
     }
-    ESP_LOGI(TAG, "Streaming task created with 16KB stack on core 1");
+    ESP_LOGI(TAG, "Streaming task created with 32KB stack on core 1");
   }
 
   std::map<std::string, std::string> headers;
