@@ -654,27 +654,29 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (!camera_ || !h264_encoder_)
     return ESP_FAIL;
 
-  // Capture new frame from camera (like camera_web_server does)
-  if (!camera_->capture_frame()) {
-    ESP_LOGW(TAG, "Failed to capture frame");
+  // Use get_current_rgb_frame() which locks the buffer until release_buffer()
+  // This prevents V4L2 from overwriting the buffer while we're encoding
+  mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
+  uint8_t* frame_data = nullptr;
+  int width, height;
+
+  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
+    ESP_LOGW(TAG, "Failed to get RGB frame");
     return ESP_FAIL;
   }
 
-  // Get frame data using stable image_buffer_ (like camera_web_server)
-  uint8_t* frame_data = camera_->get_image_data();
-  size_t frame_size = camera_->get_image_size();
-  uint16_t width = camera_->get_image_width();
-  uint16_t height = camera_->get_image_height();
-
-  if (frame_data == nullptr || frame_size == 0) {
-    ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u", frame_data, frame_size);
+  if (frame_data == nullptr || buffer == nullptr) {
+    ESP_LOGW(TAG, "Invalid frame data: ptr=%p buffer=%p", frame_data, buffer);
     return ESP_FAIL;
   }
 
-  // Convert RGB565 to YUV420
+  // Convert RGB565 to YUV420 (buffer is locked, safe to read)
   convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height);
 
-  // Encode
+  // Release the camera buffer ASAP (we've copied to yuv_buffer_)
+  camera_->release_buffer(buffer);
+
+  // Encode from our YUV buffer
   esp_h264_enc_in_frame_t in_frame = {};
   in_frame.raw_data.buffer = yuv_buffer_;
   in_frame.raw_data.len = yuv_buffer_size_;
