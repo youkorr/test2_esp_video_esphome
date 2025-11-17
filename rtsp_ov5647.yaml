@@ -12,21 +12,29 @@ esphome:
 esp32:
   board: esp32-p4-function-ev-board
   variant: esp32p4
+  flash_size: 32MB
+  cpu_frequency: 360MHz
   framework:
     type: esp-idf
     version: 5.4.2
     platform_version: https://github.com/pioarduino/platform-espressif32/releases/download/51.03.07/platform-espressif32.zip
     advanced:
-      # Augmenter les limites de stack pour H.264 encoding
+      enable_idf_experimental_features: true
       sdkconfig_options:
+        # SPIRAM configuration
+        CONFIG_SPIRAM_USE_CAPS_ALLOC: "y"
+        CONFIG_SPIRAM_USE_MALLOC: "y"
+        # File system configuration
+        CONFIG_FATFS_LFN_STACK: "y"
+        CONFIG_VFS_MAX_COUNT: "16"        # Augmenter de 8 à 16
+        CONFIG_VFS_SUPPORT_IO: "y"
+        # Network configuration
+        CONFIG_LWIP_SO_RCVBUF: "y"
+        CONFIG_LWIP_MAX_SOCKETS: "16"     # Plus de sockets réseau
         # Stack sizes pour les tasks système
-        CONFIG_ESP_MAIN_TASK_STACK_SIZE: "16384"  # Main task: 16KB (default 3584)
-        CONFIG_FREERTOS_IDLE_TASK_STACKSIZE: "2048"  # Idle task: 2KB (default 1536)
-        CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE: "4096"  # Event task: 4KB
-        # Augmenter la taille minimale de stack allouable
-        CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS: "1"
-        # Heap watchdog (désactiver pour permettre plus d'allocations)
-        CONFIG_ESP_TASK_WDT_INIT: "n"  # Désactiver watchdog pour éviter faux positifs
+        CONFIG_ESP_MAIN_TASK_STACK_SIZE: "16384"       # 16KB (était 3.5KB)
+        CONFIG_FREERTOS_IDLE_TASK_STACKSIZE: "2048"    # 2KB (était 1.5KB)
+        CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE: "4096" # 4KB
 
 # WiFi configuration
 wifi:
