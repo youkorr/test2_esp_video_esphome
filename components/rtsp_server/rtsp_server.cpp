@@ -608,13 +608,28 @@ void RTSPServer::handle_teardown_(RTSPSession &session, const std::string &reque
 
   // Stop streaming if no more clients
   if (!any_playing && streaming_active_) {
+    ESP_LOGI(TAG, "Stopping streaming (no active clients)...");
     streaming_active_ = false;
 
-    // Delete streaming task if it exists
+    // Wait for streaming task to finish gracefully
+    // The task checks streaming_active_ in its loop and will suspend itself
     if (streaming_task_handle_ != nullptr) {
+      ESP_LOGD(TAG, "Waiting for streaming task to terminate...");
+
+      // Wait up to 500ms for task to suspend itself
+      for (int i = 0; i < 50; i++) {
+        eTaskState task_state = eTaskGetState(streaming_task_handle_);
+        if (task_state == eSuspended) {
+          ESP_LOGD(TAG, "Streaming task suspended, safe to delete");
+          break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));  // Wait 10ms
+      }
+
+      // Delete the task
       vTaskDelete(streaming_task_handle_);
       streaming_task_handle_ = nullptr;
-      ESP_LOGI(TAG, "Streaming task stopped (no active clients)");
+      ESP_LOGI(TAG, "Streaming task stopped successfully");
     }
   }
 }
