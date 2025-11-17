@@ -799,47 +799,107 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
   }
 
   const size_t MAX_RTP_PAYLOAD = 1400;  // Safe MTU size
-  if (len > MAX_RTP_PAYLOAD) {
-    ESP_LOGW(TAG, "NAL unit too large (%u bytes), should fragment", len);
-    // TODO: Implement FU-A fragmentation for large NAL units
-    return ESP_FAIL;
-  }
 
-  uint8_t packet[2048];
-  RTPHeader *rtp = (RTPHeader *)packet;
+  // Small NAL units: send directly (Single NAL Unit Mode)
+  if (len <= MAX_RTP_PAYLOAD) {
+    uint8_t packet[2048];
+    RTPHeader *rtp = (RTPHeader *)packet;
 
-  rtp->v = 2;
-  rtp->p = 0;
-  rtp->x = 0;
-  rtp->cc = 0;
-  rtp->m = marker ? 1 : 0;
-  rtp->pt = 96;
-  rtp->seq = htons(rtp_seq_num_++);
-  rtp->timestamp = htonl(rtp_timestamp_);
-  rtp->ssrc = htonl(rtp_ssrc_);
+    rtp->v = 2;
+    rtp->p = 0;
+    rtp->x = 0;
+    rtp->cc = 0;
+    rtp->m = marker ? 1 : 0;
+    rtp->pt = 96;
+    rtp->seq = htons(rtp_seq_num_++);
+    rtp->timestamp = htonl(rtp_timestamp_);
+    rtp->ssrc = htonl(rtp_ssrc_);
 
-  memcpy(packet + sizeof(RTPHeader), data, len);
+    memcpy(packet + sizeof(RTPHeader), data, len);
 
-  // Send to all playing clients
-  int sent_count = 0;
-  for (auto &session : sessions_) {
-    if (session.active && session.state == RTSPState::PLAYING) {
-      struct sockaddr_in dest_addr = session.client_addr;
-      dest_addr.sin_port = htons(session.client_rtp_port);
+    // Send to all playing clients
+    for (auto &session : sessions_) {
+      if (session.active && session.state == RTSPState::PLAYING) {
+        struct sockaddr_in dest_addr = session.client_addr;
+        dest_addr.sin_port = htons(session.client_rtp_port);
 
-      ssize_t sent = sendto(rtp_socket_, packet, sizeof(RTPHeader) + len, 0,
-                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-      if (sent < 0) {
-        ESP_LOGW(TAG, "Failed to send RTP packet: %s", strerror(errno));
-      } else {
-        sent_count++;
+        sendto(rtp_socket_, packet, sizeof(RTPHeader) + len, 0,
+               (struct sockaddr *)&dest_addr, sizeof(dest_addr));
       }
     }
+
+    return ESP_OK;
   }
 
-  if (sent_count == 0) {
-    ESP_LOGD(TAG, "No active PLAYING sessions to send to");
+  // Large NAL units: Fragment using FU-A (RFC 6184)
+  ESP_LOGD(TAG, "Fragmenting NAL unit (%u bytes) with FU-A", len);
+
+  uint8_t nal_header = data[0];
+  uint8_t nal_type = nal_header & 0x1F;
+  uint8_t nri = nal_header & 0x60;
+
+  // FU indicator: F=0, NRI=from original, Type=28 (FU-A)
+  uint8_t fu_indicator = nri | 28;
+
+  const uint8_t *payload = data + 1;  // Skip original NAL header
+  size_t payload_len = len - 1;
+  size_t offset = 0;
+  size_t fragment_num = 0;
+
+  while (offset < payload_len) {
+    uint8_t packet[2048];
+    RTPHeader *rtp = (RTPHeader *)packet;
+
+    // RTP header
+    rtp->v = 2;
+    rtp->p = 0;
+    rtp->x = 0;
+    rtp->cc = 0;
+    rtp->pt = 96;
+    rtp->seq = htons(rtp_seq_num_++);
+    rtp->timestamp = htonl(rtp_timestamp_);
+    rtp->ssrc = htonl(rtp_ssrc_);
+
+    // FU-A header
+    uint8_t *fu_payload = packet + sizeof(RTPHeader);
+    fu_payload[0] = fu_indicator;
+
+    // FU header: S, E, R, Type
+    bool is_start = (offset == 0);
+    size_t remaining = payload_len - offset;
+    size_t chunk_size = (remaining > MAX_RTP_PAYLOAD - 2) ? (MAX_RTP_PAYLOAD - 2) : remaining;
+    bool is_end = (offset + chunk_size >= payload_len);
+
+    uint8_t fu_header = nal_type;
+    if (is_start) fu_header |= 0x80;  // S bit
+    if (is_end) fu_header |= 0x40;    // E bit
+
+    fu_payload[1] = fu_header;
+
+    // Copy fragment data
+    memcpy(fu_payload + 2, payload + offset, chunk_size);
+
+    // Set marker bit on last fragment
+    rtp->m = (is_end && marker) ? 1 : 0;
+
+    size_t packet_size = sizeof(RTPHeader) + 2 + chunk_size;
+
+    // Send to all playing clients
+    for (auto &session : sessions_) {
+      if (session.active && session.state == RTSPState::PLAYING) {
+        struct sockaddr_in dest_addr = session.client_addr;
+        dest_addr.sin_port = htons(session.client_rtp_port);
+
+        sendto(rtp_socket_, packet, packet_size, 0,
+               (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      }
+    }
+
+    offset += chunk_size;
+    fragment_num++;
   }
+
+  ESP_LOGD(TAG, "Sent NAL unit in %u fragments", fragment_num);
 
   return ESP_OK;
 }
