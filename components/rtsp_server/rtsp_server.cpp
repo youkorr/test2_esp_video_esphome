@@ -42,6 +42,15 @@ void RTSPServer::setup() {
 
   ESP_LOGI(TAG, "RTSP Server setup complete");
   ESP_LOGI(TAG, "Stream URL: rtsp://<IP>:%d%s", rtsp_port_, stream_path_.c_str());
+
+  // Log authentication status
+  if (!username_.empty() && !password_.empty()) {
+    ESP_LOGI(TAG, "Authentication: ENABLED (user='%s')", username_.c_str());
+    ESP_LOGI(TAG, "Connect with: rtsp://%s:***@<IP>:%d%s", username_.c_str(), rtsp_port_, stream_path_.c_str());
+  } else {
+    ESP_LOGI(TAG, "Authentication: DISABLED");
+  }
+
   ESP_LOGI(TAG, "Note: H.264 encoder will initialize when first client connects");
 }
 
@@ -853,17 +862,24 @@ int RTSPServer::get_cseq_(const std::string &request) {
 bool RTSPServer::check_authentication_(const std::string &request) {
   // Si pas d'authentification configurée, autoriser toutes les requêtes
   if (username_.empty() && password_.empty()) {
+    ESP_LOGD(TAG, "Authentication: disabled (no credentials configured)");
     return true;
   }
+
+  ESP_LOGD(TAG, "Authentication: required for user='%s'", username_.c_str());
 
   // Extraire le header Authorization
   std::string auth_header = get_request_line_(request, "Authorization");
   if (auth_header.empty()) {
+    ESP_LOGW(TAG, "Authentication failed: no Authorization header");
     return false;
   }
 
+  ESP_LOGD(TAG, "Authorization header: '%s'", auth_header.c_str());
+
   // Vérifier que c'est Basic auth
   if (auth_header.find("Basic ") != 0) {
+    ESP_LOGW(TAG, "Authentication failed: not Basic auth");
     return false;
   }
 
@@ -890,17 +906,29 @@ bool RTSPServer::check_authentication_(const std::string &request) {
     }
   }
 
+  ESP_LOGD(TAG, "Decoded credentials: '%s'", decoded.c_str());
+
   // Le format décodé doit être "username:password"
   size_t colon_pos = decoded.find(':');
   if (colon_pos == std::string::npos) {
+    ESP_LOGW(TAG, "Authentication failed: invalid format (no colon)");
     return false;
   }
 
   std::string received_username = decoded.substr(0, colon_pos);
   std::string received_password = decoded.substr(colon_pos + 1);
 
+  ESP_LOGD(TAG, "Received user='%s', expected user='%s'", received_username.c_str(), username_.c_str());
+
   // Comparer avec les credentials configurés
-  return (received_username == username_ && received_password == password_);
+  bool valid = (received_username == username_ && received_password == password_);
+  if (!valid) {
+    ESP_LOGW(TAG, "Authentication failed: invalid credentials");
+  } else {
+    ESP_LOGI(TAG, "Authentication successful for user '%s'", username_.c_str());
+  }
+
+  return valid;
 }
 
 }  // namespace rtsp_server
