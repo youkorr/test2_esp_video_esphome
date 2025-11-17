@@ -524,12 +524,13 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
   streaming_active_ = true;
 
   // Create streaming task if not already running
-  // With preallocated buffers, we only need 8KB stack instead of 32KB
+  // Note: On ESP32-P4, stack_size appears to be in BYTES not WORDS
+  // With preallocated buffers, we need 16KB stack
   if (streaming_task_handle_ == nullptr) {
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",        // Task name
-        2048,                 // Stack size in WORDS (2048 words = 8KB)
+        16384,                // Stack size in BYTES (16KB)
         this,                 // Parameter passed to task
         5,                    // Priority (same as loopTask)
         &streaming_task_handle_,
