@@ -1,0 +1,89 @@
+# Configuration RTSP Server pour OV5647
+# ESP32-P4 avec encodeur H.264 hardware
+
+substitutions:
+  device_name: "esp32-p4-camera"
+  friendly_name: "ESP32-P4 RTSP Camera"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-p4-function-ev-board
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    version: 5.4.2
+    platform_version: https://github.com/pioarduino/platform-espressif32/releases/download/51.03.07/platform-espressif32.zip
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Optional: Enable fallback hotspot
+  ap:
+    ssid: "${device_name} Fallback"
+    password: "fallback123"
+
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API (optional)
+api:
+  encryption:
+    key: !secret api_key
+
+# Enable OTA updates
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# I2C Bus for camera sensor
+i2c:
+  - id: bsp_bus
+    sda: GPIO14
+    scl: GPIO13
+    scan: true
+
+# MIPI CSI Camera - OV5647
+mipi_dsi_cam:
+  id: main_camera
+  i2c_id: bsp_bus
+  sensor_type: ov5647      # Votre caméra détectée
+  sensor_addr: 0x36        # Adresse I2C OV5647
+  resolution: 800x640      # Résolution détectée dans vos logs
+  pixel_format: RGB565     # Format de la caméra
+  framerate: 30            # 30 FPS
+
+  # Bayer pattern for OV5647
+  raw_type: RAW8
+  bayer_type: GBRG
+
+# RTSP Server avec encodeur H.264 hardware
+rtsp_server:
+  camera_id: main_camera
+  port: 554                # Port RTSP standard
+  stream_path: "/stream"   # URL: rtsp://<IP>:554/stream
+
+  # Paramètres encodeur H.264 hardware
+  bitrate: 2000000         # 2 Mbps (recommandé pour 800x640)
+  gop: 30                  # GOP de 30 frames (1 keyframe/sec @ 30fps)
+  qp_min: 10               # Qualité minimale
+  qp_max: 40               # Qualité maximale
+
+  # Réseau
+  rtp_port: 5004           # Port RTP
+  rtcp_port: 5005          # Port RTCP
+  max_clients: 3           # Maximum 3 clients simultanés
+
+# Web server pour monitoring (optionnel)
+web_server:
+  port: 80
+
+# Status LED (optionnel)
+# Configurez selon votre board
+# status_led:
+#   pin: GPIO45
