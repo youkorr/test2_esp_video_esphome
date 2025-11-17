@@ -443,6 +443,26 @@ void RTSPServer::handle_options_(RTSPSession &session, const std::string &reques
 void RTSPServer::handle_describe_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
 
+  // Initialize H.264 encoder if not already done (needed to get SPS/PPS for SDP)
+  if (!h264_encoder_) {
+    ESP_LOGI(TAG, "Initializing H.264 encoder for DESCRIBE...");
+    if (init_h264_encoder_() != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 encoder");
+      std::map<std::string, std::string> headers;
+      headers["CSeq"] = std::to_string(cseq);
+      send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
+      return;
+    }
+
+    // Try to extract SPS/PPS by encoding first available frame
+    // Don't wait if camera is not ready yet - SDP will work without SPS/PPS
+    // (client can get them from first IDR frame via RTP)
+    if (sps_data_ == nullptr || pps_data_ == nullptr) {
+      ESP_LOGI(TAG, "Attempting to extract SPS/PPS for SDP...");
+      encode_and_stream_frame_();  // Best effort - will cache SPS/PPS if frame available
+    }
+  }
+
   std::string sdp = generate_sdp_();
 
   std::map<std::string, std::string> headers;
@@ -507,9 +527,10 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
 void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
 
-  // Lazy initialization of H.264 encoder on first PLAY
+  // Encoder should already be initialized during DESCRIBE
+  // But check just in case client skipped DESCRIBE
   if (!h264_encoder_) {
-    ESP_LOGI(TAG, "Initializing H.264 encoder (first client)...");
+    ESP_LOGW(TAG, "H.264 encoder not initialized (client skipped DESCRIBE?)");
     if (init_h264_encoder_() != ESP_OK) {
       ESP_LOGE(TAG, "Failed to initialize H.264 encoder");
       std::map<std::string, std::string> headers;
@@ -517,7 +538,6 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
       send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
       return;
     }
-    ESP_LOGI(TAG, "H.264 encoder initialized successfully");
   }
 
   session.state = RTSPState::PLAYING;
@@ -617,6 +637,9 @@ std::string RTSPServer::generate_sdp_() {
     std::string sps_b64 = base64_encode_(sps_data_, sps_size_);
     std::string pps_b64 = base64_encode_(pps_data_, pps_size_);
     sdp << ";sprop-parameter-sets=" << sps_b64 << "," << pps_b64;
+    ESP_LOGI(TAG, "SDP includes SPS/PPS (SPS: %d bytes, PPS: %d bytes)", sps_size_, pps_size_);
+  } else {
+    ESP_LOGW(TAG, "SDP generated WITHOUT SPS/PPS - client must extract from RTP stream");
   }
 
   sdp << "\r\n";
@@ -765,7 +788,15 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   for (size_t i = 0; i < nal_units.size(); i++) {
     const auto &nal = nal_units[i];
-    ESP_LOGD(TAG, "Sending NAL unit %d: %u bytes", i, nal.second);
+    uint8_t nal_type = nal.first[0] & 0x1F;
+    const char* nal_type_name = "Unknown";
+    if (nal_type == 1) nal_type_name = "P-slice";
+    else if (nal_type == 5) nal_type_name = "IDR";
+    else if (nal_type == 6) nal_type_name = "SEI";
+    else if (nal_type == 7) nal_type_name = "SPS";
+    else if (nal_type == 8) nal_type_name = "PPS";
+
+    ESP_LOGD(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes", i, nal_type, nal_type_name, nal.second);
     send_h264_rtp_(nal.first, nal.second, true);
   }
 
