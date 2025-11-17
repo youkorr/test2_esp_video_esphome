@@ -135,6 +135,18 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_ERR_NO_MEM;
   }
 
+  // Allocate reusable RTP packet buffer (2KB) to reduce stack usage
+  rtp_packet_buffer_ = (uint8_t *)heap_caps_malloc(2048, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!rtp_packet_buffer_) {
+    ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
+    free(yuv_buffer_);
+    free(h264_buffer_);
+    return ESP_ERR_NO_MEM;
+  }
+
+  // Preallocate NAL units cache to reduce stack allocations
+  nal_units_cache_.reserve(20);  // Typical IDR frame has 10-15 NAL units
+
   // Configure encoder (software encoder - OpenH264)
   esp_h264_enc_cfg_sw_t cfg = {
       .pic_type = ESP_H264_RAW_FMT_I420,  // YUV420 planar (I420) - compatible avec notre conversion
@@ -175,6 +187,10 @@ void RTSPServer::cleanup_h264_encoder_() {
   if (h264_buffer_) {
     free(h264_buffer_);
     h264_buffer_ = nullptr;
+  }
+  if (rtp_packet_buffer_) {
+    free(rtp_packet_buffer_);
+    rtp_packet_buffer_ = nullptr;
   }
   if (sps_data_) {
     free(sps_data_);
@@ -507,12 +523,13 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
   session.state = RTSPState::PLAYING;
   streaming_active_ = true;
 
-  // Create streaming task if not already running (with large stack for H.264 encoding)
+  // Create streaming task if not already running
+  // With preallocated buffers, we only need 8KB stack instead of 32KB
   if (streaming_task_handle_ == nullptr) {
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",        // Task name
-        8192,                 // Stack size in WORDS (8192 words = 32KB)
+        2048,                 // Stack size in WORDS (2048 words = 8KB)
         this,                 // Parameter passed to task
         5,                    // Priority (same as loopTask)
         &streaming_task_handle_,
@@ -783,11 +800,12 @@ void RTSPServer::parse_and_cache_nal_units_(const uint8_t *data, size_t len) {
 }
 
 std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(const uint8_t *data, size_t len) {
-  std::vector<std::pair<const uint8_t *, size_t>> nal_units;
+  // Reuse cached vector to reduce stack allocations
+  nal_units_cache_.clear();
 
   if (data == nullptr || len < 4) {
     ESP_LOGW(TAG, "parse_nal_units_: invalid input (ptr=%p, len=%u)", data, len);
-    return nal_units;
+    return nal_units_cache_;
   }
 
   size_t i = 0;
@@ -812,7 +830,7 @@ std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(con
 
         size_t nal_size = j - (i + start_code_len);
         if (nal_size > 0) {
-          nal_units.push_back({data + i + start_code_len, nal_size});
+          nal_units_cache_.push_back({data + i + start_code_len, nal_size});
         }
 
         i = j;
@@ -822,7 +840,7 @@ std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(con
     i++;
   }
 
-  return nal_units;
+  return nal_units_cache_;
 }
 
 esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marker) {
@@ -836,12 +854,8 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
 
   // Small NAL units: send directly (Single NAL Unit Mode)
   if (len <= MAX_RTP_PAYLOAD) {
-    // Allocate packet buffer on heap to avoid stack overflow
-    uint8_t *packet = (uint8_t *)malloc(sizeof(RTPHeader) + len);
-    if (packet == nullptr) {
-      ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
-      return ESP_FAIL;
-    }
+    // Use preallocated buffer to reduce heap fragmentation
+    uint8_t *packet = rtp_packet_buffer_;
 
     RTPHeader *rtp = (RTPHeader *)packet;
 
@@ -868,7 +882,7 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
       }
     }
 
-    free(packet);
+    // No need to free - using preallocated buffer
     return ESP_OK;
   }
 
@@ -887,12 +901,8 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
   size_t offset = 0;
   size_t fragment_num = 0;
 
-  // Allocate packet buffer on heap to avoid stack overflow
-  uint8_t *packet = (uint8_t *)malloc(2048);
-  if (packet == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
-    return ESP_FAIL;
-  }
+  // Use preallocated buffer to reduce heap fragmentation
+  uint8_t *packet = rtp_packet_buffer_;
 
   while (offset < payload_len) {
     RTPHeader *rtp = (RTPHeader *)packet;
@@ -946,7 +956,7 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
     fragment_num++;
   }
 
-  free(packet);
+  // No need to free - using preallocated buffer
 
   ESP_LOGD(TAG, "Sent NAL unit in %u fragments", fragment_num);
 

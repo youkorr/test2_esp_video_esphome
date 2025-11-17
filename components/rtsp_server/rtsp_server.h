@@ -127,6 +127,10 @@ class RTSPServer : public Component {
   TaskHandle_t streaming_task_handle_{nullptr};
   static void streaming_task_wrapper_(void *param);
 
+  // Preallocated buffers to reduce stack usage
+  uint8_t *rtp_packet_buffer_{nullptr};  // Reusable RTP packet buffer (2KB)
+  std::vector<std::pair<const uint8_t *, size_t>> nal_units_cache_;  // Reusable NAL units vector
+
   // Internal methods
   esp_err_t init_rtsp_server_();
   esp_err_t init_rtp_sockets_();
