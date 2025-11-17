@@ -123,6 +123,10 @@ class RTSPServer : public Component {
   uint8_t *pps_data_{nullptr};
   size_t pps_size_{0};
 
+  // Streaming task (separate from loopTask to avoid stack overflow)
+  TaskHandle_t streaming_task_handle_{nullptr};
+  static void streaming_task_wrapper_(void *param);
+
   // Internal methods
   esp_err_t init_rtsp_server_();
   esp_err_t init_rtp_sockets_();

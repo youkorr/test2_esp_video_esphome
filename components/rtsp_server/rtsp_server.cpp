@@ -7,6 +7,8 @@
 #include <sstream>
 #include <esp_random.h>
 #include <arpa/inet.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 namespace esphome {
 namespace rtsp_server {
@@ -55,13 +57,11 @@ void RTSPServer::setup() {
 }
 
 void RTSPServer::loop() {
-  // Handle incoming RTSP connections
+  // Handle incoming RTSP connections (lightweight - safe for loopTask's small stack)
   handle_rtsp_connections_();
 
-  // Stream video if any client is playing
-  if (streaming_active_) {
-    stream_video_();
-  }
+  // NOTE: Video streaming now happens in separate task with larger stack
+  // to avoid stack overflow in loopTask (which only has 1536 bytes)
 
   // Cleanup inactive sessions
   cleanup_inactive_sessions_();
@@ -507,6 +507,27 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
   session.state = RTSPState::PLAYING;
   streaming_active_ = true;
 
+  // Create streaming task if not already running (with 8KB stack)
+  if (streaming_task_handle_ == nullptr) {
+    xTaskCreate(
+        streaming_task_wrapper_,
+        "rtsp_stream",        // Task name
+        8192,                 // Stack size in bytes (8KB - plenty of room)
+        this,                 // Parameter passed to task
+        5,                    // Priority (same as loopTask)
+        &streaming_task_handle_
+    );
+    if (streaming_task_handle_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to create streaming task");
+      streaming_active_ = false;
+      std::map<std::string, std::string> headers;
+      headers["CSeq"] = std::to_string(cseq);
+      send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
+      return;
+    }
+    ESP_LOGI(TAG, "Streaming task created with 8KB stack");
+  }
+
   std::map<std::string, std::string> headers;
   headers["CSeq"] = std::to_string(cseq);
   headers["Session"] = session.session_id;
@@ -538,7 +559,18 @@ void RTSPServer::handle_teardown_(RTSPSession &session, const std::string &reque
       break;
     }
   }
-  streaming_active_ = any_playing;
+
+  // Stop streaming if no more clients
+  if (!any_playing && streaming_active_) {
+    streaming_active_ = false;
+
+    // Delete streaming task if it exists
+    if (streaming_task_handle_ != nullptr) {
+      vTaskDelete(streaming_task_handle_);
+      streaming_task_handle_ = nullptr;
+      ESP_LOGI(TAG, "Streaming task stopped (no active clients)");
+    }
+  }
 }
 
 std::string RTSPServer::generate_sdp_() {
@@ -1068,6 +1100,26 @@ bool RTSPServer::check_authentication_(const std::string &request) {
   }
 
   return valid;
+}
+
+// Streaming task function (runs in separate task with 8KB stack)
+void RTSPServer::streaming_task_wrapper_(void *param) {
+  RTSPServer *server = static_cast<RTSPServer *>(param);
+
+  ESP_LOGI(TAG, "Streaming task started");
+
+  while (server->streaming_active_) {
+    // Encode and stream one frame
+    server->encode_and_stream_frame_();
+
+    // Target 30 FPS = 33.3ms per frame
+    vTaskDelay(pdMS_TO_TICKS(33));
+  }
+
+  ESP_LOGI(TAG, "Streaming task ended");
+
+  // Task will be deleted by vTaskDelete() in handle_teardown_()
+  vTaskSuspend(nullptr);  // Suspend until deleted
 }
 
 }  // namespace rtsp_server
