@@ -13,6 +13,8 @@ set(component_srcs
     "hw/src/esp_h264_enc_hw_param.c"
     "hw/src/h264_nal.c"
     "hw/src/h264_rc.c"
+    "hw/hal/esp32p4/h264_hal.c"
+    "hw/hal/esp32p4/h264_dma_hal.c"
     "interface/include/src/esp_h264_enc_param.c"
     "interface/include/src/esp_h264_enc_param_hw.c"
     "interface/include/src/esp_h264_enc_dual.c"
@@ -31,10 +33,14 @@ set(component_include_dirs
 
 set(component_requires
     driver
+    soc
+    hal
 )
 
 set(component_priv_include_dirs
     "hw/src"
+    "hw/hal/esp32p4"
+    "hw/soc/esp32p4"
     "sw/src"
 )
 

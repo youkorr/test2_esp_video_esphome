@@ -71,7 +71,7 @@ void RTSPServer::dump_config() {
 }
 
 esp_err_t RTSPServer::init_h264_encoder_() {
-  ESP_LOGI(TAG, "Initializing H.264 software encoder...");
+  ESP_LOGI(TAG, "Initializing H.264 hardware encoder...");
 
   if (!camera_) {
     ESP_LOGE(TAG, "Camera not set");
@@ -105,33 +105,35 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   ESP_LOGI(TAG, "Resolution: %dx%d (aligned from %dx%d)", width, height,
            camera_->get_image_width(), camera_->get_image_height());
 
-  // Allocate buffers
+  // Allocate buffers with 128-byte alignment for hardware encoder
   yuv_buffer_size_ = width * height * 3 / 2;
-  yuv_buffer_ = (uint8_t *)heap_caps_malloc(yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  yuv_buffer_size_ = (yuv_buffer_size_ + 127) & ~127;  // Align to 128 bytes
+  yuv_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!yuv_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate YUV buffer");
     return ESP_ERR_NO_MEM;
   }
 
   h264_buffer_size_ = yuv_buffer_size_ * 2;
-  h264_buffer_ = (uint8_t *)heap_caps_malloc(h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  h264_buffer_size_ = (h264_buffer_size_ + 127) & ~127;  // Align to 128 bytes
+  h264_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!h264_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate H.264 buffer");
     free(yuv_buffer_);
     return ESP_ERR_NO_MEM;
   }
 
-  // Configure encoder (software encoder using OpenH264)
-  esp_h264_enc_cfg_sw_t cfg = {
-      .pic_type = ESP_H264_RAW_FMT_I420,  // YUV420 planar (I420) for software encoder
+  // Configure encoder (hardware encoder for ESP32-P4)
+  esp_h264_enc_cfg_hw_t cfg = {
+      .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,  // Packed YUV format for hardware encoder
       .gop = gop_,
       .fps = 30,
       .res = {.width = width, .height = height},
       .rc = {.bitrate = bitrate_, .qp_min = qp_min_, .qp_max = qp_max_}};
 
-  esp_h264_err_t ret = esp_h264_enc_sw_new(&cfg, &h264_encoder_);
+  esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
-    ESP_LOGE(TAG, "Failed to create H.264 software encoder: %d", ret);
+    ESP_LOGE(TAG, "Failed to create H.264 hardware encoder: %d", ret);
     cleanup_h264_encoder_();
     return ESP_FAIL;
   }
@@ -143,7 +145,8 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  ESP_LOGI(TAG, "H.264 software encoder initialized successfully");
+  ESP_LOGI(TAG, "H.264 hardware encoder initialized successfully");
+  ESP_LOGI(TAG, "Hardware acceleration: 1920x1080@30fps capable");
   return ESP_OK;
 }
 
