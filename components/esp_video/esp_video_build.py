@@ -103,6 +103,14 @@ esp_h264_sources = [
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
     "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
+    # Sources matérielles (encodeur H.264 hardware ESP32-P4)
+    "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
+    "hw/src/esp_h264_enc_dual_hw.c",       # Encodeur hardware dual-stream
+    "hw/src/esp_h264_enc_hw_param.c",      # Paramètres encodeur hardware
+    "hw/src/h264_nal.c",                   # Gestion NAL units
+    "hw/src/h264_rc.c",                    # Rate control
+    "hw/hal/esp32p4/h264_hal.c",           # HAL H.264 pour ESP32-P4
+    "hw/hal/esp32p4/h264_dma_hal.c",       # HAL DMA H.264
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
     "interface/include/src/esp_h264_enc_dual.c",
@@ -119,11 +127,24 @@ if os.path.exists(esp_h264_dir):
         "sw/libs/tinyh264_inc",   # h264bsd_decoder.h, basetype.h
     ]
 
+    # Ajouter les chemins d'include pour le hardware encoder
+    h264_hw_includes = [
+        "hw/src",                  # Headers privés HW
+        "hw/hal/esp32p4",         # HAL et LL headers
+        "hw/soc/esp32p4",         # SOC structures (h264_struct.h, h264_dma_struct.h)
+    ]
+
     for inc in h264_lib_includes:
         inc_path = os.path.join(esp_h264_dir, inc)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
             print(f"[ESP-Video Build] 📁 Include H.264 lib ajouté: {inc}")
+
+    for inc in h264_hw_includes:
+        inc_path = os.path.join(esp_h264_dir, inc)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+            print(f"[ESP-Video Build] 📁 Include H.264 HW ajouté: {inc}")
 
     # Ajouter les bibliothèques statiques OpenH264 et TinyH264
     h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
