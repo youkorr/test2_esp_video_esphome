@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import mipi_dsi_cam
-from esphome.const import CONF_ID, CONF_PORT
+from esphome.const import CONF_ID, CONF_PORT, CONF_USERNAME, CONF_PASSWORD
 
 DEPENDENCIES = ["mipi_dsi_cam", "network"]
 AUTO_LOAD = []
@@ -32,6 +32,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_QP_MIN, default=10): cv.int_range(min=0, max=51),
     cv.Optional(CONF_QP_MAX, default=40): cv.int_range(min=0, max=51),
     cv.Optional(CONF_MAX_CLIENTS, default=3): cv.int_range(min=1, max=5),
+    cv.Optional(CONF_USERNAME): cv.string,
+    cv.Optional(CONF_PASSWORD): cv.string,
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -51,3 +53,8 @@ async def to_code(config):
     cg.add(var.set_qp_min(config[CONF_QP_MIN]))
     cg.add(var.set_qp_max(config[CONF_QP_MAX]))
     cg.add(var.set_max_clients(config[CONF_MAX_CLIENTS]))
+
+    if CONF_USERNAME in config:
+        cg.add(var.set_username(config[CONF_USERNAME]))
+    if CONF_PASSWORD in config:
+        cg.add(var.set_password(config[CONF_PASSWORD]))

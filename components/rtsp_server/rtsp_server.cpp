@@ -68,6 +68,11 @@ void RTSPServer::dump_config() {
   ESP_LOGCONFIG(TAG, "  GOP: %d", gop_);
   ESP_LOGCONFIG(TAG, "  QP Range: %d-%d", qp_min_, qp_max_);
   ESP_LOGCONFIG(TAG, "  Max Clients: %d", max_clients_);
+  if (!username_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Authentication: Enabled (user: %s)", username_.c_str());
+  } else {
+    ESP_LOGCONFIG(TAG, "  Authentication: Disabled");
+  }
 }
 
 esp_err_t RTSPServer::init_h264_encoder_() {
@@ -319,6 +324,17 @@ void RTSPServer::handle_rtsp_request_(RTSPSession &session) {
     ESP_LOGD(TAG, "RTSP Request:\n%s", request.c_str());
 
     RTSPMethod method = parse_rtsp_method_(request);
+
+    // Vérifier l'authentification (sauf pour OPTIONS qui ne nécessite pas d'auth)
+    if (method != RTSPMethod::OPTIONS && !check_authentication_(request)) {
+      ESP_LOGW(TAG, "Authentication failed");
+      int cseq = get_cseq_(request);
+      std::map<std::string, std::string> headers;
+      headers["CSeq"] = std::to_string(cseq);
+      headers["WWW-Authenticate"] = "Basic realm=\"RTSP Server\"";
+      send_rtsp_response_(session.socket_fd, 401, "Unauthorized", headers);
+      return;
+    }
 
     switch (method) {
       case RTSPMethod::OPTIONS:
@@ -832,6 +848,59 @@ std::string RTSPServer::get_request_line_(const std::string &request, const std:
 int RTSPServer::get_cseq_(const std::string &request) {
   std::string cseq_str = get_request_line_(request, "CSeq");
   return cseq_str.empty() ? 0 : std::stoi(cseq_str);
+}
+
+bool RTSPServer::check_authentication_(const std::string &request) {
+  // Si pas d'authentification configurée, autoriser toutes les requêtes
+  if (username_.empty() && password_.empty()) {
+    return true;
+  }
+
+  // Extraire le header Authorization
+  std::string auth_header = get_request_line_(request, "Authorization");
+  if (auth_header.empty()) {
+    return false;
+  }
+
+  // Vérifier que c'est Basic auth
+  if (auth_header.find("Basic ") != 0) {
+    return false;
+  }
+
+  // Extraire les credentials encodés en base64
+  std::string encoded = auth_header.substr(6);  // Skip "Basic "
+
+  // Décoder base64
+  std::string decoded;
+  int val = 0;
+  int valb = -8;
+  for (unsigned char c : encoded) {
+    if (c == '=') break;
+
+    // Trouver l'index dans la table base64
+    const char *p = strchr(base64_chars, c);
+    if (p == nullptr) continue;
+
+    val = (val << 6) + (p - base64_chars);
+    valb += 6;
+
+    if (valb >= 0) {
+      decoded.push_back(char((val >> valb) & 0xFF));
+      valb -= 8;
+    }
+  }
+
+  // Le format décodé doit être "username:password"
+  size_t colon_pos = decoded.find(':');
+  if (colon_pos == std::string::npos) {
+    return false;
+  }
+
+  std::string received_username = decoded.substr(0, colon_pos);
+  std::string received_password = decoded.substr(colon_pos + 1);
+
+  // Comparer avec les credentials configurés
+  return (received_username == username_ && received_password == password_);
 }
 
 }  // namespace rtsp_server

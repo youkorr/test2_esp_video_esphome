@@ -80,6 +80,8 @@ class RTSPServer : public Component {
   void set_qp_min(uint8_t qp) { qp_min_ = qp; }
   void set_qp_max(uint8_t qp) { qp_max_ = qp; }
   void set_max_clients(uint8_t max) { max_clients_ = max; }
+  void set_username(const std::string &username) { username_ = username; }
+  void set_password(const std::string &password) { password_ = password; }
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
@@ -92,6 +94,8 @@ class RTSPServer : public Component {
   uint8_t qp_min_{10};
   uint8_t qp_max_{40};
   uint8_t max_clients_{3};
+  std::string username_{""};
+  std::string password_{""};
 
   // RTSP server socket
   int rtsp_socket_{-1};
@@ -164,6 +168,7 @@ class RTSPServer : public Component {
   // Utility
   std::string get_request_line_(const std::string &request, const std::string &field);
   int get_cseq_(const std::string &request);
+  bool check_authentication_(const std::string &request);
 };
 
 #endif  // USE_ESP_IDF

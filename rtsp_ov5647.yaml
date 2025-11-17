@@ -68,6 +68,12 @@ rtsp_server:
   port: 554                # Port RTSP standard
   stream_path: "/stream"   # URL: rtsp://<IP>:554/stream
 
+  # Authentification RTSP (optionnel)
+  # Décommenter pour activer l'authentification Basic
+  # username: "admin"
+  # password: "your_password_here"
+  # URL avec auth: rtsp://admin:your_password_here@<IP>:554/stream
+
   # Paramètres encodeur H.264 hardware
   bitrate: 2000000         # 2 Mbps (recommandé pour 800x640)
   gop: 30                  # GOP de 30 frames (1 keyframe/sec @ 30fps)
