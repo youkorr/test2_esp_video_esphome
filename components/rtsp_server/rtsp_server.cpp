@@ -611,12 +611,20 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (!camera_ || !h264_encoder_)
     return ESP_FAIL;
 
-  // Get current RGB565 frame (must be released after use)
-  mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
-  uint8_t* frame_data = nullptr;
-  int width, height;
+  // Capture new frame from camera (like camera_web_server does)
+  if (!camera_->capture_frame()) {
+    ESP_LOGW(TAG, "Failed to capture frame");
+    return ESP_FAIL;
+  }
 
-  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
+  // Get frame data using stable image_buffer_ (like camera_web_server)
+  uint8_t* frame_data = camera_->get_image_data();
+  size_t frame_size = camera_->get_image_size();
+  uint16_t width = camera_->get_image_width();
+  uint16_t height = camera_->get_image_height();
+
+  if (frame_data == nullptr || frame_size == 0) {
+    ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u", frame_data, frame_size);
     return ESP_FAIL;
   }
 
@@ -636,7 +644,6 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   esp_h264_err_t ret = esp_h264_enc_process(h264_encoder_, &in_frame, &out_frame);
   if (ret != ESP_H264_ERR_OK) {
     ESP_LOGE(TAG, "H.264 encoding failed: %d", ret);
-    camera_->release_buffer(buffer);  // Release buffer before returning
     return ESP_FAIL;
   }
 
@@ -653,9 +660,6 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   frame_count_++;
   rtp_timestamp_ += 3000;  // 90kHz / 30fps
-
-  // Release buffer after processing
-  camera_->release_buffer(buffer);
 
   return ESP_OK;
 }
