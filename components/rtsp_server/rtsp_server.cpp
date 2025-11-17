@@ -692,20 +692,35 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
     return ESP_FAIL;
   }
 
+  ESP_LOGD(TAG, "H.264 encoded: %u bytes, type=%d", out_frame.length, out_frame.frame_type);
+
+  // Validate output
+  if (out_frame.length == 0 || out_frame.raw_data.buffer == nullptr) {
+    ESP_LOGE(TAG, "Invalid H.264 output: len=%u buf=%p", out_frame.length, out_frame.raw_data.buffer);
+    return ESP_FAIL;
+  }
+
   // Cache SPS/PPS from IDR frames
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) {
+    ESP_LOGD(TAG, "IDR frame - caching SPS/PPS");
     parse_and_cache_nal_units_(out_frame.raw_data.buffer, out_frame.length);
   }
 
   // Send NAL units
+  ESP_LOGD(TAG, "Parsing NAL units from %u bytes", out_frame.length);
   auto nal_units = parse_nal_units_(out_frame.raw_data.buffer, out_frame.length);
-  for (const auto &nal : nal_units) {
+  ESP_LOGD(TAG, "Found %d NAL units", nal_units.size());
+
+  for (size_t i = 0; i < nal_units.size(); i++) {
+    const auto &nal = nal_units[i];
+    ESP_LOGD(TAG, "Sending NAL unit %d: %u bytes", i, nal.second);
     send_h264_rtp_(nal.first, nal.second, true);
   }
 
   frame_count_++;
   rtp_timestamp_ += 3000;  // 90kHz / 30fps
 
+  ESP_LOGD(TAG, "Frame %u sent successfully", frame_count_);
   return ESP_OK;
 }
 
@@ -735,6 +750,11 @@ void RTSPServer::parse_and_cache_nal_units_(const uint8_t *data, size_t len) {
 
 std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(const uint8_t *data, size_t len) {
   std::vector<std::pair<const uint8_t *, size_t>> nal_units;
+
+  if (data == nullptr || len < 4) {
+    ESP_LOGW(TAG, "parse_nal_units_: invalid input (ptr=%p, len=%u)", data, len);
+    return nal_units;
+  }
 
   size_t i = 0;
   while (i < len - 3) {
@@ -772,6 +792,19 @@ std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(con
 }
 
 esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marker) {
+  // Validate input
+  if (data == nullptr || len == 0) {
+    ESP_LOGW(TAG, "send_h264_rtp_: invalid data (ptr=%p, len=%u)", data, len);
+    return ESP_FAIL;
+  }
+
+  const size_t MAX_RTP_PAYLOAD = 1400;  // Safe MTU size
+  if (len > MAX_RTP_PAYLOAD) {
+    ESP_LOGW(TAG, "NAL unit too large (%u bytes), should fragment", len);
+    // TODO: Implement FU-A fragmentation for large NAL units
+    return ESP_FAIL;
+  }
+
   uint8_t packet[2048];
   RTPHeader *rtp = (RTPHeader *)packet;
 
@@ -788,13 +821,24 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
   memcpy(packet + sizeof(RTPHeader), data, len);
 
   // Send to all playing clients
+  int sent_count = 0;
   for (auto &session : sessions_) {
     if (session.active && session.state == RTSPState::PLAYING) {
       struct sockaddr_in dest_addr = session.client_addr;
       dest_addr.sin_port = htons(session.client_rtp_port);
 
-      sendto(rtp_socket_, packet, sizeof(RTPHeader) + len, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      ssize_t sent = sendto(rtp_socket_, packet, sizeof(RTPHeader) + len, 0,
+                            (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+      if (sent < 0) {
+        ESP_LOGW(TAG, "Failed to send RTP packet: %s", strerror(errno));
+      } else {
+        sent_count++;
+      }
     }
+  }
+
+  if (sent_count == 0) {
+    ESP_LOGD(TAG, "No active PLAYING sessions to send to");
   }
 
   return ESP_OK;
