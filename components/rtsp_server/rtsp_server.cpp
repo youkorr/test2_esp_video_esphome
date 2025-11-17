@@ -441,14 +441,32 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
 
   // Parse Transport header
   std::string transport_line = get_request_line_(request, "Transport");
+  ESP_LOGD(TAG, "Transport header: '%s'", transport_line.c_str());
 
-  // Extract client ports
+  // Check if client requests TCP interleaved (not supported yet)
+  if (transport_line.find("interleaved") != std::string::npos ||
+      transport_line.find("RTP/AVP/TCP") != std::string::npos) {
+    ESP_LOGW(TAG, "Client requested TCP interleaved transport (not supported)");
+    ESP_LOGW(TAG, "Please configure client to use UDP transport");
+    std::map<std::string, std::string> headers;
+    headers["CSeq"] = std::to_string(cseq);
+    send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
+    return;
+  }
+
+  // Extract client ports (UDP mode)
   size_t client_port_pos = transport_line.find("client_port=");
   if (client_port_pos != std::string::npos) {
     int rtp_port, rtcp_port;
     sscanf(transport_line.c_str() + client_port_pos, "client_port=%d-%d", &rtp_port, &rtcp_port);
     session.client_rtp_port = rtp_port;
     session.client_rtcp_port = rtcp_port;
+  } else {
+    ESP_LOGW(TAG, "No client_port found in Transport header");
+    std::map<std::string, std::string> headers;
+    headers["CSeq"] = std::to_string(cseq);
+    send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
+    return;
   }
 
   // Generate session ID
