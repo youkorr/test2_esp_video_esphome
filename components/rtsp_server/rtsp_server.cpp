@@ -804,7 +804,7 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) frame_type_name = "IDR";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_I) frame_type_name = "I";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_P) frame_type_name = "P";
-  else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_B) frame_type_name = "B";
+  // Note: Hardware encoder only supports IDR, I, and P frames (no B-frames)
 
   ESP_LOGD(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
            frame_count_, out_frame.length, out_frame.frame_type, frame_type_name);
