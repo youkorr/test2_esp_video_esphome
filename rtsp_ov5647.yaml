@@ -16,6 +16,13 @@ esp32:
     type: esp-idf
     version: 5.4.2
     platform_version: https://github.com/pioarduino/platform-espressif32/releases/download/51.03.07/platform-espressif32.zip
+    advanced:
+      # Augmenter les limites de stack pour H.264 encoding
+      sdkconfig_options:
+        CONFIG_ESP_MAIN_TASK_STACK_SIZE: "16384"  # Main task: 16KB (default 3584)
+        CONFIG_FREERTOS_IDLE_TASK_STACKSIZE: "2048"  # Idle task: 2KB (default 1536)
+        # Permet d'allouer de plus grandes stacks pour les tasks
+        CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE: "4096"  # Event task: 4KB
 
 # WiFi configuration
 wifi:
