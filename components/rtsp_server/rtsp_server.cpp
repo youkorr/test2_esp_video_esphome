@@ -155,6 +155,9 @@ esp_err_t RTSPServer::init_h264_encoder_() {
       .res = {.width = width, .height = height},
       .rc = {.bitrate = bitrate_, .qp_min = qp_min_, .qp_max = qp_max_}};
 
+  ESP_LOGI(TAG, "Encoder config: %dx%d @ 30fps, GOP=%d, bitrate=%d, QP=%d-%d",
+           width, height, gop_, bitrate_, qp_min_, qp_max_);
+
   esp_h264_err_t ret = esp_h264_enc_sw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
     ESP_LOGE(TAG, "Failed to create H.264 software encoder: %d", ret);
@@ -170,7 +173,8 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   }
 
   ESP_LOGI(TAG, "H.264 software encoder initialized successfully (OpenH264)");
-  ESP_LOGI(TAG, "Software encoder: up to 720p@15-20fps on ESP32-P4");
+  ESP_LOGI(TAG, "Note: Software encoder on ESP32-P4 @ 360MHz");
+  ESP_LOGI(TAG, "  Expected: 640x480 @ ~20-25 FPS, 800x640 @ ~10-15 FPS");
   return ESP_OK;
 }
 
@@ -767,7 +771,14 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
     return ESP_FAIL;
   }
 
-  ESP_LOGD(TAG, "H.264 encoded: %u bytes, type=%d", out_frame.length, out_frame.frame_type);
+  const char* frame_type_name = "Unknown";
+  if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) frame_type_name = "IDR";
+  else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_I) frame_type_name = "I";
+  else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_P) frame_type_name = "P";
+  else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_B) frame_type_name = "B";
+
+  ESP_LOGD(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
+           frame_count_, out_frame.length, out_frame.frame_type, frame_type_name);
 
   // Validate output
   if (out_frame.length == 0 || out_frame.raw_data.buffer == nullptr) {
@@ -1152,12 +1163,38 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
 
   ESP_LOGI(TAG, "Streaming task started");
 
+  uint32_t frame_num = 0;
+  uint32_t total_encode_time = 0;
+  uint32_t start_time = millis();
+
   while (server->streaming_active_) {
+    // Measure encoding time
+    uint32_t encode_start = millis();
+
     // Encode and stream one frame
     server->encode_and_stream_frame_();
 
+    uint32_t encode_time = millis() - encode_start;
+    total_encode_time += encode_time;
+    frame_num++;
+
+    // Log performance every 30 frames (every ~1 second at 30 FPS)
+    if (frame_num % 30 == 0) {
+      uint32_t elapsed = millis() - start_time;
+      float actual_fps = (frame_num * 1000.0f) / elapsed;
+      float avg_encode = total_encode_time / (float)frame_num;
+      ESP_LOGI(TAG, "Performance: %.1f FPS (avg encode: %.1f ms/frame, last: %u ms)",
+               actual_fps, avg_encode, encode_time);
+    }
+
     // Target 30 FPS = 33.3ms per frame
-    vTaskDelay(pdMS_TO_TICKS(33));
+    // Only delay if encoding was fast enough
+    if (encode_time < 33) {
+      vTaskDelay(pdMS_TO_TICKS(33 - encode_time));
+    } else {
+      // Encoding took longer than target - skip delay but yield to other tasks
+      vTaskDelay(1);
+    }
   }
 
   ESP_LOGI(TAG, "Streaming task ended");
