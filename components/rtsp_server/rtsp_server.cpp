@@ -802,7 +802,13 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
 
   // Small NAL units: send directly (Single NAL Unit Mode)
   if (len <= MAX_RTP_PAYLOAD) {
-    uint8_t packet[2048];
+    // Allocate packet buffer on heap to avoid stack overflow
+    uint8_t *packet = (uint8_t *)malloc(sizeof(RTPHeader) + len);
+    if (packet == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
+      return ESP_FAIL;
+    }
+
     RTPHeader *rtp = (RTPHeader *)packet;
 
     rtp->v = 2;
@@ -828,6 +834,7 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
       }
     }
 
+    free(packet);
     return ESP_OK;
   }
 
@@ -846,8 +853,14 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
   size_t offset = 0;
   size_t fragment_num = 0;
 
+  // Allocate packet buffer on heap to avoid stack overflow
+  uint8_t *packet = (uint8_t *)malloc(2048);
+  if (packet == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
+    return ESP_FAIL;
+  }
+
   while (offset < payload_len) {
-    uint8_t packet[2048];
     RTPHeader *rtp = (RTPHeader *)packet;
 
     // RTP header
@@ -898,6 +911,8 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
     offset += chunk_size;
     fragment_num++;
   }
+
+  free(packet);
 
   ESP_LOGD(TAG, "Sent NAL unit in %u fragments", fragment_num);
 
