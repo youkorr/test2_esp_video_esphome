@@ -750,15 +750,15 @@ esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t 
       uint8_t u_avg = (u0_r0 + u0_r1) >> 1;
       uint8_t v_avg = (v0_r0 + v0_r1) >> 1;
 
-      // Write to odd line: U Y0 Y1
+      // Write to odd line: V Y0 Y1 (swap U/V to fix green tint)
       size_t odd_idx = (col / 2) * 3;
-      odd_line[odd_idx + 0] = u_avg;
+      odd_line[odd_idx + 0] = v_avg;  // Swapped: was u_avg
       odd_line[odd_idx + 1] = y0_r0;
       odd_line[odd_idx + 2] = y1_r0;
 
-      // Write to even line: V Y0 Y1
+      // Write to even line: U Y0 Y1 (swap U/V to fix green tint)
       size_t even_idx = (col / 2) * 3;
-      even_line[even_idx + 0] = v_avg;
+      even_line[even_idx + 0] = u_avg;  // Swapped: was v_avg
       even_line[even_idx + 1] = y0_r1;
       even_line[even_idx + 2] = y1_r1;
     }
