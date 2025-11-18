@@ -70,6 +70,31 @@ i2c:
     scl: GPIO13
     scan: true
 
+# ⚠️ IMPORTANT: Ajoutez votre configuration display ici
+# Exemple pour ESP32-P4-Function-EV-Board avec écran 1024x600
+# display:
+#   - platform: rgb_display
+#     id: main_display
+#     width: 1024
+#     height: 600
+#     ... (vos GPIO d'écran)
+
+# LVGL Configuration pour affichage caméra fluide
+lvgl:
+  displays:
+    - main_display  # Référence au display configuré ci-dessus
+
+  pages:
+    - id: camera_page
+      widgets:
+        # Canvas pour afficher la caméra (800x600 centré sur 1024x600)
+        - canvas:
+            id: camera_canvas
+            width: 800
+            height: 600
+            x: 112  # Centré: (1024-800)/2 = 112
+            y: 0
+
 # MIPI CSI Camera - OV5647
 mipi_dsi_cam:
   id: main_camera
@@ -169,6 +194,14 @@ camera_web_server:
   camera_id: main_camera
   port: 8080               # Port HTTP pour le stream MJPEG
                            # URL: http://<IP>:8080/
+
+# LVGL Camera Display - Affichage fluide à 50 FPS
+lvgl_camera_display:
+  id: lvgl_cam_display
+  camera_id: main_camera
+  canvas_id: camera_canvas  # Assurez-vous que ce canvas existe dans votre config LVGL
+  update_interval: 20ms     # 50 FPS pour mouvements ultra-fluides
+  # Alternative stable: 33ms (30 FPS) si watchdog timeout
 
 # Web server pour monitoring (optionnel)
 web_server:
