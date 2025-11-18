@@ -195,13 +195,14 @@ camera_web_server:
   port: 8080               # Port HTTP pour le stream MJPEG
                            # URL: http://<IP>:8080/
 
-# LVGL Camera Display - Affichage fluide à 50 FPS
+# LVGL Camera Display - VGA nécessite update lent
 lvgl_camera_display:
   id: lvgl_cam_display
   camera_id: main_camera
-  canvas_id: camera_canvas  # Assurez-vous que ce canvas existe dans votre config LVGL
-  update_interval: 50ms     # 20 FPS - stable, évite watchdog timeout
-  # Pour 30 FPS: 33ms | Pour 50 FPS: 20ms (peut causer watchdog avec VGA)
+  canvas_id: camera_canvas
+  update_interval: 150ms    # CRITIQUE: LVGL prend 138ms/update avec VGA
+  # VGA: 150ms minimum (138ms mesuré + marge) = ~6-7 FPS display
+  # 800x600: Peut utiliser 33ms pour 30 FPS
 
 # Web server pour monitoring (optionnel)
 web_server:
