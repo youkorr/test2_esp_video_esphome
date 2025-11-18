@@ -103,20 +103,18 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (adapted from 800x640: same X, adjust Y for 4:3 ratio)
-    // X: same as 800x640 (500 to 2623 = 2124 pixels width)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
-    // Y: centered crop for 640x480 (4:3 ratio)
-    // Crop height: 2124 * 3/4 = 1593, centered: (1954-1593)/2 = 180
-    // But we need 480 output, so same 1593px crop area
-    {0x3802, (180 >> 8) & 0x07},   // Y address start high
-    {0x3803, 180 & 0xFF},          // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high (same as 800x640)
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
-    // Y end: 180 + 1593 - 1 = 1772 (same 4:3 crop as 800x600)
-    {0x3806, ((1772 - 1) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1772 - 1) & 0xFF},         // Y address end low
+    // Crop window for VGA: use FULL sensor area for proper scaling
+    // For VGA 640×480 with 4x binning, we need AT LEAST 2560×1920 pixels
+    // Use sensor full width: 0-2591 (2592 pixels)
+    // Use sensor full height centered for 4:3: crop 1944 pixels
+    {0x3800, (0 >> 8) & 0x0F},     // X address start high - FULL WIDTH
+    {0x3801, 0 & 0xFF},            // X address start low
+    {0x3802, (0 >> 8) & 0x07},     // Y address start high - START at 0
+    {0x3803, 0 & 0xFF},            // Y address start low
+    {0x3804, ((2592 - 1) >> 8) & 0x0F},  // X address end high - FULL WIDTH
+    {0x3805, (2592 - 1) & 0xFF},         // X address end low
+    {0x3806, ((1944 - 1) >> 8) & 0x07},  // Y address end high - FULL HEIGHT
+    {0x3807, (1944 - 1) & 0xFF},         // Y address end low
 
     // Output size: 640x480
     {0x3808, (640 >> 8) & 0x0F},  // Output horizontal width high
