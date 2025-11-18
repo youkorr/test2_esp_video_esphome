@@ -240,7 +240,7 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  ESP_LOGD(TAG, "JPEG encoded: %u bytes (from %u bytes RGB565)", jpeg_size, image_size);
+  ESP_LOGV(TAG, "JPEG encoded: %u bytes (from %u bytes RGB565)", jpeg_size, image_size);
 
   // Envoyer le JPEG encodé
   httpd_resp_set_type(req, "image/jpeg");
@@ -288,7 +288,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
-    ESP_LOGD(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
+    ESP_LOGV(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
              server->camera_->get_image_width(),
              server->camera_->get_image_height(),
              image_size);
@@ -317,7 +317,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
-    ESP_LOGD(TAG, "JPEG encoded: %u bytes (quality=%d)", jpeg_size, server->jpeg_quality_);
+    ESP_LOGV(TAG, "JPEG encoded: %u bytes (quality=%d)", jpeg_size, server->jpeg_quality_);
 
     // Envoyer boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
@@ -338,7 +338,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       break;
     }
 
-    ESP_LOGD(TAG, "Frame sent successfully");
+    ESP_LOGV(TAG, "Frame sent successfully");
 
     // Limiter le framerate pour ne pas surcharger le réseau
     vTaskDelay(pdMS_TO_TICKS(33));  // ~30 FPS
