@@ -118,7 +118,7 @@ lvgl:
                   width: 550
 
               - label:
-                  text: "800x600 @ 30 FPS · RGB565"
+                  text: "800x600 @ 50 FPS · RGB565"
                   x: 0
                   y: 90
                   text_color: 0xCCCCCC
@@ -292,7 +292,7 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "===== CAMERA INFO =====");
                     ESP_LOGI("camera", "Screen: 1024x600");
-                    ESP_LOGI("camera", "Camera: 800x600 @ 30 FPS");
+                    ESP_LOGI("camera", "Camera: 800x600 @ 50 FPS");
                     ESP_LOGI("camera", "Canvas: 800x600 @ (112,0)");
                     ESP_LOGI("camera", "Format: RGB565 RAW8");
                     ESP_LOGI("camera", "Sensor: OV5647 @ 0x36");
@@ -368,7 +368,7 @@ lvgl:
               - label:
                   text: !lambda |-
                     static char buf[60];
-                    snprintf(buf, sizeof(buf), "800x600 @ 30 FPS · RGB565 · I2C 0x36");
+                    snprintf(buf, sizeof(buf), "800x600 @ 50 FPS · RGB565 · I2C 0x36");
                     return buf;
                   x: 140
                   y: 16
@@ -399,9 +399,9 @@ lvgl:
 #   i2c_id: bsp_bus
 #   sensor_type: ov5647
 #   sensor_addr: 0x36
-#   resolution: 800x600      # ← Nouvelle résolution
+#   resolution: 800x600      # ← Résolution optimisée pour 1024x600
 #   pixel_format: RGB565
-#   framerate: 30
+#   framerate: 50            # ← 50 FPS pour mouvements fluides
 #   raw_type: RAW8
 #   bayer_type: GBRG
 #
@@ -409,10 +409,10 @@ lvgl:
 #   id: lvgl_cam_display
 #   camera_id: tab5_cam
 #   canvas_id: camera_canvas
-#   update_interval: 100ms
+#   update_interval: 33ms    # ← 30 FPS display (ou 20ms pour 50 FPS complet)
 #
 # Résolutions disponibles:
-# - 640x480 (VGA)
-# - 800x600 (recommandé pour écran 1024x600) ✓
-# - 800x640 (format original)
-# - 1024x600 (plein écran)
+# - 640x480 (VGA) @ 30 FPS
+# - 800x600 @ 50 FPS (recommandé pour écran 1024x600) ✓
+# - 800x640 @ 50 FPS (format original)
+# - 1024x600 @ 30 FPS (plein écran)

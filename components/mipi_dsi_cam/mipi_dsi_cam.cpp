@@ -725,8 +725,8 @@ bool MipiDSICamComponent::start_streaming() {
       custom_format = &ov5647_format_640x480_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
     } else if (width == 800 && height == 600) {
-      custom_format = &ov5647_format_800x600_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 30fps (OV5647)");
+      custom_format = &ov5647_format_800x600_raw8_50fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
     } else if (width == 800 && height == 640) {
       custom_format = &ov5647_format_800x640_raw8_50fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");

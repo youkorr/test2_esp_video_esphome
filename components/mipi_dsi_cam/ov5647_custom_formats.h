@@ -37,6 +37,8 @@ typedef struct {
 // Clock rates for custom formats
 #define OV5647_IDI_CLOCK_RATE_640x480_30FPS        (48000000ULL)
 #define OV5647_MIPI_CSI_LINE_RATE_640x480_30FPS    (OV5647_IDI_CLOCK_RATE_640x480_30FPS * 4)
+#define OV5647_IDI_CLOCK_RATE_800x600_50FPS        (100000000ULL)  // Same as 800x640 for smooth motion
+#define OV5647_MIPI_CSI_LINE_RATE_800x600_50FPS    (OV5647_IDI_CLOCK_RATE_800x600_50FPS * 4)
 #define OV5647_IDI_CLOCK_RATE_800x640_50FPS        (100000000ULL)  // From testov5647 working config
 #define OV5647_MIPI_CSI_LINE_RATE_800x640_50FPS    (OV5647_IDI_CLOCK_RATE_800x640_50FPS * 4)
 #define OV5647_IDI_CLOCK_RATE_1024x600_30FPS       (72000000ULL)
@@ -409,16 +411,16 @@ static const esp_cam_sensor_format_t ov5647_format_1024x600_raw8_30fps = {
 };
 
 // ============================================================================
-// Configuration 3 : 800x600 @ 30fps RAW8 (for 1024x600 displays)
+// Configuration 3 : 800x600 @ 50fps RAW8 (for 1024x600 displays - SMOOTH MOTION)
 // ============================================================================
-// Optimized for 1024x600 displays with centered camera view
-// Camera outputs 800x600, centered on screen at position (112, 0)
+// Optimized for 1024x600 displays with centered camera view @ 50 FPS
+// Camera outputs 800x600 @ 50 FPS for smooth motion, centered at (112, 0)
 
-static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps[] = {
-    // RAW8 mode configuration (based on 800x640 working config)
+static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps[] = {
+    // RAW8 mode configuration (based on 800x640 working config @ 50 FPS)
     {0x3034, OV5647_8BIT_MODE},  // 8-bit RAW8 format
-    {0x3035, 0x21},  // System clock divider (30 fps vs 50fps for 800x640)
-    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
+    {0x3035, 0x41},  // System clock divider (50 fps - same as 800x640)
+    {0x3036, ((OV5647_IDI_CLOCK_RATE_800x600_50FPS * 8 * 4) / 25000000)},  // PLL multiplier for 100MHz
     {0x303c, 0x11},  // PLLS control
     {0x3106, 0xf5},
     {0x3821, 0x03},  // Horizontal binning + mirror
@@ -450,13 +452,13 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps[] =
     {0x3c00, 0x40},
     {0x3b07, 0x0c},
 
-    // Timing configuration for 800x600 @ 30fps
+    // Timing configuration for 800x600 @ 50fps
     // HTS (Horizontal Total Size) = 1896 pixels (same as 800x640)
     {0x380c, (1896 >> 8) & 0x1F},
     {0x380d, 1896 & 0xFF},
-    // VTS (Vertical Total Size) = 920 lines (adapted from 984 for 600 vs 640)
-    {0x380e, (920 >> 8) & 0xFF},
-    {0x380f, 920 & 0xFF},
+    // VTS (Vertical Total Size) = 1055 lines (for 50 FPS: 100MHz / (1896 * 50) = 1055)
+    {0x380e, (1055 >> 8) & 0xFF},
+    {0x380f, 1055 & 0xFF},
 
     // Binning configuration (same as 800x640)
     {0x3814, 0x31},  // Horizontal subsample
@@ -528,7 +530,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps[] =
     {0x4001, 0x02},
     {0x4004, 0x02},
     {0x4000, 0x09},
-    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_640x480_30FPS / 4))},  // MIPI pclk period (calculated)
+    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_800x600_50FPS / 4))},  // MIPI pclk period (100MHz)
     {0x4050, 0x6e},
     {0x4051, 0x8f},
 
@@ -539,28 +541,28 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps[] =
 static const esp_cam_sensor_isp_info_t ov5647_800x600_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
-        .pclk = 52344000,     // HTS × VTS × FPS = 1896 × 920 × 30
+        .pclk = 100026000,    // HTS × VTS × FPS = 1896 × 1055 × 50
         .hts = 1896,          // Horizontal Total Size (same as 800x640)
-        .vts = 920,           // Vertical Total Size (adapted for 600 lines)
+        .vts = 1055,          // Vertical Total Size (for 50 FPS)
         .exp_def = 0x300,     // Default exposure (same as 800x640)
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
-static const esp_cam_sensor_format_t ov5647_format_800x600_raw8_30fps = {
-    .name = "MIPI_2lane_24Minput_RAW8_800x600_30fps",
+static const esp_cam_sensor_format_t ov5647_format_800x600_raw8_50fps = {
+    .name = "MIPI_2lane_24Minput_RAW8_800x600_50fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .xclk = 24000000,
     .width = 800,
     .height = 600,
-    .regs = ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps,
-    .regs_size = ARRAY_SIZE(ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps),
-    .fps = 30,
+    .regs = ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps,
+    .regs_size = ARRAY_SIZE(ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps),
+    .fps = 50,
     .isp_info = &ov5647_800x600_isp_info,
     .mipi_info = {
-        .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_640x480_30FPS,
+        .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_800x600_50FPS,
         .lane_num = 2,
         .line_sync_en = false,
     },

@@ -78,7 +78,7 @@ mipi_dsi_cam:
   sensor_addr: 0x36        # Adresse I2C OV5647
   resolution: 800x600      # Résolution adaptée pour écran 1024x600
   pixel_format: RGB565     # RGB565 works better than YUYV with OV5647
-  framerate: 30            # 30 FPS
+  framerate: 50            # 50 FPS for smooth motion (same as 800x640)
 
   # Bayer pattern for OV5647
   raw_type: RAW8
