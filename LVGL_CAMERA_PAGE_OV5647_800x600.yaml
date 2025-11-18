@@ -1,0 +1,418 @@
+# Page LVGL pour caméra OV5647 - 800x600 sur écran 1024x600
+# Écran: 1024x600 | Caméra: 800x600 @ 30 FPS
+# Canvas centré avec interface moderne
+
+lvgl:
+  pages:
+    # ========== PAGE CAMERA 800x600 ==========
+    - id: camera_page
+      bg_color: 0x000000  # Fond noir
+
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📷 Page caméra OV5647 chargée");
+            auto canvas = id(camera_canvas);
+            if (canvas == nullptr) {
+              ESP_LOGE("camera", "Canvas introuvable!");
+              return;
+            }
+            // Canvas 800x600 centré horizontalement: (1024-800)/2 = 112
+            lv_obj_set_size(canvas, 800, 600);
+            lv_obj_set_pos(canvas, 112, 0);
+            ESP_LOGI("camera", "Canvas: 800x600 @ (112,0)");
+
+      widgets:
+        # ===== CANVAS CAMERA PLEIN ÉCRAN =====
+        - canvas:
+            id: camera_canvas
+            width: 800
+            height: 600
+            x: 112
+            y: 0
+            bg_color: 0x000000
+            border_width: 0
+
+        # ===== BARRE SUPÉRIEURE OVERLAY =====
+        - obj:
+            id: camera_header
+            width: 1024
+            height: 60
+            x: 0
+            y: 0
+            bg_color: 0x1a1a1a
+            bg_opa: 85%  # Semi-transparent
+            border_width: 0
+            widgets:
+              - label:
+                  text: "OV5647 CAMERA"
+                  x: 20
+                  y: 16
+                  text_color: 0xFF8800
+                  text_font: nunito_32
+                  text_align: LEFT
+
+              - obj:
+                  id: status_badge
+                  width: 120
+                  height: 36
+                  x: 450
+                  y: 12
+                  bg_color: 0x00CC44
+                  bg_opa: COVER
+                  radius: 18
+                  widgets:
+                    - label:
+                        id: camera_status_label
+                        text: "READY"
+                        text_color: 0xFFFFFF
+                        text_font: nunito_24
+                        text_align: CENTER
+                        align: CENTER
+
+              - button:
+                  id: btn_camera_back
+                  width: 90
+                  height: 44
+                  x: 910
+                  y: 8
+                  bg_color: 0xFF4444
+                  bg_opa: COVER
+                  radius: 22
+                  shadow_width: 6
+                  shadow_color: 0xFF4444
+                  shadow_opa: 60%
+                  on_click:
+                    then:
+                      - lambda: |-
+                          ESP_LOGI("camera", "Retour accueil");
+                          id(tab5_cam).stop_streaming();
+                      - lvgl.page.show: page_home
+                  widgets:
+                    - label:
+                        text: "BACK"
+                        text_color: 0xFFFFFF
+                        text_font: nunito_20
+                        text_align: CENTER
+                        align: CENTER
+
+        # ===== OVERLAY DE DÉMARRAGE =====
+        - obj:
+            id: camera_overlay
+            width: 550
+            height: 160
+            x: 237  # Centré: (1024-550)/2
+            y: 220  # Centré verticalement
+            bg_color: 0x2d2d2d
+            bg_opa: 95%
+            radius: 18
+            border_width: 3
+            border_color: 0xFF8800
+            widgets:
+              - label:
+                  text: "Press START to begin streaming"
+                  x: 0
+                  y: 35
+                  text_color: 0xFFFFFF
+                  text_font: nunito_28
+                  text_align: CENTER
+                  width: 550
+
+              - label:
+                  text: "800x600 @ 30 FPS · RGB565"
+                  x: 0
+                  y: 90
+                  text_color: 0xCCCCCC
+                  text_font: nunito_20
+                  text_align: CENTER
+                  width: 550
+
+        # ===== PANNEAU DE CONTRÔLE DROIT =====
+        - obj:
+            width: 80
+            height: 600
+            x: 944  # À droite: 1024-80
+            y: 0
+            bg_color: 0x1a1a1a
+            bg_opa: 85%
+            radius: 0
+
+        # Bouton START
+        - button:
+            id: btn_start_streaming
+            width: 70
+            height: 70
+            x: 949
+            y: 80
+            bg_color: 0x00CC44
+            bg_opa: COVER
+            radius: 35
+            shadow_width: 8
+            shadow_color: 0x00CC44
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶ Démarrage streaming");
+                    if (id(tab5_cam).start_streaming()) {
+                      ESP_LOGI("camera", "✓ Streaming OK");
+                      lv_obj_set_style_bg_color(id(status_badge), lv_color_hex(0xFF0000), 0);
+                    } else {
+                      ESP_LOGE("camera", "✗ Échec streaming");
+                    }
+                - lvgl.widget.hide: camera_overlay
+                - lvgl.label.update:
+                    id: camera_status_label
+                    text: "LIVE"
+            widgets:
+              - label:
+                  text: "▶"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_32
+                  text_align: CENTER
+                  align: CENTER
+
+        # Bouton STOP
+        - button:
+            id: btn_stop_streaming
+            width: 70
+            height: 70
+            x: 949
+            y: 170
+            bg_color: 0xFF4444
+            bg_opa: COVER
+            radius: 35
+            shadow_width: 8
+            shadow_color: 0xFF4444
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "■ Arrêt streaming");
+                    id(tab5_cam).stop_streaming();
+                    lv_obj_set_style_bg_color(id(status_badge), lv_color_hex(0x00CC44), 0);
+                - lvgl.widget.show: camera_overlay
+                - lvgl.label.update:
+                    id: camera_status_label
+                    text: "READY"
+            widgets:
+              - label:
+                  text: "■"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_32
+                  text_align: CENTER
+                  align: CENTER
+
+        # Bouton SNAPSHOT
+        - button:
+            id: btn_take_snapshot
+            width: 70
+            height: 70
+            x: 949
+            y: 260
+            bg_color: 0xFF8800
+            bg_opa: COVER
+            radius: 35
+            shadow_width: 8
+            shadow_color: 0xFF8800
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "📸 Snapshot");
+                    if (id(tab5_cam).capture_frame()) {
+                      ESP_LOGI("camera", "✓ Capturé");
+                      lv_obj_set_style_bg_color(id(status_badge), lv_color_hex(0xFF8800), 0);
+                    }
+                - delay: 300ms
+                - lambda: |-
+                    if (id(tab5_cam).is_streaming()) {
+                      lv_obj_set_style_bg_color(id(status_badge), lv_color_hex(0xFF0000), 0);
+                    } else {
+                      lv_obj_set_style_bg_color(id(status_badge), lv_color_hex(0x00CC44), 0);
+                    }
+            widgets:
+              - label:
+                  text: "📷"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_28
+                  text_align: CENTER
+                  align: CENTER
+
+        # Bouton FULLSCREEN
+        - button:
+            id: btn_fullscreen
+            width: 70
+            height: 70
+            x: 949
+            y: 350
+            bg_color: 0x4682B4
+            bg_opa: COVER
+            radius: 35
+            shadow_width: 8
+            shadow_color: 0x4682B4
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "⛶ Plein écran");
+                    // Mode plein écran: canvas 1024x600 @ (0, 0)
+                    lv_obj_set_size(id(camera_canvas), 1024, 600);
+                    lv_obj_set_pos(id(camera_canvas), 0, 0);
+                    lv_obj_add_flag(id(camera_header), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(btn_start_streaming), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(btn_stop_streaming), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(btn_take_snapshot), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(btn_fullscreen), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(btn_info), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_add_flag(id(camera_overlay), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_exit_fullscreen), LV_OBJ_FLAG_HIDDEN);
+            widgets:
+              - label:
+                  text: "⛶"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_28
+                  text_align: CENTER
+                  align: CENTER
+
+        # Bouton INFO
+        - button:
+            id: btn_info
+            width: 70
+            height: 70
+            x: 949
+            y: 440
+            bg_color: 0x4682B4
+            bg_opa: COVER
+            radius: 35
+            shadow_width: 8
+            shadow_color: 0x4682B4
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "===== CAMERA INFO =====");
+                    ESP_LOGI("camera", "Screen: 1024x600");
+                    ESP_LOGI("camera", "Camera: 800x600 @ 30 FPS");
+                    ESP_LOGI("camera", "Canvas: 800x600 @ (112,0)");
+                    ESP_LOGI("camera", "Format: RGB565 RAW8");
+                    ESP_LOGI("camera", "Sensor: OV5647 @ 0x36");
+                    ESP_LOGI("camera", "Bayer: GBRG");
+                    ESP_LOGI("camera", "Status: %s",
+                      id(tab5_cam).is_streaming() ? "STREAMING" : "IDLE");
+            widgets:
+              - label:
+                  text: "ℹ"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_32
+                  text_align: CENTER
+                  align: CENTER
+
+        # Bouton EXIT FULLSCREEN (caché par défaut)
+        - button:
+            id: btn_exit_fullscreen
+            width: 110
+            height: 50
+            x: 900
+            y: 10
+            bg_color: 0xFF4444
+            bg_opa: 95%
+            radius: 25
+            hidden: true
+            shadow_width: 12
+            shadow_color: 0xFF4444
+            shadow_opa: 70%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "Sortie plein écran");
+                    // Restaurer canvas 800x600 @ (112, 0)
+                    lv_obj_set_size(id(camera_canvas), 800, 600);
+                    lv_obj_set_pos(id(camera_canvas), 112, 0);
+                    lv_obj_clear_flag(id(camera_header), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_start_streaming), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_stop_streaming), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_take_snapshot), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_fullscreen), LV_OBJ_FLAG_HIDDEN);
+                    lv_obj_clear_flag(id(btn_info), LV_OBJ_FLAG_HIDDEN);
+                    if (!id(tab5_cam).is_streaming()) {
+                      lv_obj_clear_flag(id(camera_overlay), LV_OBJ_FLAG_HIDDEN);
+                    }
+                    lv_obj_add_flag(id(btn_exit_fullscreen), LV_OBJ_FLAG_HIDDEN);
+            widgets:
+              - label:
+                  text: "EXIT"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+                  align: CENTER
+
+        # ===== BARRE INFÉRIEURE OVERLAY =====
+        - obj:
+            id: camera_footer
+            width: 1024
+            height: 50
+            x: 0
+            y: 550  # En bas: 600-50
+            bg_color: 0x1a1a1a
+            bg_opa: 85%
+            border_width: 0
+            widgets:
+              - label:
+                  text: "OV5647"
+                  x: 20
+                  y: 14
+                  text_color: 0xFF8800
+                  text_font: nunito_24
+                  text_align: LEFT
+
+              - label:
+                  text: !lambda |-
+                    static char buf[60];
+                    snprintf(buf, sizeof(buf), "800x600 @ 30 FPS · RGB565 · I2C 0x36");
+                    return buf;
+                  x: 140
+                  y: 16
+                  text_color: 0xCCCCCC
+                  text_font: nunito_18
+                  text_align: LEFT
+
+              - label:
+                  text: !lambda |-
+                    if (id(tab5_cam).is_streaming()) {
+                      return "Streaming Active";
+                    }
+                    return "Ready";
+                  x: 800
+                  y: 16
+                  text_color: 0x888888
+                  text_font: nunito_18
+                  text_align: LEFT
+
+# ============================================
+# NOTES D'UTILISATION
+# ============================================
+#
+# Configuration requise dans votre fichier principal:
+#
+# mipi_dsi_cam:
+#   id: tab5_cam
+#   i2c_id: bsp_bus
+#   sensor_type: ov5647
+#   sensor_addr: 0x36
+#   resolution: 800x600      # ← Nouvelle résolution
+#   pixel_format: RGB565
+#   framerate: 30
+#   raw_type: RAW8
+#   bayer_type: GBRG
+#
+# lvgl_camera_display:
+#   id: lvgl_cam_display
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   update_interval: 100ms
+#
+# Résolutions disponibles:
+# - 640x480 (VGA)
+# - 800x600 (recommandé pour écran 1024x600) ✓
+# - 800x640 (format original)
+# - 1024x600 (plein écran)

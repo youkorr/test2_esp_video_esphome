@@ -452,7 +452,209 @@ static const esp_cam_sensor_format_t ov5647_format_1024x600_raw8_30fps = {
 };
 
 // ============================================================================
-// Configuration 3 : 800x640 @ 50fps RAW8 (from testov5647 working config)
+// Configuration 3 : 800x600 @ 30fps RAW8 (for 1024x600 displays)
+// ============================================================================
+// Optimized for 1024x600 displays with centered camera view
+// Camera outputs 800x600, centered on screen at position (112, 0)
+
+static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps[] = {
+    // Software reset
+    {0x0103, 0x01},
+    {OV5647_REG_DELAY, 0x0a},
+    {0x0100, 0x00},  // Standby
+
+    // RAW8 mode configuration
+    {0x3034, OV5647_8BIT_MODE},  // 8-bit RAW8 format
+    {0x3035, 0x21},  // System clock divider (30 fps)
+    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
+    {0x303c, 0x11},  // PLLS control
+    {0x3106, 0xf5},
+    {0x3821, 0x03},  // Horizontal binning + mirror
+    {0x3820, 0x41},  // Vertical binning
+    {0x3827, 0xec},
+    {0x370c, 0x0f},
+    {0x3612, 0x59},
+    {0x3618, 0x00},
+    {0x5000, 0xff},  // Enable all ISP blocks
+
+    // LSC (Lens Shading Correction)
+    {0x583e, 0xf0},  // LSC max gain
+    {0x583f, 0x20},  // LSC min gain
+
+    {0x5002, 0x41},
+    {0x5003, 0x08},
+    {0x5a00, 0x08},
+    {0x3000, 0x00},
+    {0x3001, 0x00},
+    {0x3002, 0x00},
+    {0x3016, 0x08},
+    {0x3017, 0xe0},
+    {0x3018, 0x44},
+    {0x301c, 0xf8},
+    {0x301d, 0xf0},
+    {0x3a18, 0x00},
+    {0x3a19, 0xf8},
+    {0x3c01, 0x80},
+    {0x3c00, 0x40},
+    {0x3b07, 0x0c},
+
+    // Timing configuration for 800x600 @ 30fps
+    // HTS (Horizontal Total Size) = 1896 pixels
+    {0x380c, (1896 >> 8) & 0x1F},
+    {0x380d, 1896 & 0xFF},
+    // VTS (Vertical Total Size) = 1050 lines
+    {0x380e, (1050 >> 8) & 0xFF},
+    {0x380f, 1050 & 0xFF},
+
+    // Binning configuration (4x4 for 800x600)
+    {0x3814, 0x31},  // Horizontal subsample (4x)
+    {0x3815, 0x31},  // Vertical subsample (4x)
+    {0x3708, 0x64},
+    {0x3709, 0x52},
+
+    // Crop window for 800x600
+    // X start: (2592 - 800*4) / 2 = -8 -> use 0
+    {0x3800, (0 >> 8) & 0x0F},   // X address start high
+    {0x3801, 0 & 0xFF},          // X address start low
+    // Y start: (1944 - 600*4) / 2 = -228 -> use 0
+    {0x3802, (0 >> 8) & 0x07},   // Y address start high
+    {0x3803, 0 & 0xFF},          // Y address start low
+    // X end: 2592 - 1
+    {0x3804, ((2592 - 1) >> 8) & 0x0F},  // X address end high
+    {0x3805, (2592 - 1) & 0xFF},         // X address end low
+    // Y end: 1944 - 1
+    {0x3806, ((1944 - 1) >> 8) & 0x07},  // Y address end high
+    {0x3807, (1944 - 1) & 0xFF},         // Y address end low
+
+    // Output size: 800x600
+    {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
+    {0x3809, 800 & 0xFF},         // Output horizontal width low
+    {0x380a, (600 >> 8) & 0x7F},  // Output vertical height high
+    {0x380b, 600 & 0xFF},         // Output vertical height low
+
+    // Timing offset
+    {0x3810, (4 >> 8) & 0x0F},   // Timing horizontal offset high
+    {0x3811, 4 & 0xFF},          // Timing horizontal offset low
+    {0x3812, (3 >> 8) & 0x07},   // Timing vertical offset high
+    {0x3813, 3 & 0xFF},          // Timing vertical offset low
+
+    // Analog settings
+    {0x3630, 0x2e},
+    {0x3632, 0xe2},
+    {0x3633, 0x23},
+    {0x3634, 0x44},
+    {0x3636, 0x06},
+    {0x3620, 0x64},
+    {0x3621, 0xe0},
+    {0x3600, 0x37},
+    {0x3704, 0xa0},
+    {0x3703, 0x5a},
+    {0x3715, 0x78},
+    {0x3717, 0x01},
+    {0x3731, 0x02},
+    {0x370b, 0x60},
+    {0x3705, 0x1a},
+
+    // AEC/AGC settings
+    {0x3503, 0x00},  // Enable auto exposure and auto gain
+    {0x3f05, 0x02},
+    {0x3f06, 0x10},
+    {0x3f01, 0x0a},
+    {0x3a08, 0x01},
+    {0x3a09, 0x27},
+    {0x3a0a, 0x00},
+    {0x3a0b, 0xf6},
+    {0x3a0d, 0x04},
+    {0x3a0e, 0x03},
+    {0x3a0f, 0x58},
+    {0x3a10, 0x50},
+    {0x3a1b, 0x58},
+    {0x3a1e, 0x50},
+    {0x3a11, 0x60},
+    {0x3a1f, 0x28},
+
+    // BLC (Black Level Calibration)
+    {0x4001, 0x02},
+    {0x4004, 0x02},
+    {0x4000, 0x09},
+    {0x4837, 0x24},  // MIPI pclk period
+    {0x4050, 0x6e},
+    {0x4051, 0x8f},
+
+    // MIPI configuration
+    {0x4800, BIT(5)},  // MIPI clock lane gate enable
+
+    // AWB settings
+    {0x5180, 0xff},
+    {0x5181, 0xf2},
+    {0x5182, 0x00},
+    {0x5183, 0x14},
+    {0x5184, 0x25},
+    {0x5185, 0x24},
+    {0x5186, 0x09},
+    {0x5187, 0x09},
+    {0x5188, 0x0a},
+    {0x5189, 0x75},
+    {0x518a, 0x52},
+    {0x518b, 0xea},
+    {0x518c, 0xa8},
+    {0x518d, 0x42},
+    {0x518e, 0x38},
+    {0x518f, 0x56},
+    {0x5190, 0x42},
+    {0x5191, 0xf8},
+    {0x5192, 0x04},
+    {0x5193, 0x70},
+    {0x5194, 0xf0},
+    {0x5195, 0xf0},
+    {0x5196, 0x03},
+    {0x5197, 0x01},
+    {0x5198, 0x04},
+    {0x5199, 0x12},
+    {0x519a, 0x04},
+    {0x519b, 0x00},
+    {0x519c, 0x06},
+    {0x519d, 0x82},
+    {0x519e, 0x38},
+
+    // Start streaming
+    {0x0100, 0x01},
+    {OV5647_REG_END, 0x00},
+};
+
+static const esp_cam_sensor_isp_info_t ov5647_800x600_isp_info = {
+    .isp_v1_info = {
+        .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+        .pclk = 59724000,     // HTS × VTS × FPS = 1896 × 1050 × 30
+        .hts = 1896,          // Horizontal Total Size
+        .vts = 1050,          // Vertical Total Size
+        .exp_def = 0x300,     // Default exposure
+        .gain_def = 0x100,    // Default gain (1x)
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
+    }
+};
+
+static const esp_cam_sensor_format_t ov5647_format_800x600_raw8_30fps = {
+    .name = "MIPI_2lane_24Minput_RAW8_800x600_30fps",
+    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk = 24000000,
+    .width = 800,
+    .height = 600,
+    .regs = ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps,
+    .regs_size = ARRAY_SIZE(ov5647_input_24M_MIPI_2lane_raw8_800x600_30fps),
+    .fps = 30,
+    .isp_info = &ov5647_800x600_isp_info,
+    .mipi_info = {
+        .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_640x480_30FPS,
+        .lane_num = 2,
+        .line_sync_en = false,
+    },
+    .reserved = NULL,
+};
+
+// ============================================================================
+// Configuration 4 : 800x640 @ 50fps RAW8 (from testov5647 working config)
 // ============================================================================
 // This configuration is proven to work well in testov5647 repository with
 // good image quality (brightness: 60, contrast: 145, saturation: 135).
