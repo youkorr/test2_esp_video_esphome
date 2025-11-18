@@ -838,70 +838,59 @@ esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *
   for (uint16_t row = 0; row < height; row += 2) {
     const uint16_t *row0 = rgb + (row * width);
     const uint16_t *row1 = rgb + ((row + 1) * width);
-    uint8_t *odd_line = yuv420 + (row * width * 3 / 2);      // Odd line: u y y u y y...
-    uint8_t *even_line = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
+    uint8_t *odd_ptr = yuv420 + (row * width * 3 / 2);      // Odd line: u y y u y y...
+    uint8_t *even_ptr = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
 
-    size_t out_idx = 0;
+    // Process 2 pixels at a time (UV subsampling) - ultra-optimized with lookup tables
+    for (uint16_t col = 0; col < width; col += 2, row0 += 2, row1 += 2, odd_ptr += 3, even_ptr += 3) {
+      // Get 4 pixels (2x2 block) - prefetch for better cache performance
+      uint16_t p00 = row0[0];
+      uint16_t p01 = row0[1];
+      uint16_t p10 = row1[0];
+      uint16_t p11 = row1[1];
 
-    // Process 2 pixels at a time (UV subsampling) - optimized with lookup tables
-    for (uint16_t col = 0; col < width; col += 2) {
-      // Get 4 pixels (2x2 block) and extract RGB565 components
-      uint16_t p00 = row0[col];
-      uint16_t p01 = row0[col + 1];
-      uint16_t p10 = row1[col];
-      uint16_t p11 = row1[col + 1];
-
-      // Extract RGB565 components (5-bit R, 6-bit G, 5-bit B)
-      uint8_t r0 = (p00 >> 11) & 0x1F;
+      // Extract RGB565 components (5-bit R, 6-bit G, 5-bit B) - unrolled for speed
+      uint8_t r0 = (p00 >> 11);
       uint8_t g0 = (p00 >> 5) & 0x3F;
       uint8_t b0 = p00 & 0x1F;
 
-      uint8_t r1 = (p01 >> 11) & 0x1F;
+      uint8_t r1 = (p01 >> 11);
       uint8_t g1 = (p01 >> 5) & 0x3F;
       uint8_t b1 = p01 & 0x1F;
 
-      uint8_t r2 = (p10 >> 11) & 0x1F;
+      uint8_t r2 = (p10 >> 11);
       uint8_t g2 = (p10 >> 5) & 0x3F;
       uint8_t b2 = p10 & 0x1F;
 
-      uint8_t r3 = (p11 >> 11) & 0x1F;
+      uint8_t r3 = (p11 >> 11);
       uint8_t g3 = (p11 >> 5) & 0x3F;
       uint8_t b3 = p11 & 0x1F;
 
       // Calculate Y for all 4 pixels using lookup tables (no multiplications!)
-      int y0 = y_r_lut_[r0] + y_g_lut_[g0] + y_b_lut_[b0] + 16;
-      int y1 = y_r_lut_[r1] + y_g_lut_[g1] + y_b_lut_[b1] + 16;
-      int y2 = y_r_lut_[r2] + y_g_lut_[g2] + y_b_lut_[b2] + 16;
-      int y3 = y_r_lut_[r3] + y_g_lut_[g3] + y_b_lut_[b3] + 16;
+      // Values are already in valid range from LUTs, no clamping needed
+      uint8_t y0 = y_r_lut_[r0] + y_g_lut_[g0] + y_b_lut_[b0] + 16;
+      uint8_t y1 = y_r_lut_[r1] + y_g_lut_[g1] + y_b_lut_[b1] + 16;
+      uint8_t y2 = y_r_lut_[r2] + y_g_lut_[g2] + y_b_lut_[b2] + 16;
+      uint8_t y3 = y_r_lut_[r3] + y_g_lut_[g3] + y_b_lut_[b3] + 16;
 
       // Average RGB565 components for U/V (using shifts for speed)
-      int r_avg = (r0 + r1 + r2 + r3) >> 2;
-      int g_avg = (g0 + g1 + g2 + g3) >> 2;
-      int b_avg = (b0 + b1 + b2 + b3) >> 2;
+      uint8_t r_avg = (r0 + r1 + r2 + r3) >> 2;
+      uint8_t g_avg = (g0 + g1 + g2 + g3) >> 2;
+      uint8_t b_avg = (b0 + b1 + b2 + b3) >> 2;
 
-      // Calculate U and V using lookup tables
-      int u = u_r_lut_[r_avg] + u_g_lut_[g_avg] + u_b_lut_[b_avg] + 128;
-      int v = v_r_lut_[r_avg] + v_g_lut_[g_avg] + v_b_lut_[b_avg] + 128;
+      // Calculate U and V using lookup tables (no clamping needed)
+      uint8_t u = u_r_lut_[r_avg] + u_g_lut_[g_avg] + u_b_lut_[b_avg] + 128;
+      uint8_t v = v_r_lut_[r_avg] + v_g_lut_[g_avg] + v_b_lut_[b_avg] + 128;
 
-      // Clamp to valid range [0, 255]
-      y0 = (y0 < 0) ? 0 : (y0 > 255) ? 255 : y0;
-      y1 = (y1 < 0) ? 0 : (y1 > 255) ? 255 : y1;
-      y2 = (y2 < 0) ? 0 : (y2 > 255) ? 255 : y2;
-      y3 = (y3 < 0) ? 0 : (y3 > 255) ? 255 : y3;
-      u = (u < 0) ? 0 : (u > 255) ? 255 : u;
-      v = (v < 0) ? 0 : (v > 255) ? 255 : v;
-
-      // Write to odd line: u y0 y1
-      odd_line[out_idx + 0] = u;
-      odd_line[out_idx + 1] = y0;
-      odd_line[out_idx + 2] = y1;
+      // Write to odd line: u y0 y1 (using direct pointer writes)
+      odd_ptr[0] = u;
+      odd_ptr[1] = y0;
+      odd_ptr[2] = y1;
 
       // Write to even line: v y2 y3
-      even_line[out_idx + 0] = v;
-      even_line[out_idx + 1] = y2;
-      even_line[out_idx + 2] = y3;
-
-      out_idx += 3;
+      even_ptr[0] = v;
+      even_ptr[1] = y2;
+      even_ptr[2] = y3;
     }
   }
 
