@@ -195,14 +195,13 @@ camera_web_server:
   port: 8080               # Port HTTP pour le stream MJPEG
                            # URL: http://<IP>:8080/
 
-# LVGL Camera Display - VGA nécessite update lent
+# LVGL Camera Display - 800x600 @ 50 FPS - Fluide !
 lvgl_camera_display:
   id: lvgl_cam_display
   camera_id: main_camera
   canvas_id: camera_canvas
-  update_interval: 150ms    # CRITIQUE: LVGL prend 138ms/update avec VGA
-  # VGA: 150ms minimum (138ms mesuré + marge) = ~6-7 FPS display
-  # 800x600: Peut utiliser 33ms pour 30 FPS
+  update_interval: 33ms     # 30 FPS display - FLUIDE et STABLE
+  # Note: 800x600 est bien optimisé, pas besoin de 150ms comme VGA
 
 # Web server pour monitoring (optionnel)
 web_server:
