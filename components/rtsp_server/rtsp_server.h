@@ -82,6 +82,7 @@ class RTSPServer : public Component {
   void set_max_clients(uint8_t max) { max_clients_ = max; }
   void set_username(const std::string &username) { username_ = username; }
   void set_password(const std::string &password) { password_ = password; }
+  void set_enabled(bool enabled) { enabled_ = enabled; }
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
@@ -96,6 +97,7 @@ class RTSPServer : public Component {
   uint8_t max_clients_{3};
   std::string username_{""};
   std::string password_{""};
+  bool enabled_{false};  // RTSP server enabled/disabled by switch
 
   // RTSP server socket
   int rtsp_socket_{-1};

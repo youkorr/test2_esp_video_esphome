@@ -69,6 +69,29 @@ void RTSPServer::setup() {
 }
 
 void RTSPServer::loop() {
+  // Check if RTSP server is enabled by switch
+  if (!enabled_) {
+    // If streaming was active, stop it
+    if (streaming_active_) {
+      ESP_LOGI(TAG, "RTSP server disabled by switch, stopping streaming...");
+      streaming_active_ = false;
+
+      // Wait for streaming task to stop
+      if (streaming_task_handle_ != nullptr) {
+        for (int i = 0; i < 50; i++) {
+          eTaskState task_state = eTaskGetState(streaming_task_handle_);
+          if (task_state == eSuspended) {
+            break;
+          }
+          vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        vTaskDelete(streaming_task_handle_);
+        streaming_task_handle_ = nullptr;
+      }
+    }
+    return;  // Don't handle connections when disabled
+  }
+
   // Handle incoming RTSP connections (lightweight - safe for loopTask's small stack)
   handle_rtsp_connections_();
 
@@ -81,6 +104,7 @@ void RTSPServer::loop() {
 
 void RTSPServer::dump_config() {
   ESP_LOGCONFIG(TAG, "RTSP Server:");
+  ESP_LOGCONFIG(TAG, "  Status: %s (controlled by switch)", enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGCONFIG(TAG, "  Port: %d", rtsp_port_);
   ESP_LOGCONFIG(TAG, "  Stream Path: %s", stream_path_.c_str());
   ESP_LOGCONFIG(TAG, "  RTP Port: %d", rtp_port_);

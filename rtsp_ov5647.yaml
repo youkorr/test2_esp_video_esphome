@@ -84,17 +84,37 @@ mipi_dsi_cam:
   raw_type: RAW8
   bayer_type: GBRG
 
+# Switch to control RTSP server
+switch:
+  - platform: template
+    name: "RTSP Server"
+    id: rtsp_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF  # OFF au démarrage
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *rtsp = id(rtsp_srv);
+          if (rtsp != nullptr) {
+            rtsp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *rtsp = id(rtsp_srv);
+          if (rtsp != nullptr) {
+            rtsp->set_enabled(false);
+          }
+
 # RTSP Server avec encodeur H.264 hardware
 rtsp_server:
+  id: rtsp_srv
   camera_id: main_camera
   port: 554                # Port RTSP standard
   stream_path: "/stream"   # URL: rtsp://<IP>:554/stream
 
-  # Authentification RTSP (optionnel)
-  # Décommenter pour activer l'authentification Basic
-  # username: "admin"
-  # password: "your_password_here"
-  # URL avec auth: rtsp://admin:your_password_here@<IP>:554/stream
+  # Authentification RTSP
+  username: "youkorr"
+  password: "youkorr123"
+  # URL avec auth: rtsp://youkorr:youkorr123@<IP>:554/stream
 
   # Paramètres encodeur H.264 hardware
   bitrate: 2000000         # 2 Mbps (recommandé pour 800x640)
