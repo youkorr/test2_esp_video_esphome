@@ -1,0 +1,166 @@
+# ESPHome FBS Loader - Example Configuration
+# This file demonstrates how to use the ESPHome FBS Loader component
+# to load ESP-DL FlatBuffers models from different storage locations
+
+# ============================================
+# EXAMPLE 1: Load model from FLASH Partition
+# ============================================
+# This is the most common configuration for production use.
+# The model is stored in a separate FLASH partition (SPIFFS/FAT).
+
+substitutions:
+  device_name: "esp32-p4-ai-model"
+  friendly_name: "ESP32-P4 AI Model Loader"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-p4-function-ev-board
+  variant: esp32p4
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: 5.4.2
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ============================================
+# FBS Loader Configuration - FLASH Partition
+# ============================================
+# Load a model from FLASH partition named "model_data"
+esphome_fbs_loader:
+  - id: my_model_loader
+    model_path: "model_data"              # Partition label
+    model_location: flash_partition       # Storage location
+    model_name: "human_face_detect_msr_s8_v1.espdl"  # Model name (optional)
+    param_copy: true                      # Copy parameters to PSRAM (recommended)
+
+# Text sensor to display model info
+text_sensor:
+  - platform: template
+    name: "AI Model Info"
+    id: model_info_sensor
+    update_interval: 60s
+    lambda: |-
+      if (id(my_model_loader).is_model_loaded()) {
+        return id(my_model_loader).get_model_info();
+      }
+      return {"No model loaded"};
+
+# Binary sensor to check if model is loaded
+binary_sensor:
+  - platform: template
+    name: "AI Model Loaded"
+    lambda: |-
+      return id(my_model_loader).is_model_loaded();
+
+# Sensor to display model count
+sensor:
+  - platform: template
+    name: "AI Model Count"
+    accuracy_decimals: 0
+    lambda: |-
+      return id(my_model_loader).get_model_count();
+
+# ============================================
+# EXAMPLE 2: Load encrypted model
+# ============================================
+# Uncomment to use encrypted model with AES-128
+#
+# esphome_fbs_loader:
+#   - id: encrypted_model_loader
+#     model_path: "encrypted_model_data"
+#     model_location: flash_partition
+#     encryption_key: [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+#                      0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]
+#     param_copy: true
+
+# ============================================
+# EXAMPLE 3: Load model from SD Card
+# ============================================
+# Uncomment to load model from SD card
+#
+# esphome_fbs_loader:
+#   - id: sdcard_model_loader
+#     model_path: "/sdcard/models/my_model.espdl"
+#     model_location: sdcard
+#     param_copy: true
+
+# ============================================
+# EXAMPLE 4: Load model by index (multi-model file)
+# ============================================
+# Load a specific model from a multi-model file using index
+#
+# esphome_fbs_loader:
+#   - id: indexed_model_loader
+#     model_path: "multi_model_partition"
+#     model_location: flash_partition
+#     model_index: 0                      # Load first model (0-based index)
+#     param_copy: true
+
+# ============================================
+# EXAMPLE 5: Load with reduced PSRAM usage
+# ============================================
+# Set param_copy to false to save PSRAM
+# This sacrifices performance but reduces PSRAM usage
+#
+# esphome_fbs_loader:
+#   - id: low_psram_loader
+#     model_path: "model_data"
+#     model_location: flash_partition
+#     param_copy: false                   # Don't copy params to PSRAM
+
+# ============================================
+# NOTES:
+# ============================================
+# 1. Model Storage Locations:
+#    - flash_rodata: Model embedded in firmware (use for small models)
+#    - flash_partition: Model in separate FLASH partition (recommended)
+#    - sdcard: Model on SD card (flexible but requires SD card)
+#
+# 2. Model Formats:
+#    - Models must be in ESP-DL FlatBuffers format (.espdl)
+#    - Use pack_espdl_models.py to convert ONNX models
+#
+# 3. Partition Table:
+#    - For flash_partition, you need to define a custom partition table
+#    - Add a data partition for storing models
+#    - Example partition.csv:
+#      # Name,     Type, SubType, Offset,  Size, Flags
+#      nvs,        data, nvs,     0x9000,  0x5000,
+#      otadata,    data, ota,     0xe000,  0x2000,
+#      app0,       app,  ota_0,   0x10000, 0x300000,
+#      app1,       app,  ota_1,   0x310000,0x300000,
+#      model_data, data, spiffs,  0x610000,0x9F0000,
+#
+# 4. Accessing the Model:
+#    - Use id(my_model_loader).get_model() to get fbs::FbsModel pointer
+#    - Use id(my_model_loader).get_loader() to get fbs::FbsLoader pointer
+#    - Example in lambda:
+#      auto model = id(my_model_loader).get_model();
+#      if (model != nullptr) {
+#        // Use the model for inference
+#        auto inputs = model->get_graph_inputs();
+#        // ... your inference code
+#      }
+#
+# 5. Integration with Other Components:
+#    - This loader can be used with human_face_detect, pedestrian_detect
+#    - Or create custom AI components that use the loaded model
+#    - Access model from other components using id(my_model_loader).get_model()
