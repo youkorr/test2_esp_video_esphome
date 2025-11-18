@@ -31,7 +31,7 @@ extern "C" {
 
 // OV02C10 custom format configurations (800x480 et 1280x800)
 #include "ov02c10_custom_formats.h"
-// OV5647 custom format configurations (VGA 640x480 et 1024x600)
+// OV5647 custom format configurations (640x480, 800x600, 800x640, 1024x600)
 #include "ov5647_custom_formats.h"
 // SC202CS custom format configurations (VGA 640x480)
 #include "sc202cs_custom_formats.h"
@@ -724,6 +724,9 @@ bool MipiDSICamComponent::start_streaming() {
     if (width == 640 && height == 480) {
       custom_format = &ov5647_format_640x480_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+    } else if (width == 800 && height == 600) {
+      custom_format = &ov5647_format_800x600_raw8_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 30fps (OV5647)");
     } else if (width == 800 && height == 640) {
       custom_format = &ov5647_format_800x640_raw8_50fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
