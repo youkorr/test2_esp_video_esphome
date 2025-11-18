@@ -122,6 +122,24 @@ switch:
             web_cam->set_enabled(false);
           }
 
+  - platform: template
+    name: "LVGL Camera Display"
+    id: lvgl_display_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF  # OFF au démarrage
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *lvgl_disp = id(lvgl_cam_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *lvgl_disp = id(lvgl_cam_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }
+
 # RTSP Server avec encodeur H.264 hardware
 rtsp_server:
   id: rtsp_srv
