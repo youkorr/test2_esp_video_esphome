@@ -168,6 +168,19 @@ class RTSPServer : public Component {
   void parse_and_cache_nal_units_(const uint8_t *data, size_t len);
   std::vector<std::pair<const uint8_t *, size_t>> parse_nal_units_(const uint8_t *data, size_t len);
 
+  // RGB565 to YUV conversion lookup tables (for performance)
+  static void init_yuv_lut_();
+  static int16_t y_r_lut_[32];  // Y contribution from R (5-bit)
+  static int16_t y_g_lut_[64];  // Y contribution from G (6-bit)
+  static int16_t y_b_lut_[32];  // Y contribution from B (5-bit)
+  static int16_t u_r_lut_[32];  // U contribution from R (5-bit)
+  static int16_t u_g_lut_[64];  // U contribution from G (6-bit)
+  static int16_t u_b_lut_[32];  // U contribution from B (5-bit)
+  static int16_t v_r_lut_[32];  // V contribution from R (5-bit)
+  static int16_t v_g_lut_[64];  // V contribution from G (6-bit)
+  static int16_t v_b_lut_[32];  // V contribution from B (5-bit)
+  static bool yuv_lut_initialized_;
+
   // Session management
   std::string generate_session_id_();
   RTSPSession *find_session_(int socket_fd);

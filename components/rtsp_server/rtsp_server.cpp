@@ -19,6 +19,18 @@ static const char *const TAG = "rtsp_server";
 static const char base64_chars[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+// Static lookup tables for RGB565 to YUV conversion
+int16_t RTSPServer::y_r_lut_[32];
+int16_t RTSPServer::y_g_lut_[64];
+int16_t RTSPServer::y_b_lut_[32];
+int16_t RTSPServer::u_r_lut_[32];
+int16_t RTSPServer::u_g_lut_[64];
+int16_t RTSPServer::u_b_lut_[32];
+int16_t RTSPServer::v_r_lut_[32];
+int16_t RTSPServer::v_g_lut_[64];
+int16_t RTSPServer::v_b_lut_[32];
+bool RTSPServer::yuv_lut_initialized_ = false;
+
 void RTSPServer::setup() {
   ESP_LOGI(TAG, "Setting up RTSP Server...");
 
@@ -769,60 +781,127 @@ esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t 
   return ESP_OK;
 }
 
+// Initialize YUV lookup tables for fast RGB565 to YUV conversion
+void RTSPServer::init_yuv_lut_() {
+  if (yuv_lut_initialized_)
+    return;
+
+  // RGB565 uses 5 bits for R, 6 bits for G, 5 bits for B
+  // Expand to 8-bit values: RGB565 value -> 8-bit RGB using proper bit expansion
+  // Formula: value_8bit = (value_5or6 << 3) | (value_5or6 >> 2) for 5-bit
+  //          value_8bit = (value_6 << 2) | (value_6 >> 4) for 6-bit
+
+  // BT.601 coefficients for RGB to YUV conversion:
+  // Y  =  0.257*R + 0.504*G + 0.098*B + 16
+  // U  = -0.148*R - 0.291*G + 0.439*B + 128
+  // V  =  0.439*R - 0.368*G - 0.071*B + 128
+  //
+  // Scaled by 256 for integer math:
+  // Y  = ( 66*R + 129*G +  25*B) >> 8 + 16
+  // U  = (-38*R -  74*G + 112*B) >> 8 + 128
+  // V  = (112*R -  94*G -  18*B) >> 8 + 128
+
+  // Precompute Y contributions for each RGB565 component
+  for (int i = 0; i < 32; i++) {
+    int val_8bit = (i << 3) | (i >> 2);  // 5-bit to 8-bit expansion
+    y_r_lut_[i] = (66 * val_8bit) >> 8;
+    y_b_lut_[i] = (25 * val_8bit) >> 8;
+    u_r_lut_[i] = (-38 * val_8bit) >> 8;
+    u_b_lut_[i] = (112 * val_8bit) >> 8;
+    v_r_lut_[i] = (112 * val_8bit) >> 8;
+    v_b_lut_[i] = (-18 * val_8bit) >> 8;
+  }
+
+  for (int i = 0; i < 64; i++) {
+    int val_8bit = (i << 2) | (i >> 4);  // 6-bit to 8-bit expansion
+    y_g_lut_[i] = (129 * val_8bit) >> 8;
+    u_g_lut_[i] = (-74 * val_8bit) >> 8;
+    v_g_lut_[i] = (-94 * val_8bit) >> 8;
+  }
+
+  yuv_lut_initialized_ = true;
+  ESP_LOGI(TAG, "YUV lookup tables initialized");
+}
+
 // Convert RGB565 to O_UYY_E_VYY format (required by ESP32-P4 hardware encoder)
 // Format: odd lines = u y y u y y..., even lines = v y y v y y...
-// NOTE: This is SLOW - only used as fallback if camera doesn't support YUYV
+// Optimized version using lookup tables
 esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420, uint16_t width,
                                                  uint16_t height) {
+  // Initialize lookup tables on first call
+  if (!yuv_lut_initialized_) {
+    init_yuv_lut_();
+  }
   const uint16_t *rgb = (const uint16_t *)rgb565;
 
   // Process 2 lines at a time (odd line gets U, even line gets V)
   for (uint16_t row = 0; row < height; row += 2) {
+    const uint16_t *row0 = rgb + (row * width);
+    const uint16_t *row1 = rgb + ((row + 1) * width);
     uint8_t *odd_line = yuv420 + (row * width * 3 / 2);      // Odd line: u y y u y y...
     uint8_t *even_line = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
 
-    // Process 2 pixels at a time (UV subsampling)
+    size_t out_idx = 0;
+
+    // Process 2 pixels at a time (UV subsampling) - optimized with lookup tables
     for (uint16_t col = 0; col < width; col += 2) {
-      // Get 4 pixels (2x2 block)
-      uint16_t p00 = rgb[(row + 0) * width + (col + 0)];
-      uint16_t p01 = rgb[(row + 0) * width + (col + 1)];
-      uint16_t p10 = rgb[(row + 1) * width + (col + 0)];
-      uint16_t p11 = rgb[(row + 1) * width + (col + 1)];
+      // Get 4 pixels (2x2 block) and extract RGB565 components
+      uint16_t p00 = row0[col];
+      uint16_t p01 = row0[col + 1];
+      uint16_t p10 = row1[col];
+      uint16_t p11 = row1[col + 1];
 
-      // Convert each pixel to RGB
-      uint8_t r[4], g[4], b[4];
-      for (int i = 0; i < 4; i++) {
-        uint16_t p = (i == 0) ? p00 : (i == 1) ? p01 : (i == 2) ? p10 : p11;
-        r[i] = ((p >> 11) & 0x1F) << 3;
-        g[i] = ((p >> 5) & 0x3F) << 2;
-        b[i] = (p & 0x1F) << 3;
-      }
+      // Extract RGB565 components (5-bit R, 6-bit G, 5-bit B)
+      uint8_t r0 = (p00 >> 11) & 0x1F;
+      uint8_t g0 = (p00 >> 5) & 0x3F;
+      uint8_t b0 = p00 & 0x1F;
 
-      // Calculate Y for all 4 pixels
-      int y[4];
-      for (int i = 0; i < 4; i++) {
-        y[i] = ((66 * r[i] + 129 * g[i] + 25 * b[i] + 128) >> 8) + 16;
-      }
+      uint8_t r1 = (p01 >> 11) & 0x1F;
+      uint8_t g1 = (p01 >> 5) & 0x3F;
+      uint8_t b1 = p01 & 0x1F;
 
-      // Calculate average U and V from 2x2 block
-      int r_avg = (r[0] + r[1] + r[2] + r[3]) / 4;
-      int g_avg = (g[0] + g[1] + g[2] + g[3]) / 4;
-      int b_avg = (b[0] + b[1] + b[2] + b[3]) / 4;
+      uint8_t r2 = (p10 >> 11) & 0x1F;
+      uint8_t g2 = (p10 >> 5) & 0x3F;
+      uint8_t b2 = p10 & 0x1F;
 
-      int u = ((-38 * r_avg - 74 * g_avg + 112 * b_avg + 128) >> 8) + 128;
-      int v = ((112 * r_avg - 94 * g_avg - 18 * b_avg + 128) >> 8) + 128;
+      uint8_t r3 = (p11 >> 11) & 0x1F;
+      uint8_t g3 = (p11 >> 5) & 0x3F;
+      uint8_t b3 = p11 & 0x1F;
+
+      // Calculate Y for all 4 pixels using lookup tables (no multiplications!)
+      int y0 = y_r_lut_[r0] + y_g_lut_[g0] + y_b_lut_[b0] + 16;
+      int y1 = y_r_lut_[r1] + y_g_lut_[g1] + y_b_lut_[b1] + 16;
+      int y2 = y_r_lut_[r2] + y_g_lut_[g2] + y_b_lut_[b2] + 16;
+      int y3 = y_r_lut_[r3] + y_g_lut_[g3] + y_b_lut_[b3] + 16;
+
+      // Average RGB565 components for U/V (using shifts for speed)
+      int r_avg = (r0 + r1 + r2 + r3) >> 2;
+      int g_avg = (g0 + g1 + g2 + g3) >> 2;
+      int b_avg = (b0 + b1 + b2 + b3) >> 2;
+
+      // Calculate U and V using lookup tables
+      int u = u_r_lut_[r_avg] + u_g_lut_[g_avg] + u_b_lut_[b_avg] + 128;
+      int v = v_r_lut_[r_avg] + v_g_lut_[g_avg] + v_b_lut_[b_avg] + 128;
+
+      // Clamp to valid range [0, 255]
+      y0 = (y0 < 0) ? 0 : (y0 > 255) ? 255 : y0;
+      y1 = (y1 < 0) ? 0 : (y1 > 255) ? 255 : y1;
+      y2 = (y2 < 0) ? 0 : (y2 > 255) ? 255 : y2;
+      y3 = (y3 < 0) ? 0 : (y3 > 255) ? 255 : y3;
+      u = (u < 0) ? 0 : (u > 255) ? 255 : u;
+      v = (v < 0) ? 0 : (v > 255) ? 255 : v;
 
       // Write to odd line: u y0 y1
-      size_t odd_idx = (col / 2) * 3;
-      odd_line[odd_idx + 0] = u;
-      odd_line[odd_idx + 1] = y[0];
-      odd_line[odd_idx + 2] = y[1];
+      odd_line[out_idx + 0] = u;
+      odd_line[out_idx + 1] = y0;
+      odd_line[out_idx + 2] = y1;
 
       // Write to even line: v y2 y3
-      size_t even_idx = (col / 2) * 3;
-      even_line[even_idx + 0] = v;
-      even_line[even_idx + 1] = y[2];
-      even_line[even_idx + 2] = y[3];
+      even_line[out_idx + 0] = v;
+      even_line[out_idx + 1] = y2;
+      even_line[out_idx + 2] = y3;
+
+      out_idx += 3;
     }
   }
 
