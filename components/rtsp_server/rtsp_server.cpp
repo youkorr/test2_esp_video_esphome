@@ -992,7 +992,7 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_P) frame_type_name = "P";
   // Note: Hardware encoder only supports IDR, I, and P frames (no B-frames)
 
-  ESP_LOGD(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
+  ESP_LOGV(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
            frame_count_, out_frame.length, out_frame.frame_type, frame_type_name);
 
   // Validate output
@@ -1003,14 +1003,14 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   // Cache SPS/PPS from IDR frames
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) {
-    ESP_LOGD(TAG, "IDR frame - caching SPS/PPS");
+    ESP_LOGI(TAG, "IDR frame - caching SPS/PPS");
     parse_and_cache_nal_units_(out_frame.raw_data.buffer, out_frame.length);
   }
 
   // Send NAL units
-  ESP_LOGD(TAG, "Parsing NAL units from %u bytes", out_frame.length);
+  ESP_LOGV(TAG, "Parsing NAL units from %u bytes", out_frame.length);
   auto nal_units = parse_nal_units_(out_frame.raw_data.buffer, out_frame.length);
-  ESP_LOGD(TAG, "Found %d NAL units", nal_units.size());
+  ESP_LOGV(TAG, "Found %d NAL units", nal_units.size());
 
   for (size_t i = 0; i < nal_units.size(); i++) {
     const auto &nal = nal_units[i];
@@ -1022,14 +1022,14 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
     else if (nal_type == 7) nal_type_name = "SPS";
     else if (nal_type == 8) nal_type_name = "PPS";
 
-    ESP_LOGD(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes", i, nal_type, nal_type_name, nal.second);
+    ESP_LOGV(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes", i, nal_type, nal_type_name, nal.second);
     send_h264_rtp_(nal.first, nal.second, true);
   }
 
   frame_count_++;
   rtp_timestamp_ += 3000;  // 90kHz / 30fps
 
-  ESP_LOGD(TAG, "Frame %u sent successfully", frame_count_);
+  ESP_LOGV(TAG, "Frame %u sent successfully", frame_count_);
   return ESP_OK;
 }
 
@@ -1216,7 +1216,7 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
 
   // No need to free - using preallocated buffer
 
-  ESP_LOGD(TAG, "Sent NAL unit in %u fragments", fragment_num);
+  ESP_LOGV(TAG, "Sent NAL unit in %u fragments", fragment_num);
 
   return ESP_OK;
 }
