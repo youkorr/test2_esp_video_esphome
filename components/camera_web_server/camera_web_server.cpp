@@ -23,6 +23,7 @@ static const char *STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u
 
 void CameraWebServer::setup() {
   ESP_LOGI(TAG, "Setting up Camera Web Server on port %d", this->port_);
+  ESP_LOGI(TAG, "Server is DISABLED by default - enable via switch in Home Assistant");
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not set!");
@@ -37,22 +38,30 @@ void CameraWebServer::setup() {
     return;
   }
 
-  // Démarrer le serveur HTTP
-  if (this->start_server_() != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start web server");
-    this->cleanup_jpeg_encoder_();
-    this->mark_failed();
-    return;
-  }
-
-  ESP_LOGI(TAG, "Camera Web Server started successfully");
+  ESP_LOGI(TAG, "Camera Web Server initialized (not started yet)");
+  ESP_LOGI(TAG, "Turn on the 'Camera Web Server' switch to start");
   ESP_LOGI(TAG, "  Snapshot: http://<ip>:%d/pic", this->port_);
   ESP_LOGI(TAG, "  Stream:   http://<ip>:%d/stream", this->port_);
   ESP_LOGI(TAG, "  Status:   http://<ip>:%d/status", this->port_);
 }
 
 void CameraWebServer::loop() {
-  // Le serveur HTTP tourne en background, rien à faire ici
+  // Start server when enabled
+  if (this->enabled_ && this->server_ == nullptr) {
+    ESP_LOGI(TAG, "Starting Camera Web Server...");
+    if (this->start_server_() == ESP_OK) {
+      ESP_LOGI(TAG, "Camera Web Server started successfully");
+    } else {
+      ESP_LOGE(TAG, "Failed to start Camera Web Server");
+    }
+  }
+
+  // Stop server when disabled
+  if (!this->enabled_ && this->server_ != nullptr) {
+    ESP_LOGI(TAG, "Stopping Camera Web Server...");
+    this->stop_server_();
+    ESP_LOGI(TAG, "Camera Web Server stopped");
+  }
 }
 
 esp_err_t CameraWebServer::init_jpeg_encoder_() {

@@ -22,12 +22,14 @@ class CameraWebServer : public Component {
   void set_port(uint16_t port) { port_ = port; }
   void set_enable_stream(bool enable) { enable_stream_ = enable; }
   void set_enable_snapshot(bool enable) { enable_snapshot_ = enable; }
+  void set_enabled(bool enabled) { enabled_ = enabled; }
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
   uint16_t port_{8080};
   bool enable_stream_{true};
   bool enable_snapshot_{true};
+  bool enabled_{false};  // Camera web server enabled/disabled by switch
 
 #ifdef USE_ESP_IDF
   httpd_handle_t server_{nullptr};

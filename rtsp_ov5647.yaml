@@ -84,7 +84,7 @@ mipi_dsi_cam:
   raw_type: RAW8
   bayer_type: GBRG
 
-# Switch to control RTSP server
+# Switches to control streaming servers
 switch:
   - platform: template
     name: "RTSP Server"
@@ -102,6 +102,24 @@ switch:
           auto *rtsp = id(rtsp_srv);
           if (rtsp != nullptr) {
             rtsp->set_enabled(false);
+          }
+
+  - platform: template
+    name: "Camera Web Server"
+    id: web_camera_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF  # OFF au démarrage
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *web_cam = id(web_cam_srv);
+          if (web_cam != nullptr) {
+            web_cam->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *web_cam = id(web_cam_srv);
+          if (web_cam != nullptr) {
+            web_cam->set_enabled(false);
           }
 
 # RTSP Server avec encodeur H.264 hardware
@@ -126,6 +144,13 @@ rtsp_server:
   rtp_port: 5004           # Port RTP
   rtcp_port: 5005          # Port RTCP
   max_clients: 3           # Maximum 3 clients simultanés
+
+# Camera Web Server (MJPEG streaming via HTTP)
+camera_web_server:
+  id: web_cam_srv
+  camera_id: main_camera
+  port: 8080               # Port HTTP pour le stream MJPEG
+                           # URL: http://<IP>:8080/
 
 # Web server pour monitoring (optionnel)
 web_server:
