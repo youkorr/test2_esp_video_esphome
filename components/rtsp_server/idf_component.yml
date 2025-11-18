@@ -1,0 +1,5 @@
+dependencies:
+  idf: ">=5.4.2"
+  espressif/esp_h264:
+    version: "*"
+    require: public

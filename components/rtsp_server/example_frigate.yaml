@@ -1,0 +1,152 @@
+# Frigate NVR configuration for ESP32-P4 RTSP Camera
+# Place this in your Frigate config.yml
+
+# MQTT configuration (optional, for Home Assistant integration)
+mqtt:
+  host: 192.168.1.100  # Your MQTT broker IP
+  user: mqtt_user
+  password: mqtt_password
+
+# Detectors
+detectors:
+  coral:
+    type: edgetpu
+    device: usb
+  # Or use CPU detector:
+  # cpu1:
+  #   type: cpu
+
+# Camera configuration
+cameras:
+  esp32_camera:  # Camera name
+    enabled: True
+
+    # RTSP stream from ESP32-P4
+    ffmpeg:
+      inputs:
+        - path: rtsp://192.168.1.150:554/stream  # Change to your ESP32 IP
+          roles:
+            - detect    # Use for object detection
+            - record    # Use for continuous recording
+
+      # Hardware acceleration (optional, improves performance)
+      hwaccel_args: preset-vaapi  # For Intel GPU
+      # hwaccel_args: preset-rpi-64-h264  # For Raspberry Pi 4/5
+      # hwaccel_args: preset-nvidia-h264  # For NVIDIA GPU
+
+      # Input args for RTSP
+      input_args: preset-rtsp-generic
+
+      # Output args
+      output_args:
+        record: preset-record-generic-audio-copy
+
+    # Motion detection settings
+    detect:
+      enabled: True
+      width: 1280    # Match your camera resolution
+      height: 720
+      fps: 30        # Match your camera framerate
+
+      # Motion detection zones (optional)
+      # You can define specific areas for detection
+      # zones:
+      #   front_door:
+      #     coordinates: 0,0,1280,0,1280,720,0,720
+      #     objects:
+      #       - person
+      #       - dog
+      #       - cat
+
+    # Object detection settings
+    objects:
+      track:
+        - person
+        - dog
+        - cat
+        - car
+        - bicycle
+
+      filters:
+        person:
+          min_area: 5000         # Minimum pixels for detection
+          max_area: 100000       # Maximum pixels
+          threshold: 0.7         # Confidence threshold
+
+    # Recording settings
+    record:
+      enabled: True
+      retain:
+        days: 7                  # Keep recordings for 7 days
+        mode: motion             # Only record when motion detected
+      events:
+        retain:
+          default: 30            # Keep event clips for 30 days
+          mode: active_objects
+
+    # Snapshots
+    snapshots:
+      enabled: True
+      timestamp: False
+      bounding_box: True
+      crop: False
+      retain:
+        default: 30              # Keep snapshots for 30 days
+
+# Optional: Multiple ESP32 cameras
+  # esp32_camera_2:
+  #   enabled: True
+  #   ffmpeg:
+  #     inputs:
+  #       - path: rtsp://192.168.1.151:554/stream
+  #         roles:
+  #           - detect
+  #           - record
+  #   detect:
+  #     width: 1280
+  #     height: 720
+  #     fps: 30
+
+# Recording storage
+record:
+  enabled: True
+  retain:
+    days: 7
+    mode: motion
+  events:
+    retain:
+      default: 30
+      mode: active_objects
+
+# Snapshots storage
+snapshots:
+  enabled: True
+  retain:
+    default: 30
+
+# Birdseye view (multi-camera view)
+birdseye:
+  enabled: True
+  mode: continuous  # or 'motion' or 'objects'
+  width: 1280
+  height: 720
+
+# Database
+database:
+  path: /config/frigate.db
+
+# Optional: go2rtc for re-streaming
+# Useful if you want to view streams in Home Assistant
+go2rtc:
+  streams:
+    esp32_camera:
+      - rtsp://192.168.1.150:554/stream
+    esp32_camera_hq:  # High quality re-stream
+      - ffmpeg:rtsp://192.168.1.150:554/stream#video=copy#audio=aac
+
+# UI configuration
+ui:
+  use_experimental: False
+
+# Version (check Frigate docs for latest)
+version: 0.13

@@ -1,0 +1,107 @@
+# Example ESPHome configuration for WebRTC Camera with H.264 streaming
+# ESP32-P4 with MIPI-CSI camera sensor
+
+substitutions:
+  device_name: esp32-p4-webrtc-camera
+  friendly_name: "ESP32-P4 WebRTC Camera"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  platformio_options:
+    board_build.flash_mode: qio
+    board_build.mcu: esp32p4
+    board_build.f_cpu: 400000000L
+    board_build.f_flash: 80000000L
+    board_build.flash_size: 16MB
+
+esp32:
+  board: esp32-p4-function-ev-board
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    version: latest
+    sdkconfig_options:
+      CONFIG_ESP32P4_REV_MIN_0: y
+      # Enable PSRAM
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_MODE_OCT: y
+      CONFIG_SPIRAM_SPEED_200M: y
+      # Camera/Video support
+      CONFIG_CAMERA_SUPPORTED: y
+      CONFIG_VIDEO_SUPPORTED: y
+      # Network
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+
+# WiFi configuration
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "${device_name} Fallback"
+    password: "12345678"
+
+# Enable logging
+logger:
+  level: INFO
+
+# Enable Home Assistant API (optional)
+api:
+
+# Enable OTA updates
+ota:
+
+# Web server for status (optional, different port than WebRTC)
+web_server:
+  port: 80
+
+# I2C bus for camera sensor
+i2c:
+  - id: bsp_bus
+    sda: GPIO14
+    scl: GPIO13
+    frequency: 400kHz
+
+# MIPI-CSI Camera
+mipi_dsi_cam:
+  id: main_camera
+  i2c_id: bsp_bus
+  sensor_type: sc202cs  # or ov5647, ov02c10
+  xclk_pin: GPIO11
+  xclk_freq: 24000000
+  sensor_addr: 0x36
+  reset_pin: GPIO26
+  pwdn_pin: GPIO12
+
+  # Resolution and format
+  resolution: 720P  # 1280x720
+  pixel_format: RGB565  # Will be converted to YUV420 for H.264
+  framerate: 30
+
+  # Optional: Image settings
+  # brightness: 0
+  # contrast: 0
+  # saturation: 0
+  # horizontal_mirror: false
+  # vertical_flip: false
+
+# WebRTC Camera with H.264 streaming
+webrtc_camera:
+  camera_id: main_camera
+
+  # Signaling server port (WebSocket for SDP exchange)
+  signaling_port: 8443
+
+  # RTP streaming port
+  rtp_port: 5004
+
+  # H.264 encoder settings
+  bitrate: 2000000  # 2 Mbps (adjust based on your network)
+  gop: 30           # Group of Pictures (usually = framerate)
+  qp_min: 10        # Minimum quantization parameter (lower = better quality)
+  qp_max: 40        # Maximum quantization parameter (higher = more compression)
+
+# Optional: Display camera feed on local LVGL display
+# lvgl_camera_display:
+#   camera_id: main_camera

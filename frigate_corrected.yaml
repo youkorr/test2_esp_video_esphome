@@ -1,0 +1,225 @@
+mqtt:
+  host: 192.168.1.38
+  port: 1883
+  user: frigate
+  password: Ncaseone132??
+  stats_interval: 60
+
+detectors:
+  coral:
+    type: edgetpu
+    device: pci
+
+birdseye:
+  enabled: false
+
+record:
+  # Optional: Enable recording (default: shown below)
+  # WARNING: If recording is disabled in the config, turning it on via
+  #          the UI or MQTT later will have no effect.
+  enabled: false
+  # Optional: Number of minutes to wait between cleanup runs (default: shown below)
+  # This can be used to reduce the frequency of deleting recording segments from disk if you want to minimize i/o
+  expire_interval: 60
+  # Optional: Sync recordings with disk on startup and once a day (default: shown below).
+  sync_recordings: true
+  # Optional: Retention settings for recording
+  retain:
+    # Optional: Number of days to retain recordings regardless of tracked objects (default: shown below)
+    # NOTE: This should be set to 0 and retention should be defined in alerts and detections section below
+    #       if you only want to retain recordings of alerts and detections.
+    days: 0
+    # Optional: Mode for retention. Available options are: all, motion, and active_objects
+    #   all - save all recording segments regardless of activity
+    #   motion - save all recordings segments with any detected motion
+    #   active_objects - save all recording segments with active/moving objects
+    # NOTE: this mode only applies when the days setting above is greater than 0
+    mode: all
+  # Optional: Recording Export Settings
+  export:
+    # Optional: Timelapse Output Args (default: shown below).
+    # NOTE: The default args are set to fit 24 hours of recording into 1 hour playback.
+    # See https://stackoverflow.com/a/58268695 for more info on how these args work.
+    # As an example: if you wanted to go from 24 hours to 30 minutes that would be going
+    # from 86400 seconds to 1800 seconds which would be 1800 / 86400 = 0.02.
+    # The -r (framerate) dictates how smooth the output video is.
+    # So the args would be -vf setpts=0.02*PTS -r 30 in that case.
+    timelapse_args: -vf setpts=0.04*PTS -r 30
+  # Optional: Recording Preview Settings
+  preview:
+    # Optional: Quality of recording preview (default: shown below).
+    # Options are: very_low, low, medium, high, very_high
+    quality: medium
+  # Optional: alert recording settings
+  alerts:
+    # Optional: Number of seconds before the alert to include (default: shown below)
+    pre_capture: 5
+    # Optional: Number of seconds after the alert to include (default: shown below)
+    post_capture: 5
+    # Optional: Retention settings for recordings of alerts
+    retain:
+      # Required: Retention days (default: shown below)
+      days: 14
+      # Optional: Mode for retention. (default: shown below)
+      #   all - save all recording segments for alerts regardless of activity
+      #   motion - save all recordings segments for alerts with any detected motion
+      #   active_objects - save all recording segments for alerts with active/moving objects
+      #
+      # NOTE: If the retain mode for the camera is more restrictive than the mode configured
+      #       here, the segments will already be gone by the time this mode is applied.
+      #       For example, if the camera retain mode is "motion", the segments without motion are
+      #       never stored, so setting the mode to "all" here won't bring them back.
+      mode: motion
+
+  # Optional: detection recording settings
+  detections:
+    # Optional: Number of seconds before the detection to include (default: shown below)
+    pre_capture: 5
+    # Optional: Number of seconds after the detection to include (default: shown below)
+    post_capture: 5
+    # Optional: Retention settings for recordings of detections
+    retain:
+      # Required: Retention days (default: shown below)
+      days: 14
+      # Optional: Mode for retention. (default: shown below)
+      #   all - save all recording segments for detections regardless of activity
+      #   motion - save all recordings segments for detections with any detected motion
+      #   active_objects - save all recording segments for detections with active/moving objects
+      #
+      # NOTE: If the retain mode for the camera is more restrictive than the mode configured
+      #       here, the segments will already be gone by the time this mode is applied.
+      #       For example, if the camera retain mode is "motion", the segments without motion are
+      #       never stored, so setting the mode to "all" here won't bring them back.
+      mode: motion
+
+snapshots:
+  # Optional: Enable writing jpg snapshot to /media/frigate/clips (default: shown below)
+  enabled: true
+  # Optional: save a clean PNG copy of the snapshot image (default: shown below)
+  clean_copy: true
+  # Optional: print a timestamp on the snapshots (default: shown below)
+  timestamp: true
+  # Optional: draw bounding box on the snapshots (default: shown below)
+  bounding_box: true
+  # Optional: crop the snapshot (default: shown below)
+  crop: false
+  # Optional: height to resize the snapshot to (default: original size)
+  height: 175
+  # Optional: Restrict snapshots to objects that entered any of the listed zones (default: no required zones)
+  required_zones: []
+  # Optional: Camera override for retention settings (default: global values)
+  retain:
+    # Required: Default retention days (default: shown below)
+    default: 10
+    # Optional: Per object retention days
+    objects:
+      person: 15
+  # Optional: quality of the encoded jpeg, 0-100 (default: shown below)
+  quality: 70
+
+semantic_search:
+  # Optional: Enable semantic search (default: shown below)
+  enabled: true
+  # Optional: Re-index embeddings database from historical tracked objects (default: shown below)
+  reindex: true
+  # Optional: Set the model size used for embeddings. (default: shown below)
+  # NOTE: small model runs on CPU and large model runs on GPU
+  model_size: small
+
+# ============================================
+# GO2RTC - Stream Re-streaming
+# ============================================
+go2rtc:
+  streams:
+    # Camera Tapo C500
+    frigate1:
+      - rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream1
+      - ffmpeg:frigate1#audio=aac
+
+    # Camera ESP32-P4 (OV5647)
+    frigate2:
+      - rtsp://192.168.1.49:554/stream  # ✅ CORRIGÉ: ESP32-P4 stream
+      - ffmpeg:frigate2#audio=aac
+
+  webrtc:
+    listen: :8555     # address of your local server and port (TCP/UDP)
+    candidates:
+      - 1.2.3.4:8555  # ← Remplacez 1.2.3.4 par votre IP publique externe
+    ice_servers:
+      - urls: [turn:a.relay.metered.ca:443]
+        username: user
+        credential: apikey
+
+# ============================================
+# CAMERAS
+# ============================================
+cameras:
+  # Camera 1: Tapo C500
+  frigate1:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/frigate1
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+
+    detect:
+      enabled: true
+      width: 1000   # Résolution Tapo C500
+      height: 700
+      fps: 5
+
+    objects:
+      track:
+        - person
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+
+  # Camera 2: ESP32-P4 OV5647 (H.264 Hardware)
+  frigate2:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/frigate2  # ✅ CORRIGÉ: stream frigate2
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+
+    detect:
+      enabled: true
+      width: 800    # ✅ CORRIGÉ: Résolution ESP32-P4 OV5647
+      height: 640   # ✅ CORRIGÉ: Résolution native de votre caméra
+      fps: 30       # ✅ CORRIGÉ: 30 FPS au lieu de 5
+
+    objects:
+      track:
+        - person
+        # Décommentez si vous voulez détecter d'autres objets:
+        # - dog
+        # - cat
+        # - bird
+        # - car
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+
+# ============================================
+# GLOBAL SETTINGS
+# ============================================
+version: 0.14  # Version Frigate
+
+# Face recognition (si vous l'utilisez)
+face_recognition:
+  enabled: true
+  model_size: small
+
+# License Plate Recognition (si vous l'utilisez)
+lpr:
+  enabled: true
+
+# Classification
+classification:
+  bird:
+    enabled: false

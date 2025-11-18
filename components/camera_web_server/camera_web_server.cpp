@@ -23,6 +23,7 @@ static const char *STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u
 
 void CameraWebServer::setup() {
   ESP_LOGI(TAG, "Setting up Camera Web Server on port %d", this->port_);
+  ESP_LOGI(TAG, "Server is DISABLED by default - enable via switch in Home Assistant");
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not set!");
@@ -37,22 +38,30 @@ void CameraWebServer::setup() {
     return;
   }
 
-  // Démarrer le serveur HTTP
-  if (this->start_server_() != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to start web server");
-    this->cleanup_jpeg_encoder_();
-    this->mark_failed();
-    return;
-  }
-
-  ESP_LOGI(TAG, "Camera Web Server started successfully");
+  ESP_LOGI(TAG, "Camera Web Server initialized (not started yet)");
+  ESP_LOGI(TAG, "Turn on the 'Camera Web Server' switch to start");
   ESP_LOGI(TAG, "  Snapshot: http://<ip>:%d/pic", this->port_);
   ESP_LOGI(TAG, "  Stream:   http://<ip>:%d/stream", this->port_);
   ESP_LOGI(TAG, "  Status:   http://<ip>:%d/status", this->port_);
 }
 
 void CameraWebServer::loop() {
-  // Le serveur HTTP tourne en background, rien à faire ici
+  // Start server when enabled
+  if (this->enabled_ && this->server_ == nullptr) {
+    ESP_LOGI(TAG, "Starting Camera Web Server...");
+    if (this->start_server_() == ESP_OK) {
+      ESP_LOGI(TAG, "Camera Web Server started successfully");
+    } else {
+      ESP_LOGE(TAG, "Failed to start Camera Web Server");
+    }
+  }
+
+  // Stop server when disabled
+  if (!this->enabled_ && this->server_ != nullptr) {
+    ESP_LOGI(TAG, "Stopping Camera Web Server...");
+    this->stop_server_();
+    ESP_LOGI(TAG, "Camera Web Server stopped");
+  }
 }
 
 esp_err_t CameraWebServer::init_jpeg_encoder_() {
@@ -231,7 +240,7 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
-  ESP_LOGD(TAG, "JPEG encoded: %u bytes (from %u bytes RGB565)", jpeg_size, image_size);
+  ESP_LOGV(TAG, "JPEG encoded: %u bytes (from %u bytes RGB565)", jpeg_size, image_size);
 
   // Envoyer le JPEG encodé
   httpd_resp_set_type(req, "image/jpeg");
@@ -279,7 +288,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
-    ESP_LOGD(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
+    ESP_LOGV(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
              server->camera_->get_image_width(),
              server->camera_->get_image_height(),
              image_size);
@@ -308,7 +317,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       continue;
     }
 
-    ESP_LOGD(TAG, "JPEG encoded: %u bytes (quality=%d)", jpeg_size, server->jpeg_quality_);
+    ESP_LOGV(TAG, "JPEG encoded: %u bytes (quality=%d)", jpeg_size, server->jpeg_quality_);
 
     // Envoyer boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
@@ -329,7 +338,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       break;
     }
 
-    ESP_LOGD(TAG, "Frame sent successfully");
+    ESP_LOGV(TAG, "Frame sent successfully");
 
     // Limiter le framerate pour ne pas surcharger le réseau
     vTaskDelay(pdMS_TO_TICKS(33));  // ~30 FPS

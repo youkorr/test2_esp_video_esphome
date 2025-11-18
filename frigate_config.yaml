@@ -1,0 +1,206 @@
+# Configuration Frigate NVR pour ESP32-P4 Camera OV5647
+# Placez ce fichier dans /config/frigate.yml de votre serveur Frigate
+# ou intégrez la section caméra dans votre configuration existante
+
+# MQTT (optionnel - pour intégration Home Assistant)
+mqtt:
+  enabled: true
+  host: 192.168.1.100        # ← IP de votre broker MQTT
+  port: 1883
+  # user: mqtt_user           # Décommentez si authentification requise
+  # password: mqtt_password
+
+# Détecteurs d'objets
+detectors:
+  # Option 1: Google Coral TPU (recommandé - meilleure performance)
+  coral:
+    type: edgetpu
+    device: usb
+
+  # Option 2: CPU (si pas de Coral)
+  # cpu1:
+  #   type: cpu
+  #   num_threads: 3
+
+# ============================================
+# CAMÉRA: frigate2 (ESP32-P4 OV5647)
+# ============================================
+cameras:
+  frigate2:
+    enabled: true
+
+    # Stream RTSP depuis ESP32-P4
+    ffmpeg:
+      inputs:
+        - path: rtsp://192.168.1.XXX:554/stream  # ← Changez l'IP de votre ESP32
+          roles:
+            - detect      # Détection d'objets
+            - record      # Enregistrement continu
+
+      # Accélération matérielle (adaptez selon votre serveur)
+      hwaccel_args: preset-vaapi           # Intel GPU (Celeron, i3, i5, etc.)
+      # hwaccel_args: preset-rpi-64-h264   # Raspberry Pi 4/5
+      # hwaccel_args: preset-nvidia-h264   # NVIDIA GPU
+      # hwaccel_args: []                   # Pas d'accélération (CPU uniquement)
+
+      # Arguments d'entrée RTSP
+      input_args: preset-rtsp-generic
+
+      # Arguments de sortie
+      output_args:
+        record: preset-record-generic-audio-copy
+
+    # Paramètres de détection (résolution OV5647: 800x640)
+    detect:
+      enabled: true
+      width: 800          # Résolution de votre caméra
+      height: 640
+      fps: 30             # 30 FPS
+
+      # Zones de détection (optionnel)
+      # Définissez des zones spécifiques pour la détection
+      # zones:
+      #   zone_entree:
+      #     coordinates: 0,0,800,0,800,640,0,640  # Zone plein écran
+      #     objects:
+      #       - person
+      #       - dog
+      #       - cat
+
+    # Configuration de détection de mouvement
+    motion:
+      mask: []  # Masque pour ignorer certaines zones (coordonnées)
+      threshold: 30       # Seuil de détection de mouvement (0-255)
+      contour_area: 10    # Taille minimum du contour en pixels
+      lightning_threshold: 0.8  # Seuil pour filtrer les changements de luminosité
+
+    # Objets à détecter
+    objects:
+      track:
+        - person
+        - dog
+        - cat
+        - car
+        - bicycle
+        - motorcycle
+        - bird
+
+      # Filtres par objet (affinez la détection)
+      filters:
+        person:
+          min_area: 3000         # Min 3000 pixels (ajusté pour 800x640)
+          max_area: 80000        # Max 80000 pixels
+          threshold: 0.75        # Confiance minimum 75%
+          min_score: 0.6         # Score minimum pour tracker
+
+        dog:
+          min_area: 2000
+          max_area: 50000
+          threshold: 0.7
+
+        cat:
+          min_area: 1500
+          max_area: 30000
+          threshold: 0.7
+
+        car:
+          min_area: 5000
+          max_area: 100000
+          threshold: 0.75
+
+    # Enregistrement
+    record:
+      enabled: true
+      retain:
+        days: 7                  # Conserver 7 jours d'enregistrements
+        mode: motion             # Enregistrer uniquement lors de mouvement
+      events:
+        pre_capture: 5           # Secondes avant l'événement
+        post_capture: 10         # Secondes après l'événement
+        retain:
+          default: 30            # Conserver les clips d'événements 30 jours
+          mode: active_objects   # Conserver si objets détectés
+
+    # Snapshots (captures d'écran)
+    snapshots:
+      enabled: true
+      timestamp: true            # Afficher l'horodatage
+      bounding_box: true         # Afficher les boîtes de détection
+      crop: false                # Ne pas recadrer
+      height: 640                # Hauteur de la capture
+      required_zones: []         # Zones requises pour déclencher
+      retain:
+        default: 30              # Conserver 30 jours
+
+    # Image live (pour l'interface)
+    live:
+      height: 640                # Hauteur du stream live
+      quality: 8                 # Qualité JPEG (1-31, plus bas = meilleure qualité)
+
+# ============================================
+# CONFIGURATION GLOBALE
+# ============================================
+
+# Enregistrement global
+record:
+  enabled: true
+  retain:
+    days: 7
+    mode: motion
+  events:
+    pre_capture: 5
+    post_capture: 10
+    retain:
+      default: 30
+      mode: active_objects
+
+# Snapshots global
+snapshots:
+  enabled: true
+  retain:
+    default: 30
+
+# Birdseye (vue multi-caméras)
+birdseye:
+  enabled: true
+  mode: motion        # Afficher uniquement les caméras avec mouvement
+  # mode: continuous  # Afficher toutes les caméras en continu
+  width: 1280
+  height: 720
+  quality: 8
+  restream: true      # Re-streamer via go2rtc
+
+# Base de données
+database:
+  path: /media/frigate/frigate.db
+
+# go2rtc (re-streaming - optionnel mais recommandé)
+go2rtc:
+  streams:
+    frigate2:
+      - rtsp://192.168.1.XXX:554/stream  # ← Même IP que ci-dessus
+
+    # Stream haute qualité (pour visualisation dans Home Assistant)
+    frigate2_hq:
+      - "ffmpeg:rtsp://192.168.1.XXX:554/stream#video=copy#audio=aac"
+
+# Interface utilisateur
+ui:
+  use_experimental: false
+  live_mode: mse        # Mode live (mse, webrtc, jsmpeg)
+  timezone: Europe/Paris  # ← Votre fuseau horaire
+
+# Logs
+logger:
+  default: info
+  logs:
+    frigate.mqtt: error
+    frigate.record: debug
+    frigate.detect: info
+
+# Télémétrie (optionnel)
+telemetry:
+  version_check: true
+
+# Version de Frigate
+version: 0.14

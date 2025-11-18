@@ -16,6 +16,7 @@ class LVGLCameraDisplay : public Component {
   void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
+  void set_enabled(bool enabled) { this->enabled_ = enabled; }
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -35,6 +36,7 @@ class LVGLCameraDisplay : public Component {
   uint32_t frame_count_{0};
   bool first_update_{true};
   bool canvas_warning_shown_{false};
+  bool enabled_{false};  // LVGL camera display enabled/disabled by switch
 
   uint32_t last_fps_time_{0};
 

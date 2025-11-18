@@ -1069,9 +1069,9 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
-  // IMPORTANT: AWB ne fonctionne PAS sur SC202CS (Invalid argument)
-  // SC202CS gère automatiquement la balance des blancs via ses propres registres
-  if (this->sensor_name_ != "sc202cs") {
+  // IMPORTANT: AWB ne fonctionne PAS sur certains capteurs (Invalid argument)
+  // OV5647, SC202CS gèrent automatiquement la balance des blancs via leurs propres registres
+  if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647") {
     if (this->set_white_balance_mode(true)) {
       ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
     } else {
@@ -1080,7 +1080,7 @@ bool MipiDSICamComponent::start_streaming() {
       this->set_white_balance_temp(5500);
     }
   } else {
-    ESP_LOGI(TAG, "✓ SC202CS: Using sensor built-in AWB (V4L2 AWB not supported)");
+    ESP_LOGI(TAG, "✓ %s: Using sensor built-in AWB (V4L2 AWB not supported)", this->sensor_name_.c_str());
   }
 
   // NOTE: Brightness/Contrast/Saturation auto-application désactivée

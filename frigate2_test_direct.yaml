@@ -1,0 +1,30 @@
+# Configuration de test pour frigate2 - STREAM DIRECT
+# Remplacez la section frigate2 dans votre config Frigate par ceci:
+
+cameras:
+  frigate2:
+    ffmpeg:
+      inputs:
+        # ✅ TEST 1: Stream DIRECT depuis ESP32 (sans go2rtc)
+        - path: rtsp://192.168.1.49:554/stream
+          input_args: preset-rtsp-generic  # ← Changé de preset-rtsp-restream
+          roles:
+            - detect
+
+      # Ajoutez les arguments hwaccel si vous avez un GPU
+      # hwaccel_args: preset-vaapi  # Intel
+      # hwaccel_args: preset-rpi-64-h264  # Raspberry Pi
+
+    detect:
+      enabled: true
+      width: 800
+      height: 640
+      fps: 30
+
+    objects:
+      track:
+        - person
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8

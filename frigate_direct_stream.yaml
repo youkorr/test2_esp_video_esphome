@@ -1,0 +1,158 @@
+# Configuration Frigate avec STREAM DIRECT (sans go2rtc)
+# Cette version contourne go2rtc pour éviter le problème de "client RTP port: 0"
+
+mqtt:
+  host: 192.168.1.38
+  port: 1883
+  user: frigate
+  password: Ncaseone132??
+  stats_interval: 60
+
+detectors:
+  coral:
+    type: edgetpu
+    device: pci
+
+birdseye:
+  enabled: false
+
+record:
+  enabled: false
+  expire_interval: 60
+  sync_recordings: true
+  retain:
+    days: 0
+    mode: all
+  export:
+    timelapse_args: -vf setpts=0.04*PTS -r 30
+  preview:
+    quality: medium
+  alerts:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 14
+      mode: motion
+  detections:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 14
+      mode: motion
+
+snapshots:
+  enabled: true
+  clean_copy: true
+  timestamp: true
+  bounding_box: true
+  crop: false
+  height: 175
+  required_zones: []
+  retain:
+    default: 10
+    objects:
+      person: 15
+  quality: 70
+
+semantic_search:
+  enabled: true
+  reindex: true
+  model_size: small
+
+# ============================================
+# GO2RTC - DÉSACTIVÉ TEMPORAIREMENT POUR TESTS
+# ============================================
+# Si vous voulez re-activer go2rtc plus tard, décommentez cette section
+# go2rtc:
+#   streams:
+#     frigate1:
+#       - rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream1
+#       - ffmpeg:frigate1#audio=aac
+#     frigate2:
+#       - rtsp://192.168.1.49:554/stream
+#
+#   webrtc:
+#     listen: :8555
+#     candidates:
+#       - 1.2.3.4:8555
+#     ice_servers:
+#       - urls: [turn:a.relay.metered.ca:443]
+#         username: user
+#         credential: apikey
+
+# ============================================
+# CAMERAS - STREAM DIRECT
+# ============================================
+cameras:
+  # Camera 1: Tapo C500 (via go2rtc désactivé pour cohérence)
+  frigate1:
+    ffmpeg:
+      inputs:
+        # ✅ Stream direct depuis la caméra Tapo
+        - path: rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream1
+          input_args: preset-rtsp-generic
+          roles:
+            - detect
+
+    detect:
+      enabled: true
+      width: 1000
+      height: 700
+      fps: 5
+
+    objects:
+      track:
+        - person
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+
+  # Camera 2: ESP32-P4 OV5647 - STREAM DIRECT
+  frigate2:
+    ffmpeg:
+      inputs:
+        # ✅ CORRIGÉ: Stream DIRECT depuis ESP32 (sans go2rtc)
+        - path: rtsp://192.168.1.49:554/stream
+          input_args: preset-rtsp-generic  # ✅ Changé de preset-rtsp-restream
+          roles:
+            - detect
+
+      # Optionnel: Accélération matérielle (décommentez selon votre serveur)
+      # hwaccel_args: preset-vaapi           # Intel GPU
+      # hwaccel_args: preset-rpi-64-h264     # Raspberry Pi 4/5
+      # hwaccel_args: preset-nvidia-h264     # NVIDIA GPU
+
+    detect:
+      enabled: true
+      width: 800    # Résolution native ESP32-P4 OV5647
+      height: 640
+      fps: 30       # 30 FPS avec H.264 hardware
+
+    objects:
+      track:
+        - person
+        # Décommentez si besoin:
+        # - dog
+        # - cat
+        # - car
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+
+# ============================================
+# GLOBAL SETTINGS
+# ============================================
+version: 0.14
+
+face_recognition:
+  enabled: true
+  model_size: small
+
+lpr:
+  enabled: true
+
+classification:
+  bird:
+    enabled: false

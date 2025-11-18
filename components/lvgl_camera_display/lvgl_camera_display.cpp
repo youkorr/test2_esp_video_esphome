@@ -9,6 +9,7 @@ static const char *const TAG = "lvgl_camera_display";
 
 void LVGLCameraDisplay::setup() {
   ESP_LOGCONFIG(TAG, "🎥 Configuration LVGL Camera Display...");
+  ESP_LOGI(TAG, "Display is DISABLED by default - enable via switch in Home Assistant");
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "❌ Camera non configurée");
@@ -25,25 +26,32 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Créer un timer LVGL pour les mises à jour de la caméra
-  // Ceci garantit des updates réguliers même si ESPHome loop() est lent
-  this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
-  if (this->lvgl_timer_ == nullptr) {
-    ESP_LOGE(TAG, "❌ Échec création du timer LVGL");
-    this->mark_failed();
-    return;
-  }
-
-  ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé");
+  ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
+  ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
 }
 
 void LVGLCameraDisplay::loop() {
-  // Loop() est maintenant vide car nous utilisons un timer LVGL
-  // Le timer LVGL appelle lvgl_timer_callback_() à intervalle régulier
-  // Ceci est plus fiable que de dépendre de la fréquence de loop()
+  // Start timer when enabled
+  if (this->enabled_ && this->lvgl_timer_ == nullptr) {
+    ESP_LOGI(TAG, "Starting LVGL Camera Display...");
+    this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
+    if (this->lvgl_timer_ == nullptr) {
+      ESP_LOGE(TAG, "❌ Failed to create LVGL timer");
+    } else {
+      ESP_LOGI(TAG, "✅ LVGL Camera Display started");
+    }
+  }
+
+  // Stop timer when disabled
+  if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
+    ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
+    lv_timer_del(this->lvgl_timer_);
+    this->lvgl_timer_ = nullptr;
+    ESP_LOGI(TAG, "LVGL Camera Display stopped");
+  }
 }
 
 // Callback du timer LVGL (appelé périodiquement par LVGL)
