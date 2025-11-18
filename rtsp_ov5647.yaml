@@ -200,8 +200,8 @@ lvgl_camera_display:
   id: lvgl_cam_display
   camera_id: main_camera
   canvas_id: camera_canvas  # Assurez-vous que ce canvas existe dans votre config LVGL
-  update_interval: 20ms     # 50 FPS pour mouvements ultra-fluides
-  # Alternative stable: 33ms (30 FPS) si watchdog timeout
+  update_interval: 50ms     # 20 FPS - stable, évite watchdog timeout
+  # Pour 30 FPS: 33ms | Pour 50 FPS: 20ms (peut causer watchdog avec VGA)
 
 # Web server pour monitoring (optionnel)
 web_server:
