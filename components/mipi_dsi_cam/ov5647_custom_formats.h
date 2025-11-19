@@ -466,17 +466,20 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps[] =
 
     // Crop window (adapted from 800x640: keep X same, adjust Y for 4:3 ratio)
     // X: same as 800x640 (500 to 2623 = 2124 pixels width)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
-    // Y: centered crop for 800x600 (4:3 ratio)
-    // Crop height: 2124 * 3/4 = 1593, centered: (1954-1593)/2 = 180
-    {0x3802, (180 >> 8) & 0x07},   // Y address start high
-    {0x3803, 180 & 0xFF},          // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high (same as 800x640)
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
-    // Y end: 180 + 1593 - 1 = 1772
-    {0x3806, ((1772 - 1) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1772 - 1) & 0xFF},         // Y address end low
+    // ----- X centered -----
+    {0x3800, (250 >> 8) & 0x0F},   // X start high
+    {0x3801, 250 & 0xFF},          // X start low
+    
+    {0x3804, (2373 >> 8) & 0x0F},  // X end high
+    {0x3805, 2373 & 0xFF},         // X end low
+    
+    // ----- Y centered -----
+    {0x3802, (180 >> 8) & 0x07},   // Y start high
+    {0x3803, 180 & 0xFF},          // Y start low
+    
+    {0x3806, (1772 >> 8) & 0x07},  // Y end high
+    {0x3807, 1772 & 0xFF},         // Y end low
+
 
     // Output size: 800x600
     {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
