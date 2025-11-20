@@ -448,7 +448,7 @@ esp_err_t CameraWebServer::start_server_() {
     return ESP_FAIL;
   }
 
-  // /pic
+  // Snapshot
   if (this->enable_snapshot_) {
     httpd_uri_t pic_uri = {
         .uri = "/pic",
@@ -460,7 +460,7 @@ esp_err_t CameraWebServer::start_server_() {
     ESP_LOGI(TAG, "Registered /pic endpoint");
   }
 
-  // /stream
+  // Streaming
   if (this->enable_stream_) {
     httpd_uri_t stream_uri = {
         .uri = "/stream",
@@ -472,7 +472,7 @@ esp_err_t CameraWebServer::start_server_() {
     ESP_LOGI(TAG, "Registered /stream endpoint");
   }
 
-  // /status
+  // Status
   httpd_uri_t status_uri = {
       .uri = "/status",
       .method = HTTP_GET,
@@ -482,7 +482,7 @@ esp_err_t CameraWebServer::start_server_() {
   httpd_register_uri_handler(this->server_, &status_uri);
   ESP_LOGI(TAG, "Registered /status endpoint");
 
-  // /info
+  
   httpd_uri_t info_uri = {
       .uri = "/info",
       .method = HTTP_GET,
@@ -494,6 +494,7 @@ esp_err_t CameraWebServer::start_server_() {
 
   return ESP_OK;
 }
+
 
 void CameraWebServer::stop_server_() {
   if (this->server_) {
