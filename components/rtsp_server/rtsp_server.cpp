@@ -148,15 +148,15 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  // Align to 16
-  width = ((width + 15) >> 4) << 4;
-  height = ((height + 15) >> 4) << 4;
+  // Align to 16 (hardware encoder requirement)
+  uint16_t aligned_width = ((width + 15) >> 4) << 4;
+  uint16_t aligned_height = ((height + 15) >> 4) << 4;
 
-  ESP_LOGI(TAG, "Resolution: %dx%d (aligned from %dx%d)", width, height,
-           camera_->get_image_width(), camera_->get_image_height());
+  ESP_LOGI(TAG, "Resolution: %dx%d (aligned to %dx%d for encoder)",
+           width, height, aligned_width, aligned_height);
 
   // Allocate buffers with 64-byte alignment (required by hardware encoder DMA)
-  yuv_buffer_size_ = width * height * 3 / 2;
+  yuv_buffer_size_ = aligned_width * aligned_height * 3 / 2;
   yuv_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!yuv_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate YUV buffer (64-byte aligned)");
@@ -169,6 +169,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   if (!h264_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate H.264 buffer (64-byte aligned)");
     free(yuv_buffer_);
+    yuv_buffer_ = nullptr;
     return ESP_ERR_NO_MEM;
   }
   ESP_LOGI(TAG, "H.264 buffer allocated: %zu bytes @ %p (64-byte aligned)", h264_buffer_size_, h264_buffer_);
@@ -178,7 +179,9 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   if (!rtp_packet_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
     free(yuv_buffer_);
+    yuv_buffer_ = nullptr;
     free(h264_buffer_);
+    h264_buffer_ = nullptr;
     return ESP_ERR_NO_MEM;
   }
 
@@ -190,11 +193,11 @@ esp_err_t RTSPServer::init_h264_encoder_() {
       .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,  // YUV420 packed (required by hardware encoder)
       .gop = gop_,
       .fps = 30,
-      .res = {.width = width, .height = height},
+      .res = {.width = aligned_width, .height = aligned_height},
       .rc = {.bitrate = bitrate_, .qp_min = qp_min_, .qp_max = qp_max_}};
 
   ESP_LOGI(TAG, "Encoder config: %dx%d @ 30fps, GOP=%d, bitrate=%d, QP=%d-%d",
-           width, height, gop_, bitrate_, qp_min_, qp_max_);
+           aligned_width, aligned_height, gop_, bitrate_, qp_min_, qp_max_);
 
   esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
@@ -262,6 +265,7 @@ esp_err_t RTSPServer::init_rtp_sockets_() {
   if (bind(rtp_socket_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) < 0) {
     ESP_LOGE(TAG, "Failed to bind RTP socket");
     close(rtp_socket_);
+    rtp_socket_ = -1;
     return ESP_FAIL;
   }
 
@@ -270,6 +274,7 @@ esp_err_t RTSPServer::init_rtp_sockets_() {
   if (rtcp_socket_ < 0) {
     ESP_LOGE(TAG, "Failed to create RTCP socket");
     close(rtp_socket_);
+    rtp_socket_ = -1;
     return ESP_FAIL;
   }
 
@@ -281,7 +286,9 @@ esp_err_t RTSPServer::init_rtp_sockets_() {
   if (bind(rtcp_socket_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr)) < 0) {
     ESP_LOGE(TAG, "Failed to bind RTCP socket");
     close(rtp_socket_);
+    rtp_socket_ = -1;
     close(rtcp_socket_);
+    rtcp_socket_ = -1;
     return ESP_FAIL;
   }
 
@@ -310,12 +317,14 @@ esp_err_t RTSPServer::init_rtsp_server_() {
   if (bind(rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
     ESP_LOGE(TAG, "Failed to bind RTSP socket");
     close(rtsp_socket_);
+    rtsp_socket_ = -1;
     return ESP_FAIL;
   }
 
   if (listen(rtsp_socket_, 5) < 0) {
     ESP_LOGE(TAG, "Failed to listen on RTSP socket");
     close(rtsp_socket_);
+    rtsp_socket_ = -1;
     return ESP_FAIL;
   }
 
@@ -587,7 +596,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
 
   // Create streaming task if not already running
   // Note: On ESP32-P4, stack_size appears to be in BYTES not WORDS
-  // With preallocated buffers, we need 16KB stack
+  // With preallocated buffers, we need ~16KB stack
   if (streaming_task_handle_ == nullptr) {
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
@@ -607,7 +616,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
       send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
       return;
     }
-    ESP_LOGI(TAG, "Streaming task created with 32KB stack on core 1");
+    ESP_LOGI(TAG, "Streaming task created with 16KB stack on core 1");
   }
 
   std::map<std::string, std::string> headers;
@@ -758,11 +767,16 @@ esp_err_t RTSPServer::stream_video_() {
 // This is MUCH faster than RGB565 conversion (no color space conversion, just rearrangement)
 esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t *o_uyy_e_vyy, uint16_t width,
                                                     uint16_t height) {
+  if (yuyv == nullptr || o_uyy_e_vyy == nullptr || width == 0 || height == 0) {
+    ESP_LOGE(TAG, "convert_yuyv_to_o_uyy_e_vyy_: invalid args");
+    return ESP_FAIL;
+  }
+
   const uint8_t *src = yuyv;
 
   // Process 2 lines at a time for YUV420 (vertical subsampling)
   for (uint16_t row = 0; row < height; row += 2) {
-    uint8_t *odd_line = o_uyy_e_vyy + (row * width * 3 / 2);      // Odd line: U Y Y U Y Y...
+    uint8_t *odd_line = o_uyy_e_vyy + (row * width * 3 / 2);        // Odd line: U Y Y U Y Y...
     uint8_t *even_line = o_uyy_e_vyy + ((row + 1) * width * 3 / 2); // Even line: V Y Y V Y Y...
 
     const uint8_t *src_row0 = src + (row * width * 2);       // YUYV row 0
@@ -783,8 +797,8 @@ esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t 
       uint8_t v0_r1 = src_row1[col * 2 + 3];
 
       // Average U and V vertically for YUV420 subsampling
-      uint8_t u_avg = (u0_r0 + u0_r1) >> 1;
-      uint8_t v_avg = (v0_r0 + v0_r1) >> 1;
+      uint8_t u_avg = (uint8_t)(((uint16_t)u0_r0 + (uint16_t)u0_r1) >> 1);
+      uint8_t v_avg = (uint8_t)(((uint16_t)v0_r0 + (uint16_t)v0_r1) >> 1);
 
       // Write to line at row index (0,2,4...): U Y0 Y1
       // According to O_UYY_E_VYY format: line 1,3,5... = U Y Y
@@ -847,33 +861,33 @@ void RTSPServer::init_yuv_lut_() {
   ESP_LOGI(TAG, "YUV lookup tables initialized");
 }
 
-// Convert RGB565 to O_UYY_E_VYY format (required by ESP32-P4 hardware encoder)
-// Format: odd lines = u y y u y y..., even lines = v y y v y y...
-// Optimized version using lookup tables
+// Convert RGB565 to O_UYY_E_VYY format (kept as fallback but non utilisé en YUYV natif)
 esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420, uint16_t width,
                                                  uint16_t height) {
-  // Initialize lookup tables on first call
   if (!yuv_lut_initialized_) {
     init_yuv_lut_();
   }
+  if (rgb565 == nullptr || yuv420 == nullptr || width == 0 || height == 0) {
+    ESP_LOGE(TAG, "convert_rgb565_to_yuv420_: invalid args");
+    return ESP_FAIL;
+  }
+
   const uint16_t *rgb = (const uint16_t *)rgb565;
 
   // Process 2 lines at a time (odd line gets U, even line gets V)
   for (uint16_t row = 0; row < height; row += 2) {
     const uint16_t *row0 = rgb + (row * width);
     const uint16_t *row1 = rgb + ((row + 1) * width);
-    uint8_t *odd_ptr = yuv420 + (row * width * 3 / 2);      // Odd line: u y y u y y...
+    uint8_t *odd_ptr = yuv420 + (row * width * 3 / 2);        // Odd line: u y y u y y...
     uint8_t *even_ptr = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
 
-    // Process 2 pixels at a time (UV subsampling) - ultra-optimized with lookup tables
+    // Process 2 pixels at a time (UV subsampling)
     for (uint16_t col = 0; col < width; col += 2, row0 += 2, row1 += 2, odd_ptr += 3, even_ptr += 3) {
-      // Get 4 pixels (2x2 block) - prefetch for better cache performance
       uint16_t p00 = row0[0];
       uint16_t p01 = row0[1];
       uint16_t p10 = row1[0];
       uint16_t p11 = row1[1];
 
-      // Extract RGB565 components (5-bit R, 6-bit G, 5-bit B) - unrolled for speed
       uint8_t r0 = (p00 >> 11);
       uint8_t g0 = (p00 >> 5) & 0x3F;
       uint8_t b0 = p00 & 0x1F;
@@ -890,28 +904,22 @@ esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *
       uint8_t g3 = (p11 >> 5) & 0x3F;
       uint8_t b3 = p11 & 0x1F;
 
-      // Calculate Y for all 4 pixels using lookup tables (no multiplications!)
-      // Values are already in valid range from LUTs, no clamping needed
       uint8_t y0 = y_r_lut_[r0] + y_g_lut_[g0] + y_b_lut_[b0] + 16;
       uint8_t y1 = y_r_lut_[r1] + y_g_lut_[g1] + y_b_lut_[b1] + 16;
       uint8_t y2 = y_r_lut_[r2] + y_g_lut_[g2] + y_b_lut_[b2] + 16;
       uint8_t y3 = y_r_lut_[r3] + y_g_lut_[g3] + y_b_lut_[b3] + 16;
 
-      // Average RGB565 components for U/V (using shifts for speed)
-      uint8_t r_avg = (r0 + r1 + r2 + r3) >> 2;
-      uint8_t g_avg = (g0 + g1 + g2 + g3) >> 2;
-      uint8_t b_avg = (b0 + b1 + b2 + b3) >> 2;
+      uint8_t r_avg = (uint8_t)(((uint16_t)r0 + r1 + r2 + r3) >> 2);
+      uint8_t g_avg = (uint8_t)(((uint16_t)g0 + g1 + g2 + g3) >> 2);
+      uint8_t b_avg = (uint8_t)(((uint16_t)b0 + b1 + b2 + b3) >> 2);
 
-      // Calculate U and V using lookup tables (no clamping needed)
       uint8_t u = u_r_lut_[r_avg] + u_g_lut_[g_avg] + u_b_lut_[b_avg] + 128;
       uint8_t v = v_r_lut_[r_avg] + v_g_lut_[g_avg] + v_b_lut_[b_avg] + 128;
 
-      // Write to odd line: u y0 y1 (using direct pointer writes)
       odd_ptr[0] = u;
       odd_ptr[1] = y0;
       odd_ptr[2] = y1;
 
-      // Write to even line: v y2 y3
       even_ptr[0] = v;
       even_ptr[1] = y2;
       even_ptr[2] = y3;
@@ -925,38 +933,58 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (!camera_ || !h264_encoder_)
     return ESP_FAIL;
 
-  // Use get_current_rgb_frame() which locks the buffer until release_buffer()
-  // This prevents V4L2 from overwriting the buffer while we're encoding
-  // Note: Despite the name, this returns the format configured in pixel_format (YUYV in our case)
+  // Utiliser le frame natif (YUYV) du capteur OV5647
   mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
   uint8_t* frame_data = nullptr;
-  int width, height;
+  int width = 0, height = 0;
 
-  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
+  if (!camera_->get_current_frame(&buffer, &frame_data, &width, &height)) {
     ESP_LOGW(TAG, "Failed to get frame from camera");
     return ESP_FAIL;
   }
 
-  if (frame_data == nullptr || buffer == nullptr) {
-    ESP_LOGW(TAG, "Invalid frame data: ptr=%p buffer=%p", frame_data, buffer);
+  if (frame_data == nullptr || buffer == nullptr || width <= 0 || height <= 0) {
+    ESP_LOGW(TAG, "Invalid frame data: ptr=%p buffer=%p width=%d height=%d",
+             frame_data, buffer, width, height);
+    if (buffer) {
+      camera_->release_buffer(buffer);
+    }
     return ESP_FAIL;
   }
 
   // Debug: Log first frame info
   if (frame_count_ == 0) {
-    ESP_LOGI(TAG, "First RGB565 frame: %dx%d, expected size: %d bytes", width, height, width * height * 2);
-    uint16_t *rgb = (uint16_t *)frame_data;
-    ESP_LOGI(TAG, "First 4 RGB565 pixels: %04X %04X %04X %04X", rgb[0], rgb[1], rgb[2], rgb[3]);
+    ESP_LOGI(TAG, "First YUYV frame: %dx%d, expected size: %d bytes",
+             width, height, width * height * 2);
+    ESP_LOGI(TAG, "First 8 bytes of YUYV: %02X %02X %02X %02X %02X %02X %02X %02X",
+             frame_data[0], frame_data[1], frame_data[2], frame_data[3],
+             frame_data[4], frame_data[5], frame_data[6], frame_data[7]);
   }
 
-  // Convert RGB565 to O_UYY_E_VYY (YUV420) for hardware encoder
-  // Note: YUYV from OV5647 has incorrect U/V values (all 0x10), so using RGB565 instead
-  convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height);
+  // Vérifier que le buffer YUV alloué est suffisant
+  size_t required_yuv = (size_t)width * (size_t)height * 3 / 2;
+  if (required_yuv > yuv_buffer_size_) {
+    ESP_LOGE(TAG, "YUV buffer too small: need %u bytes, have %u bytes",
+             (unsigned)required_yuv, (unsigned)yuv_buffer_size_);
+    camera_->release_buffer(buffer);
+    return ESP_FAIL;
+  }
+
+  // Convertir YUYV (YUV422) en O_UYY_E_VYY (YUV420 packed pour l'encodeur HW)
+  esp_err_t conv_res = convert_yuyv_to_o_uyy_e_vyy_(frame_data, yuv_buffer_, width, height);
+  if (conv_res != ESP_OK) {
+    ESP_LOGE(TAG, "YUYV -> O_UYY_E_VYY conversion failed");
+    camera_->release_buffer(buffer);
+    return conv_res;
+  }
 
   // Debug: Log converted YUV buffer
   if (frame_count_ == 0) {
-    ESP_LOGI(TAG, "Converted O_UYY_E_VYY buffer size: %zu bytes", yuv_buffer_size_);
-    ESP_LOGI(TAG, "First 16 bytes of O_UYY_E_VYY: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+    ESP_LOGI(TAG, "Converted O_UYY_E_VYY buffer size: %zu bytes (using %u bytes for %dx%d)",
+             yuv_buffer_size_, (unsigned)required_yuv, width, height);
+    ESP_LOGI(TAG, "First 16 bytes of O_UYY_E_VYY: "
+                  "%02X %02X %02X %02X %02X %02X %02X %02X "
+                  "%02X %02X %02X %02X %02X %02X %02X %02X",
              yuv_buffer_[0], yuv_buffer_[1], yuv_buffer_[2], yuv_buffer_[3],
              yuv_buffer_[4], yuv_buffer_[5], yuv_buffer_[6], yuv_buffer_[7],
              yuv_buffer_[8], yuv_buffer_[9], yuv_buffer_[10], yuv_buffer_[11],
@@ -965,11 +993,12 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   // Release the camera buffer ASAP (we've copied to yuv_buffer_)
   camera_->release_buffer(buffer);
+  buffer = nullptr;
 
   // Encode from our YUV buffer
   esp_h264_enc_in_frame_t in_frame = {};
   in_frame.raw_data.buffer = yuv_buffer_;
-  in_frame.raw_data.len = yuv_buffer_size_;
+  in_frame.raw_data.len = required_yuv;  // utiliser la partie réellement remplie
   in_frame.pts = frame_count_ * 90000 / 30;
 
   esp_h264_enc_out_frame_t out_frame = {};
@@ -990,14 +1019,14 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) frame_type_name = "IDR";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_I) frame_type_name = "I";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_P) frame_type_name = "P";
-  // Note: Hardware encoder only supports IDR, I, and P frames (no B-frames)
 
   ESP_LOGV(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
            frame_count_, out_frame.length, out_frame.frame_type, frame_type_name);
 
   // Validate output
   if (out_frame.length == 0 || out_frame.raw_data.buffer == nullptr) {
-    ESP_LOGE(TAG, "Invalid H.264 output: len=%u buf=%p", out_frame.length, out_frame.raw_data.buffer);
+    ESP_LOGE(TAG, "Invalid H.264 output: len=%u buf=%p",
+             out_frame.length, out_frame.raw_data.buffer);
     return ESP_FAIL;
   }
 
@@ -1022,7 +1051,8 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
     else if (nal_type == 7) nal_type_name = "SPS";
     else if (nal_type == 8) nal_type_name = "PPS";
 
-    ESP_LOGV(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes", i, nal_type, nal_type_name, nal.second);
+    ESP_LOGV(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes",
+             i, nal_type, nal_type_name, nal.second);
     send_h264_rtp_(nal.first, nal.second, true);
   }
 
@@ -1140,7 +1170,6 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
       }
     }
 
-    // No need to free - using preallocated buffer
     return ESP_OK;
   }
 
@@ -1213,8 +1242,6 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
     offset += chunk_size;
     fragment_num++;
   }
-
-  // No need to free - using preallocated buffer
 
   ESP_LOGV(TAG, "Sent NAL unit in %u fragments", fragment_num);
 
@@ -1372,7 +1399,7 @@ bool RTSPServer::check_authentication_(const std::string &request) {
   return valid;
 }
 
-// Streaming task function (runs in separate task with 8KB stack)
+// Streaming task function (runs in separate task with ~16KB stack)
 void RTSPServer::streaming_task_wrapper_(void *param) {
   RTSPServer *server = static_cast<RTSPServer *>(param);
 
@@ -1396,7 +1423,7 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
     // Log performance every 30 frames (every ~1 second at 30 FPS)
     if (frame_num % 30 == 0) {
       uint32_t elapsed = millis() - start_time;
-      float actual_fps = (frame_num * 1000.0f) / elapsed;
+      float actual_fps = (frame_num * 1000.0f) / (elapsed ? elapsed : 1);
       float avg_encode = total_encode_time / (float)frame_num;
       ESP_LOGI(TAG, "Performance: %.1f FPS (avg encode: %.1f ms/frame, last: %u ms)",
                actual_fps, avg_encode, encode_time);
@@ -1422,3 +1449,4 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
 }  // namespace esphome
 
 #endif  // USE_ESP_IDF
+
