@@ -362,11 +362,9 @@ void CameraWebServer::setup() {
 
   ESP_LOGI(TAG, "Camera initial resolution: %dx%d (RGB565 via ISP)", width, height);
 
-  if (this->init_jpeg_encoder_() != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize JPEG M2M encoder (esp_video /dev/video10)");
-    this->mark_failed();
-    return;
-  }
+  // ⚠️ IMPORTANT :
+  // On NE configure PLUS le JPEG M2M ici, car width/height peuvent être 0x0.
+  // On initialise le JPEG M2M LAZY dans /pic ou /stream après une capture réelle.
 
   ESP_LOGI(TAG, "Camera Web Server initialized (not started yet)");
   ESP_LOGI(TAG, "Turn on the 'Camera Web Server' switch to start");
@@ -395,10 +393,38 @@ void CameraWebServer::loop() {
   }
 }
 
-// Wrapper membre vers le helper V4L2
+// ⚠️ Lazy init : appelé uniquement depuis /pic et /stream AVANT le premier encodage
 esp_err_t CameraWebServer::init_jpeg_encoder_() {
+  if (s_jpeg_fd >= 0) {
+    // déjà initialisé
+    return ESP_OK;
+  }
+
+  // S'assurer que la caméra tourne et qu'on a une vraie résolution
+  if (!this->camera_->is_streaming()) {
+    ESP_LOGI(TAG, "Starting camera streaming to init JPEG M2M");
+    if (!this->camera_->start_streaming()) {
+      ESP_LOGE(TAG, "Failed to start camera streaming for JPEG init");
+      return ESP_FAIL;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  // Capturer une frame pour forcer l'ISP à fixer la résolution
+  if (!this->camera_->capture_frame()) {
+    ESP_LOGE(TAG, "Failed to capture frame for JPEG init");
+    return ESP_FAIL;
+  }
+
   int w = this->camera_->get_image_width();
   int h = this->camera_->get_image_height();
+
+  if (w <= 0 || h <= 0) {
+    ESP_LOGE(TAG, "Invalid camera resolution for JPEG init: %dx%d", w, h);
+    return ESP_FAIL;
+  }
+
+  ESP_LOGI(TAG, "Initializing JPEG M2M with resolution %dx%d", w, h);
   return init_jpeg_m2m_device(w, h);
 }
 
@@ -509,6 +535,13 @@ esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
     return ESP_FAIL;
   }
 
+  // Initialiser JPEG M2M si besoin (lazy)
+  if (server->init_jpeg_encoder_() != ESP_OK) {
+    ESP_LOGE(TAG, "JPEG M2M init failed in snapshot");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
   // Encoder via device JPEG M2M (V4L2)
   EncodedFrame frame;
   if (!encode_frame_rgb565_to_jpeg(image_data, image_size, frame)) {
@@ -544,6 +577,13 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       return ESP_FAIL;
     }
     vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  // Initialiser JPEG M2M si besoin (lazy)
+  if (server->init_jpeg_encoder_() != ESP_OK) {
+    ESP_LOGE(TAG, "JPEG M2M init failed in stream");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
   }
 
   // FPS ciblés (si caméra a une config connue, sinon 30 par défaut)
@@ -672,7 +712,7 @@ esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
   return httpd_resp_send(req, json, strlen(json));
 }
 
-// Handler /info : infos capteur + devices esp-video
+// Handler /info : infos pipeline esp-video + caméra (basé sur APIs dispo)
 esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   CameraWebServer *server = static_cast<CameraWebServer *>(req->user_ctx);
 
@@ -686,7 +726,7 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   // 1) Informations caméra via ESPHome uniquement
   // ---------------------------------------------------------
 
-  const char *sensor_name = "MIPI_Camera";   // aucune API pour récupérer un vrai nom
+  const char *sensor_name = "MIPI_Camera";   // aucune API publique pour un vrai nom
 
   int cur_w = server->camera_->get_image_width();
   int cur_h = server->camera_->get_image_height();
@@ -798,7 +838,6 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   return httpd_resp_send(req, json, strlen(json));
 }
 
-
 #else  // !USE_ESP_IDF
 
 void CameraWebServer::setup() {
@@ -812,4 +851,5 @@ void CameraWebServer::loop() {}
 
 }  // namespace camera_web_server
 }  // namespace esphome
+
 
