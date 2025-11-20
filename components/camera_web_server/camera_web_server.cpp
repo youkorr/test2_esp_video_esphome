@@ -580,7 +580,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       }
     }
 
-    vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
+    //vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
   }
 
   httpd_resp_send_chunk(req, nullptr, 0);
