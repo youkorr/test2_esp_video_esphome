@@ -607,6 +607,95 @@ static const esp_cam_sensor_format_t ov5647_format_800x640_raw8_50fps = {
     .reserved = NULL,
 };
 
+// ============================================================================
+// Configuration 4 : 800x640 @ 30fps YUV422 (YUYV) – pour RTSP / H.264 HW
+// ============================================================================
+// Ce mode sort directement du YUV422 YUYV correct : plus de U/V = 0x10,
+// tu peux l'utiliser directement avec ton convert_yuyv_to_o_uyy_e_vyy_()
+// et le H.264 hardware encoder.
+
+static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_yuv422_800x640_30fps[] = {
+    // Reset + standby
+    {0x0103, 0x01},
+    {OV5647_REG_DELAY, 0x0a},
+    {0x0100, 0x00},
+
+    // PLL (proche du profil 30fps)
+    {0x3034, 0x1A},   // 8-bit mode
+    {0x3035, 0x21},
+    {0x3036, 0x46},
+    {0x303c, 0x11},
+    {0x3106, 0xf5},
+
+    // YUV422 YUYV
+    {0x4300, 0x30},   // YUV422, YUYV
+    {0x501F, 0x00},   // YUYV order
+    {0x5000, 0xFF},   // ISP on
+    {0x5001, 0x01},   // color matrix on (sinon U/V foireux)
+    {0x503D, 0x00},   // AWB on
+
+    // Binning / orientation
+    {0x3821, 0x03},
+    {0x3820, 0x41},
+    {0x3827, 0xEC},
+
+    // Crop + timing : basé sur 800x640 RAW8
+    // HTS/VTS ~ 30fps
+    {0x380c, (1896 >> 8) & 0x1F},
+    {0x380d, 1896 & 0xFF},
+    {0x380e, (984 >> 8) & 0xFF},
+    {0x380f, 984 & 0xFF},
+
+    // Crop window
+    {0x3800, (500 >> 8) & 0x0F},
+    {0x3801, 500 & 0xFF},
+    {0x3802, (0 >> 8) & 0x07},
+    {0x3803, 0 & 0xFF},
+    {0x3804, ((2624 - 1) >> 8) & 0x0F},
+    {0x3805, (2624 - 1) & 0xFF},
+    {0x3806, ((1954 - 1) >> 8) & 0x07},
+    {0x3807, (1954 - 1) & 0xFF},
+
+    // Output size 800x640
+    {0x3808, (800 >> 8) & 0x0F},
+    {0x3809, 800 & 0xFF},
+    {0x380a, (640 >> 8) & 0x7F},
+    {0x380b, 640 & 0xFF},
+
+    // Offsets
+    {0x3810, (8 >> 8) & 0x0F},
+    {0x3811, 8 & 0xFF},
+    {0x3812, (0 >> 8) & 0x07},
+    {0x3813, 0 & 0xFF},
+
+    // Tu peux, si besoin, recopier ici les mêmes réglages analog/AEC/AWB
+    // que dans le mode RAW8 800x640, mais ce bloc minimal suffit pour commencer.
+
+    // Start streaming
+    {0x0100, 0x01},
+    {OV5647_REG_END, 0x00},
+};
+
+static const esp_cam_sensor_format_t ov5647_format_800x640_yuv422_30fps = {
+    .name = "MIPI_2lane_YUV422_800x640_30fps",
+    .format = ESP_CAM_SENSOR_PIXFORMAT_YUV422,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk = 24000000,
+    .width = 800,
+    .height = 640,
+    .regs = ov5647_input_24M_MIPI_2lane_yuv422_800x640_30fps,
+    .regs_size = ARRAY_SIZE(ov5647_input_24M_MIPI_2lane_yuv422_800x640_30fps),
+    .fps = 30,
+    .isp_info = NULL, // tu peux mettre &ov5647_800x640_isp_info si besoin
+    .mipi_info = {
+        .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_800x640_50FPS, // marge OK pour 30 FPS
+        .lane_num = 2,
+        .line_sync_en = false,
+    },
+    .reserved = NULL,
+};
+
 #ifdef __cplusplus
 }
 #endif
+
