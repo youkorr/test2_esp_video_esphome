@@ -547,7 +547,7 @@ static const esp_cam_sensor_isp_info_t ov5647_800x600_isp_info = {
         .vts = 1055,          // Vertical Total Size (for 50 FPS)
         .exp_def = 0x300,     // Default exposure (same as 800x640)
         .gain_def = 0x100,    // Default gain (1x)
-        .bayer_type = ESP_CAM_SENSOR_BAYER_RGGB,  // GBRG (BGGR mirrored horizontally)
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
     }
 };
 
