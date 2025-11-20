@@ -9,6 +9,9 @@
 
 // Tous les headers C d'esp-video doivent être protégés via extern "C"
 extern "C" {
+#include <sys/types.h>
+#include <sys/time.h>
+
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "esp_video_ioctl.h"
@@ -22,7 +25,7 @@ extern "C" {
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 }
-#endif
+#endif  // USE_ESP_IDF
 
 namespace esphome {
 namespace camera_web_server {
@@ -53,11 +56,13 @@ class CameraWebServer : public Component {
   // --- HTTP SERVER ---
   httpd_handle_t server_{nullptr};
 
+  // Démarrage / arrêt du serveur HTTP
   esp_err_t start_server_();
   void stop_server_();
 
   // Initialisation et cleanup du pipeline JPEG M2M (/dev/video10, V4L2)
-  // NOTE: maintenant lazy-init, appelée seulement depuis /pic et /stream
+  // NOTE : lazy-init, appelée seulement depuis /pic et /stream quand la
+  // caméra a déjà une résolution valide (≠ 0x0).
   esp_err_t init_jpeg_encoder_();
   void cleanup_jpeg_encoder_();
 
@@ -66,10 +71,11 @@ class CameraWebServer : public Component {
   static esp_err_t snapshot_handler_(httpd_req_t *req);
   static esp_err_t status_handler_(httpd_req_t *req);
   static esp_err_t info_handler_(httpd_req_t *req);
-#endif
+#endif  // USE_ESP_IDF
 };
 
 }  // namespace camera_web_server
 }  // namespace esphome
+
 
 
