@@ -9,8 +9,6 @@
 
 // Tous les headers C d'esp-video doivent être protégés via extern "C"
 extern "C" {
-#include "esp_cam_sensor.h"
-#include "esp_cam_sensor_types.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "esp_video_ioctl.h"
@@ -59,6 +57,7 @@ class CameraWebServer : public Component {
   void stop_server_();
 
   // Initialisation et cleanup du pipeline JPEG M2M (/dev/video10, V4L2)
+  // NOTE: maintenant lazy-init, appelée seulement depuis /pic et /stream
   esp_err_t init_jpeg_encoder_();
   void cleanup_jpeg_encoder_();
 
@@ -72,4 +71,5 @@ class CameraWebServer : public Component {
 
 }  // namespace camera_web_server
 }  // namespace esphome
+
 
