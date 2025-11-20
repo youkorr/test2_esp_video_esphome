@@ -362,9 +362,6 @@ void CameraWebServer::setup() {
 
   ESP_LOGI(TAG, "Camera initial resolution: %dx%d (RGB565 via ISP)", width, height);
 
-  // ⚠️ IMPORTANT :
-  // On NE configure PLUS le JPEG M2M ici, car width/height peuvent être 0x0.
-  // On initialise le JPEG M2M LAZY dans /pic ou /stream après une capture réelle.
 
   ESP_LOGI(TAG, "Camera Web Server initialized (not started yet)");
   ESP_LOGI(TAG, "Turn on the 'Camera Web Server' switch to start");
@@ -393,7 +390,7 @@ void CameraWebServer::loop() {
   }
 }
 
-// ⚠️ Lazy init : appelé uniquement depuis /pic et /stream AVANT le premier encodage
+
 esp_err_t CameraWebServer::init_jpeg_encoder_() {
   if (s_jpeg_fd >= 0) {
     // déjà initialisé
