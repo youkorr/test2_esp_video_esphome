@@ -683,30 +683,22 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   memset(json, 0, sizeof(json));
 
   // ---------------------------------------------------------
-  // 1) Informations caméra via esp_cam_sensor (API réduite)
+  // 1) Informations caméra via ESPHome uniquement
   // ---------------------------------------------------------
 
-  const char *sensor_name = "unknown";
+  const char *sensor_name = "MIPI_Camera";   // aucune API pour récupérer un vrai nom
 
-  // On récupère le device interne du driver ESPHome
-  esp_cam_sensor_device_t *dev = server->camera_->get_sensor();
-  if (dev != nullptr) {
-    const char *name = esp_cam_sensor_get_name(dev);
-    if (name != nullptr) sensor_name = name;
-  }
-
-  // La résolution active = API ESPHome
   int cur_w = server->camera_->get_image_width();
   int cur_h = server->camera_->get_image_height();
 
-  // FPS du capteur : API non disponible → on utilise le FPS mesuré
+  // FPS mesurés (car aucune API capteur disponible)
   int sensor_fps = (s_stream_fps_int > 0) ? s_stream_fps_int : 30;
 
   // ---------------------------------------------------------
-  // 2) JPEG M2M device info
+  // 2) JPEG M2M /dev/video10
   // ---------------------------------------------------------
-  struct v4l2_capability cap_jpeg;
-  memset(&cap_jpeg, 0, sizeof(cap_jpeg));
+
+  struct v4l2_capability cap_jpeg {};
   const char *jpeg_driver = "n/a";
   const char *jpeg_card = "n/a";
   uint32_t jpeg_caps = 0, jpeg_dev_caps = 0;
@@ -723,12 +715,12 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   }
 
   // ---------------------------------------------------------
-  // 3) ISP device /dev/video1
+  // 3) ISP /dev/video1
   // ---------------------------------------------------------
-  struct v4l2_capability cap_isp;
-  memset(&cap_isp, 0, sizeof(cap_isp));
+
+  struct v4l2_capability cap_isp {};
   const char *isp_driver = "n/a";
-  const char *isp_card = "n/a";
+  const char *isp_card   = "n/a";
 
   int fd_isp = open("/dev/video1", O_RDWR);
   if (fd_isp >= 0) {
@@ -740,12 +732,12 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   }
 
   // ---------------------------------------------------------
-  // 4) RAW device /dev/video0
+  // 4) RAW capteur /dev/video0
   // ---------------------------------------------------------
-  struct v4l2_capability cap_raw;
-  memset(&cap_raw, 0, sizeof(cap_raw));
+
+  struct v4l2_capability cap_raw {};
   const char *raw_driver = "n/a";
-  const char *raw_card = "n/a";
+  const char *raw_card   = "n/a";
 
   int fd_raw = open("/dev/video0", O_RDWR);
   if (fd_raw >= 0) {
@@ -787,12 +779,19 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
         "\"card\":\"%s\""
       "}"
     "}",
+    // Camera
     sensor_name,
     cur_w, cur_h,
     sensor_fps,
     server->camera_->is_streaming() ? "true" : "false",
+
+    // JPEG M2M
     jpeg_driver, jpeg_card, jpeg_caps, jpeg_dev_caps,
+
+    // ISP
     isp_driver, isp_card,
+
+    // RAW
     raw_driver, raw_card
   );
 
