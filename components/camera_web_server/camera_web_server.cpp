@@ -512,16 +512,20 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
   httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  char fps_hdr[8];
-  snprintf(fps_hdr, sizeof(fps_hdr), "%d", current_fps > 0 ? current_fps : 30);
-  httpd_resp_set_hdr(req, "X-Framerate", fps_hdr);
-
   ESP_LOGI(TAG, "MJPEG stream started");
 
+  // FPS calculés à partir du temps en µs
+  static uint64_t fps_last_us = 0;
+  static uint32_t fps_count = 0;
+
+  // Limiteur à ~30 FPS pour ne pas saturer le pipeline
+  static uint64_t last_jpeg_us = 0;
+
   while (true) {
+    // 1) Capturer une frame depuis la caméra (RGB565 via ISP)
     if (!server->camera_->capture_frame()) {
       ESP_LOGW(TAG, "capture_frame() failed in /stream");
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
 
@@ -530,26 +534,39 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
 
     if (!rgb || rgb_size == 0) {
       ESP_LOGW(TAG, "Invalid RGB data in /stream");
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
 
+    uint64_t now_us = esp_timer_get_time();
+
+    // 2) Limiteur simple à ~30 FPS sur l'ENCODAGE JPEG
+    if (last_jpeg_us != 0) {
+      uint64_t delta = now_us - last_jpeg_us;
+      if (delta < 33000ULL) {
+        // Moins de 33 ms depuis le dernier JPEG → on saute cette frame
+        continue;
+      }
+    }
+    last_jpeg_us = now_us;
+
+    // 3) Encoder RGB565 -> JPEG (esp_video_jpeg_device /dev/video10)
     uint8_t *jpeg_ptr = nullptr;
     size_t jpeg_size = 0;
 
     if (!encode_frame_rgb565_to_jpeg(rgb, rgb_size, &jpeg_ptr, &jpeg_size)) {
       ESP_LOGW(TAG, "JPEG encode failed in /stream");
-      vTaskDelay(pdMS_TO_TICKS(10));
+      vTaskDelay(pdMS_TO_TICKS(5));
       continue;
     }
 
-    // Boundary
+    // 4) Envoyer le boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
       ESP_LOGI(TAG, "Stream client disconnected (boundary)");
       break;
     }
 
-    // Header part
+    // 5) Header de la part
     char part_buf[128];
     int hlen = snprintf(part_buf, sizeof(part_buf), STREAM_PART,
                         static_cast<unsigned>(jpeg_size));
@@ -558,7 +575,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       break;
     }
 
-    // JPEG data
+    // 6) Données JPEG
     if (httpd_resp_send_chunk(req,
                               reinterpret_cast<const char *>(jpeg_ptr),
                               jpeg_size) != ESP_OK) {
@@ -566,27 +583,29 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       break;
     }
 
-    // ---- FPS CALCUL ----
-    fps_frame_counter++;
-    uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
-    if (fps_last_time == 0) {
-      fps_last_time = now;
-    } else if (now > fps_last_time) {
-      uint32_t dt = now - fps_last_time;
-      if (dt >= 1) {
-        current_fps = fps_frame_counter / (dt ? dt : 1);
-        fps_frame_counter = 0;
-        fps_last_time = now;
-      }
+    // 7) Calcul du FPS réel (nombre de JPEG envoyés par seconde)
+    fps_count++;
+    now_us = esp_timer_get_time();
+    if (fps_last_us == 0) {
+      fps_last_us = now_us;
+    } else if (now_us - fps_last_us >= 1000000ULL) {  // 1 seconde
+      current_fps = fps_count;
+      fps_count = 0;
+      fps_last_us = now_us;
+      // Optionnel : log
+      ESP_LOGD(TAG, "Current FPS: %d", current_fps);
     }
 
-    vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
+    // NOTE : pas de vTaskDelay(30) ici → on laisse le limiteur au-dessus gérer.
+    // On peut éventuellement relâcher un peu le CPU :
+    // vTaskDelay(1);  // si besoin de laisser de l'air au reste du système
   }
 
   httpd_resp_send_chunk(req, nullptr, 0);
   ESP_LOGI(TAG, "MJPEG stream ended");
   return ESP_OK;
 }
+
 
 // --------------------------------------------------
 // /status : JSON simple (streaming + rés + fps)
