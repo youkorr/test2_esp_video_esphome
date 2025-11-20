@@ -938,7 +938,7 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   uint8_t* frame_data = nullptr;
   int width = 0, height = 0;
 
-  if (!camera_->get_current_frame(&buffer, &frame_data, &width, &height)) {
+  if (!camera_->get_current_rgb_frame(&buffer, &frame_data, &width, &height)) {
     ESP_LOGW(TAG, "Failed to get frame from camera");
     return ESP_FAIL;
   }
