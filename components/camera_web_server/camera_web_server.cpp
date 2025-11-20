@@ -3,349 +3,68 @@
 
 #ifdef USE_ESP_IDF
 
+extern "C" {
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <errno.h>
 #include <string.h>
-
-#endif  // USE_ESP_IDF
+#include "esp_timer.h"
+}
 
 namespace esphome {
 namespace camera_web_server {
 
 static const char *const TAG = "camera_web_server";
 
-#ifdef USE_ESP_IDF
-
 // ------------------------
-// Config MJPEG / JPEG M2M
+// MJPEG boundary & headers
 // ------------------------
-
 #define PART_BOUNDARY "123456789000000000000987654321"
 static const char *STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
 static const char *STREAM_BOUNDARY = "\r\n--" PART_BOUNDARY "\r\n";
 static const char *STREAM_PART = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
 
-// Device JPEG M2M fourni par esp-video (esp_video_jpeg_device)
-static const char *JPEG_DEV_PATH = "/dev/video10";     // adapter si différent
-static const uint32_t JPEG_CAPTURE_BUF_COUNT = 3;      // nombre de buffers mmap côté JPEG
-
-struct JpegCaptureBuf {
-  void *start = nullptr;
-  size_t length = 0;
-};
-
-static JpegCaptureBuf s_cap_bufs[JPEG_CAPTURE_BUF_COUNT];
+// ------------------------
+// JPEG M2M V4L2 globals
+// ------------------------
 static int s_jpeg_fd = -1;
-
-// FPS mesurés côté stream
-static float s_stream_fps = 0.0f;
-static int s_stream_fps_int = 0;
-static int s_target_fps = 30;  // valeur par défaut si on ne sait pas encore
-
-// Petite structure pour retourner une frame JPEG encodée
-struct EncodedFrame {
-  uint8_t *ptr = nullptr;
-  size_t size = 0;
-  uint32_t index = 0;  // index du buffer capture dans s_cap_bufs
-};
+static void *s_cap_buf = nullptr;
+static size_t s_cap_buf_size = 0;
 
 // ------------------------
-// Helpers V4L2 / esp-video
+// FPS globals
 // ------------------------
+static uint32_t fps_frame_counter = 0;
+static uint32_t fps_last_time = 0;
+static int current_fps = 0;
 
-static esp_err_t init_jpeg_m2m_device(int width, int height) {
-  if (s_jpeg_fd >= 0) {
-    ESP_LOGW(TAG, "JPEG M2M device already initialized");
-    return ESP_OK;
+// --------------------------------------------------
+// Helper: open /dev/video10 (esp_video_jpeg_device)
+// --------------------------------------------------
+static int open_jpeg_device() {
+  int fd = ::open("/dev/video10", O_RDWR);
+  if (fd < 0) {
+    ESP_LOGE(TAG, "Failed to open /dev/video10: errno=%d", errno);
+    return -1;
   }
 
-  ESP_LOGI(TAG, "Opening JPEG M2M device: %s", JPEG_DEV_PATH);
-
-  // On suppose que esp-video a déjà créé le device JPEG (esp_video_create_jpeg_video_device)
-  s_jpeg_fd = ::open(JPEG_DEV_PATH, O_RDWR);
-  if (s_jpeg_fd < 0) {
-    ESP_LOGE(TAG, "Failed to open %s: errno=%d", JPEG_DEV_PATH, errno);
-    return ESP_FAIL;
+  struct v4l2_capability cap {};
+  if (ioctl(fd, VIDIOC_QUERYCAP, &cap) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_QUERYCAP(/dev/video10) failed: errno=%d", errno);
+    ::close(fd);
+    return -1;
   }
 
-  // Vérifier les capacités
-  struct v4l2_capability cap;
-  memset(&cap, 0, sizeof(cap));
-  if (ioctl(s_jpeg_fd, VIDIOC_QUERYCAP, &cap) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QUERYCAP failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  if (!(cap.capabilities & V4L2_CAP_VIDEO_M2M)) {
-    ESP_LOGE(TAG, "Device %s is not a mem2mem device", JPEG_DEV_PATH);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "JPEG M2M device opened, driver=%s, card=%s",
-           (char *) cap.driver, (char *) cap.card);
-
-  // ---------
-  // Format OUTPUT : RGB565 (entrée encoder)
-  // ---------
-  struct v4l2_format fmt;
-  memset(&fmt, 0, sizeof(fmt));
-  fmt.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  fmt.fmt.pix.width = width;
-  fmt.fmt.pix.height = height;
-  fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
-  fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_S_FMT, &fmt) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_S_FMT (OUTPUT RGB565) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "JPEG OUTPUT format set: %ux%u RGB565",
-           fmt.fmt.pix.width, fmt.fmt.pix.height);
-
-  // ---------
-  // Format CAPTURE : JPEG
-  // ---------
-  memset(&fmt, 0, sizeof(fmt));
-  fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  fmt.fmt.pix.width = width;
-  fmt.fmt.pix.height = height;
-  fmt.fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
-  fmt.fmt.pix.field = V4L2_FIELD_NONE;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_S_FMT, &fmt) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_S_FMT (CAPTURE JPEG) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "JPEG CAPTURE format set: %ux%u JPEG",
-           fmt.fmt.pix.width, fmt.fmt.pix.height);
-
-  // ---------
-  // Buffers CAPTURE en MMAP
-  // ---------
-  struct v4l2_requestbuffers req;
-  memset(&req, 0, sizeof(req));
-  req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  req.count = JPEG_CAPTURE_BUF_COUNT;
-  req.memory = V4L2_MEMORY_MMAP;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_REQBUFS, &req) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_REQBUFS (CAPTURE) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  if (req.count < 1) {
-    ESP_LOGE(TAG, "Not enough CAPTURE buffers allocated");
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "Allocated %u CAPTURE buffers", req.count);
-
-  for (uint32_t i = 0; i < req.count && i < JPEG_CAPTURE_BUF_COUNT; i++) {
-    struct v4l2_buffer buf;
-    memset(&buf, 0, sizeof(buf));
-    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    buf.memory = V4L2_MEMORY_MMAP;
-    buf.index = i;
-
-    if (ioctl(s_jpeg_fd, VIDIOC_QUERYBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QUERYBUF (CAPTURE index=%u) failed: errno=%d", i, errno);
-      ::close(s_jpeg_fd);
-      s_jpeg_fd = -1;
-      return ESP_FAIL;
-    }
-
-    void *addr = mmap(nullptr, buf.length, PROT_READ | PROT_WRITE,
-                      MAP_SHARED, s_jpeg_fd, buf.m.offset);
-    if (addr == MAP_FAILED) {
-      ESP_LOGE(TAG, "mmap failed for CAPTURE index=%u: errno=%d", i, errno);
-      ::close(s_jpeg_fd);
-      s_jpeg_fd = -1;
-      return ESP_FAIL;
-    }
-
-    s_cap_bufs[i].start = addr;
-    s_cap_bufs[i].length = buf.length;
-
-    if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QBUF (CAPTURE index=%u) failed: errno=%d", i, errno);
-      ::close(s_jpeg_fd);
-      s_jpeg_fd = -1;
-      return ESP_FAIL;
-    }
-  }
-
-  // ---------
-  // OUTPUT en USERPTR (on fournit directement le buffer RGB565 de la caméra)
-  // ---------
-  memset(&req, 0, sizeof(req));
-  req.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  req.count = 1;
-  req.memory = V4L2_MEMORY_USERPTR;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_REQBUFS, &req) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_REQBUFS (OUTPUT USERPTR) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  // ---------
-  // STREAMON sur OUTPUT et CAPTURE
-  // ---------
-  enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  if (ioctl(s_jpeg_fd, VIDIOC_STREAMON, &type) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_STREAMON (OUTPUT) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  if (ioctl(s_jpeg_fd, VIDIOC_STREAMON, &type) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_STREAMON (CAPTURE) failed: errno=%d", errno);
-    ::close(s_jpeg_fd);
-    s_jpeg_fd = -1;
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "JPEG M2M device ready (RGB565 -> JPEG via V4L2)");
-
-  return ESP_OK;
+  ESP_LOGI(TAG, "JPEG M2M opened: driver=%s card=%s caps=0x%X devcaps=0x%X",
+           cap.driver, cap.card, cap.capabilities, cap.device_caps);
+  return fd;
 }
 
-static void deinit_jpeg_m2m_device() {
-  if (s_jpeg_fd < 0) {
-    return;
-  }
-
-  ESP_LOGI(TAG, "Stopping JPEG M2M device");
-
-  // STREAMOFF
-  enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  ioctl(s_jpeg_fd, VIDIOC_STREAMOFF, &type);
-  type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  ioctl(s_jpeg_fd, VIDIOC_STREAMOFF, &type);
-
-  // munmap buffers
-  for (uint32_t i = 0; i < JPEG_CAPTURE_BUF_COUNT; i++) {
-    if (s_cap_bufs[i].start != nullptr) {
-      munmap(s_cap_bufs[i].start, s_cap_bufs[i].length);
-      s_cap_bufs[i].start = nullptr;
-      s_cap_bufs[i].length = 0;
-    }
-  }
-
-  ::close(s_jpeg_fd);
-  s_jpeg_fd = -1;
-
-  ESP_LOGI(TAG, "JPEG M2M device stopped");
-}
-
-// Encode une frame RGB565 en JPEG via le device M2M
-// - rgb / rgb_size : données caméra RGB565
-// - out_frame : infos sur le buffer JPEG renvoyé (pointer dans mmap + index buffer)
-// IMPORTANT : l'appelant doit RE-QBUF le buffer capture via l’index retourné
-static bool encode_frame_rgb565_to_jpeg(uint8_t *rgb, size_t rgb_size, EncodedFrame &out_frame) {
-  if (s_jpeg_fd < 0) {
-    ESP_LOGE(TAG, "JPEG M2M device not initialized");
-    return false;
-  }
-
-  // 1) QBUF côté OUTPUT (USERPTR)
-  struct v4l2_buffer buf_out;
-  memset(&buf_out, 0, sizeof(buf_out));
-  buf_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  buf_out.memory = V4L2_MEMORY_USERPTR;
-  buf_out.m.userptr = reinterpret_cast<unsigned long>(rgb);
-  buf_out.length = rgb_size;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf_out) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QBUF (OUTPUT) failed: errno=%d", errno);
-    return false;
-  }
-
-  // 2) DQBUF côté CAPTURE (bloquant jusqu’à ce que le JPEG soit prêt)
-  struct v4l2_buffer buf_cap;
-  memset(&buf_cap, 0, sizeof(buf_cap));
-  buf_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf_cap.memory = V4L2_MEMORY_MMAP;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_DQBUF, &buf_cap) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_DQBUF (CAPTURE) failed: errno=%d", errno);
-
-    // Essayer de vider OUTPUT pour ne pas le bloquer
-    struct v4l2_buffer tmp;
-    memset(&tmp, 0, sizeof(tmp));
-    tmp.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    tmp.memory = V4L2_MEMORY_USERPTR;
-    ioctl(s_jpeg_fd, VIDIOC_DQBUF, &tmp);
-
-    return false;
-  }
-
-  // 3) DQBUF côté OUTPUT (USERPTR)
-  struct v4l2_buffer buf_out_done;
-  memset(&buf_out_done, 0, sizeof(buf_out_done));
-  buf_out_done.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  buf_out_done.memory = V4L2_MEMORY_USERPTR;
-  if (ioctl(s_jpeg_fd, VIDIOC_DQBUF, &buf_out_done) < 0) {
-    ESP_LOGW(TAG, "VIDIOC_DQBUF (OUTPUT) failed: errno=%d", errno);
-    // On continue quand même, le JPEG est prêt côté CAPTURE
-  }
-
-  // 4) Retourner le buffer JPEG (on NE LE REQUEUE PAS ici)
-  if (buf_cap.index >= JPEG_CAPTURE_BUF_COUNT) {
-    ESP_LOGE(TAG, "Invalid CAPTURE buffer index: %u", buf_cap.index);
-    return false;
-  }
-
-  out_frame.ptr = static_cast<uint8_t *>(s_cap_bufs[buf_cap.index].start);
-  out_frame.size = buf_cap.bytesused;
-  out_frame.index = buf_cap.index;
-
-  return true;
-}
-
-// Requeue un buffer CAPTURE après usage
-static void requeue_capture_buffer(uint32_t index) {
-  if (s_jpeg_fd < 0) {
-    return;
-  }
-  if (index >= JPEG_CAPTURE_BUF_COUNT) {
-    return;
-  }
-
-  struct v4l2_buffer buf;
-  memset(&buf, 0, sizeof(buf));
-  buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf.memory = V4L2_MEMORY_MMAP;
-  buf.index = index;
-
-  if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf) < 0) {
-    ESP_LOGW(TAG, "VIDIOC_QBUF (CAPTURE requeue index=%u) failed: errno=%d", index, errno);
-  }
-}
-
-// ------------------------
-// Implémentation classe
-// ------------------------
+// --------------------------------------------------
+// Component methods
+// --------------------------------------------------
 
 void CameraWebServer::setup() {
   ESP_LOGI(TAG, "Setting up Camera Web Server on port %d", this->port_);
@@ -357,32 +76,22 @@ void CameraWebServer::setup() {
     return;
   }
 
-  const int width = this->camera_->get_image_width();
-  const int height = this->camera_->get_image_height();
-
-  ESP_LOGI(TAG, "Camera initial resolution: %dx%d (RGB565 via ISP)", width, height);
-
-
-  ESP_LOGI(TAG, "Camera Web Server initialized (not started yet)");
-  ESP_LOGI(TAG, "Turn on the 'Camera Web Server' switch to start");
-  ESP_LOGI(TAG, "  Snapshot: http://<ip>:%d/pic", this->port_);
-  ESP_LOGI(TAG, "  Stream:   http://<ip>:%d/stream", this->port_);
-  ESP_LOGI(TAG, "  Status:   http://<ip>:%d/status", this->port_);
-  ESP_LOGI(TAG, "  Info:     http://<ip>:%d/info", this->port_);
+  int w = this->camera_->get_image_width();
+  int h = this->camera_->get_image_height();
+  ESP_LOGI(TAG, "Camera initial resolution: %dx%d (RGB565 via ISP)", w, h);
+  // ⚠️ On n'initialise pas le JPEG ici (lazy init dans /pic et /stream)
 }
 
 void CameraWebServer::loop() {
-  // Start server when enabled
   if (this->enabled_ && this->server_ == nullptr) {
     ESP_LOGI(TAG, "Starting Camera Web Server...");
     if (this->start_server_() == ESP_OK) {
-      ESP_LOGI(TAG, "Camera Web Server started successfully");
+      ESP_LOGI(TAG, "Camera Web Server started");
     } else {
       ESP_LOGE(TAG, "Failed to start Camera Web Server");
     }
   }
 
-  // Stop server when disabled
   if (!this->enabled_ && this->server_ != nullptr) {
     ESP_LOGI(TAG, "Stopping Camera Web Server...");
     this->stop_server_();
@@ -390,108 +99,80 @@ void CameraWebServer::loop() {
   }
 }
 
-
-esp_err_t CameraWebServer::init_jpeg_encoder_() {
-  if (s_jpeg_fd >= 0) {
-    // déjà initialisé
-    return ESP_OK;
-  }
-
-  // S'assurer que la caméra tourne et qu'on a une vraie résolution
-  if (!this->camera_->is_streaming()) {
-    ESP_LOGI(TAG, "Starting camera streaming to init JPEG M2M");
-    if (!this->camera_->start_streaming()) {
-      ESP_LOGE(TAG, "Failed to start camera streaming for JPEG init");
-      return ESP_FAIL;
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-
-  // Capturer une frame pour forcer l'ISP à fixer la résolution
-  if (!this->camera_->capture_frame()) {
-    ESP_LOGE(TAG, "Failed to capture frame for JPEG init");
-    return ESP_FAIL;
-  }
-
-  int w = this->camera_->get_image_width();
-  int h = this->camera_->get_image_height();
-
-  if (w <= 0 || h <= 0) {
-    ESP_LOGE(TAG, "Invalid camera resolution for JPEG init: %dx%d", w, h);
-    return ESP_FAIL;
-  }
-
-  ESP_LOGI(TAG, "Initializing JPEG M2M with resolution %dx%d", w, h);
-  return init_jpeg_m2m_device(w, h);
-}
-
-// Wrapper membre vers le helper
-void CameraWebServer::cleanup_jpeg_encoder_() {
-  deinit_jpeg_m2m_device();
-}
+// --------------------------------------------------
+// HTTP server: start / stop
+// --------------------------------------------------
 
 esp_err_t CameraWebServer::start_server_() {
   httpd_config_t config = HTTPD_DEFAULT_CONFIG();
   config.server_port = this->port_;
   config.ctrl_port = this->port_ + 1;
-  config.max_uri_handlers = 8;
+  config.max_uri_handlers = 10;
   config.max_open_sockets = 3;
   config.stack_size = 8192;
-
-  ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
 
   if (httpd_start(&this->server_, &config) != ESP_OK) {
     ESP_LOGE(TAG, "Failed to start HTTP server");
     return ESP_FAIL;
   }
 
-  // Snapshot
+  // /pic
   if (this->enable_snapshot_) {
-    httpd_uri_t pic_uri = {
+    httpd_uri_t uri_pic = {
         .uri = "/pic",
         .method = HTTP_GET,
         .handler = snapshot_handler_,
-        .user_ctx = this
-    };
-    httpd_register_uri_handler(this->server_, &pic_uri);
-    ESP_LOGI(TAG, "Registered /pic endpoint");
+        .user_ctx = this};
+    httpd_register_uri_handler(this->server_, &uri_pic);
+    ESP_LOGI(TAG, "Registered /pic");
   }
 
-  // Streaming
+  // /stream
   if (this->enable_stream_) {
-    httpd_uri_t stream_uri = {
+    httpd_uri_t uri_stream = {
         .uri = "/stream",
         .method = HTTP_GET,
         .handler = stream_handler_,
-        .user_ctx = this
-    };
-    httpd_register_uri_handler(this->server_, &stream_uri);
-    ESP_LOGI(TAG, "Registered /stream endpoint");
+        .user_ctx = this};
+    httpd_register_uri_handler(this->server_, &uri_stream);
+    ESP_LOGI(TAG, "Registered /stream");
   }
 
-  // Status
-  httpd_uri_t status_uri = {
-      .uri = "/status",
-      .method = HTTP_GET,
-      .handler = status_handler_,
-      .user_ctx = this
-  };
-  httpd_register_uri_handler(this->server_, &status_uri);
-  ESP_LOGI(TAG, "Registered /status endpoint");
+  // /status
+  {
+    httpd_uri_t uri_status = {
+        .uri = "/status",
+        .method = HTTP_GET,
+        .handler = status_handler_,
+        .user_ctx = this};
+    httpd_register_uri_handler(this->server_, &uri_status);
+    ESP_LOGI(TAG, "Registered /status");
+  }
 
-  
-  httpd_uri_t info_uri = {
-      .uri = "/info",
-      .method = HTTP_GET,
-      .handler = info_handler_,
-      .user_ctx = this
-  };
-  httpd_register_uri_handler(this->server_, &info_uri);
-  ESP_LOGI(TAG, "Registered /info endpoint");
+  // /info
+  {
+    httpd_uri_t uri_info = {
+        .uri = "/info",
+        .method = HTTP_GET,
+        .handler = info_handler_,
+        .user_ctx = this};
+    httpd_register_uri_handler(this->server_, &uri_info);
+    ESP_LOGI(TAG, "Registered /info");
+  }
+
+  // /view (page avec image + FPS en bas)
+  {
+    httpd_uri_t uri_view = {
+        .uri = "/view",
+        .method = HTTP_GET,
+        .handler = view_handler_,
+        .user_ctx = this};
+    httpd_register_uri_handler(this->server_, &uri_view);
+    ESP_LOGI(TAG, "Registered /view");
+  }
 
   return ESP_OK;
 }
-
 
 void CameraWebServer::stop_server_() {
   if (this->server_) {
@@ -499,77 +180,269 @@ void CameraWebServer::stop_server_() {
     this->server_ = nullptr;
   }
 
-  // Nettoyer le JPEG M2M encoder
   this->cleanup_jpeg_encoder_();
 }
 
-// Handler pour snapshot JPEG unique
-esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
-  CameraWebServer *server = static_cast<CameraWebServer *>(req->user_ctx);
+// --------------------------------------------------
+// JPEG M2M init / cleanup
+// --------------------------------------------------
 
-  if (!server->camera_->is_streaming()) {
-    ESP_LOGW(TAG, "Camera not streaming, starting...");
-    if (!server->camera_->start_streaming()) {
-      httpd_resp_send_500(req);
-      return ESP_FAIL;
+void CameraWebServer::cleanup_jpeg_encoder_() {
+  if (s_jpeg_fd >= 0) {
+    ESP_LOGI(TAG, "Stopping JPEG M2M device");
+
+    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    ioctl(s_jpeg_fd, VIDIOC_STREAMOFF, &type);
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(s_jpeg_fd, VIDIOC_STREAMOFF, &type);
+
+    if (s_cap_buf != nullptr) {
+      munmap(s_cap_buf, s_cap_buf_size);
+      s_cap_buf = nullptr;
+      s_cap_buf_size = 0;
     }
-    vTaskDelay(pdMS_TO_TICKS(100));  // Attendre que streaming soit stable
+
+    ::close(s_jpeg_fd);
+    s_jpeg_fd = -1;
   }
-
-  // Capturer une frame
-  if (!server->camera_->capture_frame()) {
-    ESP_LOGW(TAG, "Failed to capture frame");
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  // Obtenir le buffer image (RGB565 via ISP)
-  uint8_t *image_data = server->camera_->get_image_data();
-  size_t image_size = server->camera_->get_image_size();
-
-  if (image_data == nullptr || image_size == 0) {
-    ESP_LOGE(TAG, "No image data available");
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  // Initialiser JPEG M2M si besoin (lazy)
-  if (server->init_jpeg_encoder_() != ESP_OK) {
-    ESP_LOGE(TAG, "JPEG M2M init failed in snapshot");
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  // Encoder via device JPEG M2M (V4L2)
-  EncodedFrame frame;
-  if (!encode_frame_rgb565_to_jpeg(image_data, image_size, frame)) {
-    ESP_LOGE(TAG, "JPEG M2M encoding failed");
-    httpd_resp_send_500(req);
-    return ESP_FAIL;
-  }
-
-  ESP_LOGV(TAG, "JPEG encoded (snapshot): %u bytes (from %u bytes RGB565)",
-           (unsigned) frame.size, (unsigned) image_size);
-
-  // Envoyer le JPEG encodé
-  httpd_resp_set_type(req, "image/jpeg");
-  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=snapshot.jpg");
-  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
-
-  esp_err_t res = httpd_resp_send(req, reinterpret_cast<const char *>(frame.ptr), frame.size);
-
-  // Requeue le buffer capture pour réutilisation
-  requeue_capture_buffer(frame.index);
-
-  return res;
 }
 
-// Handler pour stream MJPEG continu
-esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
-  CameraWebServer *server = static_cast<CameraWebServer *>(req->user_ctx);
+esp_err_t CameraWebServer::init_jpeg_encoder_() {
+  if (s_jpeg_fd >= 0) {
+    return ESP_OK;  // déjà prêt
+  }
+
+  // S'assurer que la caméra streame et a une vraie résolution (pas 0x0)
+  if (!this->camera_->is_streaming()) {
+    ESP_LOGI(TAG, "Starting camera streaming for JPEG init");
+    if (!this->camera_->start_streaming()) {
+      ESP_LOGE(TAG, "Failed to start camera streaming");
+      return ESP_FAIL;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  if (!this->camera_->capture_frame()) {
+    ESP_LOGE(TAG, "Failed to capture frame for JPEG init");
+    return ESP_FAIL;
+  }
+
+  int width = this->camera_->get_image_width();
+  int height = this->camera_->get_image_height();
+
+  if (width <= 0 || height <= 0) {
+    ESP_LOGE(TAG, "Invalid camera resolution: %dx%d", width, height);
+    return ESP_FAIL;
+  }
+
+  ESP_LOGI(TAG, "Initializing JPEG M2M for %dx%d (OV5647 max ~800x640)", width, height);
+
+  s_jpeg_fd = open_jpeg_device();
+  if (s_jpeg_fd < 0) {
+    ESP_LOGE(TAG, "open_jpeg_device() failed");
+    return ESP_FAIL;
+  }
+
+  // OUTPUT = RGB565
+  {
+    struct v4l2_format fmt_out {};
+    fmt_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    fmt_out.fmt.pix.width = width;
+    fmt_out.fmt.pix.height = height;
+    fmt_out.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
+    fmt_out.fmt.pix.field = V4L2_FIELD_NONE;
+
+    if (ioctl(s_jpeg_fd, VIDIOC_S_FMT, &fmt_out) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_S_FMT(OUTPUT RGB565) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "JPEG OUTPUT format set: %ux%u RGB565",
+             fmt_out.fmt.pix.width, fmt_out.fmt.pix.height);
+  }
+
+  // CAPTURE = JPEG
+  {
+    struct v4l2_format fmt_cap {};
+    fmt_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    fmt_cap.fmt.pix.width = width;
+    fmt_cap.fmt.pix.height = height;
+    fmt_cap.fmt.pix.pixelformat = V4L2_PIX_FMT_JPEG;
+    fmt_cap.fmt.pix.field = V4L2_FIELD_NONE;
+
+    if (ioctl(s_jpeg_fd, VIDIOC_S_FMT, &fmt_cap) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_S_FMT(CAPTURE JPEG) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "JPEG CAPTURE format set: %ux%u JPEG",
+             fmt_cap.fmt.pix.width, fmt_cap.fmt.pix.height);
+  }
+
+  // REQBUFS CAPTURE (MMAP)
+  {
+    struct v4l2_requestbuffers req_cap {};
+    req_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req_cap.count = 1;
+    req_cap.memory = V4L2_MEMORY_MMAP;
+
+    if (ioctl(s_jpeg_fd, VIDIOC_REQBUFS, &req_cap) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_REQBUFS(CAPTURE) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    if (req_cap.count < 1) {
+      ESP_LOGE(TAG, "No CAPTURE buffer allocated");
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    struct v4l2_buffer buf_cap {};
+    buf_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf_cap.memory = V4L2_MEMORY_MMAP;
+    buf_cap.index = 0;
+
+    if (ioctl(s_jpeg_fd, VIDIOC_QUERYBUF, &buf_cap) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QUERYBUF(CAPTURE) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    s_cap_buf_size = buf_cap.length;
+    s_cap_buf = mmap(nullptr, buf_cap.length,
+                     PROT_READ | PROT_WRITE,
+                     MAP_SHARED, s_jpeg_fd, buf_cap.m.offset);
+
+    if (s_cap_buf == MAP_FAILED) {
+      ESP_LOGE(TAG, "mmap(CAPTURE) failed: errno=%d", errno);
+      s_cap_buf = nullptr;
+      s_cap_buf_size = 0;
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf_cap) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QBUF(CAPTURE initial) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+  }
+
+  // REQBUFS OUTPUT (USERPTR)
+  {
+    struct v4l2_requestbuffers req_out {};
+    req_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    req_out.count = 1;
+    req_out.memory = V4L2_MEMORY_USERPTR;
+
+    if (ioctl(s_jpeg_fd, VIDIOC_REQBUFS, &req_out) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_REQBUFS(OUTPUT USERPTR) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+  }
+
+  // STREAMON OUTPUT/CAPTURE
+  {
+    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    if (ioctl(s_jpeg_fd, VIDIOC_STREAMON, &type) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_STREAMON(OUTPUT) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    if (ioctl(s_jpeg_fd, VIDIOC_STREAMON, &type) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_STREAMON(CAPTURE) failed: errno=%d", errno);
+      this->cleanup_jpeg_encoder_();
+      return ESP_FAIL;
+    }
+  }
+
+  ESP_LOGI(TAG, "JPEG M2M encoder ready (RGB565 -> JPEG)");
+  return ESP_OK;
+}
+
+// --------------------------------------------------
+// Helper: encode RGB565 -> JPEG via /dev/video10
+// --------------------------------------------------
+
+static bool encode_frame_rgb565_to_jpeg(uint8_t *rgb, size_t rgb_size,
+                                        uint8_t **jpeg_ptr, size_t *jpeg_size) {
+  if (s_jpeg_fd < 0 || s_cap_buf == nullptr || s_cap_buf_size == 0) {
+    ESP_LOGE(TAG, "JPEG device not initialized");
+    return false;
+  }
+
+  // QBUF OUTPUT (userptr)
+  struct v4l2_buffer buf_out {};
+  buf_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  buf_out.memory = V4L2_MEMORY_USERPTR;
+  buf_out.m.userptr = reinterpret_cast<unsigned long>(rgb);
+  buf_out.length = rgb_size;
+
+  if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf_out) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_QBUF(OUTPUT) failed: errno=%d", errno);
+    return false;
+  }
+
+  // DQBUF CAPTURE
+  struct v4l2_buffer buf_cap {};
+  buf_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  buf_cap.memory = V4L2_MEMORY_MMAP;
+
+  if (ioctl(s_jpeg_fd, VIDIOC_DQBUF, &buf_cap) < 0) {
+    ESP_LOGE(TAG, "VIDIOC_DQBUF(CAPTURE) failed: errno=%d", errno);
+
+    // Essayer de vider OUTPUT pour ne pas bloquer
+    struct v4l2_buffer tmp {};
+    tmp.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+    tmp.memory = V4L2_MEMORY_USERPTR;
+    ioctl(s_jpeg_fd, VIDIOC_DQBUF, &tmp);
+
+    return false;
+  }
+
+  // DQBUF OUTPUT (libérer)
+  struct v4l2_buffer buf_out_done {};
+  buf_out_done.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  buf_out_done.memory = V4L2_MEMORY_USERPTR;
+  if (ioctl(s_jpeg_fd, VIDIOC_DQBUF, &buf_out_done) < 0) {
+    ESP_LOGW(TAG, "VIDIOC_DQBUF(OUTPUT) failed (non-fatal): errno=%d", errno);
+  }
+
+  if (buf_cap.index != 0 || buf_cap.bytesused == 0) {
+    ESP_LOGE(TAG, "Invalid CAPTURE buffer: index=%u used=%u",
+             buf_cap.index, buf_cap.bytesused);
+    return false;
+  }
+
+  *jpeg_ptr = static_cast<uint8_t *>(s_cap_buf);
+  *jpeg_size = buf_cap.bytesused;
+
+  // Requeue CAPTURE
+  buf_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+  buf_cap.memory = V4L2_MEMORY_MMAP;
+  buf_cap.index = 0;
+  if (ioctl(s_jpeg_fd, VIDIOC_QBUF, &buf_cap) < 0) {
+    ESP_LOGW(TAG, "VIDIOC_QBUF(CAPTURE requeue) failed: errno=%d", errno);
+  }
+
+  return true;
+}
+
+// --------------------------------------------------
+// /pic : snapshot JPEG
+// --------------------------------------------------
+
+esp_err_t CameraWebServer::snapshot_handler_(httpd_req_t *req) {
+  auto *server = static_cast<CameraWebServer *>(req->user_ctx);
 
   if (!server->camera_->is_streaming()) {
-    ESP_LOGI(TAG, "Starting camera streaming for MJPEG stream");
+    ESP_LOGI(TAG, "Camera not streaming, starting for snapshot");
     if (!server->camera_->start_streaming()) {
       httpd_resp_send_500(req);
       return ESP_FAIL;
@@ -577,131 +450,165 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
     vTaskDelay(pdMS_TO_TICKS(100));
   }
 
-  // Initialiser JPEG M2M si besoin (lazy)
-  if (server->init_jpeg_encoder_() != ESP_OK) {
-    ESP_LOGE(TAG, "JPEG M2M init failed in stream");
+  if (!server->camera_->capture_frame()) {
+    ESP_LOGE(TAG, "capture_frame() failed in /pic");
     httpd_resp_send_500(req);
     return ESP_FAIL;
   }
 
-  // FPS ciblés (si caméra a une config connue, sinon 30 par défaut)
-  s_target_fps = 30;
+  uint8_t *rgb = server->camera_->get_image_data();
+  size_t rgb_size = server->camera_->get_image_size();
+
+  if (!rgb || rgb_size == 0) {
+    ESP_LOGE(TAG, "Invalid RGB data in /pic");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  if (server->init_jpeg_encoder_() != ESP_OK) {
+    ESP_LOGE(TAG, "init_jpeg_encoder_() failed in /pic");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  uint8_t *jpeg_ptr = nullptr;
+  size_t jpeg_size = 0;
+
+  if (!encode_frame_rgb565_to_jpeg(rgb, rgb_size, &jpeg_ptr, &jpeg_size)) {
+    ESP_LOGE(TAG, "encode_frame_rgb565_to_jpeg() failed in /pic");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
+
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=snapshot.jpg");
+
+  return httpd_resp_send(req, reinterpret_cast<const char *>(jpeg_ptr), jpeg_size);
+}
+
+// --------------------------------------------------
+// /stream : MJPEG + calcul FPS
+// --------------------------------------------------
+
+esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
+  auto *server = static_cast<CameraWebServer *>(req->user_ctx);
+
+  if (!server->camera_->is_streaming()) {
+    ESP_LOGI(TAG, "Starting camera streaming for MJPEG");
+    if (!server->camera_->start_streaming()) {
+      httpd_resp_send_500(req);
+      return ESP_FAIL;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  if (server->init_jpeg_encoder_() != ESP_OK) {
+    ESP_LOGE(TAG, "init_jpeg_encoder_() failed in /stream");
+    httpd_resp_send_500(req);
+    return ESP_FAIL;
+  }
 
   httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  // On envoie un X-Framerate basé sur la dernière estimation ou la cible
   char fps_hdr[8];
-  int fps_to_report = (s_stream_fps_int > 0) ? s_stream_fps_int : s_target_fps;
-  snprintf(fps_hdr, sizeof(fps_hdr), "%d", fps_to_report);
+  snprintf(fps_hdr, sizeof(fps_hdr), "%d", current_fps > 0 ? current_fps : 30);
   httpd_resp_set_hdr(req, "X-Framerate", fps_hdr);
 
-  ESP_LOGI(TAG, "MJPEG stream started (header X-Framerate=%s)", fps_hdr);
-
-  int64_t last_ts_us = 0;
+  ESP_LOGI(TAG, "MJPEG stream started");
 
   while (true) {
-    // Capturer une frame
     if (!server->camera_->capture_frame()) {
-      ESP_LOGW(TAG, "Failed to capture frame in stream");
+      ESP_LOGW(TAG, "capture_frame() failed in /stream");
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
 
-    uint8_t *image_data = server->camera_->get_image_data();
-    size_t image_size = server->camera_->get_image_size();
+    uint8_t *rgb = server->camera_->get_image_data();
+    size_t rgb_size = server->camera_->get_image_size();
 
-    if (image_data == nullptr || image_size == 0) {
-      ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u",
-               image_data, (unsigned) image_size);
+    if (!rgb || rgb_size == 0) {
+      ESP_LOGW(TAG, "Invalid RGB data in /stream");
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
 
-    ESP_LOGV(TAG, "Frame captured: %ux%u RGB565 = %u bytes",
-             server->camera_->get_image_width(),
-             server->camera_->get_image_height(),
-             (unsigned) image_size);
+    uint8_t *jpeg_ptr = nullptr;
+    size_t jpeg_size = 0;
 
-    // Encoder via JPEG M2M
-    EncodedFrame frame;
-    if (!encode_frame_rgb565_to_jpeg(image_data, image_size, frame)) {
-      ESP_LOGW(TAG, "JPEG M2M encoding failed in stream");
+    if (!encode_frame_rgb565_to_jpeg(rgb, rgb_size, &jpeg_ptr, &jpeg_size)) {
+      ESP_LOGW(TAG, "JPEG encode failed in /stream");
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
 
-    // Envoyer boundary
+    // Boundary
     if (httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY)) != ESP_OK) {
-      ESP_LOGI(TAG, "Stream client disconnected (boundary send failed)");
-      requeue_capture_buffer(frame.index);
+      ESP_LOGI(TAG, "Stream client disconnected (boundary)");
       break;
     }
 
-    // Envoyer header de la part avec taille JPEG
+    // Header part
     char part_buf[128];
-    int hlen = snprintf(part_buf, sizeof(part_buf), STREAM_PART, (unsigned) frame.size);
+    int hlen = snprintf(part_buf, sizeof(part_buf), STREAM_PART,
+                        static_cast<unsigned>(jpeg_size));
     if (httpd_resp_send_chunk(req, part_buf, hlen) != ESP_OK) {
-      ESP_LOGI(TAG, "Stream client disconnected (part header send failed)");
-      requeue_capture_buffer(frame.index);
+      ESP_LOGI(TAG, "Stream client disconnected (part header)");
       break;
     }
 
-    // Envoyer les données JPEG
+    // JPEG data
     if (httpd_resp_send_chunk(req,
-                              reinterpret_cast<const char *>(frame.ptr),
-                              frame.size) != ESP_OK) {
-      ESP_LOGI(TAG, "Failed to send JPEG chunk (client disconnected?)");
-      requeue_capture_buffer(frame.index);
+                              reinterpret_cast<const char *>(jpeg_ptr),
+                              jpeg_size) != ESP_OK) {
+      ESP_LOGI(TAG, "Stream client disconnected (jpeg data)");
       break;
     }
 
-    // Requeue le buffer capture maintenant qu’on a fini de l’utiliser
-    requeue_capture_buffer(frame.index);
-
-    // Calcul FPS
-    int64_t now_us = esp_timer_get_time();
-    if (last_ts_us != 0) {
-      float dt = (now_us - last_ts_us) / 1000000.0f;
-      if (dt > 0.0f) {
-        float inst_fps = 1.0f / dt;
-        // lissage exponentiel
-        if (s_stream_fps <= 0.1f) {
-          s_stream_fps = inst_fps;
-        } else {
-          s_stream_fps = 0.9f * s_stream_fps + 0.1f * inst_fps;
-        }
-        s_stream_fps_int = static_cast<int>(s_stream_fps + 0.5f);
+    // ---- FPS CALCUL ----
+    fps_frame_counter++;
+    uint32_t now = static_cast<uint32_t>(esp_timer_get_time() / 1000000ULL);
+    if (fps_last_time == 0) {
+      fps_last_time = now;
+    } else if (now > fps_last_time) {
+      uint32_t dt = now - fps_last_time;
+      if (dt >= 1) {
+        current_fps = fps_frame_counter / (dt ? dt : 1);
+        fps_frame_counter = 0;
+        fps_last_time = now;
       }
     }
-    last_ts_us = now_us;
 
-    ESP_LOGV(TAG, "Frame sent successfully, FPS ~ %.2f", s_stream_fps);
-
-    // Limiter le framerate (optionnel)
-    vTaskDelay(pdMS_TO_TICKS(33));  // ~30 FPS
+    vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
   }
 
-  // Terminer le stream HTTP proprement
   httpd_resp_send_chunk(req, nullptr, 0);
-
   ESP_LOGI(TAG, "MJPEG stream ended");
   return ESP_OK;
 }
 
-// Handler pour status JSON
+// --------------------------------------------------
+// /status : JSON simple (streaming + rés + fps)
+// --------------------------------------------------
+
 esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
-  CameraWebServer *server = static_cast<CameraWebServer *>(req->user_ctx);
+  auto *server = static_cast<CameraWebServer *>(req->user_ctx);
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
 
-  int fps = (s_stream_fps_int > 0) ? s_stream_fps_int : s_target_fps;
-
   char json[256];
+  int fps = (current_fps > 0) ? current_fps : 0;
+
   snprintf(json, sizeof(json),
-           "{\"streaming\":%s,\"width\":%d,\"height\":%d,"
-           "\"format\":\"RGB565\",\"fps\":%d}",
+           "{"
+             "\"streaming\":%s,"
+             "\"width\":%d,"
+             "\"height\":%d,"
+             "\"format\":\"RGB565\","
+             "\"fps\":%d"
+           "}",
            server->camera_->is_streaming() ? "true" : "false",
            server->camera_->get_image_width(),
            server->camera_->get_image_height(),
@@ -710,9 +617,12 @@ esp_err_t CameraWebServer::status_handler_(httpd_req_t *req) {
   return httpd_resp_send(req, json, strlen(json));
 }
 
-// Handler /info : infos pipeline esp-video + caméra (basé sur APIs dispo)
+// --------------------------------------------------
+// /info : infos RAW/ISP/JPEG + caméra
+// --------------------------------------------------
+
 esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
-  CameraWebServer *server = static_cast<CameraWebServer *>(req->user_ctx);
+  auto *server = static_cast<CameraWebServer *>(req->user_ctx);
 
   httpd_resp_set_type(req, "application/json");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
@@ -720,42 +630,30 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   char json[2048];
   memset(json, 0, sizeof(json));
 
-  // ---------------------------------------------------------
-  // 1) Informations caméra via ESPHome uniquement
-  // ---------------------------------------------------------
-
-  const char *sensor_name = "MIPI_Camera";   // aucune API publique pour un vrai nom
-
+  const char *sensor_name = "OV5647";  // pour ton cas
   int cur_w = server->camera_->get_image_width();
   int cur_h = server->camera_->get_image_height();
+  int fps = (current_fps > 0) ? current_fps : 0;
 
-  // FPS mesurés (car aucune API capteur disponible)
-  int sensor_fps = (s_stream_fps_int > 0) ? s_stream_fps_int : 30;
-
-  // ---------------------------------------------------------
-  // 2) JPEG M2M /dev/video10
-  // ---------------------------------------------------------
-
+  // JPEG /dev/video10
   struct v4l2_capability cap_jpeg {};
   const char *jpeg_driver = "n/a";
-  const char *jpeg_card = "n/a";
-  uint32_t jpeg_caps = 0, jpeg_dev_caps = 0;
+  const char *jpeg_card   = "n/a";
+  uint32_t jpeg_caps = 0;
+  uint32_t jpeg_dev_caps = 0;
 
   int fd_jpeg = open("/dev/video10", O_RDWR);
   if (fd_jpeg >= 0) {
     if (ioctl(fd_jpeg, VIDIOC_QUERYCAP, &cap_jpeg) == 0) {
       jpeg_driver = (const char *)cap_jpeg.driver;
-      jpeg_card = (const char *)cap_jpeg.card;
+      jpeg_card   = (const char *)cap_jpeg.card;
       jpeg_caps = cap_jpeg.capabilities;
       jpeg_dev_caps = cap_jpeg.device_caps;
     }
     close(fd_jpeg);
   }
 
-  // ---------------------------------------------------------
-  // 3) ISP /dev/video1
-  // ---------------------------------------------------------
-
+  // ISP /dev/video1
   struct v4l2_capability cap_isp {};
   const char *isp_driver = "n/a";
   const char *isp_card   = "n/a";
@@ -764,15 +662,12 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   if (fd_isp >= 0) {
     if (ioctl(fd_isp, VIDIOC_QUERYCAP, &cap_isp) == 0) {
       isp_driver = (const char *)cap_isp.driver;
-      isp_card = (const char *)cap_isp.card;
+      isp_card   = (const char *)cap_isp.card;
     }
     close(fd_isp);
   }
 
-  // ---------------------------------------------------------
-  // 4) RAW capteur /dev/video0
-  // ---------------------------------------------------------
-
+  // RAW /dev/video0
   struct v4l2_capability cap_raw {};
   const char *raw_driver = "n/a";
   const char *raw_card   = "n/a";
@@ -781,14 +676,10 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
   if (fd_raw >= 0) {
     if (ioctl(fd_raw, VIDIOC_QUERYCAP, &cap_raw) == 0) {
       raw_driver = (const char *)cap_raw.driver;
-      raw_card = (const char *)cap_raw.card;
+      raw_card   = (const char *)cap_raw.card;
     }
     close(fd_raw);
   }
-
-  // ---------------------------------------------------------
-  // JSON final
-  // ---------------------------------------------------------
 
   snprintf(json, sizeof(json),
     "{"
@@ -817,37 +708,82 @@ esp_err_t CameraWebServer::info_handler_(httpd_req_t *req) {
         "\"card\":\"%s\""
       "}"
     "}",
-    // Camera
     sensor_name,
     cur_w, cur_h,
-    sensor_fps,
+    fps,
     server->camera_->is_streaming() ? "true" : "false",
-
-    // JPEG M2M
     jpeg_driver, jpeg_card, jpeg_caps, jpeg_dev_caps,
-
-    // ISP
     isp_driver, isp_card,
-
-    // RAW
     raw_driver, raw_card
   );
 
   return httpd_resp_send(req, json, strlen(json));
 }
 
+// --------------------------------------------------
+// /view : page web image + FPS en bas (comme ta capture)
+// --------------------------------------------------
+
+esp_err_t CameraWebServer::view_handler_(httpd_req_t *req) {
+  // Page ultra simple : image stream + FPS dessous (mis à jour via /status)
+  const char html[] =
+      "<html><head><meta charset='utf-8'>"
+      "<title>ESP32-P4 Camera</title>"
+      "<style>"
+      "body{margin:0;background:#000;color:#eee;font-family:Arial;text-align:center;}"
+      "#wrap{position:relative;display:inline-block;margin-top:10px;}"
+      "img{width:100%;max-width:800px;border-radius:8px;}"
+      "#bar{position:absolute;left:0;right:0;bottom:0;"
+      "background:rgba(0,0,0,0.6);color:#0f0;padding:4px 8px;"
+      "font-size:14px;text-align:left;}"
+      "</style>"
+      "</head><body>"
+      "<h3>OV5647 Camera (RGB565 via ISP)</h3>"
+      "<div id='wrap'>"
+      "<img src='/stream' id='cam'>"
+      "<div id='bar'>FPS: --  |  Res: -- x --</div>"
+      "</div>"
+      "<script>"
+      "async function upd(){"
+      " try{"
+      "  let r=await fetch('/status');"
+      "  let j=await r.json();"
+      "  document.getElementById('bar').innerText="
+      "    'FPS: '+j.fps+'  |  Res: '+j.width+' x '+j.height;"
+      " }catch(e){}"
+      "}"
+      "setInterval(upd, 500);"
+      "upd();"
+      "</script>"
+      "</body></html>";
+
+  httpd_resp_set_type(req, "text/html");
+  return httpd_resp_send(req, html, strlen(html));
+}
+
+// --------------------------------------------------
+// non-IDF stub
+// --------------------------------------------------
+
+}  // namespace camera_web_server
+}  // namespace esphome
+
 #else  // !USE_ESP_IDF
 
+namespace esphome {
+namespace camera_web_server {
+
 void CameraWebServer::setup() {
-  ESP_LOGE(TAG, "Camera Web Server requires ESP-IDF framework");
+  ESP_LOGE("camera_web_server", "Camera Web Server requires ESP-IDF");
   this->mark_failed();
 }
 
 void CameraWebServer::loop() {}
 
-#endif  // USE_ESP_IDF
-
 }  // namespace camera_web_server
 }  // namespace esphome
+
+#endif  // USE_ESP_IDF
+
 
 
