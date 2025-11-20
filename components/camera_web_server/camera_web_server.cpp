@@ -580,7 +580,7 @@ esp_err_t CameraWebServer::stream_handler_(httpd_req_t *req) {
       }
     }
 
-    //vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
+    vTaskDelay(pdMS_TO_TICKS(30));  // ~30 FPS
   }
 
   httpd_resp_send_chunk(req, nullptr, 0);
@@ -744,13 +744,19 @@ esp_err_t CameraWebServer::view_handler_(httpd_req_t *req) {
       "<div id='bar'>FPS: --  |  Res: -- x --</div>"
       "</div>"
       "<script>"
-      "async function upd(){"
-      " try{"
-      "  let r=await fetch('/status');"
-      "  let j=await r.json();"
-      "  document.getElementById('bar').innerText="
-      "    'FPS: '+j.fps+'  |  Res: '+j.width+' x '+j.height;"
-      " }catch(e){}"
+      "function upd(){"
+      "  var xhr = new XMLHttpRequest();"
+      "  xhr.onreadystatechange = function(){"
+      "    if (xhr.readyState == 4 && xhr.status == 200) {"
+      "      try {"
+      "        var j = JSON.parse(xhr.responseText);"
+      "        document.getElementById('bar').innerText ="
+      "          'FPS: ' + j.fps + '  |  Res: ' + j.width + ' x ' + j.height;"
+      "      } catch(e) {}"
+      "    }"
+      "  };"
+      "  xhr.open('GET', '/status', true);"
+      "  xhr.send();"
       "}"
       "setInterval(upd, 500);"
       "upd();"
@@ -760,6 +766,7 @@ esp_err_t CameraWebServer::view_handler_(httpd_req_t *req) {
   httpd_resp_set_type(req, "text/html");
   return httpd_resp_send(req, html, strlen(html));
 }
+
 
 // --------------------------------------------------
 // non-IDF stub
