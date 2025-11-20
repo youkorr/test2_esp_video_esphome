@@ -1,15 +1,22 @@
 #include "rtsp_server.h"
 
 #ifdef USE_ESP_IDF
+
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+
 #include <cstring>
+#include <cstdio>
 #include <sstream>
+#include <algorithm>
+
 #include <esp_random.h>
 #include <arpa/inet.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include <algorithm>
+#include <fcntl.h>
+#include <errno.h>
+#include "esp_heap_caps.h"
 
 namespace esphome {
 namespace rtsp_server {
@@ -35,11 +42,17 @@ bool RTSPServer::yuv_lut_initialized_ = false;
 void RTSPServer::setup() {
   ESP_LOGI(TAG, "Setting up RTSP Server...");
 
+  if (!camera_) {
+    ESP_LOGE(TAG, "Camera not set");
+    mark_failed();
+    return;
+  }
+
+  // Optionnel : forcer le format pour OV5647 si besoin (sinon géré dans le YAML)
+  // camera_->set_pixel_format(mipi_dsi_cam::PIXEL_FORMAT_RGB565);
+
   // Generate random SSRC
   rtp_ssrc_ = esp_random();
-
-  // Note: H.264 encoder initialization is deferred until first client connects
-  // This is because camera dimensions are not available until streaming starts
 
   // Initialize RTP/RTCP sockets
   if (init_rtp_sockets_() != ESP_OK) {
@@ -58,7 +71,6 @@ void RTSPServer::setup() {
   ESP_LOGI(TAG, "RTSP Server setup complete");
   ESP_LOGI(TAG, "Stream URL: rtsp://<IP>:%d%s", rtsp_port_, stream_path_.c_str());
 
-  // Log authentication status
   if (!username_.empty() && !password_.empty()) {
     ESP_LOGI(TAG, "Authentication: ENABLED (user='%s')", username_.c_str());
     ESP_LOGI(TAG, "Connect with: rtsp://%s:***@<IP>:%d%s", username_.c_str(), rtsp_port_, stream_path_.c_str());
@@ -66,19 +78,18 @@ void RTSPServer::setup() {
     ESP_LOGI(TAG, "Authentication: DISABLED");
   }
 
-  ESP_LOGI(TAG, "Note: H.264 encoder will initialize when first client connects");
+  ESP_LOGI(TAG, "Note: H.264 encoder will initialize when first client connects (DESCRIBE/PLAY)");
 }
 
 void RTSPServer::loop() {
-  // Check if RTSP server is enabled by switch
+  // Géré par un switch dans ESPHome
   if (!enabled_) {
-    // If streaming was active, stop it
     if (streaming_active_) {
       ESP_LOGI(TAG, "RTSP server disabled by switch, stopping streaming...");
       streaming_active_ = false;
 
-      // Wait for streaming task to stop
       if (streaming_task_handle_ != nullptr) {
+        // Laisser la tâche se suspendre
         for (int i = 0; i < 50; i++) {
           eTaskState task_state = eTaskGetState(streaming_task_handle_);
           if (task_state == eSuspended) {
@@ -90,16 +101,13 @@ void RTSPServer::loop() {
         streaming_task_handle_ = nullptr;
       }
     }
-    return;  // Don't handle connections when disabled
+    return;
   }
 
-  // Handle incoming RTSP connections (lightweight - safe for loopTask's small stack)
+  // Gestion des connexions RTSP (léger, safe pour la stack de loopTask)
   handle_rtsp_connections_();
 
-  // NOTE: Video streaming now happens in separate task with larger stack
-  // to avoid stack overflow in loopTask (which only has 1536 bytes)
-
-  // Cleanup inactive sessions
+  // Nettoyage des sessions inactives
   cleanup_inactive_sessions_();
 }
 
@@ -129,41 +137,35 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  // Ensure camera is streaming (do NOT depend on LVGL or other components)
+  // S'assurer que la caméra stream
   if (!camera_->is_streaming()) {
     ESP_LOGW(TAG, "Camera not streaming yet, starting stream...");
     if (!camera_->start_streaming()) {
       ESP_LOGE(TAG, "Failed to start camera streaming");
       return ESP_FAIL;
     }
-    // Give camera time to initialize
-    delay(100);
+    vTaskDelay(pdMS_TO_TICKS(100));
   }
 
   uint16_t width = camera_->get_image_width();
   uint16_t height = camera_->get_image_height();
 
-  // Verify dimensions are valid
   if (width == 0 || height == 0) {
     ESP_LOGE(TAG, "Invalid camera dimensions: %dx%d", width, height);
     return ESP_FAIL;
   }
 
-  // Align to 16
-  uint16_t aligned_width = ((width + 15) >> 4) << 4;
-  uint16_t aligned_height = ((height + 15) >> 4) << 4;
+  ESP_LOGI(TAG, "Camera resolution: %dx%d (RGB565 expected)", width, height);
 
-  ESP_LOGI(TAG, "Resolution: %dx%d (aligned to %dx%d for encoder)", width, height,
-           aligned_width, aligned_height);
-
-  // Allocate buffers with 64-byte alignment (required by hardware encoder DMA)
-  yuv_buffer_size_ = aligned_width * aligned_height * 3 / 2;
+  // Pas de réalignement : on suppose des résolutions multiples de 16 (720,480, etc.)
+  yuv_buffer_size_ = width * height * 3 / 2;
   yuv_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!yuv_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate YUV buffer (64-byte aligned)");
     return ESP_ERR_NO_MEM;
   }
-  ESP_LOGI(TAG, "YUV buffer allocated: %zu bytes @ %p (64-byte aligned)", yuv_buffer_size_, yuv_buffer_);
+
+  ESP_LOGI(TAG, "YUV buffer allocated: %zu bytes @ %p", yuv_buffer_size_, yuv_buffer_);
 
   h264_buffer_size_ = yuv_buffer_size_ * 2;
   h264_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -173,32 +175,35 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     yuv_buffer_ = nullptr;
     return ESP_ERR_NO_MEM;
   }
-  ESP_LOGI(TAG, "H.264 buffer allocated: %zu bytes @ %p (64-byte aligned)", h264_buffer_size_, h264_buffer_);
 
-  // Allocate reusable RTP packet buffer (2KB) to reduce stack usage
+  ESP_LOGI(TAG, "H.264 buffer allocated: %zu bytes @ %p", h264_buffer_size_, h264_buffer_);
+
+  // Buffer RTP réutilisable
   rtp_packet_buffer_ = (uint8_t *)heap_caps_malloc(2048, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!rtp_packet_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate RTP packet buffer");
     free(yuv_buffer_);
-    yuv_buffer_ = nullptr;
     free(h264_buffer_);
+    yuv_buffer_ = nullptr;
     h264_buffer_ = nullptr;
     return ESP_ERR_NO_MEM;
   }
 
-  // Preallocate NAL units cache to reduce stack allocations
-  nal_units_cache_.reserve(20);  // Typical IDR frame has 10-15 NAL units
+  nal_units_cache_.reserve(20);
 
-  // Configure encoder (HARDWARE encoder - ESP32-P4 H.264 accelerator)
-  esp_h264_enc_cfg_hw_t cfg = {
-      .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,  // YUV420 packed (required by hardware encoder)
-      .gop = gop_,
-      .fps = 30,
-      .res = {.width = aligned_width, .height = aligned_height},
-      .rc = {.bitrate = bitrate_, .qp_min = qp_min_, .qp_max = qp_max_}};
+  // Configuration de l’encodeur HW
+  esp_h264_enc_cfg_hw_t cfg = {};
+  cfg.pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY;  // YUV420 packed spécial P4
+  cfg.gop = gop_;
+  cfg.fps = 30;
+  cfg.res.width = width;
+  cfg.res.height = height;
+  cfg.rc.bitrate = bitrate_;
+  cfg.rc.qp_min = qp_min_;
+  cfg.rc.qp_max = qp_max_;
 
-  ESP_LOGI(TAG, "Encoder config: %dx%d @ 30fps, GOP=%d, bitrate=%d, QP=%d-%d",
-           aligned_width, aligned_height, gop_, bitrate_, qp_min_, qp_max_);
+  ESP_LOGI(TAG, "Encoder config: %dx%d @ %dfps, GOP=%d, bitrate=%d, QP=%d-%d",
+           width, height, cfg.fps, gop_, bitrate_, qp_min_, qp_max_);
 
   esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &h264_encoder_);
   if (ret != ESP_H264_ERR_OK || !h264_encoder_) {
@@ -214,8 +219,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
     return ESP_FAIL;
   }
 
-  ESP_LOGI(TAG, "H.264 HARDWARE encoder initialized successfully!");
-  ESP_LOGI(TAG, "Note: Using ESP32-P4 hardware H.264 accelerator");
+  ESP_LOGI(TAG, "H.264 HARDWARE encoder initialized successfully");
   return ESP_OK;
 }
 
@@ -250,7 +254,7 @@ void RTSPServer::cleanup_h264_encoder_() {
 esp_err_t RTSPServer::init_rtp_sockets_() {
   ESP_LOGI(TAG, "Initializing RTP/RTCP sockets...");
 
-  // RTP socket
+  // RTP
   rtp_socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (rtp_socket_ < 0) {
     ESP_LOGE(TAG, "Failed to create RTP socket");
@@ -269,7 +273,7 @@ esp_err_t RTSPServer::init_rtp_sockets_() {
     return ESP_FAIL;
   }
 
-  // RTCP socket
+  // RTCP
   rtcp_socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
   if (rtcp_socket_ < 0) {
     ESP_LOGE(TAG, "Failed to create RTCP socket");
@@ -286,8 +290,8 @@ esp_err_t RTSPServer::init_rtp_sockets_() {
   if (bind(rtcp_socket_, (struct sockaddr *)&rtcp_addr, sizeof(rtcp_addr)) < 0) {
     ESP_LOGE(TAG, "Failed to bind RTCP socket");
     close(rtp_socket_);
-    rtp_socket_ = -1;
     close(rtcp_socket_);
+    rtp_socket_ = -1;
     rtcp_socket_ = -1;
     return ESP_FAIL;
   }
@@ -305,7 +309,6 @@ esp_err_t RTSPServer::init_rtsp_server_() {
     return ESP_FAIL;
   }
 
-  // Set socket options
   int reuse = 1;
   setsockopt(rtsp_socket_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
@@ -328,7 +331,6 @@ esp_err_t RTSPServer::init_rtsp_server_() {
     return ESP_FAIL;
   }
 
-  // Set non-blocking
   int flags = fcntl(rtsp_socket_, F_GETFL, 0);
   fcntl(rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
 
@@ -352,14 +354,14 @@ void RTSPServer::cleanup_sockets_() {
 }
 
 void RTSPServer::handle_rtsp_connections_() {
-  // Accept new connections
+  // Nouvelle connexion
   struct sockaddr_in client_addr;
   socklen_t addr_len = sizeof(client_addr);
 
   int client_fd = accept(rtsp_socket_, (struct sockaddr *)&client_addr, &addr_len);
   if (client_fd >= 0) {
     if (sessions_.size() < max_clients_) {
-      ESP_LOGI(TAG, "New RTSP client connected from %s", inet_ntoa(client_addr.sin_addr));
+      ESP_LOGI(TAG, "New RTSP client from %s", inet_ntoa(client_addr.sin_addr));
 
       RTSPSession session = {};
       session.socket_fd = client_fd;
@@ -368,7 +370,6 @@ void RTSPServer::handle_rtsp_connections_() {
       session.last_activity = millis();
       session.active = true;
 
-      // Set non-blocking
       int flags = fcntl(client_fd, F_GETFL, 0);
       fcntl(client_fd, F_SETFL, flags | O_NONBLOCK);
 
@@ -379,7 +380,7 @@ void RTSPServer::handle_rtsp_connections_() {
     }
   }
 
-  // Handle existing sessions
+  // Sessions existantes
   for (auto &session : sessions_) {
     if (session.active) {
       handle_rtsp_request_(session);
@@ -401,7 +402,7 @@ void RTSPServer::handle_rtsp_request_(RTSPSession &session) {
 
     RTSPMethod method = parse_rtsp_method_(request);
 
-    // Vérifier l'authentification (sauf pour OPTIONS qui ne nécessite pas d'auth)
+    // Auth sauf OPTIONS
     if (method != RTSPMethod::OPTIONS && !check_authentication_(request)) {
       ESP_LOGW(TAG, "Authentication failed");
       int cseq = get_cseq_(request);
@@ -433,31 +434,24 @@ void RTSPServer::handle_rtsp_request_(RTSPSession &session) {
         break;
     }
   } else if (len == 0 || (len < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-    // Connection closed
     ESP_LOGI(TAG, "Client disconnected");
     remove_session_(session.socket_fd);
   }
 }
 
 RTSPMethod RTSPServer::parse_rtsp_method_(const std::string &request) {
-  if (request.rfind("OPTIONS", 0) == 0)
-    return RTSPMethod::OPTIONS;
-  if (request.rfind("DESCRIBE", 0) == 0)
-    return RTSPMethod::DESCRIBE;
-  if (request.rfind("SETUP", 0) == 0)
-    return RTSPMethod::SETUP;
-  if (request.rfind("PLAY", 0) == 0)
-    return RTSPMethod::PLAY;
-  if (request.rfind("PAUSE", 0) == 0)
-    return RTSPMethod::PAUSE;
-  if (request.rfind("TEARDOWN", 0) == 0)
-    return RTSPMethod::TEARDOWN;
+  if (request.find("OPTIONS") == 0) return RTSPMethod::OPTIONS;
+  if (request.find("DESCRIBE") == 0) return RTSPMethod::DESCRIBE;
+  if (request.find("SETUP") == 0) return RTSPMethod::SETUP;
+  if (request.find("PLAY") == 0) return RTSPMethod::PLAY;
+  if (request.find("PAUSE") == 0) return RTSPMethod::PAUSE;
+  if (request.find("TEARDOWN") == 0) return RTSPMethod::TEARDOWN;
   return RTSPMethod::UNKNOWN;
 }
 
 void RTSPServer::send_rtsp_response_(int socket_fd, int code, const std::string &status,
-                                      const std::map<std::string, std::string> &headers,
-                                      const std::string &body) {
+                                     const std::map<std::string, std::string> &headers,
+                                     const std::string &body) {
   std::ostringstream response;
   response << "RTSP/1.0 " << code << " " << status << "\r\n";
 
@@ -494,7 +488,6 @@ void RTSPServer::handle_options_(RTSPSession &session, const std::string &reques
 void RTSPServer::handle_describe_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
 
-  // Initialize H.264 encoder if not already done (needed to get SPS/PPS for SDP)
   if (!h264_encoder_) {
     ESP_LOGI(TAG, "Initializing H.264 encoder for DESCRIBE...");
     if (init_h264_encoder_() != ESP_OK) {
@@ -505,10 +498,9 @@ void RTSPServer::handle_describe_(RTSPSession &session, const std::string &reque
       return;
     }
 
-    // Try to extract SPS/PPS by encoding first available frame
     if (sps_data_ == nullptr || pps_data_ == nullptr) {
       ESP_LOGI(TAG, "Attempting to extract SPS/PPS for SDP...");
-      encode_and_stream_frame_();  // Best effort - will cache SPS/PPS if frame available
+      encode_and_stream_frame_();  // Essaie de récupérer SPS/PPS
     }
   }
 
@@ -524,22 +516,18 @@ void RTSPServer::handle_describe_(RTSPSession &session, const std::string &reque
 void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
 
-  // Parse Transport header
   std::string transport_line = get_request_line_(request, "Transport");
   ESP_LOGD(TAG, "Transport header: '%s'", transport_line.c_str());
 
-  // Check if client requests TCP interleaved (not supported yet)
   if (transport_line.find("interleaved") != std::string::npos ||
       transport_line.find("RTP/AVP/TCP") != std::string::npos) {
-    ESP_LOGW(TAG, "Client requested TCP interleaved transport (not supported)");
-    ESP_LOGW(TAG, "Please configure client to use UDP transport");
+    ESP_LOGW(TAG, "TCP interleaved not supported");
     std::map<std::string, std::string> headers;
     headers["CSeq"] = std::to_string(cseq);
     send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
     return;
   }
 
-  // Extract client ports (UDP mode)
   size_t client_port_pos = transport_line.find("client_port=");
   if (client_port_pos != std::string::npos) {
     int rtp_port, rtcp_port;
@@ -547,14 +535,13 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
     session.client_rtp_port = rtp_port;
     session.client_rtcp_port = rtcp_port;
   } else {
-    ESP_LOGW(TAG, "No client_port found in Transport header");
+    ESP_LOGW(TAG, "No client_port found");
     std::map<std::string, std::string> headers;
     headers["CSeq"] = std::to_string(cseq);
     send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
     return;
   }
 
-  // Generate session ID
   if (session.session_id.empty()) {
     session.session_id = generate_session_id_();
   }
@@ -576,10 +563,8 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
 void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) {
   int cseq = get_cseq_(request);
 
-  // Encoder should already be initialized during DESCRIBE
-  // But check just in case client skipped DESCRIBE
   if (!h264_encoder_) {
-    ESP_LOGW(TAG, "H.264 encoder not initialized (client skipped DESCRIBE?)");
+    ESP_LOGW(TAG, "Encoder not initialized (PLAY without DESCRIBE?)");
     if (init_h264_encoder_() != ESP_OK) {
       ESP_LOGE(TAG, "Failed to initialize H.264 encoder");
       std::map<std::string, std::string> headers;
@@ -589,30 +574,43 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
     }
   }
 
+  // S’assurer que la caméra stream
+  if (!camera_->is_streaming()) {
+    ESP_LOGI(TAG, "Starting camera streaming for RTSP PLAY");
+    if (!camera_->start_streaming()) {
+      ESP_LOGE(TAG, "Camera failed to start");
+      std::map<std::string, std::string> headers;
+      headers["CSeq"] = std::to_string(cseq);
+      send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
+      return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
   session.state = RTSPState::PLAYING;
   streaming_active_ = true;
 
-  // Create streaming task if not already running
   if (streaming_task_handle_ == nullptr) {
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
-        "rtsp_stream",        // Task name
-        16384,                // Stack size in BYTES (16KB)
-        this,                 // Parameter passed to task
-        5,                    // Priority (same as loopTask)
+        "rtsp_stream",
+        16384,     // 16KB
+        this,
+        5,
         &streaming_task_handle_,
-        1                     // Pin to core 1 (loopTask runs on core 1)
+        1          // core 1
     );
 
     if (result != pdPASS || streaming_task_handle_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to create streaming task (result=%d)", result);
+      ESP_LOGE(TAG, "Failed to create streaming task (res=%d)", result);
       streaming_active_ = false;
       std::map<std::string, std::string> headers;
       headers["CSeq"] = std::to_string(cseq);
       send_rtsp_response_(session.socket_fd, 500, "Internal Server Error", headers);
       return;
     }
-    ESP_LOGI(TAG, "Streaming task created with 16KB stack on core 1");
+
+    ESP_LOGI(TAG, "Streaming task created");
   }
 
   std::map<std::string, std::string> headers;
@@ -638,7 +636,6 @@ void RTSPServer::handle_teardown_(RTSPSession &session, const std::string &reque
 
   remove_session_(session.socket_fd);
 
-  // Check if any sessions are still playing
   bool any_playing = false;
   for (const auto &s : sessions_) {
     if (s.active && s.state == RTSPState::PLAYING) {
@@ -647,39 +644,28 @@ void RTSPServer::handle_teardown_(RTSPSession &session, const std::string &reque
     }
   }
 
-  // Stop streaming if no more clients
   if (!any_playing && streaming_active_) {
-    ESP_LOGI(TAG, "Stopping streaming (no active clients)...");
+    ESP_LOGI(TAG, "Stopping streaming (no active clients)");
     streaming_active_ = false;
 
-    // Wait for streaming task to finish gracefully
     if (streaming_task_handle_ != nullptr) {
-      ESP_LOGD(TAG, "Waiting for streaming task to terminate...");
-
-      // Wait up to 500ms for task to suspend itself
       for (int i = 0; i < 50; i++) {
         eTaskState task_state = eTaskGetState(streaming_task_handle_);
-        if (task_state == eSuspended) {
-          ESP_LOGD(TAG, "Streaming task suspended, safe to delete");
-          break;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));  // Wait 10ms
+        if (task_state == eSuspended) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
       }
-
-      // Delete the task
       vTaskDelete(streaming_task_handle_);
       streaming_task_handle_ = nullptr;
-      ESP_LOGI(TAG, "Streaming task stopped successfully");
+      ESP_LOGI(TAG, "Streaming task stopped");
     }
   }
 }
 
 std::string RTSPServer::generate_sdp_() {
-  // Get local IP
-  std::string local_ip = "0.0.0.0";  // Will be replaced with actual IP by client if needed
+  std::string local_ip = "0.0.0.0";  // éventuellement remplacé côté client
 
-  uint16_t width = camera_ ? camera_->get_image_width() : 0;
-  uint16_t height = camera_ ? camera_->get_image_height() : 0;
+  uint16_t width = camera_->get_image_width();
+  uint16_t height = camera_->get_image_height();
 
   std::ostringstream sdp;
   sdp << "v=0\r\n";
@@ -693,22 +679,19 @@ std::string RTSPServer::generate_sdp_() {
   sdp << "a=rtpmap:96 H264/90000\r\n";
   sdp << "a=fmtp:96 packetization-mode=1";
 
-  // Add SPS/PPS if available
   if (sps_data_ && sps_size_ > 0 && pps_data_ && pps_size_ > 0) {
     std::string sps_b64 = base64_encode_(sps_data_, sps_size_);
     std::string pps_b64 = base64_encode_(pps_data_, pps_size_);
     sdp << ";sprop-parameter-sets=" << sps_b64 << "," << pps_b64;
-    ESP_LOGI(TAG, "SDP includes SPS/PPS (SPS: %d bytes, PPS: %d bytes)", sps_size_, pps_size_);
+    ESP_LOGI(TAG, "SDP includes SPS/PPS (SPS=%d, PPS=%d)", (int)sps_size_, (int)pps_size_);
   } else {
-    ESP_LOGW(TAG, "SDP generated WITHOUT SPS/PPS - client must extract from RTP stream");
+    ESP_LOGW(TAG, "SDP WITHOUT SPS/PPS (client will parse from first IDR)");
   }
 
   sdp << "\r\n";
   sdp << "a=control:track1\r\n";
-  if (width > 0 && height > 0) {
-    sdp << "a=framerate:30\r\n";
-    sdp << "a=framesize:96 " << width << "-" << height << "\r\n";
-  }
+  sdp << "a=framerate:30\r\n";
+  sdp << "a=framesize:96 " << width << "-" << height << "\r\n";
 
   return sdp.str();
 }
@@ -754,51 +737,40 @@ std::string RTSPServer::base64_encode_(const uint8_t *data, size_t len) {
 esp_err_t RTSPServer::stream_video_() {
   if (!streaming_active_)
     return ESP_OK;
-
   return encode_and_stream_frame_();
 }
 
-// Convert YUYV (YUV422) to O_UYY_E_VYY format (YUV420 for ESP32-P4 hardware encoder)
-// YUYV input: Y0 U0 Y1 V0 Y2 U1 Y3 V1... (4 bytes for 2 pixels)
-// O_UYY_E_VYY output: odd lines = U Y Y U Y Y..., even lines = V Y Y V Y Y...
-// This is MUCH faster than RGB565 conversion (no color space conversion, just rearrangement)
-esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t *o_uyy_e_vyy, uint16_t width,
-                                                    uint16_t height) {
+// YUYV → O_UYY_E_VYY (support éventuel d'autres capteurs, rarement utilisé avec OV5647)
+esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t *o_uyy_e_vyy,
+                                                   uint16_t width, uint16_t height) {
   const uint8_t *src = yuyv;
 
-  // Process 2 lines at a time for YUV420 (vertical subsampling)
   for (uint16_t row = 0; row < height; row += 2) {
-    uint8_t *odd_line = o_uyy_e_vyy + (row * width * 3 / 2);        // Odd line: U Y Y U Y Y...
-    uint8_t *even_line = o_uyy_e_vyy + ((row + 1) * width * 3 / 2); // Even line: V Y Y V Y Y...
+    uint8_t *odd_line = o_uyy_e_vyy + (row * width * 3 / 2);
+    uint8_t *even_line = o_uyy_e_vyy + ((row + 1) * width * 3 / 2);
 
-    const uint8_t *src_row0 = src + (row * width * 2);       // YUYV row 0
-    const uint8_t *src_row1 = src + ((row + 1) * width * 2); // YUYV row 1
+    const uint8_t *src_row0 = src + (row * width * 2);
+    const uint8_t *src_row1 = src + ((row + 1) * width * 2);
 
-    // Process 2 pixels at a time (YUYV contains Y0 U0 Y1 V0 for each 2 pixels)
     for (uint16_t col = 0; col < width; col += 2) {
-      // Read from row 0: Y0 U0 Y1 V0
       uint8_t y0_r0 = src_row0[col * 2 + 0];
       uint8_t u0_r0 = src_row0[col * 2 + 1];
       uint8_t y1_r0 = src_row0[col * 2 + 2];
       uint8_t v0_r0 = src_row0[col * 2 + 3];
 
-      // Read from row 1: Y0 U0 Y1 V0
       uint8_t y0_r1 = src_row1[col * 2 + 0];
       uint8_t u0_r1 = src_row1[col * 2 + 1];
       uint8_t y1_r1 = src_row1[col * 2 + 2];
       uint8_t v0_r1 = src_row1[col * 2 + 3];
 
-      // Average U and V vertically for YUV420 subsampling
       uint8_t u_avg = (u0_r0 + u0_r1) >> 1;
       uint8_t v_avg = (v0_r0 + v0_r1) >> 1;
 
-      // Write to odd line: U Y0 Y1
       size_t odd_idx = (col / 2) * 3;
       odd_line[odd_idx + 0] = u_avg;
       odd_line[odd_idx + 1] = y0_r0;
       odd_line[odd_idx + 2] = y1_r0;
 
-      // Write to even line: V Y0 Y1
       size_t even_idx = (col / 2) * 3;
       even_line[even_idx + 0] = v_avg;
       even_line[even_idx + 1] = y0_r1;
@@ -809,21 +781,13 @@ esp_err_t RTSPServer::convert_yuyv_to_o_uyy_e_vyy_(const uint8_t *yuyv, uint8_t 
   return ESP_OK;
 }
 
-// Initialize YUV lookup tables for fast RGB565 to YUV conversion
+// LUT init pour RGB565 → YUV
 void RTSPServer::init_yuv_lut_() {
   if (yuv_lut_initialized_)
     return;
 
-  // RGB565 uses 5 bits for R, 6 bits for G, 5 bits for B
-  // Expand to 8-bit values: RGB565 value -> 8-bit RGB using proper bit expansion
-
-  // BT.601 coefficients for RGB to YUV conversion (scaled by 256):
-  // Y  = ( 66*R + 129*G +  25*B) >> 8 + 16
-  // U  = (-38*R -  74*G + 112*B) >> 8 + 128
-  // V  = (112*R -  94*G -  18*B) >> 8 + 128
-
   for (int i = 0; i < 32; i++) {
-    int val_8bit = (i << 3) | (i >> 2);  // 5-bit to 8-bit expansion
+    int val_8bit = (i << 3) | (i >> 2);
     y_r_lut_[i] = (66 * val_8bit) >> 8;
     y_b_lut_[i] = (25 * val_8bit) >> 8;
     u_r_lut_[i] = (-38 * val_8bit) >> 8;
@@ -833,32 +797,30 @@ void RTSPServer::init_yuv_lut_() {
   }
 
   for (int i = 0; i < 64; i++) {
-    int val_8bit = (i << 2) | (i >> 4);  // 6-bit to 8-bit expansion
+    int val_8bit = (i << 2) | (i >> 4);
     y_g_lut_[i] = (129 * val_8bit) >> 8;
     u_g_lut_[i] = (-74 * val_8bit) >> 8;
     v_g_lut_[i] = (-94 * val_8bit) >> 8;
   }
 
   yuv_lut_initialized_ = true;
-  ESP_LOGI(TAG, "YUV lookup tables initialized");
+  ESP_LOGI(TAG, "YUV LUT initialized");
 }
 
-// Convert RGB565 to O_UYY_E_VYY format (required by ESP32-P4 hardware encoder)
-// Format: odd lines = u y y u y y..., even lines = v y y v y y...
-esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420, uint16_t width,
-                                                 uint16_t height) {
+// RGB565 → O_UYY_E_VYY (format HW encoder ESP32-P4)
+esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420,
+                                                uint16_t width, uint16_t height) {
   if (!yuv_lut_initialized_) {
     init_yuv_lut_();
   }
 
   const uint16_t *rgb = (const uint16_t *)rgb565;
 
-  // Process 2 lines at a time (odd line gets U, even line gets V)
   for (uint16_t row = 0; row < height; row += 2) {
     const uint16_t *row0 = rgb + (row * width);
     const uint16_t *row1 = rgb + ((row + 1) * width);
-    uint8_t *odd_ptr = yuv420 + (row * width * 3 / 2);        // Odd line: u y y u y y...
-    uint8_t *even_ptr = yuv420 + ((row + 1) * width * 3 / 2); // Even line: v y y v y y...
+    uint8_t *odd_ptr = yuv420 + (row * width * 3 / 2);
+    uint8_t *even_ptr = yuv420 + ((row + 1) * width * 3 / 2);
 
     for (uint16_t col = 0; col < width; col += 2, row0 += 2, row1 += 2, odd_ptr += 3, even_ptr += 3) {
       uint16_t p00 = row0[0];
@@ -894,12 +856,10 @@ esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *
       uint8_t u = u_r_lut_[r_avg] + u_g_lut_[g_avg] + u_b_lut_[b_avg] + 128;
       uint8_t v = v_r_lut_[r_avg] + v_g_lut_[g_avg] + v_b_lut_[b_avg] + 128;
 
-      // Write to odd line: u y0 y1
       odd_ptr[0] = u;
       odd_ptr[1] = y0;
       odd_ptr[2] = y1;
 
-      // Write to even line: v y2 y3
       even_ptr[0] = v;
       even_ptr[1] = y2;
       even_ptr[2] = y3;
@@ -910,11 +870,10 @@ esp_err_t RTSPServer::convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *
 }
 
 esp_err_t RTSPServer::encode_and_stream_frame_() {
-  if (!camera_ || !h264_encoder_ || !streaming_active_) {
+  if (!camera_ || !h264_encoder_)
     return ESP_FAIL;
-  }
 
-  // Capture une frame via l'API caméra ESPHome (comme camera_web_server)
+  // Même API que camera_web_server : capture_frame + get_image_data
   if (!camera_->capture_frame()) {
     ESP_LOGW(TAG, "Failed to capture frame from camera");
     return ESP_FAIL;
@@ -925,40 +884,35 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   int width = camera_->get_image_width();
   int height = camera_->get_image_height();
 
-  if (frame_data == nullptr || frame_size == 0) {
-    ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u", frame_data, (unsigned) frame_size);
+  if (!frame_data || frame_size == 0 || width == 0 || height == 0) {
+    ESP_LOGW(TAG, "Invalid frame data: ptr=%p size=%u width=%d height=%d",
+             frame_data, (unsigned)frame_size, width, height);
     return ESP_FAIL;
   }
 
-  // Debug: Log first frame info
   if (frame_count_ == 0) {
-    ESP_LOGI(TAG, "First RGB565 frame: %dx%d, size=%u bytes", width, height, (unsigned) frame_size);
+    ESP_LOGI(TAG, "First frame: %dx%d RGB565, size=%u bytes", width, height, (unsigned)frame_size);
     uint16_t *rgb = (uint16_t *)frame_data;
-    ESP_LOGI(TAG, "First 4 RGB565 pixels: %04X %04X %04X %04X", rgb[0], rgb[1], rgb[2], rgb[3]);
+    ESP_LOGI(TAG, "First 4 pixels: %04X %04X %04X %04X", rgb[0], rgb[1], rgb[2], rgb[3]);
   }
 
-  // Convert RGB565 to O_UYY_E_VYY (YUV420) for hardware encoder
-  // (si ta cam est en YUYV plus tard, tu pourras switcher vers convert_yuyv_to_o_uyy_e_vyy_)
+  // Conversion RGB565 → O_UYY_E_VYY
   convert_rgb565_to_yuv420_(frame_data, yuv_buffer_, width, height);
 
-  // Debug: Log converted YUV buffer
   if (frame_count_ == 0) {
-    ESP_LOGI(TAG, "Converted O_UYY_E_VYY buffer size: %zu bytes", yuv_buffer_size_);
-    ESP_LOGI(TAG,
-             "First 16 bytes of O_UYY_E_VYY: "
-             "%02X %02X %02X %02X %02X %02X %02X %02X "
-             "%02X %02X %02X %02X %02X %02X %02X %02X",
-             yuv_buffer_[0],  yuv_buffer_[1],  yuv_buffer_[2],  yuv_buffer_[3],
-             yuv_buffer_[4],  yuv_buffer_[5],  yuv_buffer_[6],  yuv_buffer_[7],
-             yuv_buffer_[8],  yuv_buffer_[9],  yuv_buffer_[10], yuv_buffer_[11],
+    ESP_LOGI(TAG, "First YUV420(O_UYY_E_VYY) bytes: "
+                  "%02X %02X %02X %02X %02X %02X %02X %02X "
+                  "%02X %02X %02X %02X %02X %02X %02X %02X",
+             yuv_buffer_[0], yuv_buffer_[1], yuv_buffer_[2], yuv_buffer_[3],
+             yuv_buffer_[4], yuv_buffer_[5], yuv_buffer_[6], yuv_buffer_[7],
+             yuv_buffer_[8], yuv_buffer_[9], yuv_buffer_[10], yuv_buffer_[11],
              yuv_buffer_[12], yuv_buffer_[13], yuv_buffer_[14], yuv_buffer_[15]);
   }
 
-  // Encode from our YUV buffer
   esp_h264_enc_in_frame_t in_frame = {};
   in_frame.raw_data.buffer = yuv_buffer_;
   in_frame.raw_data.len = yuv_buffer_size_;
-  in_frame.pts = frame_count_ * 90000 / 30;  // 30 FPS
+  in_frame.pts = frame_count_ * 90000 / 30;
 
   esp_h264_enc_out_frame_t out_frame = {};
   out_frame.raw_data.buffer = h264_buffer_;
@@ -966,15 +920,12 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
 
   esp_h264_err_t ret = esp_h264_enc_process(h264_encoder_, &in_frame, &out_frame);
   if (ret != ESP_H264_ERR_OK) {
-    ESP_LOGE(TAG, "H.264 encoding failed: error code %d (frame %u, in_len=%u, out_len=%u)",
-             ret, frame_count_, in_frame.raw_data.len, out_frame.raw_data.len);
-    if (frame_count_ == 0) {
-      ESP_LOGE(TAG, "First frame encoding failed - check YUV format conversion!");
-    }
+    ESP_LOGE(TAG, "H.264 encoding failed: err=%d (in_len=%u out_len=%u)",
+             ret, in_frame.raw_data.len, out_frame.raw_data.len);
     return ESP_FAIL;
   }
 
-  const char* frame_type_name = "Unknown";
+  const char *frame_type_name = "Unknown";
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) frame_type_name = "IDR";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_I) frame_type_name = "I";
   else if (out_frame.frame_type == ESP_H264_FRAME_TYPE_P) frame_type_name = "P";
@@ -982,43 +933,39 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   ESP_LOGV(TAG, "Frame %u encoded: %u bytes, type=%d (%s)",
            frame_count_, out_frame.length, out_frame.frame_type, frame_type_name);
 
-  // Validate output
   if (out_frame.length == 0 || out_frame.raw_data.buffer == nullptr) {
     ESP_LOGE(TAG, "Invalid H.264 output: len=%u buf=%p",
              out_frame.length, out_frame.raw_data.buffer);
     return ESP_FAIL;
   }
 
-  // Cache SPS/PPS from IDR frames
   if (out_frame.frame_type == ESP_H264_FRAME_TYPE_IDR) {
-    ESP_LOGI(TAG, "IDR frame - caching SPS/PPS");
+    ESP_LOGI(TAG, "IDR frame: caching SPS/PPS");
     parse_and_cache_nal_units_(out_frame.raw_data.buffer, out_frame.length);
   }
 
-  // Send NAL units
-  ESP_LOGV(TAG, "Parsing NAL units from %u bytes", out_frame.length);
   auto nal_units = parse_nal_units_(out_frame.raw_data.buffer, out_frame.length);
-  ESP_LOGV(TAG, "Found %d NAL units", (int) nal_units.size());
+  ESP_LOGV(TAG, "Found %d NAL units", (int)nal_units.size());
 
   for (size_t i = 0; i < nal_units.size(); i++) {
     const auto &nal = nal_units[i];
     uint8_t nal_type = nal.first[0] & 0x1F;
-    const char* nal_type_name = "Unknown";
+    const char *nal_type_name = "Unknown";
     if (nal_type == 1) nal_type_name = "P-slice";
     else if (nal_type == 5) nal_type_name = "IDR";
     else if (nal_type == 6) nal_type_name = "SEI";
     else if (nal_type == 7) nal_type_name = "SPS";
     else if (nal_type == 8) nal_type_name = "PPS";
 
-    ESP_LOGV(TAG, "Sending NAL unit %d: type=%d (%s), %u bytes",
-             (int) i, nal_type, nal_type_name, (unsigned) nal.second);
-    send_h264_rtp_(nal.first, nal.second, true);
+    bool marker = (i == nal_units.size() - 1);
+    ESP_LOGV(TAG, "Sending NAL %d: type=%d (%s), %u bytes, marker=%d",
+             (int)i, nal_type, nal_type_name, (unsigned)nal.second, (int)marker);
+    send_h264_rtp_(nal.first, nal.second, marker);
   }
 
   frame_count_++;
   rtp_timestamp_ += 3000;  // 90kHz / 30fps
 
-  ESP_LOGV(TAG, "Frame %u sent successfully", frame_count_);
   return ESP_OK;
 }
 
@@ -1034,24 +981,23 @@ void RTSPServer::parse_and_cache_nal_units_(const uint8_t *data, size_t len) {
       sps_size_ = nal.second;
       sps_data_ = (uint8_t *)malloc(sps_size_);
       memcpy(sps_data_, nal.first, sps_size_);
-      ESP_LOGI(TAG, "Cached SPS (%d bytes)", sps_size_);
+      ESP_LOGI(TAG, "Cached SPS (%d bytes)", (int)sps_size_);
     } else if (nal_type == 8) {  // PPS
       if (pps_data_)
         free(pps_data_);
       pps_size_ = nal.second;
       pps_data_ = (uint8_t *)malloc(pps_size_);
       memcpy(pps_data_, nal.first, pps_size_);
-      ESP_LOGI(TAG, "Cached PPS (%d bytes)", pps_size_);
+      ESP_LOGI(TAG, "Cached PPS (%d bytes)", (int)pps_size_);
     }
   }
 }
 
 std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(const uint8_t *data, size_t len) {
-  // Reuse cached vector to reduce stack allocations
   nal_units_cache_.clear();
 
-  if (data == nullptr || len < 4) {
-    ESP_LOGW(TAG, "parse_nal_units_: invalid input (ptr=%p, len=%u)", data, (unsigned) len);
+  if (!data || len < 4) {
+    ESP_LOGW(TAG, "parse_nal_units_: invalid input");
     return nal_units_cache_;
   }
 
@@ -1079,7 +1025,6 @@ std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(con
         if (nal_size > 0) {
           nal_units_cache_.push_back({data + i + start_code_len, nal_size});
         }
-
         i = j;
         continue;
       }
@@ -1091,18 +1036,15 @@ std::vector<std::pair<const uint8_t *, size_t>> RTSPServer::parse_nal_units_(con
 }
 
 esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marker) {
-  // Validate input
-  if (data == nullptr || len == 0) {
-    ESP_LOGW(TAG, "send_h264_rtp_: invalid data (ptr=%p, len=%u)", data, (unsigned) len);
+  if (!data || len == 0) {
+    ESP_LOGW(TAG, "send_h264_rtp_: invalid data");
     return ESP_FAIL;
   }
 
-  const size_t MAX_RTP_PAYLOAD = 1400;  // Safe MTU size
+  const size_t MAX_RTP_PAYLOAD = 1400;
 
-  // Small NAL units: send directly (Single NAL Unit Mode)
   if (len <= MAX_RTP_PAYLOAD) {
     uint8_t *packet = rtp_packet_buffer_;
-
     RTPHeader *rtp = (RTPHeader *)packet;
 
     rtp->v = 2;
@@ -1126,21 +1068,17 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
                (struct sockaddr *)&dest_addr, sizeof(dest_addr));
       }
     }
-
     return ESP_OK;
   }
 
-  // Large NAL units: Fragment using FU-A (RFC 6184)
-  ESP_LOGD(TAG, "Fragmenting NAL unit (%u bytes) with FU-A", (unsigned) len);
+  ESP_LOGD(TAG, "Fragmenting NAL unit (%u bytes) with FU-A", (unsigned)len);
 
   uint8_t nal_header = data[0];
   uint8_t nal_type = nal_header & 0x1F;
   uint8_t nri = nal_header & 0x60;
+  uint8_t fu_indicator = nri | 28;  // FU-A
 
-  // FU indicator: F=0, NRI=from original, Type=28 (FU-A)
-  uint8_t fu_indicator = nri | 28;
-
-  const uint8_t *payload = data + 1;  // Skip original NAL header
+  const uint8_t *payload = data + 1;
   size_t payload_len = len - 1;
   size_t offset = 0;
   size_t fragment_num = 0;
@@ -1172,7 +1110,6 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
     if (is_end) fu_header |= 0x40;
 
     fu_payload[1] = fu_header;
-
     memcpy(fu_payload + 2, payload + offset, chunk_size);
 
     rtp->m = (is_end && marker) ? 1 : 0;
@@ -1193,8 +1130,7 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
     fragment_num++;
   }
 
-  ESP_LOGV(TAG, "Sent NAL unit in %u fragments", (unsigned) fragment_num);
-
+  ESP_LOGV(TAG, "Sent NAL in %u FU-A fragments", (unsigned)fragment_num);
   return ESP_OK;
 }
 
@@ -1233,13 +1169,13 @@ void RTSPServer::remove_session_(int socket_fd) {
   }
 
   sessions_.erase(std::remove_if(sessions_.begin(), sessions_.end(),
-                                  [](const RTSPSession &s) { return !s.active; }),
+                                 [](const RTSPSession &s) { return !s.active; }),
                   sessions_.end());
 }
 
 void RTSPServer::cleanup_inactive_sessions_() {
   uint32_t now = millis();
-  const uint32_t timeout = 60000;  // 60 seconds
+  const uint32_t timeout = 60000;  // 60s
 
   for (auto &session : sessions_) {
     if (session.active && (now - session.last_activity > timeout)) {
@@ -1277,70 +1213,60 @@ int RTSPServer::get_cseq_(const std::string &request) {
 
 bool RTSPServer::check_authentication_(const std::string &request) {
   if (username_.empty() && password_.empty()) {
-    ESP_LOGD(TAG, "Authentication: disabled (no credentials configured)");
+    ESP_LOGD(TAG, "Authentication disabled (no credentials)");
     return true;
   }
 
-  ESP_LOGD(TAG, "Authentication: required for user='%s'", username_.c_str());
+  ESP_LOGD(TAG, "Authentication required for user='%s'", username_.c_str());
 
   std::string auth_header = get_request_line_(request, "Authorization");
   if (auth_header.empty()) {
-    ESP_LOGW(TAG, "Authentication failed: no Authorization header");
+    ESP_LOGW(TAG, "No Authorization header");
     return false;
   }
-
-  ESP_LOGD(TAG, "Authorization header: '%s'", auth_header.c_str());
 
   if (auth_header.find("Basic ") != 0) {
-    ESP_LOGW(TAG, "Authentication failed: not Basic auth");
+    ESP_LOGW(TAG, "Not Basic auth");
     return false;
   }
 
-  std::string encoded = auth_header.substr(6);  // Skip "Basic "
+  std::string encoded = auth_header.substr(6);
 
   std::string decoded;
   int val = 0;
   int valb = -8;
   for (unsigned char c : encoded) {
     if (c == '=') break;
-
     const char *p = strchr(base64_chars, c);
-    if (p == nullptr) continue;
-
+    if (!p) continue;
     val = (val << 6) + (p - base64_chars);
     valb += 6;
-
     if (valb >= 0) {
       decoded.push_back(char((val >> valb) & 0xFF));
       valb -= 8;
     }
   }
 
-  ESP_LOGD(TAG, "Decoded credentials: '%s'", decoded.c_str());
-
   size_t colon_pos = decoded.find(':');
   if (colon_pos == std::string::npos) {
-    ESP_LOGW(TAG, "Authentication failed: invalid format (no colon)");
+    ESP_LOGW(TAG, "Invalid auth format (no colon)");
     return false;
   }
 
   std::string received_username = decoded.substr(0, colon_pos);
   std::string received_password = decoded.substr(colon_pos + 1);
 
-  ESP_LOGD(TAG, "Received user='%s', expected user='%s'",
-           received_username.c_str(), username_.c_str());
-
   bool valid = (received_username == username_ && received_password == password_);
   if (!valid) {
-    ESP_LOGW(TAG, "Authentication failed: invalid credentials");
+    ESP_LOGW(TAG, "Invalid credentials");
   } else {
-    ESP_LOGI(TAG, "Authentication successful for user '%s'", username_.c_str());
+    ESP_LOGI(TAG, "Authentication successful for '%s'", username_.c_str());
   }
 
   return valid;
 }
 
-// Streaming task function (runs in separate task with dedicated stack)
+// Tâche de streaming (séparée de loopTask)
 void RTSPServer::streaming_task_wrapper_(void *param) {
   RTSPServer *server = static_cast<RTSPServer *>(param);
 
@@ -1361,10 +1287,10 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
 
     if (frame_num % 30 == 0) {
       uint32_t elapsed = millis() - start_time;
-      float actual_fps = (frame_num * 1000.0f) / (float) elapsed;
-      float avg_encode = total_encode_time / (float) frame_num;
-      ESP_LOGI(TAG, "Performance: %.1f FPS (avg encode: %.1f ms/frame, last: %u ms)",
-               actual_fps, avg_encode, (unsigned) encode_time);
+      float actual_fps = (frame_num * 1000.0f) / (float)elapsed;
+      float avg_encode = total_encode_time / (float)frame_num;
+      ESP_LOGI(TAG, "RTSP: %.1f FPS (avg encode=%.1f ms, last=%u ms)",
+               actual_fps, avg_encode, (unsigned)encode_time);
     }
 
     if (encode_time < 33) {
@@ -1375,7 +1301,6 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
   }
 
   ESP_LOGI(TAG, "Streaming task ended");
-
   vTaskSuspend(nullptr);
 }
 
@@ -1383,4 +1308,5 @@ void RTSPServer::streaming_task_wrapper_(void *param) {
 }  // namespace esphome
 
 #endif  // USE_ESP_IDF
+
 
