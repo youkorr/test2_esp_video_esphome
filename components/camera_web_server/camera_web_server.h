@@ -6,26 +6,8 @@
 
 #ifdef USE_ESP_IDF
 #include <esp_http_server.h>
-
-// Tous les headers C d'esp-video doivent être protégés via extern "C"
-extern "C" {
-#include <sys/types.h>
-#include <sys/time.h>
-
-#include "esp_video_init.h"
-#include "esp_video_device.h"
-#include "esp_video_ioctl.h"
-#include "esp_video_isp_ioctl.h"
-#include "esp_ipa.h"
-#include "esp_ipa_types.h"
-#include "driver/ppa.h"          // Pixel-Processing Accelerator hardware
-#include "linux/videodev2.h"
-#include "esp_timer.h"
-#include "esp_err.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-}
-#endif  // USE_ESP_IDF
+#include "driver/jpeg_encode.h"
+#endif
 
 namespace esphome {
 namespace camera_web_server {
@@ -43,36 +25,31 @@ class CameraWebServer : public Component {
   void set_enabled(bool enabled) { enabled_ = enabled; }
 
  protected:
-  // --- CAMERA ---
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
-
-  // --- CONFIG WEBSERVER ---
   uint16_t port_{8080};
   bool enable_stream_{true};
   bool enable_snapshot_{true};
-  bool enabled_{false};  // Activé/désactivé via switch HA
+  bool enabled_{false};  // Camera web server enabled/disabled by switch
 
 #ifdef USE_ESP_IDF
-  // --- HTTP SERVER ---
   httpd_handle_t server_{nullptr};
 
-  // Démarrage / arrêt du serveur HTTP
+  // JPEG encoder hardware
+  jpeg_encoder_handle_t jpeg_handle_{nullptr};
+  uint8_t *jpeg_buffer_{nullptr};
+  size_t jpeg_buffer_size_{0};
+  int jpeg_quality_{80};  // 0-100
+
   esp_err_t start_server_();
   void stop_server_();
-
-  // Initialisation et cleanup du pipeline JPEG M2M (/dev/video10, V4L2)
-  // NOTE : lazy-init, appelée seulement depuis /pic et /stream quand la
-  // caméra a déjà une résolution valide (≠ 0x0).
   esp_err_t init_jpeg_encoder_();
   void cleanup_jpeg_encoder_();
 
-  // --- HANDLERS HTTP (statiques pour httpd API C) ---
+  // HTTP handlers (static pour compatibilité avec httpd API C)
   static esp_err_t stream_handler_(httpd_req_t *req);
   static esp_err_t snapshot_handler_(httpd_req_t *req);
   static esp_err_t status_handler_(httpd_req_t *req);
-  static esp_err_t info_handler_(httpd_req_t *req);
-  static esp_err_t view_handler_(httpd_req_t *req);  // <-- pour /view (image + FPS)
-#endif  // USE_ESP_IDF
+#endif
 };
 
 }  // namespace camera_web_server
