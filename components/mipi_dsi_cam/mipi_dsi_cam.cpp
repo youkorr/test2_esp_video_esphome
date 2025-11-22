@@ -746,28 +746,27 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @  800x640)
+  // Custom Format Support (SC202CS @  800x6à0)
   // ============================================================================
   if (this->sensor_name_ == "sc202cs") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    
-    if (width == 800 && height == 640) {
-      custom_format = &sc202cs_custom_format_800x640;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format:  800x640 RAW8 @ 30fps (SC202CS)");
+  
+    if (width == 800 && height == 600) {
+      custom_format = &sc202cs_custom_format_800x600;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 30fps (SC202CS)");
     }
-
-    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+  
     if (custom_format != nullptr) {
       if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
         ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
         ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
       } else {
         ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for native VGA (%ux%u)", width, height);
+        ESP_LOGI(TAG, "   Sensor registers configured for 800x600");
       }
     }
   }
+
   // ============================================================================
 
   // RGB565 natif du CSI (pas de conversion, pas de copie)
