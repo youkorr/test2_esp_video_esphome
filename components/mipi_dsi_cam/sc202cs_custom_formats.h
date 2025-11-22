@@ -1,9 +1,9 @@
 /*
  * SC202CS Custom Format Configurations
- * Support for VGA resolution: 640×480
+ * Support for 1280x720, 1600x1200 and custom 800x640
  *
- * SC202CS native resolution is 1600×1200
- * VGA format uses 2×2 binning + centered crop for optimal quality
+ * SC202CS native resolution is 1600×1200.
+ * 800×640 mode uses a centered crop inside the full sensor window.
  */
 
 #pragma once
@@ -29,11 +29,13 @@ typedef struct {
 #define SC202CS_REG_END        0xFFFF
 #define SC202CS_REG_SLEEP_MODE 0x0100
 
-// Clock and timing constants for VGA
+// Clock and timing constants (hérités de la config 576 Mbps 1-lane)
 #define SC202CS_IDI_CLOCK_RATE_VGA_30FPS     (36000000ULL)
 #define SC202CS_MIPI_CSI_LINE_RATE_VGA_30FPS (SC202CS_IDI_CLOCK_RATE_VGA_30FPS * 2)  // 1-lane MIPI
 
+// -----------------------------------------------------------------------------
 // cleaned_0x18_FT_SC2356_24Minput_576Mbps_1lane_8bit_1280x720_30fps
+// -----------------------------------------------------------------------------
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1280x720_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
     {0x36e9, 0x80},          {0x36ea, 0x06},
@@ -103,7 +105,9 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1280x720_30fps[] = {
     {SC202CS_REG_END, 0x00},
 };
 
+// -----------------------------------------------------------------------------
 // cleaned_0x18_FT_SC2356_24Minput_576Mbps_1lane_8bit_1600x1200_30fps
+// -----------------------------------------------------------------------------
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1600x1200_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
     {0x36e9, 0x80},          {0x36ea, 0x06},
@@ -270,7 +274,6 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x640_30fps[] = {
 
 /* --------------------------------------------------------------------------
  *  Descripteur de format esp_video pour le mode 800x640
- *  ⚠️ Adapte : isp_info et mipi_clk selon ce que tu as pour les autres modes.
  * --------------------------------------------------------------------------*/
 
 static const esp_cam_sensor_format_t sc202cs_custom_format_800x640 = {
@@ -285,13 +288,19 @@ static const esp_cam_sensor_format_t sc202cs_custom_format_800x640 = {
     .fps       = 30,
     .isp_info  = NULL,      /* ou &sc202cs_isp_info_xxx si tu en as un */
     .mipi_info = {
-        .mipi_clk     = 576000000,  /* à harmoniser avec tes autres modes */
+        .mipi_clk     = 576000000,  /* 576 Mbps, 1 lane */
         .lane_num     = 1,
         .line_sync_en = false,
     },
     .reserved  = NULL,
 };
 
+/* --------------------------------------------------------------------------
+ *  Déclaration externe pour utilisation côté C++
+ * --------------------------------------------------------------------------*/
+extern const esp_cam_sensor_format_t sc202cs_custom_format_800x640;
+
 #ifdef __cplusplus
 }
 #endif
+
