@@ -1,9 +1,9 @@
 /*
  * SC202CS Custom Format Configurations
- * Support for 1280x720, 1600x1200 and custom 800x640
+ * Support for 1280x720, 1600x1200 and custom 800x600
  *
  * SC202CS native resolution is 1600×1200.
- * 800×640 mode uses a centered crop inside the full sensor window.
+ * 800×600 mode uses full sensor (1600×1200) with 2×2 binning and no ROI offset.
  */
 
 #pragma once
@@ -35,6 +35,7 @@ typedef struct {
 
 // -----------------------------------------------------------------------------
 // cleaned_0x18_FT_SC2356_24Minput_576Mbps_1lane_8bit_1280x720_30fps
+// (configuration d’origine fournie, inchangée)
 // -----------------------------------------------------------------------------
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1280x720_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
@@ -107,6 +108,7 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1280x720_30fps[] = {
 
 // -----------------------------------------------------------------------------
 // cleaned_0x18_FT_SC2356_24Minput_576Mbps_1lane_8bit_1600x1200_30fps
+// (configuration d’origine fournie, inchangée)
 // -----------------------------------------------------------------------------
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1600x1200_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
@@ -170,25 +172,26 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1600x1200_30fps[] = 
 };
 
 /* --------------------------------------------------------------------------
- *  Nouveau mode 800x640 @ 30fps (centré dans le plein capteur 1600x1200)
+ *  Nouveau mode 800x600 @ 30fps (binning 2×2 sans offset, plein capteur 1600x1200)
  *
- *  Logique utilisée :
- *  - Capteur plein : 1600x1200
- *  - ROI de sortie : 800x640
- *  - On ajoute une marge de 8 px (comme pour le mode 1280x720) :
- *      regionW = 800 + 8 = 808
- *      regionH = 640 + 8 = 648
- *  - ROI centré :
- *      startX = (1600 - 808) / 2 = 396 = 0x018C
- *      endX   = startX + 808 - 1 = 1203 = 0x04B3
- *      startY = (1200 - 648) / 2 = 276 = 0x0114
- *      endY   = startY + 648 - 1 = 923 = 0x039B
+ *  Logique :
+ *  - Capteur plein : 1600x1200 (indices 0..1599, 0..1199)
+ *  - Binning 2×2 → sortie 800x600
+ *  - ROI = full frame, sans offset :
+ *      startX = 0       = 0x0000
+ *      endX   = 1599    = 0x063F
+ *      startY = 0       = 0x0000
+ *      endY   = 1199    = 0x04AF
  *  - Largeur / hauteur de sortie :
  *      width  = 800  = 0x0320
- *      height = 640  = 0x0280
+ *      height = 600  = 0x0258
+ *
+ *  Remarque :
+ *  - On réutilise la même base d'analog / timing / ISP que le mode 1600x1200.
+ *  - Le binning 2×2 est géré par les registres déjà en place (même pipeline).
  * --------------------------------------------------------------------------*/
 
-static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x640_30fps[] = {
+static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
     {0x36e9, 0x80},          {0x36ea, 0x06},
     {0x36eb, 0x0a},          {0x36ec, 0x01},
@@ -196,22 +199,22 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x640_30fps[] = {
     {0x301f, 0x18},          {0x3031, 0x08},
     {0x3037, 0x00},
 
-    /* ROI centré 800x640 */
-    {0x3200, 0x01},          // x_start MSB = 396 (0x018C)
-    {0x3201, 0x8c},          // x_start LSB
-    {0x3202, 0x01},          // y_start MSB = 276 (0x0114)
-    {0x3203, 0x14},          // y_start LSB
-    {0x3204, 0x04},          // x_end MSB = 1203 (0x04B3)
-    {0x3205, 0xb3},          // x_end LSB
-    {0x3206, 0x03},          // y_end MSB = 923 (0x039B)
-    {0x3207, 0x9b},          // y_end LSB
+    /* ROI plein capteur 1600x1200, sans offset */
+    {0x3200, 0x00},          // x_start MSB = 0 (0x0000)
+    {0x3201, 0x00},          // x_start LSB
+    {0x3202, 0x00},          // y_start MSB = 0 (0x0000)
+    {0x3203, 0x00},          // y_start LSB
+    {0x3204, 0x06},          // x_end MSB = 1599 (0x063F)
+    {0x3205, 0x3f},          // x_end LSB
+    {0x3206, 0x04},          // y_end MSB = 1199 (0x04AF)
+    {0x3207, 0xaf},          // y_end LSB
 
     {0x3208, 0x03},          // output width MSB = 800 (0x0320)
     {0x3209, 0x20},          // output width LSB
-    {0x320a, 0x02},          // output height MSB = 640 (0x0280)
-    {0x320b, 0x80},          // output height LSB
+    {0x320a, 0x02},          // output height MSB = 600 (0x0258)
+    {0x320b, 0x58},          // output height LSB
 
-    {0x3210, 0x00},          // offsets comme le mode 1280x720
+    {0x3210, 0x00},          // offsets identiques au style 1280x720 (petit blanking)
     {0x3211, 0x04},
     {0x3212, 0x00},
     {0x3213, 0x04},
@@ -273,22 +276,22 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x640_30fps[] = {
 };
 
 /* --------------------------------------------------------------------------
- *  Descripteur de format esp_video pour le mode 800x640
+ *  Descripteur de format esp_video pour le mode 800x600
  * --------------------------------------------------------------------------*/
 
-static const esp_cam_sensor_format_t sc202cs_custom_format_800x640 = {
-    .name      = "cleaned_0x18_FT_SC202CS_24Minput_576Mbps_1lane_8bit_800x640_30fps",
+static const esp_cam_sensor_format_t sc202cs_custom_format_800x600 = {
+    .name      = "cleaned_0x18_FT_SC202CS_24Minput_576Mbps_1lane_8bit_800x600_30fps",
     .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
     .port      = ESP_CAM_SENSOR_MIPI_CSI,
     .xclk      = 24000000, /* 24 MHz */
     .width     = 800,
-    .height    = 640,
-    .regs      = init_reglist_MIPI_1lane_raw8_800x640_30fps,
-    .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_800x640_30fps),
+    .height    = 600,
+    .regs      = init_reglist_MIPI_1lane_raw8_800x600_30fps,
+    .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_800x600_30fps),
     .fps       = 30,
     .isp_info  = NULL,      /* ou &sc202cs_isp_info_xxx si tu en as un */
     .mipi_info = {
-        .mipi_clk     = 576000000,  /* 576 Mbps, 1 lane */
+        .mipi_clk     = 576000000,  /* 576 Mbps, 1 lane (comme demandé) */
         .lane_num     = 1,
         .line_sync_en = false,
     },
@@ -298,9 +301,11 @@ static const esp_cam_sensor_format_t sc202cs_custom_format_800x640 = {
 /* --------------------------------------------------------------------------
  *  Déclaration externe pour utilisation côté C++
  * --------------------------------------------------------------------------*/
-extern const esp_cam_sensor_format_t sc202cs_custom_format_800x640;
+extern const esp_cam_sensor_format_t sc202cs_custom_format_800x600;
 
 #ifdef __cplusplus
 }
 #endif
+
+
 
