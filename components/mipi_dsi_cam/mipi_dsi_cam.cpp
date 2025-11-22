@@ -746,15 +746,15 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ VGA 640x480)
+  // Custom Format Support (SC202CS @  800x640)
   // ============================================================================
   if (this->sensor_name_ == "sc202cs") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
-    // Sélectionner le format custom VGA
-    if (width == 640 && height == 480) {
-      custom_format = &sc202cs_format_vga_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (SC202CS)");
+    
+    if (width == 800 && height == 640) {
+      custom_format = &sc202cs_custom_format_800x640;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format:  800x640 RAW8 @ 30fps (SC202CS)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
