@@ -377,7 +377,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
     return true;
   }
 
-  // Parse RTSP URL: rtsp://host:port/path
+  // Parse RTSP URL: rtsp://[user:pass@]host:port/path
   std::string url = this->url_;
   if (url.find("rtsp://") != 0) {
     ESP_LOGE(TAG, "Invalid RTSP URL");
@@ -386,16 +386,30 @@ bool NetworkCamera::connect_rtsp_stream_() {
 
   url = url.substr(7);  // Remove "rtsp://"
 
-  size_t port_pos = url.find(':');
+  // Check for credentials (user:pass@)
+  std::string credentials;
+  size_t at_pos = url.find('@');
+  if (at_pos != std::string::npos) {
+    credentials = url.substr(0, at_pos);
+    url = url.substr(at_pos + 1);  // Remove credentials from URL
+    ESP_LOGI(TAG, "RTSP credentials found");
+  }
+
+  // Now parse host:port/path
   size_t path_pos = url.find('/');
+  size_t port_pos = url.find(':');
 
   std::string host;
   uint16_t port = 554;
   std::string path = "/";
 
-  if (port_pos != std::string::npos && port_pos < path_pos) {
+  if (port_pos != std::string::npos && (path_pos == std::string::npos || port_pos < path_pos)) {
     host = url.substr(0, port_pos);
-    port = atoi(url.substr(port_pos + 1, path_pos - port_pos - 1).c_str());
+    if (path_pos != std::string::npos) {
+      port = atoi(url.substr(port_pos + 1, path_pos - port_pos - 1).c_str());
+    } else {
+      port = atoi(url.substr(port_pos + 1).c_str());
+    }
   } else if (path_pos != std::string::npos) {
     host = url.substr(0, path_pos);
   } else {
