@@ -479,43 +479,9 @@ bool NetworkCamera::connect_rtsp_stream_() {
     return false;
   }
 
-  // Create RTP socket (UDP)
-  this->rtp_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
-  if (this->rtp_socket_ < 0) {
-    ESP_LOGE(TAG, "Failed to create RTP socket");
-    this->disconnect_rtsp_stream_();
-    return false;
-  }
-
-  // Bind RTP socket to local port
-  struct sockaddr_in rtp_addr;
-  memset(&rtp_addr, 0, sizeof(rtp_addr));
-  rtp_addr.sin_family = AF_INET;
-  rtp_addr.sin_addr.s_addr = INADDR_ANY;
-  rtp_addr.sin_port = 0;  // Let OS choose port
-
-  if (bind(this->rtp_socket_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) < 0) {
-    ESP_LOGE(TAG, "Failed to bind RTP socket");
-    this->disconnect_rtsp_stream_();
-    return false;
-  }
-
-  // Get assigned port
-  socklen_t addr_len = sizeof(rtp_addr);
-  getsockname(this->rtp_socket_, (struct sockaddr *)&rtp_addr, &addr_len);
-  this->rtp_port_ = ntohs(rtp_addr.sin_port);
-
-  // Set non-blocking
-  int flags = fcntl(this->rtp_socket_, F_GETFL, 0);
-  fcntl(this->rtp_socket_, F_SETFL, flags | O_NONBLOCK);
-
-  // SETUP
-  char transport[128];
-  snprintf(transport, sizeof(transport), "Transport: RTP/AVP;unicast;client_port=%u-%u\r\n",
-           this->rtp_port_, this->rtp_port_ + 1);
-
+  // SETUP with TCP interleaved transport
   std::string setup_url = full_url + "/trackID=1";
-  if (!this->send_rtsp_request_("SETUP", setup_url, transport)) {
+  if (!this->send_rtsp_request_("SETUP", setup_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
     this->disconnect_rtsp_stream_();
     return false;
   }
@@ -528,8 +494,12 @@ bool NetworkCamera::connect_rtsp_stream_() {
     return false;
   }
 
+  // Set socket to non-blocking for reading interleaved data
+  int flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
+  fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
+
   this->stream_connected_ = true;
-  ESP_LOGI(TAG, "RTSP stream connected, RTP port: %u", this->rtp_port_);
+  ESP_LOGI(TAG, "RTSP stream connected (TCP interleaved)");
 
   return true;
 }
@@ -538,16 +508,16 @@ void NetworkCamera::disconnect_rtsp_stream_() {
   if (this->rtsp_socket_ >= 0) {
     // Send TEARDOWN
     if (!this->rtsp_session_.empty()) {
+      // Set blocking for TEARDOWN
+      int flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
+      fcntl(this->rtsp_socket_, F_SETFL, flags & ~O_NONBLOCK);
+
       char session_header[128];
       snprintf(session_header, sizeof(session_header), "Session: %s\r\n", this->rtsp_session_.c_str());
       this->send_rtsp_request_("TEARDOWN", this->url_, session_header);
     }
     close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
-  }
-  if (this->rtp_socket_ >= 0) {
-    close(this->rtp_socket_);
-    this->rtp_socket_ = -1;
   }
   this->stream_connected_ = false;
   this->rtsp_session_.clear();
@@ -609,21 +579,21 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
 }
 
 bool NetworkCamera::fetch_rtp_frame_() {
-  if (this->rtp_socket_ < 0) {
+  if (this->rtsp_socket_ < 0) {
     return false;
   }
 
+  // TCP interleaved format:
+  // $ (0x24), channel (1 byte), length (2 bytes big endian), RTP data
+  uint8_t header[4];
   uint8_t rtp_packet[1500];
-  struct sockaddr_in from_addr;
-  socklen_t from_len = sizeof(from_addr);
 
   // Accumulate NAL units into h264_buffer_
   bool frame_complete = false;
 
   while (!frame_complete) {
-    ssize_t len = recvfrom(this->rtp_socket_, rtp_packet, sizeof(rtp_packet), 0,
-                           (struct sockaddr *)&from_addr, &from_len);
-
+    // Read interleaved header
+    ssize_t len = recv(this->rtsp_socket_, header, 4, MSG_PEEK);
     if (len <= 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;  // No more data available
@@ -631,23 +601,71 @@ bool NetworkCamera::fetch_rtp_frame_() {
       return false;
     }
 
-    if (len < 12) {
+    if (len < 4) {
+      break;  // Not enough data yet
+    }
+
+    // Check for interleaved marker
+    if (header[0] != '$') {
+      // Skip non-interleaved data (could be RTSP response)
+      char skip[1];
+      recv(this->rtsp_socket_, skip, 1, 0);
+      continue;
+    }
+
+    uint8_t channel = header[1];
+    uint16_t rtp_len = (header[2] << 8) | header[3];
+
+    if (rtp_len > sizeof(rtp_packet)) {
+      ESP_LOGW(TAG, "RTP packet too large: %u", rtp_len);
+      // Consume the header and skip the packet
+      recv(this->rtsp_socket_, header, 4, 0);
+      while (rtp_len > 0) {
+        ssize_t skip = recv(this->rtsp_socket_, rtp_packet,
+                           rtp_len > sizeof(rtp_packet) ? sizeof(rtp_packet) : rtp_len, 0);
+        if (skip <= 0) break;
+        rtp_len -= skip;
+      }
+      continue;
+    }
+
+    // Consume the header
+    recv(this->rtsp_socket_, header, 4, 0);
+
+    // Read RTP packet
+    ssize_t received = 0;
+    while (received < rtp_len) {
+      len = recv(this->rtsp_socket_, rtp_packet + received, rtp_len - received, 0);
+      if (len <= 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          break;
+        }
+        return false;
+      }
+      received += len;
+    }
+
+    if (received < rtp_len) {
+      break;  // Incomplete packet
+    }
+
+    // Skip RTCP packets (channel 1)
+    if (channel != 0) {
+      continue;
+    }
+
+    if (rtp_len < 12) {
       continue;  // Invalid RTP packet
     }
 
     // RTP header
-    // uint8_t version = (rtp_packet[0] >> 6) & 0x03;
-    // uint8_t padding = (rtp_packet[0] >> 5) & 0x01;
-    // uint8_t extension = (rtp_packet[0] >> 4) & 0x01;
-    // uint8_t cc = rtp_packet[0] & 0x0F;
     uint8_t marker = (rtp_packet[1] >> 7) & 0x01;
-    // uint8_t pt = rtp_packet[1] & 0x7F;
 
     int header_len = 12;  // Basic RTP header
 
     // H264 NAL unit starts after RTP header
     uint8_t *nal_data = rtp_packet + header_len;
-    int nal_len = len - header_len;
+    int nal_len = rtp_len - header_len;
 
     if (nal_len <= 0) {
       continue;
@@ -673,7 +691,6 @@ bool NetworkCamera::fetch_rtp_frame_() {
 
       uint8_t fu_header = nal_data[1];
       bool start = (fu_header >> 7) & 0x01;
-      bool end = (fu_header >> 6) & 0x01;
       uint8_t fu_type = fu_header & 0x1F;
 
       if (start) {
