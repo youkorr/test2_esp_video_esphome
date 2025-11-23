@@ -674,7 +674,7 @@ esp_err_t WebDAVBox3::handle_webdav_propfind(httpd_req_t *req) {
   ESP_LOGI(TAG, "URI formatée pour la réponse: %s", uri_path.c_str());
   
   // Ajouter les propriétés pour le chemin actuel (avec format amélioré)
-  response += generate_prop_xml(uri_path, is_directory, st.st_mtime, st.st_size);
+  response += generate_prop_xml(uri_path, is_directory, modified, file_size);
   
   // Si c'est un répertoire et que la profondeur > 0, lister son contenu
   if (is_directory && (depth_header == "1" || depth_header == "infinity")) {
