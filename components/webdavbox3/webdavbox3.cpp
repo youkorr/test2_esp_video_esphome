@@ -624,32 +624,34 @@ esp_err_t WebDAVBox3::handle_webdav_propfind(httpd_req_t *req) {
 
   // Ajouter plus de logs détaillés
   ESP_LOGI(TAG, "PROPFIND sur %s (URI: %s)", path.c_str(), req->uri);
-  
-  // Vérifier si le chemin existe
-  struct stat st;
-  if (stat(path.c_str(), &st) != 0) {
-    ESP_LOGE(TAG, "Chemin non trouvé: %s (errno: %d)", path.c_str(), errno);
-    return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not Found");
-  }
-  
-  // Lister le contenu du répertoire pour diagnostic
-  if (S_ISDIR(st.st_mode)) {
-    std::string fatfs_path = to_fatfs_path(path);
+
+  // Vérifier si le chemin existe avec FatFS
+  std::string fatfs_path = to_fatfs_path(path);
+  FILINFO fno;
+  bool is_directory = false;
+  size_t file_size = 0;
+  time_t modified = 0;
+
+  // Pour la racine, utiliser f_opendir au lieu de f_stat
+  if (fatfs_path == "0:" || fatfs_path == "0:/") {
     FF_DIR dir;
-    FILINFO fno;
     FRESULT res = f_opendir(&dir, fatfs_path.c_str());
-    if (res == FR_OK) {
-      ESP_LOGI(TAG, "Contenu du répertoire %s:", path.c_str());
-      while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
-        if (strcmp(fno.fname, ".") && strcmp(fno.fname, "..")) {
-          ESP_LOGI(TAG, "  - %s", fno.fname);
-        }
-      }
-      f_closedir(&dir);
+    if (res != FR_OK) {
+      ESP_LOGE(TAG, "Chemin non trouvé: %s (error: %d)", path.c_str(), res);
+      return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not Found");
     }
+    f_closedir(&dir);
+    is_directory = true;
+  } else {
+    FRESULT res = f_stat(fatfs_path.c_str(), &fno);
+    if (res != FR_OK) {
+      ESP_LOGE(TAG, "Chemin non trouvé: %s (error: %d)", path.c_str(), res);
+      return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not Found");
+    }
+    is_directory = (fno.fattrib & AM_DIR) != 0;
+    file_size = fno.fsize;
   }
-  
-  bool is_directory = S_ISDIR(st.st_mode);
+
   std::string depth_header = "0";  // Par défaut, profondeur 0
   
   // Récupérer l'en-tête Depth
