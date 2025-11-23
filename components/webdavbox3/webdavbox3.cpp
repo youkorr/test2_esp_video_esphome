@@ -1111,7 +1111,7 @@ esp_err_t WebDAVBox3::handle_webdav_delete(httpd_req_t *req) {
   // Vérifier si c'est un répertoire ou un fichier
   if (is_dir(path)) {
     // Supprimer le répertoire (doit être vide)
-    if (rmdir(path.c_str()) == 0) {
+    if (remove(path.c_str()) == 0) {
       ESP_LOGI(TAG, "Répertoire supprimé: %s", path.c_str());
       httpd_resp_set_status(req, "204 No Content");
       httpd_resp_send(req, NULL, 0);
