@@ -1,0 +1,4 @@
+dependencies:
+  esp_h264:
+    git: https://github.com/espressif/esp-h264-component.git
+    path: esp_h264

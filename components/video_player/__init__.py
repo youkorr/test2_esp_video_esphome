@@ -61,13 +61,6 @@ async def to_code(config):
 
     await cg.register_component(var, config)
 
-    # Add esp_h264 component dependency
-    cg.add_idf_component(
-        name="esp_h264",
-        repo="https://github.com/espressif/esp-h264-component.git",
-        path="esp_h264",
-    )
-
     cg.add(var.set_source_path(config[CONF_SOURCE]))
     cg.add(var.set_resolution(config[CONF_WIDTH], config[CONF_HEIGHT]))
     cg.add(var.set_autoplay(config[CONF_AUTOPLAY]))
