@@ -12,16 +12,8 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "Display is DISABLED by default - enable via switch in Home Assistant");
 
   if (this->camera_ == nullptr) {
-  if (this->camera_ == nullptr && this->rtsp_url_.empty()) {
     ESP_LOGE(TAG, "❌ Camera non configurée");
     this->mark_failed();
-    return;
-  }
-
-  if (this->camera_ == nullptr && !this->rtsp_url_.empty()) {
-    ESP_LOGI(TAG, "Using RTSP source: %s", this->rtsp_url_.c_str());
-    ESP_LOGW(TAG,
-             "RTSP input playback is experimental - ensure a compatible decoder pipeline is configured");
     return;
   }
 
@@ -72,17 +64,6 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
 
 // Mise à jour de la frame caméra (appelée par le timer LVGL)
 void LVGLCameraDisplay::update_camera_frame_() {
-  if (this->camera_ == nullptr) {
-    if (!this->rtsp_url_.empty() && !this->rtsp_warning_shown_) {
-      ESP_LOGW(TAG,
-               "RTSP source '%s' configured but RTSP decoding/display is not implemented yet; "
-               "use a mipi_dsi_cam source until RTSP playback support is added",
-               this->rtsp_url_.c_str());
-      this->rtsp_warning_shown_ = true;
-    }
-    return;
-  }
-
   // Si la caméra est en streaming, capturer ET mettre à jour le canvas
   if (!this->camera_->is_streaming()) {
     return;
@@ -205,7 +186,6 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 
 }  // namespace lvgl_camera_display
 }  // namespace esphome
-
 
 
 
