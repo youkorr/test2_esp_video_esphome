@@ -9,19 +9,17 @@
 // LVGL
 #include "lvgl.h"
 
-// Tous les headers C doivent être dans extern "C"
+// esp-h264 software decoder
 extern "C" {
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/time.h>
+#include "esp_h264_dec.h"
+#include "esp_h264_dec_sw.h"
+#include "esp_h264_types.h"
+}
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
-
-#include "linux/videodev2.h"
-}
 
 #endif  // USE_ESP_IDF
 
@@ -69,19 +67,15 @@ class VideoPlayer : public Component {
  protected:
 
   // ============================
-  // H.264 DECODER ESP_VIDEO M2M
+  // H.264 SOFTWARE DECODER
   // ============================
 
-  static const int CAPTURE_BUFFER_COUNT = 3;
-
-  struct CaptureBuffer {
-    void *addr = nullptr;
-    size_t length = 0;
-  };
-
-  // --- init, deinit du pipeline M2M ---
+  // --- init, deinit decoder ---
   esp_err_t init_decoder_();
   void deinit_decoder_();
+
+  // --- YUV to RGB conversion ---
+  void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
   // --- MP4 parsing ---
   bool parse_mp4_();
@@ -150,14 +144,17 @@ class VideoPlayer : public Component {
   lv_obj_t *img_obj_{nullptr};
   lv_img_dsc_t img_dsc_{};
 
-  // Buffer RGB565
+  // Buffer RGB565 for LVGL
   std::vector<uint8_t> frame_buffer_;
 
-  // H.264 M2M file descriptor
-  int fd_h264_{-1};
+  // esp-h264 software decoder
+  esp_h264_dec_handle_t decoder_{nullptr};
 
-  // Buffers de capture (MMAP)
-  CaptureBuffer capture_bufs_[CAPTURE_BUFFER_COUNT];
+  // Input buffer for encoded H.264 data
+  std::vector<uint8_t> input_buffer_;
+
+  // Output buffer for decoded I420 data
+  std::vector<uint8_t> yuv_buffer_;
 
   // Fichier H.264
   FILE *file_{nullptr};

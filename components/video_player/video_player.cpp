@@ -5,20 +5,6 @@
 
 #ifdef USE_ESP_IDF
 
-// Tous les headers C doivent être dans extern "C" pour C++
-extern "C" {
-#include <sys/types.h>
-#include <sys/time.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-
-#include "linux/videodev2.h"
-}
-
 namespace esphome {
 namespace video_player {
 
@@ -189,195 +175,50 @@ void VideoPlayer::stop() {
 }
 
 // --------------------------------------------------
-// Decoder init / deinit (H.264 M2M via V4L2)
+// Decoder init / deinit (esp-h264 software decoder)
 // --------------------------------------------------
 
 esp_err_t VideoPlayer::init_decoder_() {
   if (this->decoder_ready_) return ESP_OK;
 
-  if (this->device_path_.empty()) {
-    ESP_LOGE(TAG, "No H.264 device path set (device_path_)");
+  // Create software H.264 decoder
+  esp_h264_dec_cfg_sw_t cfg = {
+    .pic_type = ESP_H264_RAW_FMT_I420
+  };
+
+  esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->decoder_);
+  if (err != ESP_H264_ERR_OK || this->decoder_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create H.264 software decoder: err=%d", err);
     return ESP_FAIL;
   }
 
-  // Ouvrir le device H.264 M2M (/dev/videoXX)
-  this->fd_h264_ = ::open(this->device_path_.c_str(), O_RDWR /* | O_NONBLOCK */);
-  if (this->fd_h264_ < 0) {
-    ESP_LOGE(TAG, "Failed to open H.264 M2M device '%s': errno=%d",
-             this->device_path_.c_str(), errno);
+  // Open the decoder
+  err = esp_h264_dec_open(this->decoder_);
+  if (err != ESP_H264_ERR_OK) {
+    ESP_LOGE(TAG, "Failed to open H.264 decoder: err=%d", err);
+    esp_h264_dec_del(this->decoder_);
+    this->decoder_ = nullptr;
     return ESP_FAIL;
   }
 
-  struct v4l2_capability cap {};
-  if (ioctl(this->fd_h264_, VIDIOC_QUERYCAP, &cap) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QUERYCAP failed on '%s': errno=%d",
-             this->device_path_.c_str(), errno);
-    ::close(this->fd_h264_);
-    this->fd_h264_ = -1;
-    return ESP_FAIL;
-  }
+  // Allocate input buffer (max 256KB per frame should be enough)
+  this->input_buffer_.resize(256 * 1024);
 
-  ESP_LOGI(TAG, "H.264 device opened: driver=%s card=%s caps=0x%X devcaps=0x%X",
-           cap.driver, cap.card, cap.capabilities, cap.device_caps);
-
-  // --- OUTPUT: H.264 stream ---
-  {
-    struct v4l2_format fmt_out {};
-    fmt_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    fmt_out.fmt.pix.width = this->width_;
-    fmt_out.fmt.pix.height = this->height_;
-    fmt_out.fmt.pix.pixelformat = V4L2_PIX_FMT_H264;
-    fmt_out.fmt.pix.field = V4L2_FIELD_NONE;
-
-    if (ioctl(this->fd_h264_, VIDIOC_S_FMT, &fmt_out) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_S_FMT(OUTPUT H264) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "H.264 OUTPUT format set: %ux%u H264",
-             fmt_out.fmt.pix.width, fmt_out.fmt.pix.height);
-  }
-
-  // --- CAPTURE: RGB565 (décodé) ---
-  {
-    struct v4l2_format fmt_cap {};
-    fmt_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    fmt_cap.fmt.pix.width = this->width_;
-    fmt_cap.fmt.pix.height = this->height_;
-    fmt_cap.fmt.pix.pixelformat = V4L2_PIX_FMT_RGB565;
-    fmt_cap.fmt.pix.field = V4L2_FIELD_NONE;
-
-    if (ioctl(this->fd_h264_, VIDIOC_S_FMT, &fmt_cap) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_S_FMT(CAPTURE RGB565) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-
-    ESP_LOGI(TAG, "H.264 CAPTURE format set: %ux%u RGB565",
-             fmt_cap.fmt.pix.width, fmt_cap.fmt.pix.height);
-  }
-
-  // --- REQBUFS CAPTURE (MMAP) ---
-  {
-    struct v4l2_requestbuffers req_cap {};
-    req_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    req_cap.count = CAPTURE_BUFFER_COUNT;
-    req_cap.memory = V4L2_MEMORY_MMAP;
-
-    if (ioctl(this->fd_h264_, VIDIOC_REQBUFS, &req_cap) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_REQBUFS(CAPTURE) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-
-    if (req_cap.count < 1) {
-      ESP_LOGE(TAG, "No CAPTURE buffer allocated");
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-
-    for (unsigned i = 0; i < req_cap.count && i < CAPTURE_BUFFER_COUNT; i++) {
-      struct v4l2_buffer buf {};
-      buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-      buf.memory = V4L2_MEMORY_MMAP;
-      buf.index = i;
-
-      if (ioctl(this->fd_h264_, VIDIOC_QUERYBUF, &buf) < 0) {
-        ESP_LOGE(TAG, "VIDIOC_QUERYBUF(CAPTURE idx=%u) failed: errno=%d", i, errno);
-        ::close(this->fd_h264_);
-        this->fd_h264_ = -1;
-        return ESP_FAIL;
-      }
-
-      void *addr = mmap(nullptr, buf.length,
-                        PROT_READ | PROT_WRITE,
-                        MAP_SHARED, this->fd_h264_, buf.m.offset);
-      if (addr == MAP_FAILED) {
-        ESP_LOGE(TAG, "mmap(CAPTURE idx=%u) failed: errno=%d", i, errno);
-        ::close(this->fd_h264_);
-        this->fd_h264_ = -1;
-        return ESP_FAIL;
-      }
-
-      this->capture_bufs_[i].addr = addr;
-      this->capture_bufs_[i].length = buf.length;
-
-      if (ioctl(this->fd_h264_, VIDIOC_QBUF, &buf) < 0) {
-        ESP_LOGE(TAG, "VIDIOC_QBUF(CAPTURE idx=%u) failed: errno=%d", i, errno);
-        ::close(this->fd_h264_);
-        this->fd_h264_ = -1;
-        return ESP_FAIL;
-      }
-    }
-
-    ESP_LOGI(TAG, "Allocated %u capture buffers", req_cap.count);
-  }
-
-  // --- REQBUFS OUTPUT (USERPTR) ---
-  {
-    struct v4l2_requestbuffers req_out {};
-    req_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    req_out.count = 2;  // 2 buffers logiques, en USERPTR
-    req_out.memory = V4L2_MEMORY_USERPTR;
-
-    if (ioctl(this->fd_h264_, VIDIOC_REQBUFS, &req_out) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_REQBUFS(OUTPUT USERPTR) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-  }
-
-  // --- STREAMON OUTPUT / CAPTURE ---
-  {
-    enum v4l2_buf_type type;
-
-    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (ioctl(this->fd_h264_, VIDIOC_STREAMON, &type) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_STREAMON(CAPTURE) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-
-    type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    if (ioctl(this->fd_h264_, VIDIOC_STREAMON, &type) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_STREAMON(OUTPUT) failed: errno=%d", errno);
-      ::close(this->fd_h264_);
-      this->fd_h264_ = -1;
-      return ESP_FAIL;
-    }
-  }
+  // Allocate output buffer for I420 (Y + U/4 + V/4 = 1.5 bytes per pixel)
+  size_t yuv_size = this->width_ * this->height_ * 3 / 2;
+  this->yuv_buffer_.resize(yuv_size);
 
   this->decoder_ready_ = true;
   this->eof_ = false;
-  ESP_LOGI(TAG, "H.264 M2M decoder initialized OK");
+  ESP_LOGI(TAG, "H.264 software decoder initialized OK (%dx%d)", this->width_, this->height_);
   return ESP_OK;
 }
 
 void VideoPlayer::deinit_decoder_() {
-  if (this->fd_h264_ >= 0) {
-    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-    ioctl(this->fd_h264_, VIDIOC_STREAMOFF, &type);
-    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    ioctl(this->fd_h264_, VIDIOC_STREAMOFF, &type);
-
-    for (int i = 0; i < CAPTURE_BUFFER_COUNT; i++) {
-      if (this->capture_bufs_[i].addr != nullptr &&
-          this->capture_bufs_[i].length > 0) {
-        munmap(this->capture_bufs_[i].addr, this->capture_bufs_[i].length);
-        this->capture_bufs_[i].addr = nullptr;
-        this->capture_bufs_[i].length = 0;
-      }
-    }
-
-    ::close(this->fd_h264_);
-    this->fd_h264_ = -1;
+  if (this->decoder_ != nullptr) {
+    esp_h264_dec_close(this->decoder_);
+    esp_h264_dec_del(this->decoder_);
+    this->decoder_ = nullptr;
   }
 
   if (this->file_ != nullptr) {
@@ -386,6 +227,45 @@ void VideoPlayer::deinit_decoder_() {
   }
 
   this->decoder_ready_ = false;
+}
+
+// --------------------------------------------------
+// I420 to RGB565 conversion
+// --------------------------------------------------
+
+void VideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
+  const uint8_t *y_plane = yuv;
+  const uint8_t *u_plane = yuv + w * h;
+  const uint8_t *v_plane = u_plane + (w * h / 4);
+
+  for (int j = 0; j < h; j++) {
+    for (int i = 0; i < w; i++) {
+      int y_idx = j * w + i;
+      int uv_idx = (j / 2) * (w / 2) + (i / 2);
+
+      int y = y_plane[y_idx];
+      int u = u_plane[uv_idx] - 128;
+      int v = v_plane[uv_idx] - 128;
+
+      // YUV to RGB conversion
+      int r = y + ((359 * v) >> 8);
+      int g = y - ((88 * u + 183 * v) >> 8);
+      int b = y + ((454 * u) >> 8);
+
+      // Clamp values
+      r = r < 0 ? 0 : (r > 255 ? 255 : r);
+      g = g < 0 ? 0 : (g > 255 ? 255 : g);
+      b = b < 0 ? 0 : (b > 255 ? 255 : b);
+
+      // Convert to RGB565
+      uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+
+      // Store in little-endian
+      int rgb_idx = (j * w + i) * 2;
+      rgb[rgb_idx] = rgb565 & 0xFF;
+      rgb[rgb_idx + 1] = (rgb565 >> 8) & 0xFF;
+    }
+  }
 }
 
 // --------------------------------------------------
@@ -933,73 +813,44 @@ size_t VideoPlayer::read_next_mp4_sample_(uint8_t *buf, size_t max_size) {
 }
 
 bool VideoPlayer::feed_and_decode_one_frame_() {
-  if (!this->decoder_ready_ || this->fd_h264_ < 0 || this->file_ == nullptr)
+  if (!this->decoder_ready_ || this->decoder_ == nullptr || this->file_ == nullptr)
     return false;
 
-  // Lire un chunk H.264 brut (Annex-B)
-  static const size_t CHUNK_SIZE = 4096;
-  uint8_t in_buf[CHUNK_SIZE];
-  size_t n = this->read_h264_chunk_(in_buf, CHUNK_SIZE);
+  // Read next H.264 sample (Annex-B format)
+  size_t n = this->read_h264_chunk_(this->input_buffer_.data(), this->input_buffer_.size());
   if (n == 0) {
-    // EOF ou pas de données
+    // EOF or no data
     return false;
   }
 
-  // QBUF OUTPUT (USERPTR)
-  struct v4l2_buffer buf_out {};
-  buf_out.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  buf_out.memory = V4L2_MEMORY_USERPTR;
-  buf_out.m.userptr = reinterpret_cast<unsigned long>(in_buf);
-  buf_out.length = n;
+  // Prepare input frame
+  esp_h264_dec_in_frame_t in_frame = {};
+  in_frame.raw_data.buffer = this->input_buffer_.data();
+  in_frame.raw_data.len = n;
+  in_frame.pts = 0;
+  in_frame.dts = 0;
 
-  if (ioctl(this->fd_h264_, VIDIOC_QBUF, &buf_out) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QBUF(OUTPUT) failed: errno=%d", errno);
-    return false;
+  // Prepare output frame
+  esp_h264_dec_out_frame_t out_frame = {};
+  out_frame.outbuf = this->yuv_buffer_.data();
+  out_frame.out_size = 0;
+
+  // Decode
+  esp_h264_err_t err = esp_h264_dec_process(this->decoder_, &in_frame, &out_frame);
+  if (err != ESP_H264_ERR_OK) {
+    ESP_LOGW(TAG, "Decode failed: err=%d", err);
+    return true;  // Continue trying
   }
 
-  // DQBUF CAPTURE (décodé)
-  struct v4l2_buffer buf_cap {};
-  buf_cap.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-  buf_cap.memory = V4L2_MEMORY_MMAP;
+  // Check if we got a decoded frame
+  if (out_frame.out_size > 0) {
+    // Convert I420 to RGB565
+    this->convert_i420_to_rgb565_(this->yuv_buffer_.data(),
+                                   this->frame_buffer_.data(),
+                                   this->width_, this->height_);
 
-  if (ioctl(this->fd_h264_, VIDIOC_DQBUF, &buf_cap) < 0) {
-    if (errno == EAGAIN) {
-      // Rien de prêt encore, pas grave
-      return true;
-    }
-    ESP_LOGE(TAG, "VIDIOC_DQBUF(CAPTURE) failed: errno=%d", errno);
-    return false;
-  }
-
-  if (buf_cap.index >= CAPTURE_BUFFER_COUNT ||
-      this->capture_bufs_[buf_cap.index].addr == nullptr ||
-      buf_cap.bytesused == 0) {
-    ESP_LOGE(TAG, "Invalid CAPTURE buffer: idx=%u used=%u",
-             buf_cap.index, buf_cap.bytesused);
-    return false;
-  }
-
-  // Copie la frame décodée (RGB565) dans le buffer LVGL
-  size_t copy_size = buf_cap.bytesused;
-  if (copy_size > this->frame_buffer_.size())
-    copy_size = this->frame_buffer_.size();
-
-  uint8_t *src = static_cast<uint8_t *>(this->capture_bufs_[buf_cap.index].addr);
-  this->update_lvgl_frame_(src, copy_size);
-
-  // Réqueue CAPTURE
-  if (ioctl(this->fd_h264_, VIDIOC_QBUF, &buf_cap) < 0) {
-    ESP_LOGW(TAG, "VIDIOC_QBUF(CAPTURE requeue) failed: errno=%d", errno);
-  }
-
-  // DQBUF OUTPUT (libérer)
-  struct v4l2_buffer buf_out_done {};
-  buf_out_done.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
-  buf_out_done.memory = V4L2_MEMORY_USERPTR;
-  if (ioctl(this->fd_h264_, VIDIOC_DQBUF, &buf_out_done) < 0) {
-    if (errno != EAGAIN) {
-      ESP_LOGW(TAG, "VIDIOC_DQBUF(OUTPUT) failed (non-fatal): errno=%d", errno);
-    }
+    // Update LVGL display
+    this->update_lvgl_frame_(this->frame_buffer_.data(), this->frame_buffer_.size());
   }
 
   return true;

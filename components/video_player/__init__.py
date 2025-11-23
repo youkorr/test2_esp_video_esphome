@@ -9,6 +9,9 @@ DEPENDENCIES = ["lvgl"]
 
 CODEOWNERS = ["@youkorr"]
 
+# ESP-IDF component dependency
+ESP_IDF_COMPONENTS = ["esp_h264"]
+
 video_player_ns = cg.esphome_ns.namespace("video_player")
 VideoPlayer = video_player_ns.class_("VideoPlayer", cg.Component)
 
@@ -57,6 +60,13 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
 
     await cg.register_component(var, config)
+
+    # Add esp_h264 component dependency
+    cg.add_idf_component(
+        name="esp_h264",
+        repo="https://github.com/espressif/esp-h264-component.git",
+        path="esp_h264",
+    )
 
     cg.add(var.set_source_path(config[CONF_SOURCE]))
     cg.add(var.set_resolution(config[CONF_WIDTH], config[CONF_HEIGHT]))
