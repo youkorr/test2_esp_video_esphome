@@ -66,8 +66,8 @@ async def to_code(config):
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
-        # LvPageType has get_obj() method to get the lv_obj_t*
-        cg.add(var.set_parent(parent.get_obj()))
+        # Access underlying lv_obj_t* - LvPageType stores it in 'obj' member
+        cg.add(var.set_parent(parent.obj))
 
 
 # Action schemas
