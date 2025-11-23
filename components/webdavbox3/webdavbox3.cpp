@@ -2,7 +2,6 @@
 #include "esphome/core/log.h"
 #include "esp_task_wdt.h"
 #include <sys/stat.h>
-#include <dirent.h>
 #include <unistd.h>
 #include <fstream>
 #include <errno.h>
@@ -15,10 +14,19 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include "esp_timer.h"
+#include "ff.h"
 
 
 namespace esphome {
 namespace webdavbox3 {
+
+// Helper to convert VFS path to FatFS path
+static std::string to_fatfs_path(const std::string& vfs_path) {
+  if (vfs_path.find("/sdcard") == 0) {
+    return "0:" + vfs_path.substr(7);
+  }
+  return vfs_path;
+}
 
 
 
@@ -41,8 +49,9 @@ bool create_directories_util(const std::string& path) {
             *p = 0;
             struct stat st;
             if (stat(tmp, &st) != 0) {
-                if (mkdir(tmp, 0755) != 0) {
-                    ESP_LOGE("WEBDAV", "Failed to create directory: %s (errno: %d)", tmp, errno);
+                std::string fatfs_tmp = to_fatfs_path(tmp);
+                if (f_mkdir(fatfs_tmp.c_str()) != FR_OK && f_mkdir(fatfs_tmp.c_str()) != FR_EXIST) {
+                    ESP_LOGE("WEBDAV", "Failed to create directory: %s", tmp);
                     return false;
                 }
             } else if (!S_ISDIR(st.st_mode)) {
@@ -55,8 +64,9 @@ bool create_directories_util(const std::string& path) {
 
     struct stat st;
     if (stat(tmp, &st) != 0) {
-        if (mkdir(tmp, 0755) != 0) {
-            ESP_LOGE("WEBDAV", "Failed to create directory: %s (errno: %d)", tmp, errno);
+        std::string fatfs_tmp = to_fatfs_path(tmp);
+        if (f_mkdir(fatfs_tmp.c_str()) != FR_OK && f_mkdir(fatfs_tmp.c_str()) != FR_EXIST) {
+            ESP_LOGE("WEBDAV", "Failed to create directory: %s", tmp);
             return false;
         }
     } else if (!S_ISDIR(st.st_mode)) {
@@ -102,40 +112,42 @@ void WebDAVBox3::setup() {
   // [Votre code existant]
   
   ESP_LOGI(TAG, "Diagnostic du système de fichiers");
-  
-  // 1. Vérifier si le répertoire racine est accessible  
-  DIR *dir = opendir(root_path_.c_str());
-  if (!dir) {
-    ESP_LOGE(TAG, "Impossible d'ouvrir le répertoire racine (errno: %d)", errno);
+
+  // 1. Vérifier si le répertoire racine est accessible
+  std::string fatfs_root = to_fatfs_path(root_path_);
+  FF_DIR dir;
+  FILINFO fno;
+  FRESULT res = f_opendir(&dir, fatfs_root.c_str());
+  if (res != FR_OK) {
+    ESP_LOGE(TAG, "Impossible d'ouvrir le répertoire racine (error: %d)", res);
   } else {
     ESP_LOGI(TAG, "Répertoire racine accessible");
-    
+
     // Lister le contenu du répertoire racine
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != nullptr) {
-      if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
+    while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
+      if (strcmp(fno.fname, ".") && strcmp(fno.fname, "..")) {
         std::string full_path = root_path_;
         if (full_path.back() != '/') full_path += '/';
-        full_path += entry->d_name;
-        
+        full_path += fno.fname;
+
         struct stat st;
         if (stat(full_path.c_str(), &st) == 0) {
-          ESP_LOGI(TAG, "  - %s (%s, taille: %ld)", 
-                  entry->d_name,
+          ESP_LOGI(TAG, "  - %s (%s, taille: %ld)",
+                  fno.fname,
                   S_ISDIR(st.st_mode) ? "dossier" : "fichier",
                   (long)st.st_size);
-          
+
           // Vérifier les permissions
-          ESP_LOGI(TAG, "    Permissions: %c%c%c", 
+          ESP_LOGI(TAG, "    Permissions: %c%c%c",
                   (st.st_mode & S_IRUSR) ? 'r' : '-',
                   (st.st_mode & S_IWUSR) ? 'w' : '-',
                   (st.st_mode & S_IXUSR) ? 'x' : '-');
         } else {
-          ESP_LOGE(TAG, "  - %s (erreur stat: %d)", entry->d_name, errno);
+          ESP_LOGE(TAG, "  - %s (erreur stat: %d)", fno.fname, errno);
         }
       }
     }
-    closedir(dir);
+    f_closedir(&dir);
   }
   
   // 2. Essayer de créer un fichier test
@@ -450,17 +462,19 @@ bool WebDAVBox3::is_dir(const std::string &path) {
 
 std::vector<std::string> WebDAVBox3::list_dir(const std::string &path) {
   std::vector<std::string> files;
-  DIR *dir = opendir(path.c_str());
-  if (dir != nullptr) {
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != nullptr) {
-      if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
-        files.push_back(entry->d_name);
+  std::string fatfs_path = to_fatfs_path(path);
+  FF_DIR dir;
+  FILINFO fno;
+  FRESULT res = f_opendir(&dir, fatfs_path.c_str());
+  if (res == FR_OK) {
+    while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
+      if (strcmp(fno.fname, ".") && strcmp(fno.fname, "..")) {
+        files.push_back(fno.fname);
       }
     }
-    closedir(dir);
+    f_closedir(&dir);
   } else {
-    ESP_LOGE(TAG, "Impossible d'ouvrir le répertoire: %s (errno: %d)", path.c_str(), errno);
+    ESP_LOGE(TAG, "Impossible d'ouvrir le répertoire: %s (error: %d)", path.c_str(), res);
   }
   return files;
 }
@@ -634,16 +648,18 @@ esp_err_t WebDAVBox3::handle_webdav_propfind(httpd_req_t *req) {
   
   // Lister le contenu du répertoire pour diagnostic
   if (S_ISDIR(st.st_mode)) {
-    DIR *dir = opendir(path.c_str());
-    if (dir) {
+    std::string fatfs_path = to_fatfs_path(path);
+    FF_DIR dir;
+    FILINFO fno;
+    FRESULT res = f_opendir(&dir, fatfs_path.c_str());
+    if (res == FR_OK) {
       ESP_LOGI(TAG, "Contenu du répertoire %s:", path.c_str());
-      struct dirent *entry;
-      while ((entry = readdir(dir)) != nullptr) {
-        if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, "..")) {
-          ESP_LOGI(TAG, "  - %s", entry->d_name);
+      while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
+        if (strcmp(fno.fname, ".") && strcmp(fno.fname, "..")) {
+          ESP_LOGI(TAG, "  - %s", fno.fname);
         }
       }
-      closedir(dir);
+      f_closedir(&dir);
     }
   }
   
@@ -1148,8 +1164,10 @@ esp_err_t WebDAVBox3::handle_webdav_mkcol(httpd_req_t *req) {
     }
     
     // Créer le dossier
-    if (mkdir(path.c_str(), 0755) != 0) {
-        ESP_LOGE(TAG, "Échec de la création du dossier: %s (errno: %d)", path.c_str(), errno);
+    std::string fatfs_path = to_fatfs_path(path);
+    FRESULT res = f_mkdir(fatfs_path.c_str());
+    if (res != FR_OK && res != FR_EXIST) {
+        ESP_LOGE(TAG, "Échec de la création du dossier: %s (error: %d)", path.c_str(), res);
         return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create directory");
     }
     
@@ -1209,8 +1227,10 @@ esp_err_t WebDAVBox3::handle_webdav_move(httpd_req_t *req) {
     std::string parent_dir = dst.substr(0, dst.find_last_of('/'));
     if (!parent_dir.empty() && !is_dir(parent_dir)) {
       ESP_LOGI(TAG, "Création du répertoire parent: %s", parent_dir.c_str());
-      if (mkdir(parent_dir.c_str(), 0755) != 0) {
-        ESP_LOGE(TAG, "Impossible de créer le répertoire parent: %s (errno: %d)", parent_dir.c_str(), errno);
+      std::string fatfs_parent = to_fatfs_path(parent_dir);
+      FRESULT res = f_mkdir(fatfs_parent.c_str());
+      if (res != FR_OK && res != FR_EXIST) {
+        ESP_LOGE(TAG, "Impossible de créer le répertoire parent: %s (error: %d)", parent_dir.c_str(), res);
       }
     }
     
@@ -1253,7 +1273,8 @@ esp_err_t WebDAVBox3::handle_webdav_copy(httpd_req_t *req) {
     // Créer le répertoire parent si nécessaire
     std::string parent_dir = dst.substr(0, dst.find_last_of('/'));
     if (!parent_dir.empty() && !is_dir(parent_dir)) {
-      mkdir(parent_dir.c_str(), 0777);
+      std::string fatfs_parent = to_fatfs_path(parent_dir);
+      f_mkdir(fatfs_parent.c_str());
     }
     
     // Pour les répertoires, il faudrait une copie récursive (non implémentée ici)
