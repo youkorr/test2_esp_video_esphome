@@ -452,18 +452,23 @@ bool NetworkCamera::connect_rtsp_stream_() {
   }
   memcpy(&server_addr.sin_addr, he->h_addr, he->h_length);
 
+  // Set connection timeout
+  struct timeval tv;
+  tv.tv_sec = 10;
+  tv.tv_usec = 0;
+  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+  ESP_LOGI(TAG, "Attempting TCP connection to %s:%u...", host.c_str(), port);
+
   if (connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-    ESP_LOGE(TAG, "Failed to connect to RTSP server");
+    ESP_LOGE(TAG, "Failed to connect to RTSP server: %s (errno %d)", strerror(errno), errno);
     close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
     return false;
   }
 
-  // Set socket timeout
-  struct timeval tv;
-  tv.tv_sec = 5;
-  tv.tv_usec = 0;
-  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  ESP_LOGI(TAG, "TCP connection established");
 
   std::string full_url = "rtsp://" + host + ":" + std::to_string(port) + path;
 
