@@ -23,6 +23,11 @@ CONF_HEIGHT = "height"
 CONF_AUTOPLAY = "autoplay"
 CONF_LOOP = "loop"
 CONF_DEVICE = "device"
+CONF_PARENT_ID = "parent_id"
+
+# Get LVGL obj type
+lvgl_ns = cg.esphome_ns.namespace("lvgl")
+LvglComponent = lvgl_ns.class_("LvglComponent", cg.PollingComponent)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(VideoPlayer),
@@ -42,6 +47,9 @@ CONFIG_SCHEMA = cv.Schema({
 
     # H.264 hardware decoder device path (esp_video)
     cv.Optional(CONF_DEVICE, default="/dev/video30"): cv.string,
+
+    # Parent LVGL object (page/container) - if not set, uses current screen
+    cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -55,6 +63,10 @@ async def to_code(config):
     cg.add(var.set_autoplay(config[CONF_AUTOPLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_device_path(config[CONF_DEVICE]))
+
+    if CONF_PARENT_ID in config:
+        parent = await cg.get_variable(config[CONF_PARENT_ID])
+        cg.add(var.set_parent(parent))
 
 
 # Action schemas

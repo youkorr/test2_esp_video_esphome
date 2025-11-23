@@ -48,6 +48,9 @@ class VideoPlayer : public Component {
 
   void set_autoplay(bool b) { autoplay_ = b; }
   void set_loop(bool b) { loop_ = b; }
+#ifdef USE_ESP_IDF
+  void set_parent(lv_obj_t *parent) { parent_ = parent; }
+#endif
 
   // --------- ESPHome ----------
   void setup() override;
@@ -139,6 +142,7 @@ class VideoPlayer : public Component {
 #ifdef USE_ESP_IDF
 
   // Handle LVGL
+  lv_obj_t *parent_{nullptr};
   lv_obj_t *img_obj_{nullptr};
   lv_img_dsc_t img_dsc_{};
 

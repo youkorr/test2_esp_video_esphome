@@ -57,8 +57,8 @@ void VideoPlayer::setup() {
   }
 
   // Créer un widget LVGL (image) pour afficher la vidéo
-  lv_obj_t *scr = lv_scr_act();
-  this->img_obj_ = lv_img_create(scr);
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+  this->img_obj_ = lv_img_create(parent);
 
   // Préparer le buffer de frame (RGB565) pour LVGL
   size_t fb_size = static_cast<size_t>(this->width_) * this->height_ * 2;  // RGB565 (2 bytes/pixel)
