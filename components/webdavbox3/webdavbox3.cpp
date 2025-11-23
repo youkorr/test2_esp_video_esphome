@@ -426,23 +426,17 @@ std::string WebDAVBox3::get_file_path(httpd_req_t *req, const std::string &root_
   path += uri;
   
   ESP_LOGI(TAG, "Mapped URI %s to path %s", req->uri, path.c_str());
-  
-  // Vérifier si le chemin existe
-  struct stat st;
-  if (stat(path.c_str(), &st) == 0) {
-    ESP_LOGI(TAG, "Chemin existe: %s", path.c_str());
-  } else {
-    ESP_LOGI(TAG, "⚠️ Chemin n'existe PAS: %s (errno: %d)", path.c_str(), errno);
-  }
-  
+
   return path;
 }
 
 
 bool WebDAVBox3::is_dir(const std::string &path) {
-  struct stat st;
-  if (stat(path.c_str(), &st) == 0)
-    return S_ISDIR(st.st_mode);
+  std::string fatfs_path = to_fatfs_path(path);
+  FILINFO fno;
+  FRESULT res = f_stat(fatfs_path.c_str(), &fno);
+  if (res == FR_OK)
+    return (fno.fattrib & AM_DIR) != 0;
   return false;
 }
 
@@ -725,20 +719,25 @@ esp_err_t WebDAVBox3::handle_webdav_propfind(httpd_req_t *req) {
 esp_err_t WebDAVBox3::handle_webdav_get(httpd_req_t *req) {
     auto *inst = static_cast<WebDAVBox3 *>(req->user_ctx);
     std::string path = get_file_path(req, inst->root_path_);
-    
+
     ESP_LOGI(TAG, "GET %s (URI: %s)", path.c_str(), req->uri);
-    
-    // Vérifier si le fichier existe
-    struct stat st;
-    if (stat(path.c_str(), &st) != 0) {
-        ESP_LOGE(TAG, "Fichier non trouvé: %s (errno: %d)", path.c_str(), errno);
+
+    // Vérifier si le fichier existe avec FatFS
+    std::string fatfs_path = to_fatfs_path(path);
+    FILINFO fno;
+    FRESULT fres = f_stat(fatfs_path.c_str(), &fno);
+    if (fres != FR_OK) {
+        ESP_LOGE(TAG, "Fichier non trouvé: %s (error: %d)", path.c_str(), fres);
         return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "File not found");
     }
-    
+
     // Vérifier si c'est un répertoire
-    if (S_ISDIR(st.st_mode)) {
+    if (fno.fattrib & AM_DIR) {
         return handle_webdav_propfind(req);
     }
+
+    // Use fno.fsize for file size
+    size_t file_size = fno.fsize;
     
     // Ouvrir le fichier
     FILE *file = fopen(path.c_str(), "rb");
@@ -791,19 +790,19 @@ esp_err_t WebDAVBox3::handle_webdav_get(httpd_req_t *req) {
     
     // Configurer les en-têtes de la réponse
     httpd_resp_set_type(req, content_type);
-    //httpd_resp_set_hdr(req, "Content-Length", std::to_string(st.st_size).c_str());
+    //httpd_resp_set_hdr(req, "Content-Length", std::to_string(file_size).c_str());
     httpd_resp_set_hdr(req, "Accept-Ranges", "bytes");
     
-    ESP_LOGI(TAG, "Envoi du fichier %s (%zu octets, type: %s)", path.c_str(), (size_t)st.st_size, content_type);
-    
+    ESP_LOGI(TAG, "Envoi du fichier %s (%zu octets, type: %s)", path.c_str(), file_size, content_type);
+
     // Stratégie optimisée pour les fichiers volumineux - utiliser des buffer plus grands grâce à la PSRAM
     // Utiliser la PSRAM si disponible pour allouer de grands buffers
-    const size_t CHUNK_SIZE = (st.st_size > 300 * 1024 * 1024) ? 262144 :  // 256K pour très grands fichiers 
-                             (st.st_size > 50 * 1024 * 1024) ? 131072 :   // 128K pour grands fichiers
+    const size_t CHUNK_SIZE = (file_size > 300 * 1024 * 1024) ? 262144 :  // 256K pour très grands fichiers
+                             (file_size > 50 * 1024 * 1024) ? 131072 :   // 128K pour grands fichiers
                              65536;                                       // 64K pour fichiers moyens/petits
-    
-    ESP_LOGI(TAG, "Utilisation d'un buffer de taille %zu pour un fichier de %zu octets", 
-             CHUNK_SIZE, (size_t)st.st_size);
+
+    ESP_LOGI(TAG, "Utilisation d'un buffer de taille %zu pour un fichier de %zu octets",
+             CHUNK_SIZE, file_size);
     
     // Vérifier si la PSRAM est disponible
     bool using_psram = false;
@@ -835,7 +834,7 @@ esp_err_t WebDAVBox3::handle_webdav_get(httpd_req_t *req) {
     fseek(file, 0, SEEK_SET);
     
     // Désactiver les logs trop fréquents pour les gros fichiers
-    bool is_large_file = (st.st_size > 50 * 1024 * 1024);
+    bool is_large_file = (file_size > 50 * 1024 * 1024);
     size_t log_interval = is_large_file ? (10 * 1024 * 1024) : (1 * 1024 * 1024);  // 10MB ou 1MB
     
     size_t read_bytes;
@@ -862,15 +861,15 @@ esp_err_t WebDAVBox3::handle_webdav_get(httpd_req_t *req) {
             float speed_kbps = (total_sent / 1024.0f) / elapsed_sec;
             
             ESP_LOGI(TAG, "Envoyé: %zu/%zu octets (%d%%), %.2f KB/s", 
-                    total_sent, (size_t)st.st_size, 
-                    (int)((total_sent * 100) / st.st_size),
+                    total_sent, (size_t)file_size, 
+                    (int)((total_sent * 100) / file_size),
                     speed_kbps);
             
             last_log_time = current_time;
         }
         
         // Pour les très gros fichiers (>300MB), pause minimale seulement tous les 10MB
-        if (st.st_size > 300 * 1024 * 1024 && total_sent % (10 * 1024 * 1024) == 0) {
+        if (file_size > 300 * 1024 * 1024 && total_sent % (10 * 1024 * 1024) == 0) {
             taskYIELD();  // Cède juste le CPU sans délai
         }
     }
@@ -895,7 +894,7 @@ esp_err_t WebDAVBox3::handle_webdav_get(httpd_req_t *req) {
                 total_sent, total_time, avg_speed, using_psram ? "PSRAM" : "RAM interne");
     } else {
         ESP_LOGE(TAG, "Erreur lors de l'envoi du fichier: %d (total envoyé: %zu/%zu octets, %.2f MB/s)",
-                err, total_sent, (size_t)st.st_size, avg_speed);
+                err, total_sent, (size_t)file_size, avg_speed);
     }
     
     return err;
@@ -1034,8 +1033,9 @@ esp_err_t WebDAVBox3::handle_webdav_put(httpd_req_t *req) {
     ESP_LOGI(TAG, "Content length: %d bytes", req->content_len);
 
     // Ne pas écraser un dossier
-    struct stat st;
-    if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+    std::string fatfs_path = to_fatfs_path(path);
+    FILINFO fno;
+    if (f_stat(fatfs_path.c_str(), &fno) == FR_OK && (fno.fattrib & AM_DIR)) {
         return httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Cannot overwrite directory");
     }
 
@@ -1043,8 +1043,7 @@ esp_err_t WebDAVBox3::handle_webdav_put(httpd_req_t *req) {
     size_t last_slash = path.find_last_of('/');
     if (last_slash != std::string::npos) {
         std::string dir_path = path.substr(0, last_slash);
-        struct stat dir_stat;
-        if (stat(dir_path.c_str(), &dir_stat) != 0 || !S_ISDIR(dir_stat.st_mode)) {
+        if (!is_dir(dir_path)) {
             if (!create_directories_util(dir_path)) {
                 return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to create parent directory");
             }
@@ -1144,18 +1143,18 @@ esp_err_t WebDAVBox3::handle_webdav_delete(httpd_req_t *req) {
 esp_err_t WebDAVBox3::handle_webdav_mkcol(httpd_req_t *req) {
     auto *inst = static_cast<WebDAVBox3 *>(req->user_ctx);
     std::string path = get_file_path(req, inst->root_path_);
-    
+
     ESP_LOGI(TAG, "MKCOL %s (URI: %s)", path.c_str(), req->uri);
-    
-    // Vérifier si le chemin existe déjà
-    struct stat st;
-    if (stat(path.c_str(), &st) == 0) {
+
+    // Vérifier si le chemin existe déjà avec FatFS
+    std::string fatfs_path = to_fatfs_path(path);
+    FILINFO fno;
+    if (f_stat(fatfs_path.c_str(), &fno) == FR_OK) {
         ESP_LOGE(TAG, "Le chemin existe déjà: %s", path.c_str());
         return httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "Method Not Allowed");
     }
-    
+
     // Créer le dossier
-    std::string fatfs_path = to_fatfs_path(path);
     FRESULT res = f_mkdir(fatfs_path.c_str());
     if (res != FR_OK && res != FR_EXIST) {
         ESP_LOGE(TAG, "Échec de la création du dossier: %s (error: %d)", path.c_str(), res);
