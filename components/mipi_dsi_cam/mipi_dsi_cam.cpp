@@ -9,8 +9,8 @@
 #include <vector>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <dirent.h>
 #include <fcntl.h>
+#include "ff.h"
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -602,7 +602,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   if (!dir.empty()) {
     struct stat st;
     if (stat(dir.c_str(), &st) != 0) {
-      mkdir(dir.c_str(), 0755);
+      f_mkdir(dir.c_str());
     }
   }
 
