@@ -126,25 +126,11 @@ void WebDAVBox3::setup() {
     // Lister le contenu du répertoire racine
     while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
       if (strcmp(fno.fname, ".") && strcmp(fno.fname, "..")) {
-        std::string full_path = root_path_;
-        if (full_path.back() != '/') full_path += '/';
-        full_path += fno.fname;
-
-        struct stat st;
-        if (stat(full_path.c_str(), &st) == 0) {
-          ESP_LOGI(TAG, "  - %s (%s, taille: %ld)",
-                  fno.fname,
-                  S_ISDIR(st.st_mode) ? "dossier" : "fichier",
-                  (long)st.st_size);
-
-          // Vérifier les permissions
-          ESP_LOGI(TAG, "    Permissions: %c%c%c",
-                  (st.st_mode & S_IRUSR) ? 'r' : '-',
-                  (st.st_mode & S_IWUSR) ? 'w' : '-',
-                  (st.st_mode & S_IXUSR) ? 'x' : '-');
-        } else {
-          ESP_LOGE(TAG, "  - %s (erreur stat: %d)", fno.fname, errno);
-        }
+        bool is_dir = (fno.fattrib & AM_DIR) != 0;
+        ESP_LOGI(TAG, "  - %s (%s, taille: %lu)",
+                fno.fname,
+                is_dir ? "dossier" : "fichier",
+                (unsigned long)fno.fsize);
       }
     }
     f_closedir(&dir);
