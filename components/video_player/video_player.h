@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/automation.h"
 
 #ifdef USE_ESP_IDF
 
@@ -155,6 +156,22 @@ class VideoPlayer : public Component {
   bool decoder_ready_{false};
 
 #endif  // USE_ESP_IDF
+};
+
+// Action templates for automation
+template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<VideoPlayer> {
+ public:
+  void play(const Ts &...x) override { this->parent_->play(); }
+};
+
+template<typename... Ts> class PauseAction : public Action<Ts...>, public Parented<VideoPlayer> {
+ public:
+  void play(const Ts &...x) override { this->parent_->pause(); }
+};
+
+template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<VideoPlayer> {
+ public:
+  void play(const Ts &...x) override { this->parent_->stop(); }
 };
 
 }  // namespace video_player
