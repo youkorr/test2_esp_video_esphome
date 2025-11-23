@@ -233,13 +233,11 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
-  lv_obj_set_flex_flow(this->controls_container_, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(this->controls_container_, LV_FLEX_ALIGN_CENTER, 
-                        LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-  // Play button
+  // Play button - positioned manually
   this->play_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->play_btn_, 50, 40);
+  lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, 0);
   lv_obj_t *play_label = lv_label_create(this->play_btn_);
   lv_label_set_text(play_label, LV_SYMBOL_PLAY);
   lv_obj_center(play_label);
@@ -248,6 +246,7 @@ void SimpleVideoPlayer::create_controls_() {
   // Pause button
   this->pause_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->pause_btn_, 50, 40);
+  lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 70, 0);
   lv_obj_t *pause_label = lv_label_create(this->pause_btn_);
   lv_label_set_text(pause_label, LV_SYMBOL_PAUSE);
   lv_obj_center(pause_label);
@@ -256,6 +255,7 @@ void SimpleVideoPlayer::create_controls_() {
   // Stop button
   this->stop_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->stop_btn_, 50, 40);
+  lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 130, 0);
   lv_obj_t *stop_label = lv_label_create(this->stop_btn_);
   lv_label_set_text(stop_label, LV_SYMBOL_STOP);
   lv_obj_center(stop_label);
@@ -263,14 +263,15 @@ void SimpleVideoPlayer::create_controls_() {
 
   // Progress slider
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_flex_grow(this->slider_, 1);
-  lv_obj_set_height(this->slider_, 10);
+  lv_obj_set_size(this->slider_, this->width_ - 300, 10);
+  lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 190, 0);
   lv_slider_set_range(this->slider_, 0, 100);
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
 
   // Frame counter
   this->time_label_ = lv_label_create(this->controls_container_);
   lv_label_set_text(this->time_label_, "Frame: 0");
+  lv_obj_align(this->time_label_, LV_ALIGN_RIGHT_MID, -10, 0);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
 }
 
