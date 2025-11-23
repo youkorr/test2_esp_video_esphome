@@ -6,6 +6,7 @@ DEPENDENCIES = ["lvgl", "mipi_dsi_cam"]
 AUTO_LOAD = ["mipi_dsi_cam"]
 
 CONF_CAMERA_ID = "camera_id"
+CONF_RTSP_URL = "rtsp_url"
 CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
 
@@ -16,9 +17,17 @@ mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
 # Utiliser le nom réel de la classe C++ (MipiDSICamComponent)
 MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 
+
+def validate_camera_or_rtsp(value):
+    if isinstance(value, str) and "://" in value:
+        return {CONF_RTSP_URL: cv.url(value)}
+    return {CONF_CAMERA_ID: cv.use_id(MipiDsiCam)(value)}
+
+
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(LVGLCameraDisplay),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+    cv.Required(CONF_CAMERA_ID): validate_camera_or_rtsp,
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL, default="33ms"): cv.positive_time_period_milliseconds,
 }).extend(cv.COMPONENT_SCHEMA)
@@ -31,5 +40,13 @@ async def to_code(config):
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
     
+
+    camera_conf = config[CONF_CAMERA_ID]
+    if CONF_RTSP_URL in camera_conf:
+        cg.add(var.set_rtsp_url(camera_conf[CONF_RTSP_URL]))
+    else:
+        camera = await cg.get_variable(camera_conf[CONF_CAMERA_ID])
+        cg.add(var.set_camera(camera))
+
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
