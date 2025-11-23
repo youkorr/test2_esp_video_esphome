@@ -104,22 +104,22 @@ class SimpleVideoPlayer : public Component {
 // Action templates for automation
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
-  void play(Ts... x) override { this->parent_->play(); }
+  void play(const Ts &...x) override { this->parent_->play(); }
 };
 
 template<typename... Ts> class PauseAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
-  void play(Ts... x) override { this->parent_->pause(); }
+  void play(const Ts &...x) override { this->parent_->pause(); }
 };
 
 template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
-  void play(Ts... x) override { this->parent_->stop(); }
+  void play(const Ts &...x) override { this->parent_->stop(); }
 };
 
 template<typename... Ts> class ResumeAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
-  void play(Ts... x) override { this->parent_->resume(); }
+  void play(const Ts &...x) override { this->parent_->resume(); }
 };
 
 }  // namespace simple_video_player
