@@ -14,6 +14,7 @@ class LVGLCameraDisplay : public Component {
   void dump_config() override;
 
   void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_rtsp_url(const std::string &rtsp_url) { this->rtsp_url_ = rtsp_url; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
@@ -29,6 +30,7 @@ class LVGLCameraDisplay : public Component {
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
+  std::string rtsp_url_{};
 
   uint32_t update_interval_{33};
   uint32_t last_update_{0};
@@ -36,6 +38,7 @@ class LVGLCameraDisplay : public Component {
   uint32_t frame_count_{0};
   bool first_update_{true};
   bool canvas_warning_shown_{false};
+  bool rtsp_warning_shown_{false};
   bool enabled_{false};  // LVGL camera display enabled/disabled by switch
 
   uint32_t last_fps_time_{0};
