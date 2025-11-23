@@ -350,7 +350,7 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   }
 
   jpeg_decode_cfg_t decode_cfg = {
-      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565_LITTLE_ENDIAN,
+      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
 
