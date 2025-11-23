@@ -99,6 +99,10 @@ class VideoPlayer : public Component {
   bool parse_stsz_(uint32_t size);
   bool parse_stco_(uint32_t size);
   bool parse_stss_(uint32_t size);
+  // Fragmented MP4 support
+  bool parse_moof_(uint32_t size, long mdat_start);
+  bool parse_traf_(uint32_t size, long mdat_start);
+  bool parse_trun_(uint32_t size, long mdat_start);
 
   // --- lecture du fichier H.264 ---
   size_t read_h264_chunk_(uint8_t *buf, size_t max_size);

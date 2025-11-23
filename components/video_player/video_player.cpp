@@ -425,6 +425,7 @@ bool VideoPlayer::parse_mp4_() {
 
   ESP_LOGI(TAG, "Parsing MP4 file, size=%ld bytes", file_size);
 
+  // First pass: parse moov for codec info
   while (ftell(this->file_) < file_size) {
     uint32_t box_size, box_type;
     long box_start = ftell(this->file_);
@@ -447,9 +448,12 @@ bool VideoPlayer::parse_mp4_() {
     ESP_LOGD(TAG, "Box: %.4s size=%u at %ld", type_str, box_size, box_start);
 
     if (box_type == make_fourcc('m', 'o', 'o', 'v')) {
-      if (!this->parse_moov_(box_size - 8)) {
-        return false;
-      }
+      // Parse moov but don't fail if stbl is empty (fragmented MP4)
+      this->parse_moov_(box_size - 8);
+    } else if (box_type == make_fourcc('m', 'o', 'o', 'f')) {
+      // Parse movie fragment for fragmented MP4
+      long moof_data_start = box_start + box_size;  // mdat follows moof
+      this->parse_moof_(box_size - 8, moof_data_start);
     } else {
       // Skip this box
       fseek(this->file_, box_start + box_size, SEEK_SET);
@@ -458,6 +462,8 @@ bool VideoPlayer::parse_mp4_() {
 
   if (this->samples_.empty()) {
     ESP_LOGE(TAG, "No video samples found in MP4");
+  } else {
+    ESP_LOGI(TAG, "Found %u video samples", this->samples_.size());
   }
   return !this->samples_.empty();
 }
@@ -739,6 +745,116 @@ bool VideoPlayer::parse_avcc_(uint32_t size) {
 
   ESP_LOGI(TAG, "avcC: NAL length size=%u, SPS=%u bytes, PPS=%u bytes",
            this->nal_length_size_, this->sps_.size(), this->pps_.size());
+  return true;
+}
+
+// Fragmented MP4 parsing
+bool VideoPlayer::parse_moof_(uint32_t size, long mdat_start) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('t', 'r', 'a', 'f')) {
+      this->parse_traf_(box_size - 8, mdat_start);
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_traf_(uint32_t size, long mdat_start) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('t', 'r', 'u', 'n')) {
+      this->parse_trun_(box_size - 8, mdat_start);
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_trun_(uint32_t size, long mdat_start) {
+  uint8_t version = fgetc(this->file_);
+  uint32_t flags = 0;
+  flags |= fgetc(this->file_) << 16;
+  flags |= fgetc(this->file_) << 8;
+  flags |= fgetc(this->file_);
+
+  uint32_t sample_count = read_be32(this->file_);
+
+  // Data offset (relative to mdat start)
+  int32_t data_offset = 0;
+  if (flags & 0x000001) {
+    data_offset = (int32_t)read_be32(this->file_);
+  }
+
+  // First sample flags
+  if (flags & 0x000004) {
+    read_be32(this->file_);  // skip first_sample_flags
+  }
+
+  // Calculate base offset
+  long offset = mdat_start + 8 + data_offset;  // +8 for mdat header
+
+  ESP_LOGD(TAG, "trun: %u samples, offset=%ld", sample_count, offset);
+
+  for (uint32_t i = 0; i < sample_count; i++) {
+    Mp4Sample sample;
+    sample.duration = 0;
+    sample.is_keyframe = (i == 0);  // Assume first sample in fragment is keyframe
+
+    // Sample duration
+    if (flags & 0x000100) {
+      sample.duration = read_be32(this->file_);
+    }
+
+    // Sample size
+    if (flags & 0x000200) {
+      sample.size = read_be32(this->file_);
+    } else {
+      sample.size = 0;  // Should have default from tfhd
+    }
+
+    // Sample flags
+    if (flags & 0x000400) {
+      uint32_t sample_flags = read_be32(this->file_);
+      // Check if this is a non-sync sample (bit 16)
+      sample.is_keyframe = !(sample_flags & 0x00010000);
+    }
+
+    // Composition time offset
+    if (flags & 0x000800) {
+      if (version == 0) {
+        read_be32(this->file_);  // unsigned
+      } else {
+        read_be32(this->file_);  // signed
+      }
+    }
+
+    sample.offset = offset;
+    offset += sample.size;
+
+    this->samples_.push_back(sample);
+  }
+
   return true;
 }
 
