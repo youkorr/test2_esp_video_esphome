@@ -2,6 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
+#include "esphome/core/automation.h"
 
 #ifdef USE_ESP_IDF
 
@@ -98,6 +99,27 @@ class SimpleVideoPlayer : public Component {
   // Frame timing
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{33};  // ~30fps default
+};
+
+// Action templates for automation
+template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
+ public:
+  void play(Ts... x) override { this->parent_->play(); }
+};
+
+template<typename... Ts> class PauseAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
+ public:
+  void play(Ts... x) override { this->parent_->pause(); }
+};
+
+template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
+ public:
+  void play(Ts... x) override { this->parent_->stop(); }
+};
+
+template<typename... Ts> class ResumeAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
+ public:
+  void play(Ts... x) override { this->parent_->resume(); }
 };
 
 }  // namespace simple_video_player

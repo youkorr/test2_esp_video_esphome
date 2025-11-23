@@ -1,12 +1,19 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
+from esphome import automation
 
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
 SimpleVideoPlayer = simple_video_player_ns.class_("SimpleVideoPlayer", cg.Component)
+
+# Actions
+PlayAction = simple_video_player_ns.class_("PlayAction", automation.Action)
+PauseAction = simple_video_player_ns.class_("PauseAction", automation.Action)
+StopAction = simple_video_player_ns.class_("StopAction", automation.Action)
+ResumeAction = simple_video_player_ns.class_("ResumeAction", automation.Action)
 
 CONF_FILE_PATH = "file_path"
 CONF_WIDTH = "width"
@@ -24,7 +31,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_BUFFER_SIZE, default=100000): cv.positive_int,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
-    cv.Optional(CONF_SHOW_CONTROLS, default=True): cv.boolean,
+    cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -39,3 +46,37 @@ async def to_code(config):
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+
+# Action schemas
+SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(SimpleVideoPlayer),
+})
+
+
+@automation.register_action("simple_video_player.play", PlayAction, SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA)
+async def play_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("simple_video_player.pause", PauseAction, SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA)
+async def pause_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("simple_video_player.stop", StopAction, SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA)
+async def stop_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("simple_video_player.resume", ResumeAction, SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA)
+async def resume_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
