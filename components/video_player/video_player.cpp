@@ -423,6 +423,8 @@ bool VideoPlayer::parse_mp4_() {
   long file_size = ftell(this->file_);
   fseek(this->file_, 0, SEEK_SET);
 
+  ESP_LOGI(TAG, "Parsing MP4 file, size=%ld bytes", file_size);
+
   while (ftell(this->file_) < file_size) {
     uint32_t box_size, box_type;
     long box_start = ftell(this->file_);
@@ -435,6 +437,15 @@ bool VideoPlayer::parse_mp4_() {
       box_size = file_size - box_start;
     }
 
+    char type_str[5] = {
+      (char)((box_type >> 24) & 0xFF),
+      (char)((box_type >> 16) & 0xFF),
+      (char)((box_type >> 8) & 0xFF),
+      (char)(box_type & 0xFF),
+      0
+    };
+    ESP_LOGD(TAG, "Box: %.4s size=%u at %ld", type_str, box_size, box_start);
+
     if (box_type == make_fourcc('m', 'o', 'o', 'v')) {
       if (!this->parse_moov_(box_size - 8)) {
         return false;
@@ -445,6 +456,9 @@ bool VideoPlayer::parse_mp4_() {
     }
   }
 
+  if (this->samples_.empty()) {
+    ESP_LOGE(TAG, "No video samples found in MP4");
+  }
   return !this->samples_.empty();
 }
 
@@ -611,6 +625,8 @@ bool VideoPlayer::parse_stbl_(uint32_t size) {
 
   // Build sample table from chunks
   if (sample_sizes.empty() || chunk_offsets.empty()) {
+    ESP_LOGE(TAG, "MP4 stbl incomplete: sample_sizes=%u, chunk_offsets=%u",
+             sample_sizes.size(), chunk_offsets.size());
     return false;
   }
 
