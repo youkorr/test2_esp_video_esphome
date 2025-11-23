@@ -680,24 +680,27 @@ esp_err_t WebDAVBox3::handle_webdav_propfind(httpd_req_t *req) {
   if (is_directory && (depth_header == "1" || depth_header == "infinity")) {
     auto files = list_dir(path);
     ESP_LOGI(TAG, "Trouvé %d fichiers/dossiers dans %s", files.size(), path.c_str());
-    
+
     for (const auto &file_name : files) {
       std::string file_path = path;
       if (file_path.back() != '/') file_path += '/';
       file_path += file_name;
-      
-      struct stat file_stat;
-      if (stat(file_path.c_str(), &file_stat) == 0) {
-        bool is_file_dir = S_ISDIR(file_stat.st_mode);
+
+      // Use FatFS f_stat instead of VFS stat
+      std::string fatfs_file_path = to_fatfs_path(file_path);
+      FILINFO file_fno;
+      FRESULT fres = f_stat(fatfs_file_path.c_str(), &file_fno);
+      if (fres == FR_OK) {
+        bool is_file_dir = (file_fno.fattrib & AM_DIR) != 0;
         std::string href = uri_path;
         if (href.back() != '/') href += '/';
         href += file_name;
         if (is_file_dir) href += '/';
-        
-        ESP_LOGI(TAG, "Ajout de %s à la réponse PROPFIND (est_dir: %d)", href.c_str(), is_file_dir);
-        response += generate_prop_xml(href, is_file_dir, file_stat.st_mtime, file_stat.st_size);
+
+        ESP_LOGD(TAG, "Ajout de %s à la réponse PROPFIND (est_dir: %d)", href.c_str(), is_file_dir);
+        response += generate_prop_xml(href, is_file_dir, 0, file_fno.fsize);
       } else {
-        ESP_LOGE(TAG, "Impossible d'obtenir le stat pour %s (errno: %d)", file_path.c_str(), errno);
+        ESP_LOGE(TAG, "Impossible d'obtenir le stat pour %s (error: %d)", file_path.c_str(), fres);
       }
     }
   }
