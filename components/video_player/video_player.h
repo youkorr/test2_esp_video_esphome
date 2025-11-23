@@ -27,6 +27,14 @@ extern "C" {
 namespace esphome {
 namespace video_player {
 
+// MP4 sample entry
+struct Mp4Sample {
+  uint32_t offset;
+  uint32_t size;
+  uint32_t duration;
+  bool is_keyframe;
+};
+
 class VideoPlayer : public Component {
  public:
   // --------- Configuration depuis YAML -------------
@@ -35,6 +43,7 @@ class VideoPlayer : public Component {
 
   void set_width(int w) { width_ = w; }
   void set_height(int h) { height_ = h; }
+  void set_resolution(int w, int h) { width_ = w; height_ = h; }
 
   void set_autoplay(bool b) { autoplay_ = b; }
   void set_loop(bool b) { loop_ = b; }
@@ -69,8 +78,26 @@ class VideoPlayer : public Component {
   esp_err_t init_decoder_();
   void deinit_decoder_();
 
+  // --- MP4 parsing ---
+  bool parse_mp4_();
+  bool read_mp4_box_(uint32_t &size, uint32_t &type);
+  bool parse_moov_(uint32_t size);
+  bool parse_trak_(uint32_t size);
+  bool parse_mdia_(uint32_t size);
+  bool parse_minf_(uint32_t size);
+  bool parse_stbl_(uint32_t size);
+  bool parse_stsd_(uint32_t size);
+  bool parse_avc1_(uint32_t size);
+  bool parse_avcc_(uint32_t size);
+  bool parse_stts_(uint32_t size);
+  bool parse_stsc_(uint32_t size);
+  bool parse_stsz_(uint32_t size);
+  bool parse_stco_(uint32_t size);
+  bool parse_stss_(uint32_t size);
+
   // --- lecture du fichier H.264 ---
   size_t read_h264_chunk_(uint8_t *buf, size_t max_size);
+  size_t read_next_mp4_sample_(uint8_t *buf, size_t max_size);
 
   // --- decode une frame ---
   bool feed_and_decode_one_frame_();
@@ -82,7 +109,7 @@ class VideoPlayer : public Component {
   // Membres
   // =================================
 
-  // Chemin du fichier vidéo (ex: "/sdcard/video.h264")
+  // Chemin du fichier vidéo (ex: "/sdcard/video.mp4")
   std::string source_path_;
 
   // Chemin du device H.264 (ex: "/dev/video30")
@@ -97,6 +124,15 @@ class VideoPlayer : public Component {
   bool loop_{false};
   bool playing_{false};
   bool eof_{false};
+
+  // MP4 parsing
+  bool is_mp4_{false};
+  std::vector<Mp4Sample> samples_;
+  size_t current_sample_{0};
+  uint8_t nal_length_size_{4};  // Usually 4 bytes for length prefix
+  std::vector<uint8_t> sps_;
+  std::vector<uint8_t> pps_;
+  bool sps_pps_sent_{false};
 
 #ifdef USE_ESP_IDF
 

@@ -1,6 +1,8 @@
 #include "video_player.h"
 #include "esphome/core/log.h"
 
+#include <algorithm>  // for std::find
+
 #ifdef USE_ESP_IDF
 
 // Tous les headers C doivent être dans extern "C" pour C++
@@ -21,6 +23,23 @@ namespace esphome {
 namespace video_player {
 
 static const char *const TAG = "video_player";
+
+// Helper to read big-endian values
+static uint32_t read_be32(FILE *f) {
+  uint8_t buf[4];
+  if (fread(buf, 1, 4, f) != 4) return 0;
+  return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+}
+
+static uint16_t read_be16(FILE *f) {
+  uint8_t buf[2];
+  if (fread(buf, 1, 2, f) != 2) return 0;
+  return (buf[0] << 8) | buf[1];
+}
+
+static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
+  return (a << 24) | (b << 16) | (c << 8) | d;
+}
 
 // --------------------------------------------------
 // Setup / Loop
@@ -56,7 +75,7 @@ void VideoPlayer::setup() {
   lv_img_set_src(this->img_obj_, &this->img_dsc_);
   lv_obj_center(this->img_obj_);
 
-  // Ouvrir le fichier H.264 (carte SD, SPIFFS, etc.)
+  // Ouvrir le fichier vidéo (carte SD, SPIFFS, etc.)
   if (!this->source_path_.empty()) {
     this->file_ = fopen(this->source_path_.c_str(), "rb");
     if (this->file_ == nullptr) {
@@ -66,6 +85,33 @@ void VideoPlayer::setup() {
       return;
     }
     ESP_LOGI(TAG, "Video source opened: %s", this->source_path_.c_str());
+
+    // Check if file is MP4 by looking at first bytes
+    uint8_t header[8];
+    if (fread(header, 1, 8, this->file_) == 8) {
+      // MP4 files start with a box: size (4 bytes) + type (4 bytes)
+      // Common first boxes: ftyp, moov, free, mdat
+      uint32_t box_type = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
+      if (box_type == make_fourcc('f', 't', 'y', 'p') ||
+          box_type == make_fourcc('m', 'o', 'o', 'v') ||
+          box_type == make_fourcc('f', 'r', 'e', 'e') ||
+          box_type == make_fourcc('m', 'd', 'a', 't')) {
+        this->is_mp4_ = true;
+        ESP_LOGI(TAG, "Detected MP4 container format");
+      }
+    }
+    fseek(this->file_, 0, SEEK_SET);
+
+    // Parse MP4 if detected
+    if (this->is_mp4_) {
+      if (!this->parse_mp4_()) {
+        ESP_LOGE(TAG, "Failed to parse MP4 file");
+        this->mark_failed();
+        return;
+      }
+      ESP_LOGI(TAG, "MP4 parsed: %u samples, SPS=%u bytes, PPS=%u bytes",
+               this->samples_.size(), this->sps_.size(), this->pps_.size());
+    }
   } else {
     ESP_LOGW(TAG, "No video source path set");
     this->mark_failed();
@@ -98,6 +144,11 @@ void VideoPlayer::loop() {
         if (this->file_) {
           fseek(this->file_, 0, SEEK_SET);
           this->eof_ = false;
+          // Reset MP4 sample counter for looping
+          if (this->is_mp4_) {
+            this->current_sample_ = 0;
+            this->sps_pps_sent_ = false;
+          }
         }
       } else {
         this->stop();
@@ -345,11 +396,408 @@ size_t VideoPlayer::read_h264_chunk_(uint8_t *buf, size_t max_size) {
   if (this->file_ == nullptr || this->eof_)
     return 0;
 
+  // For MP4 files, read samples; for raw H.264, read chunks
+  if (this->is_mp4_) {
+    return this->read_next_mp4_sample_(buf, max_size);
+  }
+
   size_t n = fread(buf, 1, max_size, this->file_);
   if (n == 0) {
     this->eof_ = true;
   }
   return n;
+}
+
+// --------------------------------------------------
+// MP4 Parsing
+// --------------------------------------------------
+
+bool VideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
+  size = read_be32(this->file_);
+  type = read_be32(this->file_);
+  return size > 0;
+}
+
+bool VideoPlayer::parse_mp4_() {
+  fseek(this->file_, 0, SEEK_END);
+  long file_size = ftell(this->file_);
+  fseek(this->file_, 0, SEEK_SET);
+
+  while (ftell(this->file_) < file_size) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_size == 0) {
+      box_size = file_size - box_start;
+    }
+
+    if (box_type == make_fourcc('m', 'o', 'o', 'v')) {
+      if (!this->parse_moov_(box_size - 8)) {
+        return false;
+      }
+    } else {
+      // Skip this box
+      fseek(this->file_, box_start + box_size, SEEK_SET);
+    }
+  }
+
+  return !this->samples_.empty();
+}
+
+bool VideoPlayer::parse_moov_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('t', 'r', 'a', 'k')) {
+      if (!this->parse_trak_(box_size - 8)) {
+        // Continue to next track
+      }
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_trak_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('m', 'd', 'i', 'a')) {
+      if (!this->parse_mdia_(box_size - 8)) {
+        return false;
+      }
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_mdia_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('m', 'i', 'n', 'f')) {
+      if (!this->parse_minf_(box_size - 8)) {
+        return false;
+      }
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_minf_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('s', 't', 'b', 'l')) {
+      if (!this->parse_stbl_(box_size - 8)) {
+        return false;
+      }
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_stbl_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  std::vector<uint32_t> sample_sizes;
+  std::vector<uint32_t> chunk_offsets;
+  std::vector<std::pair<uint32_t, uint32_t>> samples_per_chunk;  // first_chunk, samples_per_chunk
+  std::vector<uint32_t> keyframes;
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('s', 't', 's', 'd')) {
+      // Sample description - contains avc1/avcC
+      this->parse_stsd_(box_size - 8);
+    } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
+      // Sample sizes
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t sample_size = read_be32(this->file_);
+      uint32_t sample_count = read_be32(this->file_);
+
+      if (sample_size == 0) {
+        for (uint32_t i = 0; i < sample_count; i++) {
+          sample_sizes.push_back(read_be32(this->file_));
+        }
+      } else {
+        sample_sizes.assign(sample_count, sample_size);
+      }
+    } else if (box_type == make_fourcc('s', 't', 'c', 'o')) {
+      // Chunk offsets
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t entry_count = read_be32(this->file_);
+      for (uint32_t i = 0; i < entry_count; i++) {
+        chunk_offsets.push_back(read_be32(this->file_));
+      }
+    } else if (box_type == make_fourcc('c', 'o', '6', '4')) {
+      // 64-bit chunk offsets
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t entry_count = read_be32(this->file_);
+      for (uint32_t i = 0; i < entry_count; i++) {
+        fseek(this->file_, 4, SEEK_CUR);  // Skip high 32 bits
+        chunk_offsets.push_back(read_be32(this->file_));
+      }
+    } else if (box_type == make_fourcc('s', 't', 's', 'c')) {
+      // Sample-to-chunk
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t entry_count = read_be32(this->file_);
+      for (uint32_t i = 0; i < entry_count; i++) {
+        uint32_t first_chunk = read_be32(this->file_);
+        uint32_t spc = read_be32(this->file_);
+        fseek(this->file_, 4, SEEK_CUR);  // sample_description_index
+        samples_per_chunk.push_back({first_chunk, spc});
+      }
+    } else if (box_type == make_fourcc('s', 't', 's', 's')) {
+      // Sync samples (keyframes)
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t entry_count = read_be32(this->file_);
+      for (uint32_t i = 0; i < entry_count; i++) {
+        keyframes.push_back(read_be32(this->file_));
+      }
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  // Build sample table from chunks
+  if (sample_sizes.empty() || chunk_offsets.empty()) {
+    return false;
+  }
+
+  // Default: 1 sample per chunk if stsc is missing
+  if (samples_per_chunk.empty()) {
+    samples_per_chunk.push_back({1, 1});
+  }
+
+  size_t sample_idx = 0;
+  size_t spc_idx = 0;
+  uint32_t current_spc = samples_per_chunk[0].second;
+
+  for (size_t chunk_idx = 0; chunk_idx < chunk_offsets.size(); chunk_idx++) {
+    // Check if we need to update samples_per_chunk
+    if (spc_idx + 1 < samples_per_chunk.size() &&
+        chunk_idx + 1 >= samples_per_chunk[spc_idx + 1].first) {
+      spc_idx++;
+      current_spc = samples_per_chunk[spc_idx].second;
+    }
+
+    uint32_t offset = chunk_offsets[chunk_idx];
+
+    for (uint32_t s = 0; s < current_spc && sample_idx < sample_sizes.size(); s++) {
+      Mp4Sample sample;
+      sample.offset = offset;
+      sample.size = sample_sizes[sample_idx];
+      sample.duration = 0;
+      sample.is_keyframe = keyframes.empty() ||
+                          std::find(keyframes.begin(), keyframes.end(), sample_idx + 1) != keyframes.end();
+
+      this->samples_.push_back(sample);
+      offset += sample.size;
+      sample_idx++;
+    }
+  }
+
+  ESP_LOGI(TAG, "Built sample table: %u samples from %u chunks",
+           this->samples_.size(), chunk_offsets.size());
+  return true;
+}
+
+bool VideoPlayer::parse_stsd_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  fseek(this->file_, 4, SEEK_CUR);  // version/flags
+  uint32_t entry_count = read_be32(this->file_);
+
+  for (uint32_t i = 0; i < entry_count && ftell(this->file_) < end; i++) {
+    uint32_t entry_size = read_be32(this->file_);
+    uint32_t entry_type = read_be32(this->file_);
+    long entry_start = ftell(this->file_) - 8;
+
+    if (entry_type == make_fourcc('a', 'v', 'c', '1') ||
+        entry_type == make_fourcc('a', 'v', 'c', '3')) {
+      this->parse_avc1_(entry_size - 8);
+    }
+
+    fseek(this->file_, entry_start + entry_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_avc1_(uint32_t size) {
+  long end = ftell(this->file_) + size;
+
+  // Skip visual sample entry header (78 bytes)
+  fseek(this->file_, 78, SEEK_CUR);
+
+  while (ftell(this->file_) < end) {
+    uint32_t box_size, box_type;
+    long box_start = ftell(this->file_);
+
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      break;
+    }
+
+    if (box_type == make_fourcc('a', 'v', 'c', 'C')) {
+      this->parse_avcc_(box_size - 8);
+    }
+
+    fseek(this->file_, box_start + box_size, SEEK_SET);
+  }
+
+  return true;
+}
+
+bool VideoPlayer::parse_avcc_(uint32_t size) {
+  (void)fgetc(this->file_);  // config_version - unused
+  fseek(this->file_, 3, SEEK_CUR);  // profile, compatibility, level
+
+  uint8_t length_size_minus_one = fgetc(this->file_);
+  this->nal_length_size_ = (length_size_minus_one & 0x03) + 1;
+
+  // SPS
+  uint8_t num_sps = fgetc(this->file_) & 0x1F;
+  for (int i = 0; i < num_sps; i++) {
+    uint16_t sps_len = read_be16(this->file_);
+    this->sps_.resize(sps_len);
+    fread(this->sps_.data(), 1, sps_len, this->file_);
+  }
+
+  // PPS
+  uint8_t num_pps = fgetc(this->file_);
+  for (int i = 0; i < num_pps; i++) {
+    uint16_t pps_len = read_be16(this->file_);
+    this->pps_.resize(pps_len);
+    fread(this->pps_.data(), 1, pps_len, this->file_);
+  }
+
+  ESP_LOGI(TAG, "avcC: NAL length size=%u, SPS=%u bytes, PPS=%u bytes",
+           this->nal_length_size_, this->sps_.size(), this->pps_.size());
+  return true;
+}
+
+size_t VideoPlayer::read_next_mp4_sample_(uint8_t *buf, size_t max_size) {
+  if (this->file_ == nullptr || this->eof_) {
+    return 0;
+  }
+
+  size_t written = 0;
+
+  // Send SPS/PPS first (as Annex-B NAL units)
+  if (!this->sps_pps_sent_) {
+    // Start code + SPS
+    if (!this->sps_.empty() && written + 4 + this->sps_.size() <= max_size) {
+      buf[written++] = 0x00;
+      buf[written++] = 0x00;
+      buf[written++] = 0x00;
+      buf[written++] = 0x01;
+      memcpy(buf + written, this->sps_.data(), this->sps_.size());
+      written += this->sps_.size();
+    }
+
+    // Start code + PPS
+    if (!this->pps_.empty() && written + 4 + this->pps_.size() <= max_size) {
+      buf[written++] = 0x00;
+      buf[written++] = 0x00;
+      buf[written++] = 0x00;
+      buf[written++] = 0x01;
+      memcpy(buf + written, this->pps_.data(), this->pps_.size());
+      written += this->pps_.size();
+    }
+
+    this->sps_pps_sent_ = true;
+    if (written > 0) {
+      return written;
+    }
+  }
+
+  // Read next sample
+  if (this->current_sample_ >= this->samples_.size()) {
+    this->eof_ = true;
+    return 0;
+  }
+
+  Mp4Sample &sample = this->samples_[this->current_sample_];
+  fseek(this->file_, sample.offset, SEEK_SET);
+
+  // Read sample and convert from AVCC to Annex-B
+  size_t remaining = sample.size;
+  while (remaining > 0 && written < max_size) {
+    // Read NAL length
+    uint32_t nal_len = 0;
+    for (int i = 0; i < this->nal_length_size_; i++) {
+      nal_len = (nal_len << 8) | fgetc(this->file_);
+    }
+    remaining -= this->nal_length_size_;
+
+    if (nal_len > remaining || written + 4 + nal_len > max_size) {
+      break;
+    }
+
+    // Write Annex-B start code
+    buf[written++] = 0x00;
+    buf[written++] = 0x00;
+    buf[written++] = 0x00;
+    buf[written++] = 0x01;
+
+    // Read NAL data
+    fread(buf + written, 1, nal_len, this->file_);
+    written += nal_len;
+    remaining -= nal_len;
+  }
+
+  this->current_sample_++;
+  return written;
 }
 
 bool VideoPlayer::feed_and_decode_one_frame_() {
