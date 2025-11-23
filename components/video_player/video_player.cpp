@@ -61,6 +61,9 @@ void VideoPlayer::setup() {
   lv_img_set_src(this->img_obj_, &this->img_dsc_);
   lv_obj_center(this->img_obj_);
 
+  // Hide initially until first frame is decoded
+  lv_obj_add_flag(this->img_obj_, LV_OBJ_FLAG_HIDDEN);
+
   // Ouvrir le fichier vidéo (carte SD, SPIFFS, etc.)
   if (!this->source_path_.empty()) {
     this->file_ = fopen(this->source_path_.c_str(), "rb");
@@ -874,6 +877,11 @@ void VideoPlayer::update_lvgl_frame_(const uint8_t *rgb565, size_t len) {
 
   lv_img_set_src(this->img_obj_, &this->img_dsc_);
   lv_obj_invalidate(this->img_obj_);
+
+  // Show image if it was hidden
+  if (lv_obj_has_flag(this->img_obj_, LV_OBJ_FLAG_HIDDEN)) {
+    lv_obj_clear_flag(this->img_obj_, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 }  // namespace video_player
