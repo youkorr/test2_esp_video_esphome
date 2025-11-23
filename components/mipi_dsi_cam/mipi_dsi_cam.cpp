@@ -8,6 +8,8 @@
 #include <string.h>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>

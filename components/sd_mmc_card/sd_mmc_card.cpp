@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <vector>
 #include <cstdio>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #include "math.h"
 #include "esphome/core/log.h"
