@@ -6,8 +6,20 @@
 #include "esp_http_client.h"
 #include "driver/jpeg_decode.h"
 
+// H264 decoder
+extern "C" {
+#include "esp_h264_dec.h"
+}
+
+#include "lwip/sockets.h"
+
 namespace esphome {
 namespace network_camera {
+
+enum class Protocol {
+  MJPEG,
+  RTSP,
+};
 
 class NetworkCamera : public Component {
  public:
@@ -20,6 +32,13 @@ class NetworkCamera : public Component {
   void set_height(uint16_t height) { this->height_ = height; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
+  void set_protocol(const std::string &protocol) {
+    if (protocol == "rtsp") {
+      this->protocol_ = Protocol::RTSP;
+    } else {
+      this->protocol_ = Protocol::MJPEG;
+    }
+  }
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -32,6 +51,7 @@ class NetworkCamera : public Component {
   std::string url_{};
   uint16_t width_{640};
   uint16_t height_{480};
+  Protocol protocol_{Protocol::MJPEG};
 
   lv_obj_t *canvas_obj_{nullptr};
 
@@ -41,7 +61,7 @@ class NetworkCamera : public Component {
   uint32_t frame_count_{0};
   bool first_update_{true};
   bool canvas_warning_shown_{false};
-  bool enabled_{true};  // Enabled by default for network camera
+  bool enabled_{true};
 
   lv_timer_t *lvgl_timer_{nullptr};
 
@@ -60,7 +80,7 @@ class NetworkCamera : public Component {
   size_t jpeg_buffer_size_{0};
   size_t jpeg_data_len_{0};
 
-  // HTTP client
+  // HTTP client (MJPEG)
   esp_http_client_handle_t http_client_{nullptr};
   bool stream_connected_{false};
 
@@ -73,14 +93,46 @@ class NetworkCamera : public Component {
   MjpegState mjpeg_state_{MjpegState::SEARCHING_BOUNDARY};
   size_t content_length_{0};
 
+  // RTSP client
+  int rtsp_socket_{-1};
+  int rtp_socket_{-1};
+  uint16_t rtp_port_{0};
+  std::string rtsp_session_{};
+  int cseq_{1};
+
+  // H264 decoder
+  esp_h264_dec_handle_t h264_decoder_{nullptr};
+
+  // H264 receive buffer
+  uint8_t *h264_buffer_{nullptr};
+  size_t h264_buffer_size_{0};
+  size_t h264_data_len_{0};
+
+  // YUV buffer for H264 output
+  uint8_t *yuv_buffer_{nullptr};
+  size_t yuv_buffer_size_{0};
+
+  // Common methods
   bool init_buffers_();
   bool init_jpeg_decoder_();
-  bool connect_stream_();
-  void disconnect_stream_();
-  bool fetch_jpeg_frame_();
-  bool decode_jpeg_to_rgb565_();
   void update_canvas_();
   void swap_buffers_();
+
+  // MJPEG methods
+  bool connect_mjpeg_stream_();
+  void disconnect_mjpeg_stream_();
+  bool fetch_jpeg_frame_();
+  bool decode_jpeg_to_rgb565_();
+
+  // RTSP methods
+  bool connect_rtsp_stream_();
+  void disconnect_rtsp_stream_();
+  bool init_h264_decoder_();
+  bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "");
+  bool parse_rtsp_response_(std::string &response);
+  bool fetch_rtp_frame_();
+  bool decode_h264_to_yuv_();
+  void convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height);
 };
 
 }  // namespace network_camera

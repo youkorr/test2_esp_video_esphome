@@ -3,18 +3,22 @@
 #include "esphome/core/application.h"
 
 #include <cstring>
+#include <netdb.h>
+#include <arpa/inet.h>
 
 namespace esphome {
 namespace network_camera {
 
 static const char *const TAG = "network_camera";
 
-// Maximum JPEG buffer size (adjust based on resolution)
+// Maximum buffer sizes
 static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG
+static const size_t MAX_H264_SIZE = 256 * 1024;  // 256KB for H264 NAL units
 
 void NetworkCamera::setup() {
-  ESP_LOGCONFIG(TAG, "Setting up Network Camera (MJPEG)...");
+  ESP_LOGCONFIG(TAG, "Setting up Network Camera...");
   ESP_LOGI(TAG, "  URL: %s", this->url_.c_str());
+  ESP_LOGI(TAG, "  Protocol: %s", this->protocol_ == Protocol::RTSP ? "RTSP/H264" : "MJPEG");
   ESP_LOGI(TAG, "  Resolution: %ux%u", this->width_, this->height_);
   ESP_LOGI(TAG, "  Update interval: %u ms", this->update_interval_);
 
@@ -24,13 +28,21 @@ void NetworkCamera::setup() {
     return;
   }
 
-  if (!this->init_jpeg_decoder_()) {
-    ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
-    this->mark_failed();
-    return;
+  if (this->protocol_ == Protocol::MJPEG) {
+    if (!this->init_jpeg_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
+      this->mark_failed();
+      return;
+    }
+  } else {
+    if (!this->init_h264_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize H264 decoder");
+      this->mark_failed();
+      return;
+    }
   }
 
-  ESP_LOGI(TAG, "Network Camera initialized (not connected yet)");
+  ESP_LOGI(TAG, "Network Camera initialized");
 }
 
 void NetworkCamera::loop() {
@@ -38,9 +50,15 @@ void NetworkCamera::loop() {
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     ESP_LOGI(TAG, "Starting Network Camera display...");
 
-    // Connect to stream
-    if (!this->connect_stream_()) {
-      ESP_LOGE(TAG, "Failed to connect to MJPEG stream");
+    bool connected = false;
+    if (this->protocol_ == Protocol::MJPEG) {
+      connected = this->connect_mjpeg_stream_();
+    } else {
+      connected = this->connect_rtsp_stream_();
+    }
+
+    if (!connected) {
+      ESP_LOGE(TAG, "Failed to connect to stream");
       return;
     }
 
@@ -57,31 +75,53 @@ void NetworkCamera::loop() {
     ESP_LOGI(TAG, "Stopping Network Camera display...");
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
-    this->disconnect_stream_();
+
+    if (this->protocol_ == Protocol::MJPEG) {
+      this->disconnect_mjpeg_stream_();
+    } else {
+      this->disconnect_rtsp_stream_();
+    }
+
     ESP_LOGI(TAG, "Network Camera display stopped");
   }
 }
 
 void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
   NetworkCamera *cam = static_cast<NetworkCamera *>(timer->user_data);
-  if (cam != nullptr && cam->stream_connected_) {
-    if (cam->fetch_jpeg_frame_()) {
-      if (cam->decode_jpeg_to_rgb565_()) {
-        cam->update_canvas_();
-        cam->swap_buffers_();
-        cam->frame_count_++;
+  if (cam == nullptr || !cam->stream_connected_) {
+    return;
+  }
 
-        // Log FPS every 100 frames
-        if (cam->frame_count_ % 100 == 0) {
-          static uint32_t last_time = 0;
-          uint32_t now = millis();
-          if (last_time > 0) {
-            float fps = 100000.0f / (now - last_time);
-            ESP_LOGI(TAG, "Frames: %u - FPS: %.1f", cam->frame_count_, fps);
-          }
-          last_time = now;
-        }
+  bool frame_ready = false;
+
+  if (cam->protocol_ == Protocol::MJPEG) {
+    if (cam->fetch_jpeg_frame_()) {
+      frame_ready = cam->decode_jpeg_to_rgb565_();
+    }
+  } else {
+    if (cam->fetch_rtp_frame_()) {
+      if (cam->decode_h264_to_yuv_()) {
+        cam->convert_yuv420_to_rgb565_(cam->yuv_buffer_, cam->current_decode_buffer_,
+                                       cam->width_, cam->height_);
+        frame_ready = true;
       }
+    }
+  }
+
+  if (frame_ready) {
+    cam->update_canvas_();
+    cam->swap_buffers_();
+    cam->frame_count_++;
+
+    // Log FPS every 100 frames
+    if (cam->frame_count_ % 100 == 0) {
+      static uint32_t last_time = 0;
+      uint32_t now = millis();
+      if (last_time > 0) {
+        float fps = 100000.0f / (now - last_time);
+        ESP_LOGI(TAG, "Frames: %u - FPS: %.1f", cam->frame_count_, fps);
+      }
+      last_time = now;
     }
   }
 }
@@ -102,19 +142,31 @@ bool NetworkCamera::init_buffers_() {
   this->current_display_buffer_ = this->rgb565_buffer_a_;
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
 
-  // Allocate JPEG receive buffer
-  this->jpeg_buffer_size_ = MAX_JPEG_SIZE;
-  this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(this->jpeg_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (this->protocol_ == Protocol::MJPEG) {
+    // Allocate JPEG receive buffer
+    this->jpeg_buffer_size_ = MAX_JPEG_SIZE;
+    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(this->jpeg_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
-  if (this->jpeg_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes)", this->jpeg_buffer_size_);
-    return false;
+    if (this->jpeg_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes)", this->jpeg_buffer_size_);
+      return false;
+    }
+  } else {
+    // Allocate H264 and YUV buffers
+    this->h264_buffer_size_ = MAX_H264_SIZE;
+    this->h264_buffer_ = (uint8_t *)heap_caps_malloc(this->h264_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    // YUV420: width * height * 1.5 bytes
+    this->yuv_buffer_size_ = this->width_ * this->height_ * 3 / 2;
+    this->yuv_buffer_ = (uint8_t *)heap_caps_malloc(this->yuv_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    if (this->h264_buffer_ == nullptr || this->yuv_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate H264/YUV buffers");
+      return false;
+    }
   }
 
-  ESP_LOGI(TAG, "Buffers allocated:");
-  ESP_LOGI(TAG, "  RGB565: 2x %u bytes", this->rgb565_buffer_size_);
-  ESP_LOGI(TAG, "  JPEG: %u bytes", this->jpeg_buffer_size_);
-
+  ESP_LOGI(TAG, "Buffers allocated successfully");
   return true;
 }
 
@@ -134,7 +186,25 @@ bool NetworkCamera::init_jpeg_decoder_() {
   return true;
 }
 
-bool NetworkCamera::connect_stream_() {
+bool NetworkCamera::init_h264_decoder_() {
+  esp_h264_dec_cfg_t dec_cfg = {};
+  dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
+
+  esp_h264_err_t ret = esp_h264_dec_open(&dec_cfg, &this->h264_decoder_);
+  if (ret != ESP_H264_ERR_OK) {
+    ESP_LOGE(TAG, "Failed to create H264 decoder: %d", ret);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "H264 decoder initialized");
+  return true;
+}
+
+// ============================================================================
+// MJPEG Methods
+// ============================================================================
+
+bool NetworkCamera::connect_mjpeg_stream_() {
   if (this->stream_connected_) {
     return true;
   }
@@ -162,7 +232,7 @@ bool NetworkCamera::connect_stream_() {
   int content_length = esp_http_client_fetch_headers(this->http_client_);
   int status_code = esp_http_client_get_status_code(this->http_client_);
 
-  ESP_LOGI(TAG, "Connected to stream - Status: %d, Content-Length: %d", status_code, content_length);
+  ESP_LOGI(TAG, "MJPEG connected - Status: %d", status_code);
 
   if (status_code != 200) {
     ESP_LOGE(TAG, "HTTP error: %d", status_code);
@@ -177,7 +247,7 @@ bool NetworkCamera::connect_stream_() {
   return true;
 }
 
-void NetworkCamera::disconnect_stream_() {
+void NetworkCamera::disconnect_mjpeg_stream_() {
   if (this->http_client_ != nullptr) {
     esp_http_client_close(this->http_client_);
     esp_http_client_cleanup(this->http_client_);
@@ -191,7 +261,6 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  // Read data from stream
   uint8_t temp_buffer[4096];
   static uint8_t parse_buffer[8192];
   static size_t parse_buffer_len = 0;
@@ -199,22 +268,21 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
     ESP_LOGE(TAG, "Stream read error");
-    this->disconnect_stream_();
+    this->disconnect_mjpeg_stream_();
     return false;
   }
   if (read_len == 0) {
-    return false;  // No data available
+    return false;
   }
 
   // Append to parse buffer
   if (parse_buffer_len + read_len > sizeof(parse_buffer)) {
-    parse_buffer_len = 0;  // Reset on overflow
+    parse_buffer_len = 0;
   }
   memcpy(parse_buffer + parse_buffer_len, temp_buffer, read_len);
   parse_buffer_len += read_len;
 
-  // Parse MJPEG stream
-  // Look for JPEG markers (FFD8 = start, FFD9 = end)
+  // Parse MJPEG stream - look for JPEG markers
   size_t i = 0;
   while (i < parse_buffer_len - 1) {
     if (this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
@@ -222,7 +290,6 @@ bool NetworkCamera::fetch_jpeg_frame_() {
       if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD8) {
         this->jpeg_data_len_ = 0;
         this->mjpeg_state_ = MjpegState::READING_CONTENT;
-        // Copy start marker
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xD8;
         i += 2;
@@ -232,11 +299,9 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     } else if (this->mjpeg_state_ == MjpegState::READING_CONTENT) {
       // Copy data and look for end marker (FFD9)
       if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD9) {
-        // End of JPEG
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xD9;
 
-        // Move remaining data to start of buffer
         size_t remaining = parse_buffer_len - i - 2;
         if (remaining > 0) {
           memmove(parse_buffer, parse_buffer + i + 2, remaining);
@@ -246,19 +311,17 @@ bool NetworkCamera::fetch_jpeg_frame_() {
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
 
         if (this->first_update_) {
-          ESP_LOGI(TAG, "First JPEG frame received: %u bytes", this->jpeg_data_len_);
+          ESP_LOGI(TAG, "First JPEG frame: %u bytes", this->jpeg_data_len_);
           this->first_update_ = false;
         }
 
-        return true;  // Complete frame received
+        return true;
       }
 
-      // Copy byte to JPEG buffer
       if (this->jpeg_data_len_ < this->jpeg_buffer_size_) {
         this->jpeg_buffer_[this->jpeg_data_len_++] = parse_buffer[i];
       } else {
-        // Buffer overflow, reset
-        ESP_LOGW(TAG, "JPEG buffer overflow, resetting");
+        ESP_LOGW(TAG, "JPEG buffer overflow");
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
         this->jpeg_data_len_ = 0;
       }
@@ -266,14 +329,13 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     }
   }
 
-  // Keep unparsed data
   if (i < parse_buffer_len && this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
     size_t remaining = parse_buffer_len - i;
     memmove(parse_buffer, parse_buffer + i, remaining);
     parse_buffer_len = remaining;
   }
 
-  return false;  // No complete frame yet
+  return false;
 }
 
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
@@ -281,26 +343,16 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  jpeg_decode_picture_info_t pic_info = {};
-
-  // Get JPEG info first
-  esp_err_t ret = jpeg_decoder_get_info(this->jpeg_buffer_, this->jpeg_data_len_, &pic_info);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to get JPEG info: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  // Configure decode
   jpeg_decode_cfg_t decode_cfg = {
       .output_format = JPEG_DECODE_OUT_FORMAT_RGB565_BIG_ENDIAN,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
 
   uint32_t out_size = 0;
-  ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
-                             this->jpeg_buffer_, this->jpeg_data_len_,
-                             this->current_decode_buffer_, this->rgb565_buffer_size_,
-                             &out_size);
+  esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
+                                       this->jpeg_buffer_, this->jpeg_data_len_,
+                                       this->current_decode_buffer_, this->rgb565_buffer_size_,
+                                       &out_size);
 
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
@@ -310,10 +362,391 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   return true;
 }
 
+// ============================================================================
+// RTSP Methods
+// ============================================================================
+
+bool NetworkCamera::connect_rtsp_stream_() {
+  if (this->stream_connected_) {
+    return true;
+  }
+
+  // Parse RTSP URL: rtsp://host:port/path
+  std::string url = this->url_;
+  if (url.find("rtsp://") != 0) {
+    ESP_LOGE(TAG, "Invalid RTSP URL");
+    return false;
+  }
+
+  url = url.substr(7);  // Remove "rtsp://"
+
+  size_t port_pos = url.find(':');
+  size_t path_pos = url.find('/');
+
+  std::string host;
+  uint16_t port = 554;
+  std::string path = "/";
+
+  if (port_pos != std::string::npos && port_pos < path_pos) {
+    host = url.substr(0, port_pos);
+    port = atoi(url.substr(port_pos + 1, path_pos - port_pos - 1).c_str());
+  } else if (path_pos != std::string::npos) {
+    host = url.substr(0, path_pos);
+  } else {
+    host = url;
+  }
+
+  if (path_pos != std::string::npos) {
+    path = url.substr(path_pos);
+  }
+
+  ESP_LOGI(TAG, "Connecting to RTSP: %s:%u%s", host.c_str(), port, path.c_str());
+
+  // Create TCP socket for RTSP
+  this->rtsp_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+  if (this->rtsp_socket_ < 0) {
+    ESP_LOGE(TAG, "Failed to create socket");
+    return false;
+  }
+
+  struct sockaddr_in server_addr;
+  memset(&server_addr, 0, sizeof(server_addr));
+  server_addr.sin_family = AF_INET;
+  server_addr.sin_port = htons(port);
+
+  struct hostent *he = gethostbyname(host.c_str());
+  if (he == nullptr) {
+    ESP_LOGE(TAG, "DNS resolution failed for %s", host.c_str());
+    close(this->rtsp_socket_);
+    this->rtsp_socket_ = -1;
+    return false;
+  }
+  memcpy(&server_addr.sin_addr, he->h_addr, he->h_length);
+
+  if (connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+    ESP_LOGE(TAG, "Failed to connect to RTSP server");
+    close(this->rtsp_socket_);
+    this->rtsp_socket_ = -1;
+    return false;
+  }
+
+  // Set socket timeout
+  struct timeval tv;
+  tv.tv_sec = 5;
+  tv.tv_usec = 0;
+  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+  std::string full_url = "rtsp://" + host + ":" + std::to_string(port) + path;
+
+  // OPTIONS
+  if (!this->send_rtsp_request_("OPTIONS", full_url)) {
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  // DESCRIBE
+  if (!this->send_rtsp_request_("DESCRIBE", full_url, "Accept: application/sdp\r\n")) {
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  // Create RTP socket (UDP)
+  this->rtp_socket_ = socket(AF_INET, SOCK_DGRAM, 0);
+  if (this->rtp_socket_ < 0) {
+    ESP_LOGE(TAG, "Failed to create RTP socket");
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  // Bind RTP socket to local port
+  struct sockaddr_in rtp_addr;
+  memset(&rtp_addr, 0, sizeof(rtp_addr));
+  rtp_addr.sin_family = AF_INET;
+  rtp_addr.sin_addr.s_addr = INADDR_ANY;
+  rtp_addr.sin_port = 0;  // Let OS choose port
+
+  if (bind(this->rtp_socket_, (struct sockaddr *)&rtp_addr, sizeof(rtp_addr)) < 0) {
+    ESP_LOGE(TAG, "Failed to bind RTP socket");
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  // Get assigned port
+  socklen_t addr_len = sizeof(rtp_addr);
+  getsockname(this->rtp_socket_, (struct sockaddr *)&rtp_addr, &addr_len);
+  this->rtp_port_ = ntohs(rtp_addr.sin_port);
+
+  // Set non-blocking
+  int flags = fcntl(this->rtp_socket_, F_GETFL, 0);
+  fcntl(this->rtp_socket_, F_SETFL, flags | O_NONBLOCK);
+
+  // SETUP
+  char transport[128];
+  snprintf(transport, sizeof(transport), "Transport: RTP/AVP;unicast;client_port=%u-%u\r\n",
+           this->rtp_port_, this->rtp_port_ + 1);
+
+  std::string setup_url = full_url + "/trackID=1";
+  if (!this->send_rtsp_request_("SETUP", setup_url, transport)) {
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  // PLAY
+  char session_header[128];
+  snprintf(session_header, sizeof(session_header), "Session: %s\r\n", this->rtsp_session_.c_str());
+  if (!this->send_rtsp_request_("PLAY", full_url, session_header)) {
+    this->disconnect_rtsp_stream_();
+    return false;
+  }
+
+  this->stream_connected_ = true;
+  ESP_LOGI(TAG, "RTSP stream connected, RTP port: %u", this->rtp_port_);
+
+  return true;
+}
+
+void NetworkCamera::disconnect_rtsp_stream_() {
+  if (this->rtsp_socket_ >= 0) {
+    // Send TEARDOWN
+    if (!this->rtsp_session_.empty()) {
+      char session_header[128];
+      snprintf(session_header, sizeof(session_header), "Session: %s\r\n", this->rtsp_session_.c_str());
+      this->send_rtsp_request_("TEARDOWN", this->url_, session_header);
+    }
+    close(this->rtsp_socket_);
+    this->rtsp_socket_ = -1;
+  }
+  if (this->rtp_socket_ >= 0) {
+    close(this->rtp_socket_);
+    this->rtp_socket_ = -1;
+  }
+  this->stream_connected_ = false;
+  this->rtsp_session_.clear();
+}
+
+bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
+                                       const std::string &extra_headers) {
+  char request[512];
+  snprintf(request, sizeof(request),
+           "%s %s RTSP/1.0\r\n"
+           "CSeq: %d\r\n"
+           "%s"
+           "\r\n",
+           method.c_str(), url.c_str(), this->cseq_++, extra_headers.c_str());
+
+  if (send(this->rtsp_socket_, request, strlen(request), 0) < 0) {
+    ESP_LOGE(TAG, "Failed to send RTSP %s", method.c_str());
+    return false;
+  }
+
+  // Receive response
+  char response[2048];
+  int len = recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
+  if (len <= 0) {
+    ESP_LOGE(TAG, "Failed to receive RTSP response");
+    return false;
+  }
+  response[len] = '\0';
+
+  // Check status
+  if (strstr(response, "200 OK") == nullptr) {
+    ESP_LOGE(TAG, "RTSP %s failed: %s", method.c_str(), response);
+    return false;
+  }
+
+  // Extract Session ID from SETUP response
+  if (method == "SETUP") {
+    char *session = strstr(response, "Session: ");
+    if (session) {
+      session += 9;
+      char *end = strpbrk(session, ";\r\n");
+      if (end) {
+        this->rtsp_session_ = std::string(session, end - session);
+        ESP_LOGI(TAG, "RTSP Session: %s", this->rtsp_session_.c_str());
+      }
+    }
+  }
+
+  ESP_LOGI(TAG, "RTSP %s OK", method.c_str());
+  return true;
+}
+
+bool NetworkCamera::fetch_rtp_frame_() {
+  if (this->rtp_socket_ < 0) {
+    return false;
+  }
+
+  uint8_t rtp_packet[1500];
+  struct sockaddr_in from_addr;
+  socklen_t from_len = sizeof(from_addr);
+
+  // Accumulate NAL units into h264_buffer_
+  bool frame_complete = false;
+
+  while (!frame_complete) {
+    ssize_t len = recvfrom(this->rtp_socket_, rtp_packet, sizeof(rtp_packet), 0,
+                           (struct sockaddr *)&from_addr, &from_len);
+
+    if (len <= 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;  // No more data available
+      }
+      return false;
+    }
+
+    if (len < 12) {
+      continue;  // Invalid RTP packet
+    }
+
+    // RTP header
+    // uint8_t version = (rtp_packet[0] >> 6) & 0x03;
+    // uint8_t padding = (rtp_packet[0] >> 5) & 0x01;
+    // uint8_t extension = (rtp_packet[0] >> 4) & 0x01;
+    // uint8_t cc = rtp_packet[0] & 0x0F;
+    uint8_t marker = (rtp_packet[1] >> 7) & 0x01;
+    // uint8_t pt = rtp_packet[1] & 0x7F;
+
+    int header_len = 12;  // Basic RTP header
+
+    // H264 NAL unit starts after RTP header
+    uint8_t *nal_data = rtp_packet + header_len;
+    int nal_len = len - header_len;
+
+    if (nal_len <= 0) {
+      continue;
+    }
+
+    // Check NAL unit type
+    uint8_t nal_type = nal_data[0] & 0x1F;
+
+    if (nal_type >= 1 && nal_type <= 23) {
+      // Single NAL unit
+      if (this->h264_data_len_ + nal_len + 4 < this->h264_buffer_size_) {
+        // Add start code
+        this->h264_buffer_[this->h264_data_len_++] = 0x00;
+        this->h264_buffer_[this->h264_data_len_++] = 0x00;
+        this->h264_buffer_[this->h264_data_len_++] = 0x00;
+        this->h264_buffer_[this->h264_data_len_++] = 0x01;
+        memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data, nal_len);
+        this->h264_data_len_ += nal_len;
+      }
+    } else if (nal_type == 28) {
+      // FU-A (Fragmentation Unit)
+      if (nal_len < 2) continue;
+
+      uint8_t fu_header = nal_data[1];
+      bool start = (fu_header >> 7) & 0x01;
+      bool end = (fu_header >> 6) & 0x01;
+      uint8_t fu_type = fu_header & 0x1F;
+
+      if (start) {
+        // Start of fragmented NAL
+        uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
+        if (this->h264_data_len_ + nal_len + 3 < this->h264_buffer_size_) {
+          this->h264_buffer_[this->h264_data_len_++] = 0x00;
+          this->h264_buffer_[this->h264_data_len_++] = 0x00;
+          this->h264_buffer_[this->h264_data_len_++] = 0x00;
+          this->h264_buffer_[this->h264_data_len_++] = 0x01;
+          this->h264_buffer_[this->h264_data_len_++] = reconstructed;
+          memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data + 2, nal_len - 2);
+          this->h264_data_len_ += nal_len - 2;
+        }
+      } else {
+        // Continuation
+        if (this->h264_data_len_ + nal_len - 2 < this->h264_buffer_size_) {
+          memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data + 2, nal_len - 2);
+          this->h264_data_len_ += nal_len - 2;
+        }
+      }
+    }
+
+    // Marker bit indicates end of frame
+    if (marker) {
+      frame_complete = true;
+    }
+  }
+
+  if (frame_complete && this->h264_data_len_ > 0) {
+    if (this->first_update_) {
+      ESP_LOGI(TAG, "First H264 frame: %u bytes", this->h264_data_len_);
+      this->first_update_ = false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+bool NetworkCamera::decode_h264_to_yuv_() {
+  if (this->h264_data_len_ == 0 || this->h264_decoder_ == nullptr) {
+    return false;
+  }
+
+  esp_h264_dec_in_frame_t in_frame = {};
+  in_frame.raw_data.buffer = this->h264_buffer_;
+  in_frame.raw_data.len = this->h264_data_len_;
+
+  esp_h264_dec_out_frame_t out_frame = {};
+  out_frame.raw_data.buffer = this->yuv_buffer_;
+  out_frame.raw_data.len = this->yuv_buffer_size_;
+
+  esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
+
+  // Reset buffer for next frame
+  this->h264_data_len_ = 0;
+
+  if (ret != ESP_H264_ERR_OK) {
+    return false;
+  }
+
+  return out_frame.decoded_frame_num > 0;
+}
+
+void NetworkCamera::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height) {
+  // YUV420 (I420) layout:
+  // Y plane: width * height bytes
+  // U plane: (width/2) * (height/2) bytes
+  // V plane: (width/2) * (height/2) bytes
+
+  uint8_t *y_plane = yuv;
+  uint8_t *u_plane = yuv + width * height;
+  uint8_t *v_plane = u_plane + (width / 2) * (height / 2);
+
+  uint16_t *rgb = (uint16_t *)rgb565;
+
+  for (int j = 0; j < height; j++) {
+    for (int i = 0; i < width; i++) {
+      int y_idx = j * width + i;
+      int uv_idx = (j / 2) * (width / 2) + (i / 2);
+
+      int y = y_plane[y_idx];
+      int u = u_plane[uv_idx] - 128;
+      int v = v_plane[uv_idx] - 128;
+
+      // YUV to RGB conversion
+      int r = y + ((v * 359) >> 8);
+      int g = y - ((u * 88 + v * 183) >> 8);
+      int b = y + ((u * 454) >> 8);
+
+      // Clamp
+      r = r < 0 ? 0 : (r > 255 ? 255 : r);
+      g = g < 0 ? 0 : (g > 255 ? 255 : g);
+      b = b < 0 ? 0 : (b > 255 ? 255 : b);
+
+      // RGB565: RRRRR GGGGGG BBBBB
+      rgb[y_idx] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+    }
+  }
+}
+
+// ============================================================================
+// Common Methods
+// ============================================================================
+
 void NetworkCamera::update_canvas_() {
   if (this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
-      ESP_LOGW(TAG, "Canvas not configured yet");
+      ESP_LOGW(TAG, "Canvas not configured");
       this->canvas_warning_shown_ = true;
     }
     return;
@@ -325,7 +758,6 @@ void NetworkCamera::update_canvas_() {
 }
 
 void NetworkCamera::swap_buffers_() {
-  // Swap decode and display buffers
   uint8_t *temp = this->current_display_buffer_;
   this->current_display_buffer_ = this->current_decode_buffer_;
   this->current_decode_buffer_ = temp;
@@ -343,11 +775,11 @@ void NetworkCamera::configure_canvas(lv_obj_t *canvas) {
 }
 
 void NetworkCamera::dump_config() {
-  ESP_LOGCONFIG(TAG, "Network Camera (MJPEG):");
+  ESP_LOGCONFIG(TAG, "Network Camera:");
   ESP_LOGCONFIG(TAG, "  URL: %s", this->url_.c_str());
+  ESP_LOGCONFIG(TAG, "  Protocol: %s", this->protocol_ == Protocol::RTSP ? "RTSP/H264" : "MJPEG");
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->width_, this->height_);
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
-  ESP_LOGCONFIG(TAG, "  Canvas configured: %s", this->canvas_obj_ ? "YES" : "NO");
 }
 
 }  // namespace network_camera
