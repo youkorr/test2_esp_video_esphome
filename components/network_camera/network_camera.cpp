@@ -554,7 +554,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
   }
 
   // Set socket to non-blocking for reading interleaved data
-  int flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
+  flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
   fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
 
   this->stream_connected_ = true;
