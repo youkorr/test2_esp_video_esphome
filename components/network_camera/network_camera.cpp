@@ -187,12 +187,18 @@ bool NetworkCamera::init_jpeg_decoder_() {
 }
 
 bool NetworkCamera::init_h264_decoder_() {
-  esp_h264_dec_cfg_t dec_cfg = {};
+  esp_h264_dec_cfg_sw_t dec_cfg = {};
   dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
 
-  esp_h264_err_t ret = esp_h264_dec_open(&dec_cfg, &this->h264_decoder_);
+  esp_h264_err_t ret = esp_h264_dec_sw_new(&dec_cfg, &this->h264_decoder_);
   if (ret != ESP_H264_ERR_OK) {
     ESP_LOGE(TAG, "Failed to create H264 decoder: %d", ret);
+    return false;
+  }
+
+  ret = esp_h264_dec_open(this->h264_decoder_);
+  if (ret != ESP_H264_ERR_OK) {
+    ESP_LOGE(TAG, "Failed to open H264 decoder: %d", ret);
     return false;
   }
 
@@ -344,7 +350,7 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   }
 
   jpeg_decode_cfg_t decode_cfg = {
-      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565_BIG_ENDIAN,
+      .output_format = JPEG_DECODE_OUT_FORMAT_RGB565_LITTLE_ENDIAN,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
 
@@ -687,19 +693,35 @@ bool NetworkCamera::decode_h264_to_yuv_() {
   in_frame.raw_data.len = this->h264_data_len_;
 
   esp_h264_dec_out_frame_t out_frame = {};
-  out_frame.raw_data.buffer = this->yuv_buffer_;
-  out_frame.raw_data.len = this->yuv_buffer_size_;
 
-  esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
+  // Process all NAL units in the buffer
+  bool frame_decoded = false;
+  while (in_frame.raw_data.len > 0) {
+    esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
+    if (ret != ESP_H264_ERR_OK) {
+      break;
+    }
+
+    // Check if we got a decoded frame
+    if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
+      // Copy decoded YUV data to our buffer
+      size_t copy_size = out_frame.out_size;
+      if (copy_size > this->yuv_buffer_size_) {
+        copy_size = this->yuv_buffer_size_;
+      }
+      memcpy(this->yuv_buffer_, out_frame.outbuf, copy_size);
+      frame_decoded = true;
+    }
+
+    // Move to next NAL unit
+    in_frame.raw_data.buffer += in_frame.consume;
+    in_frame.raw_data.len -= in_frame.consume;
+  }
 
   // Reset buffer for next frame
   this->h264_data_len_ = 0;
 
-  if (ret != ESP_H264_ERR_OK) {
-    return false;
-  }
-
-  return out_frame.decoded_frame_num > 0;
+  return frame_decoded;
 }
 
 void NetworkCamera::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height) {

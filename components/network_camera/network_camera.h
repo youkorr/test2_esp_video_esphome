@@ -9,6 +9,7 @@
 // H264 decoder
 extern "C" {
 #include "esp_h264_dec.h"
+#include "esp_h264_dec_sw.h"
 }
 
 #include "lwip/sockets.h"
