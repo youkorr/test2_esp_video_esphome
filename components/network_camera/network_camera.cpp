@@ -5,6 +5,7 @@
 #include <cstring>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include "mbedtls/base64.h"
 
 namespace esphome {
 namespace network_camera {
@@ -392,7 +393,15 @@ bool NetworkCamera::connect_rtsp_stream_() {
   if (at_pos != std::string::npos) {
     credentials = url.substr(0, at_pos);
     url = url.substr(at_pos + 1);  // Remove credentials from URL
-    ESP_LOGI(TAG, "RTSP credentials found");
+
+    // Encode credentials to Base64 for Basic auth
+    size_t out_len = 0;
+    unsigned char base64_buf[256];
+    if (mbedtls_base64_encode(base64_buf, sizeof(base64_buf), &out_len,
+                              (const unsigned char *)credentials.c_str(), credentials.length()) == 0) {
+      this->rtsp_auth_ = std::string((char *)base64_buf, out_len);
+      ESP_LOGI(TAG, "RTSP credentials encoded for Basic auth");
+    }
   }
 
   // Now parse host:port/path
@@ -546,13 +555,21 @@ void NetworkCamera::disconnect_rtsp_stream_() {
 
 bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
                                        const std::string &extra_headers) {
-  char request[512];
+  char request[768];
+
+  // Build Authorization header if credentials available
+  std::string auth_header;
+  if (!this->rtsp_auth_.empty()) {
+    auth_header = "Authorization: Basic " + this->rtsp_auth_ + "\r\n";
+  }
+
   snprintf(request, sizeof(request),
            "%s %s RTSP/1.0\r\n"
            "CSeq: %d\r\n"
            "%s"
+           "%s"
            "\r\n",
-           method.c_str(), url.c_str(), this->cseq_++, extra_headers.c_str());
+           method.c_str(), url.c_str(), this->cseq_++, auth_header.c_str(), extra_headers.c_str());
 
   if (send(this->rtsp_socket_, request, strlen(request), 0) < 0) {
     ESP_LOGE(TAG, "Failed to send RTSP %s", method.c_str());

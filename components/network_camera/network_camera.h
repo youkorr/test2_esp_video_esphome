@@ -99,6 +99,7 @@ class NetworkCamera : public Component {
   int rtp_socket_{-1};
   uint16_t rtp_port_{0};
   std::string rtsp_session_{};
+  std::string rtsp_auth_{};  // Base64 encoded credentials
   int cseq_{1};
 
   // H264 decoder
