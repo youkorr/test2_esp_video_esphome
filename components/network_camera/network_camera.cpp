@@ -5,7 +5,9 @@
 #include <cstring>
 #include <netdb.h>
 #include <arpa/inet.h>
+#include <sys/select.h>
 #include "mbedtls/base64.h"
+#include "esp_task_wdt.h"
 
 namespace esphome {
 namespace network_camera {
@@ -452,21 +454,73 @@ bool NetworkCamera::connect_rtsp_stream_() {
   }
   memcpy(&server_addr.sin_addr, he->h_addr, he->h_length);
 
-  // Set connection timeout
-  struct timeval tv;
-  tv.tv_sec = 10;
-  tv.tv_usec = 0;
-  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
   ESP_LOGI(TAG, "Attempting TCP connection to %s:%u...", host.c_str(), port);
 
-  if (connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-    ESP_LOGE(TAG, "Failed to connect to RTSP server: %s (errno %d)", strerror(errno), errno);
+  // Set socket to non-blocking for connect
+  int flags = fcntl(this->rtsp_socket_, F_GETFL, 0);
+  fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
+
+  // Start non-blocking connect
+  int ret = connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  if (ret < 0 && errno != EINPROGRESS) {
+    ESP_LOGE(TAG, "Failed to start connect: %s (errno %d)", strerror(errno), errno);
     close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
     return false;
   }
+
+  // Wait for connection with timeout, feeding watchdog periodically
+  bool connected = false;
+  for (int i = 0; i < 10; i++) {  // 10 x 500ms = 5 seconds max
+    fd_set write_fds;
+    FD_ZERO(&write_fds);
+    FD_SET(this->rtsp_socket_, &write_fds);
+
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 500000;  // 500ms
+
+    int sel_ret = select(this->rtsp_socket_ + 1, nullptr, &write_fds, nullptr, &tv);
+
+    if (sel_ret > 0) {
+      // Check if connection succeeded
+      int so_error;
+      socklen_t len = sizeof(so_error);
+      getsockopt(this->rtsp_socket_, SOL_SOCKET, SO_ERROR, &so_error, &len);
+
+      if (so_error == 0) {
+        connected = true;
+        break;
+      } else {
+        ESP_LOGE(TAG, "Connection failed: %s (errno %d)", strerror(so_error), so_error);
+        break;
+      }
+    } else if (sel_ret < 0) {
+      ESP_LOGE(TAG, "Select error: %s", strerror(errno));
+      break;
+    }
+
+    // Feed watchdog and yield
+    esp_task_wdt_reset();
+    vTaskDelay(1);
+  }
+
+  if (!connected) {
+    ESP_LOGE(TAG, "Connection timeout");
+    close(this->rtsp_socket_);
+    this->rtsp_socket_ = -1;
+    return false;
+  }
+
+  // Set back to blocking for RTSP commands
+  fcntl(this->rtsp_socket_, F_SETFL, flags);
+
+  // Set read/write timeout
+  struct timeval tv;
+  tv.tv_sec = 5;
+  tv.tv_usec = 0;
+  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
   ESP_LOGI(TAG, "TCP connection established");
 
