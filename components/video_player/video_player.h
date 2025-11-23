@@ -57,6 +57,7 @@ class VideoPlayer : public Component {
   void play();
   void pause();
   void stop();
+  bool is_playing() const { return playing_; }
 
   float get_setup_priority() const override {
     return setup_priority::LATE;  // comme le LVGL panel
