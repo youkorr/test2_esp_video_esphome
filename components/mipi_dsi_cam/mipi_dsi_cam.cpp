@@ -8,7 +8,9 @@
 #include <string.h>
 #include <vector>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <fcntl.h>
+#include "ff.h"
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -600,7 +602,12 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   if (!dir.empty()) {
     struct stat st;
     if (stat(dir.c_str(), &st) != 0) {
-      mkdir(dir.c_str(), 0755);
+      // Convert VFS path to FatFS path (e.g., /sdcard/photos -> 0:/photos)
+      std::string fatfs_dir = dir;
+      if (fatfs_dir.find("/sdcard") == 0) {
+        fatfs_dir = "0:" + fatfs_dir.substr(7);
+      }
+      f_mkdir(fatfs_dir.c_str());
     }
   }
 
@@ -717,6 +724,7 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   // Custom Format Support (OV5647) - All resolutions supported
   // ============================================================================
+  bool custom_format_applied = false;
   if (this->sensor_name_ == "ov5647") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
@@ -724,6 +732,9 @@ bool MipiDSICamComponent::start_streaming() {
     if (width == 640 && height == 480) {
       custom_format = &ov5647_format_640x480_raw8_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+    } else if (width == 800 && height == 600) {
+      custom_format = &ov5647_format_800x600_raw8_50fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
     } else if (width == 800 && height == 640) {
       custom_format = &ov5647_format_800x640_raw8_50fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
@@ -740,6 +751,7 @@ bool MipiDSICamComponent::start_streaming() {
       } else {
         ESP_LOGI(TAG, "✅ Custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
+        custom_format_applied = true;
       }
     }
   }
@@ -859,15 +871,39 @@ bool MipiDSICamComponent::start_streaming() {
 
   // SET le format pour que le driver calcule sizeimage
   if (ioctl(this->video_fd_, VIDIOC_S_FMT, &fmt) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
-    ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
-    ESP_LOGE(TAG, "This may indicate:");
-    ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
-    ESP_LOGE(TAG, "  2. ESP-IDF 5.4.2+ has stricter format validation");
-    ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
-    close(this->video_fd_);
-    this->video_fd_ = -1;
-    return false;
+    if (custom_format_applied) {
+      ESP_LOGW(TAG, "VIDIOC_S_FMT failed but custom sensor format was applied");
+      ESP_LOGW(TAG, "Trying to query the actual format from driver...");
+
+      // Query what format the driver actually set
+      memset(&fmt, 0, sizeof(fmt));
+      fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+      if (ioctl(this->video_fd_, VIDIOC_G_FMT, &fmt) == 0) {
+        ESP_LOGI(TAG, "Driver format: %ux%u, sizeimage=%u",
+                 fmt.fmt.pix.width, fmt.fmt.pix.height, fmt.fmt.pix.sizeimage);
+        // Use the custom format dimensions
+        fmt.fmt.pix.width = width;
+        fmt.fmt.pix.height = height;
+        fmt.fmt.pix.sizeimage = width * height * 2; // RGB565 = 2 bytes per pixel
+        ESP_LOGI(TAG, "Using custom format dimensions: %ux%u", width, height);
+      } else {
+        // Fallback: calculate sizeimage manually
+        fmt.fmt.pix.width = width;
+        fmt.fmt.pix.height = height;
+        fmt.fmt.pix.sizeimage = width * height * 2;
+        ESP_LOGW(TAG, "Could not query format, using calculated values");
+      }
+    } else {
+      ESP_LOGE(TAG, "VIDIOC_S_FMT failed: %s", strerror(errno));
+      ESP_LOGE(TAG, "Requested: %ux%u RGB565", width, height);
+      ESP_LOGE(TAG, "This may indicate:");
+      ESP_LOGE(TAG, "  1. Sensor %s doesn't support this resolution in RGB565", this->sensor_name_.c_str());
+      ESP_LOGE(TAG, "  2. ESP-IDF 5.4.2+ has stricter format validation");
+      ESP_LOGE(TAG, "  3. Try a different resolution (VGA/1080P) or pixel format");
+      close(this->video_fd_);
+      this->video_fd_ = -1;
+      return false;
+    }
   }
 
   // 3. Vérifier le format appliqué (le driver peut ajuster)
