@@ -798,7 +798,7 @@ void SimpleVideoPlayer::create_ui_() {
   lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(this->touch_layer_, touch_cb_, LV_EVENT_CLICKED, this);
 
-  if (this->show_controls_) {
+  if (this->controls_enabled_) {
     this->create_controls_();
     // Create hide timer
     this->hide_timer_ = lv_timer_create(hide_timer_cb_, this->hide_delay_ms_, this);

@@ -55,7 +55,7 @@ class SimpleVideoPlayer : public Component {
   void set_buffer_size(size_t size) { buffer_size_ = size; }
   void set_auto_play(bool b) { auto_play_ = b; }
   void set_loop(bool b) { loop_ = b; }
-  void set_show_controls(bool b) { show_controls_ = b; }
+  void set_show_controls(bool b) { controls_enabled_ = b; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
 
   void setup() override;
@@ -132,7 +132,7 @@ class SimpleVideoPlayer : public Component {
   size_t buffer_size_{100000};
   bool auto_play_{true};
   bool loop_{true};
-  bool show_controls_{true};
+  bool controls_enabled_{true};
 
   // State
   PlayerState state_{PlayerState::STOPPED};
