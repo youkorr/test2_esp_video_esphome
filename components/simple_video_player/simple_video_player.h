@@ -53,13 +53,17 @@ class SimpleVideoPlayer : public Component {
   void update_display_();
   void create_ui_();
   void create_controls_();
-  
+  void show_controls_();
+  void hide_controls_();
+
   // LVGL callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
   static void timer_cb_(lv_timer_t *timer);
+  static void hide_timer_cb_(lv_timer_t *timer);
+  static void touch_cb_(lv_event_t *e);
 
   // Configuration
   std::string file_path_;
@@ -96,11 +100,17 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *slider_{nullptr};
   lv_obj_t *time_label_{nullptr};
   lv_obj_t *controls_container_{nullptr};
+  lv_obj_t *touch_layer_{nullptr};
   lv_timer_t *playback_timer_{nullptr};
+  lv_timer_t *hide_timer_{nullptr};
 
   // Frame timing
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{33};  // ~30fps default
+
+  // Controls visibility
+  bool controls_visible_{true};
+  uint32_t hide_delay_ms_{3000};  // Auto-hide after 3 seconds
 };
 
 // Action templates for automation

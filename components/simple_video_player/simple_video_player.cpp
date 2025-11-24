@@ -219,8 +219,19 @@ void SimpleVideoPlayer::create_ui_() {
                        this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_center(this->canvas_);
 
+  // Create invisible touch layer over the canvas
+  this->touch_layer_ = lv_obj_create(parent);
+  lv_obj_remove_style_all(this->touch_layer_);
+  lv_obj_set_size(this->touch_layer_, this->width_, this->height_);
+  lv_obj_center(this->touch_layer_);
+  lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_event_cb(this->touch_layer_, touch_cb_, LV_EVENT_CLICKED, this);
+
   if (this->show_controls_) {
     this->create_controls_();
+    // Create hide timer
+    this->hide_timer_ = lv_timer_create(hide_timer_cb_, this->hide_delay_ms_, this);
+    lv_timer_pause(this->hide_timer_);
   }
 }
 
@@ -289,6 +300,13 @@ void SimpleVideoPlayer::play() {
   if (this->playback_timer_ != nullptr) {
     lv_timer_resume(this->playback_timer_);
   }
+
+  // Start auto-hide timer for controls
+  if (this->hide_timer_ != nullptr && this->controls_visible_) {
+    lv_timer_reset(this->hide_timer_);
+    lv_timer_resume(this->hide_timer_);
+  }
+
   ESP_LOGI(TAG, "Playback started");
 }
 
@@ -301,6 +319,13 @@ void SimpleVideoPlayer::pause() {
   if (this->playback_timer_ != nullptr) {
     lv_timer_pause(this->playback_timer_);
   }
+
+  // Show controls when paused
+  this->show_controls_();
+  if (this->hide_timer_ != nullptr) {
+    lv_timer_pause(this->hide_timer_);
+  }
+
   ESP_LOGI(TAG, "Playback paused");
 }
 
@@ -321,7 +346,7 @@ void SimpleVideoPlayer::stop() {
   if (this->playback_timer_ != nullptr) {
     lv_timer_pause(this->playback_timer_);
   }
-  
+
   if (this->file_ != nullptr) {
     fseek(this->file_, 0, SEEK_SET);
   }
@@ -331,6 +356,12 @@ void SimpleVideoPlayer::stop() {
   // Update slider
   if (this->slider_ != nullptr) {
     lv_slider_set_value(this->slider_, 0, LV_ANIM_OFF);
+  }
+
+  // Show controls when stopped
+  this->show_controls_();
+  if (this->hide_timer_ != nullptr) {
+    lv_timer_pause(this->hide_timer_);
   }
 
   ESP_LOGI(TAG, "Playback stopped");
@@ -371,7 +402,7 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
 
 void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
-  
+
   if (player->state_ != PlayerState::PLAYING) {
     return;
   }
@@ -385,6 +416,49 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     if (!player->loop_) {
       player->stop();
     }
+  }
+}
+
+void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+  player->hide_controls_();
+  lv_timer_pause(timer);
+}
+
+void SimpleVideoPlayer::touch_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  if (player->controls_visible_) {
+    player->hide_controls_();
+  } else {
+    player->show_controls_();
+  }
+}
+
+void SimpleVideoPlayer::show_controls_() {
+  if (this->controls_container_ == nullptr) {
+    return;
+  }
+
+  lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  this->controls_visible_ = true;
+
+  // Start timer to auto-hide during playback
+  if (this->state_ == PlayerState::PLAYING && this->hide_timer_ != nullptr) {
+    lv_timer_reset(this->hide_timer_);
+    lv_timer_resume(this->hide_timer_);
+  }
+}
+
+void SimpleVideoPlayer::hide_controls_() {
+  if (this->controls_container_ == nullptr) {
+    return;
+  }
+
+  lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  this->controls_visible_ = false;
+
+  if (this->hide_timer_ != nullptr) {
+    lv_timer_pause(this->hide_timer_);
   }
 }
 
