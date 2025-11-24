@@ -659,6 +659,7 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
 // ==============================================
 
 bool SimpleVideoPlayer::init_aac_decoder_() {
+#if USE_ESP_AUDIO_CODEC
   if (this->speaker_ == nullptr || !this->has_audio_) {
     return false;
   }
@@ -702,6 +703,10 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
            this->audio_sample_rate_, this->audio_channels_);
 
   return true;
+#else
+  ESP_LOGW(TAG, "AAC decoder not available - esp_audio_codec not found");
+  return false;
+#endif
 }
 
 bool SimpleVideoPlayer::read_next_audio_sample_() {
@@ -733,6 +738,7 @@ bool SimpleVideoPlayer::read_next_audio_sample_() {
 }
 
 bool SimpleVideoPlayer::decode_audio_frame_() {
+#if USE_ESP_AUDIO_CODEC
   if (!this->aac_decoder_ready_ || this->speaker_ == nullptr || this->audio_input_size_ == 0) {
     return false;
   }
@@ -767,6 +773,9 @@ bool SimpleVideoPlayer::decode_audio_frame_() {
   }
 
   return true;
+#else
+  return false;
+#endif
 }
 
 void SimpleVideoPlayer::process_audio_() {
