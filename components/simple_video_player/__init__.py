@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
+from esphome.components import speaker
 
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
@@ -26,6 +27,7 @@ CONF_AUTO_PLAY = "auto_play"
 CONF_LOOP = "loop"
 CONF_SHOW_CONTROLS = "show_controls"
 CONF_PARENT_ID = "parent_id"
+CONF_SPEAKER = "speaker"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -37,6 +39,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
+    cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -55,6 +58,10 @@ async def to_code(config):
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
         cg.add(var.set_parent(parent.obj))
+
+    if CONF_SPEAKER in config:
+        spk = await cg.get_variable(config[CONF_SPEAKER])
+        cg.add(var.set_speaker(spk))
 
 
 # Action schemas

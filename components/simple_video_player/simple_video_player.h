@@ -8,6 +8,7 @@
 
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
+#include "esphome/components/speaker/speaker.h"
 
 // esp-h264 software decoder
 extern "C" {
@@ -15,6 +16,7 @@ extern "C" {
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
 }
+
 
 namespace esphome {
 namespace simple_video_player {
@@ -57,6 +59,7 @@ class SimpleVideoPlayer : public Component {
   void set_loop(bool b) { loop_ = b; }
   void set_show_controls(bool b) { controls_enabled_ = b; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
+  void set_speaker(speaker::Speaker *spk) { speaker_ = spk; }
 
   void setup() override;
   void loop() override;
@@ -104,6 +107,12 @@ class SimpleVideoPlayer : public Component {
   bool parse_stss_(uint32_t size);
   bool read_next_mp4_sample_();
   bool decode_h264_frame_();
+
+  // Audio decoding
+  bool init_aac_decoder_();
+  bool read_next_audio_sample_();
+  bool decode_audio_frame_();
+  void process_audio_();
 
   // YUV to RGB conversion
   void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
@@ -173,6 +182,15 @@ class SimpleVideoPlayer : public Component {
   uint32_t audio_sample_rate_{44100};
   uint8_t audio_channels_{2};
   std::vector<uint8_t> audio_config_;  // AAC config
+
+  // Speaker and audio
+  speaker::Speaker *speaker_{nullptr};
+  void *aac_decoder_{nullptr};
+  uint8_t *audio_input_buffer_{nullptr};
+  uint8_t *audio_output_buffer_{nullptr};
+  size_t audio_input_size_{0};
+  size_t audio_output_size_{0};
+  bool has_audio_{false};
 
   // LVGL objects
   lv_obj_t *parent_{nullptr};

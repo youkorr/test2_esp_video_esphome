@@ -80,6 +80,14 @@ void SimpleVideoPlayer::setup() {
       this->mark_failed();
       return;
     }
+
+    // Initialize audio decoder if speaker is configured
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
+      }
+    }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -601,10 +609,141 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
-  // Simplified esds parsing - just skip it for now
-  // Full implementation would extract AAC config
-  fseek(this->file_, size, SEEK_CUR);
+  long start_pos = ftell(this->file_);
+  long end_pos = start_pos + size;
+
+  // Skip version/flags
+  fseek(this->file_, 4, SEEK_CUR);
+
+  // Parse ES descriptor
+  while (ftell(this->file_) < end_pos) {
+    uint8_t tag;
+    if (fread(&tag, 1, 1, this->file_) != 1) break;
+
+    // Read descriptor length (variable length encoding)
+    uint32_t len = 0;
+    uint8_t b;
+    do {
+      if (fread(&b, 1, 1, this->file_) != 1) break;
+      len = (len << 7) | (b & 0x7F);
+    } while (b & 0x80);
+
+    if (tag == 0x05) {  // DecoderSpecificInfo
+      // This is the AAC config
+      this->audio_config_.resize(len);
+      fread(this->audio_config_.data(), 1, len, this->file_);
+      this->has_audio_ = true;
+      ESP_LOGI(TAG, "Found AAC config: %d bytes", len);
+      break;
+    } else {
+      // Skip other descriptors (but parse nested ones)
+      if (tag == 0x03 || tag == 0x04) {
+        // ES_Descriptor or DecoderConfigDescriptor - continue parsing
+        if (tag == 0x03) {
+          fseek(this->file_, 3, SEEK_CUR);  // Skip ES_ID and flags
+        } else if (tag == 0x04) {
+          fseek(this->file_, 13, SEEK_CUR);  // Skip decoder config
+        }
+      } else {
+        fseek(this->file_, len, SEEK_CUR);
+      }
+    }
+  }
+
+  fseek(this->file_, end_pos, SEEK_SET);
   return true;
+}
+
+// ==============================================
+// AUDIO DECODER
+// ==============================================
+
+bool SimpleVideoPlayer::init_aac_decoder_() {
+  if (this->speaker_ == nullptr || !this->has_audio_) {
+    return false;
+  }
+
+  // Allocate audio buffers
+  this->audio_input_buffer_ = (uint8_t *)heap_caps_malloc(8192,
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  this->audio_output_buffer_ = (uint8_t *)heap_caps_malloc(8192,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+  if (!this->audio_input_buffer_ || !this->audio_output_buffer_) {
+    ESP_LOGE(TAG, "Failed to allocate audio buffers");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "Audio decoder initialized: %d Hz, %d channels",
+           this->audio_sample_rate_, this->audio_channels_);
+
+  return true;
+}
+
+bool SimpleVideoPlayer::read_next_audio_sample_() {
+  if (this->current_audio_sample_ >= this->audio_samples_.size()) {
+    return false;
+  }
+
+  AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
+
+  // Seek to sample position
+  fseek(this->file_, sample.offset, SEEK_SET);
+
+  // Read sample data
+  if (sample.size > 8192) {
+    ESP_LOGW(TAG, "Audio sample too large: %u", sample.size);
+    this->current_audio_sample_++;
+    return false;
+  }
+
+  size_t bytes_read = fread(this->audio_input_buffer_, 1, sample.size, this->file_);
+  if (bytes_read != sample.size) {
+    return false;
+  }
+
+  this->audio_input_size_ = sample.size;
+  this->current_audio_sample_++;
+
+  return true;
+}
+
+bool SimpleVideoPlayer::decode_audio_frame_() {
+  // For now, just pass raw AAC to speaker if it supports decoding
+  // Full implementation would decode AAC to PCM first
+  if (this->speaker_ == nullptr || this->audio_input_size_ == 0) {
+    return false;
+  }
+
+  // Send to speaker (speaker should handle AAC decoding)
+  // This is a simplified approach - real implementation needs proper decoding
+  return true;
+}
+
+void SimpleVideoPlayer::process_audio_() {
+  if (!this->has_audio_ || this->speaker_ == nullptr) {
+    return;
+  }
+
+  // Process audio samples to keep in sync with video
+  // This is a simplified implementation
+  while (this->current_audio_sample_ < this->audio_samples_.size()) {
+    AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
+
+    // Check if this audio sample should be played based on video position
+    if (this->current_video_sample_ > 0) {
+      Mp4Sample &video = this->video_samples_[this->current_video_sample_ - 1];
+      if (sample.timestamp_ms > video.timestamp_ms + 100) {
+        break;  // Audio is ahead, wait
+      }
+    }
+
+    if (this->read_next_audio_sample_()) {
+      this->decode_audio_frame_();
+    } else {
+      break;
+    }
+  }
 }
 
 bool SimpleVideoPlayer::read_next_mp4_sample_() {
@@ -1015,6 +1154,8 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         got_frame = true;
       }
     }
+    // Process audio
+    player->process_audio_();
   }
 
   if (!got_frame) {
