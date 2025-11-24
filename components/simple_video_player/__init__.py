@@ -3,12 +3,10 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
 from esphome.components import speaker
+import os
 
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
-
-# ESP-IDF components needed for H.264 and AAC decoding
-ESP_IDF_COMPONENTS = ["esp_h264", "esp_audio_codec"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
 SimpleVideoPlayer = simple_video_player_ns.class_("SimpleVideoPlayer", cg.Component)
@@ -44,8 +42,6 @@ CONFIG_SCHEMA = cv.Schema({
 
 
 async def to_code(config):
-    import os
-
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
