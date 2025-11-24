@@ -836,20 +836,23 @@ bool VideoPlayer::feed_and_decode_one_frame_() {
   in_frame.pts = 0;
   in_frame.dts = 0;
 
-  // Prepare output frame
+  // Prepare output frame - set buffer capacity
   esp_h264_dec_out_frame_t out_frame = {};
   out_frame.outbuf = this->yuv_buffer_.data();
-  out_frame.out_size = 0;
+  out_frame.out_size = this->yuv_buffer_.size();  // Tell decoder buffer capacity
 
   // Decode
   esp_h264_err_t err = esp_h264_dec_process(this->decoder_, &in_frame, &out_frame);
   if (err != ESP_H264_ERR_OK) {
-    ESP_LOGW(TAG, "Decode failed: err=%d", err);
+    ESP_LOGW(TAG, "Decode failed: err=%d, input_size=%u", err, n);
     return true;  // Continue trying
   }
 
   // Check if we got a decoded frame
   if (out_frame.out_size > 0) {
+    ESP_LOGD(TAG, "Decoded frame: %u bytes (expected %u)",
+             out_frame.out_size, this->yuv_buffer_.size());
+
     // Convert I420 to RGB565
     this->convert_i420_to_rgb565_(this->yuv_buffer_.data(),
                                    this->frame_buffer_.data(),
