@@ -744,9 +744,9 @@ bool SimpleVideoPlayer::decode_audio_frame_() {
   }
 
   // Prepare input frame
-  esp_audio_dec_in_frame_t in_frame = {
+  esp_audio_dec_in_raw_t in_frame = {
     .buffer = this->audio_input_buffer_,
-    .len = (int)this->audio_input_size_,
+    .len = this->audio_input_size_,
     .consumed = 0,
   };
 
