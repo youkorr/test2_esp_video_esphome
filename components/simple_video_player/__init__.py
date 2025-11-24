@@ -7,8 +7,8 @@ from esphome.components import speaker
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
-# ESP-IDF components needed for H.264 decoding
-ESP_IDF_COMPONENTS = ["esp_h264"]
+# ESP-IDF components needed for H.264 and AAC decoding
+ESP_IDF_COMPONENTS = ["esp_h264", "esp_audio_codec"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
 SimpleVideoPlayer = simple_video_player_ns.class_("SimpleVideoPlayer", cg.Component)

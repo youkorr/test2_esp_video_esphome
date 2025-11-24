@@ -663,18 +663,42 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
     return false;
   }
 
-  // Allocate audio buffers
+  // Register AAC decoder
+  esp_audio_dec_register_default();
+
+  // Configure AAC decoder
+  esp_aac_dec_cfg_t aac_cfg = {
+    .aac_plus_enable = true,
+  };
+
+  esp_audio_dec_cfg_t dec_cfg = {
+    .type = ESP_AUDIO_TYPE_AAC,
+    .cfg = &aac_cfg,
+    .cfg_sz = sizeof(aac_cfg),
+  };
+
+  // Create decoder instance
+  esp_audio_err_t ret = esp_audio_dec_open(&dec_cfg, &this->aac_decoder_);
+  if (ret != ESP_AUDIO_ERR_OK || this->aac_decoder_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create AAC decoder: %d", ret);
+    return false;
+  }
+
+  // Allocate audio buffers (larger for decoded PCM)
   this->audio_input_buffer_ = (uint8_t *)heap_caps_malloc(8192,
                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  this->audio_output_buffer_ = (uint8_t *)heap_caps_malloc(8192,
+  this->audio_output_buffer_ = (uint8_t *)heap_caps_malloc(16384,
                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
   if (!this->audio_input_buffer_ || !this->audio_output_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate audio buffers");
+    esp_audio_dec_close(this->aac_decoder_);
+    this->aac_decoder_ = nullptr;
     return false;
   }
 
-  ESP_LOGI(TAG, "Audio decoder initialized: %d Hz, %d channels",
+  this->aac_decoder_ready_ = true;
+  ESP_LOGI(TAG, "AAC decoder initialized: %d Hz, %d channels",
            this->audio_sample_rate_, this->audio_channels_);
 
   return true;
@@ -709,14 +733,39 @@ bool SimpleVideoPlayer::read_next_audio_sample_() {
 }
 
 bool SimpleVideoPlayer::decode_audio_frame_() {
-  // For now, just pass raw AAC to speaker if it supports decoding
-  // Full implementation would decode AAC to PCM first
-  if (this->speaker_ == nullptr || this->audio_input_size_ == 0) {
+  if (!this->aac_decoder_ready_ || this->speaker_ == nullptr || this->audio_input_size_ == 0) {
     return false;
   }
 
-  // Send to speaker (speaker should handle AAC decoding)
-  // This is a simplified approach - real implementation needs proper decoding
+  // Prepare input frame
+  esp_audio_dec_in_frame_t in_frame = {
+    .buffer = this->audio_input_buffer_,
+    .len = (int)this->audio_input_size_,
+    .consumed = 0,
+  };
+
+  // Prepare output frame
+  esp_audio_dec_out_frame_t out_frame = {
+    .buffer = this->audio_output_buffer_,
+    .len = 16384,
+    .decoded_size = 0,
+  };
+
+  // Decode AAC to PCM
+  esp_audio_err_t ret = esp_audio_dec_process(this->aac_decoder_, &in_frame, &out_frame);
+  if (ret != ESP_AUDIO_ERR_OK) {
+    ESP_LOGW(TAG, "AAC decode failed: %d", ret);
+    return false;
+  }
+
+  // Send decoded PCM to speaker
+  if (out_frame.decoded_size > 0) {
+    size_t bytes_written = this->speaker_->play(this->audio_output_buffer_, out_frame.decoded_size);
+    if (bytes_written == 0) {
+      ESP_LOGW(TAG, "Failed to write audio to speaker");
+    }
+  }
+
   return true;
 }
 
