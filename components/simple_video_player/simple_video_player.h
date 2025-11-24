@@ -27,6 +27,7 @@ class SimpleVideoPlayer : public Component {
   void set_auto_play(bool b) { auto_play_ = b; }
   void set_loop(bool b) { loop_ = b; }
   void set_show_controls(bool b) { show_controls_ = b; }
+  void set_parent(lv_obj_t *parent) { parent_ = parent; }
 
   void setup() override;
   void loop() override;
@@ -87,6 +88,7 @@ class SimpleVideoPlayer : public Component {
   jpeg_decoder_handle_t decoder_{nullptr};
 
   // LVGL objects
+  lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
   lv_obj_t *play_btn_{nullptr};
   lv_obj_t *pause_btn_{nullptr};

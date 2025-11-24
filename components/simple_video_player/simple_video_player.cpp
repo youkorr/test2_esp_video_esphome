@@ -211,10 +211,10 @@ void SimpleVideoPlayer::update_display_() {
 }
 
 void SimpleVideoPlayer::create_ui_() {
-  lv_obj_t *scr = lv_scr_act();
+  lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
   // Create canvas for video display
-  this->canvas_ = lv_canvas_create(scr);
+  this->canvas_ = lv_canvas_create(parent);
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
                        this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_center(this->canvas_);
@@ -225,10 +225,10 @@ void SimpleVideoPlayer::create_ui_() {
 }
 
 void SimpleVideoPlayer::create_controls_() {
-  lv_obj_t *scr = lv_scr_act();
+  lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
   // Controls container at bottom
-  this->controls_container_ = lv_obj_create(scr);
+  this->controls_container_ = lv_obj_create(parent);
   lv_obj_set_size(this->controls_container_, this->width_, 60);
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);

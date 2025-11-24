@@ -22,6 +22,7 @@ CONF_BUFFER_SIZE = "buffer_size"
 CONF_AUTO_PLAY = "auto_play"
 CONF_LOOP = "loop"
 CONF_SHOW_CONTROLS = "show_controls"
+CONF_PARENT_ID = "parent_id"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -32,6 +33,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
+    cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -46,6 +48,10 @@ async def to_code(config):
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+    if CONF_PARENT_ID in config:
+        parent = await cg.get_variable(config[CONF_PARENT_ID])
+        cg.add(var.set_parent(parent.obj))
 
 
 # Action schemas
