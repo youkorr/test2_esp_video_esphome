@@ -3,7 +3,6 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
 from esphome.components import speaker
-import os
 
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
@@ -44,31 +43,6 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-
-    # Add esp_audio_codec include paths manually
-    component_dir = os.path.dirname(os.path.abspath(__file__))
-    audio_codec_dir = os.path.join(os.path.dirname(component_dir), "esp_audio_codec")
-
-    audio_codec_includes = [
-        "include",
-        "include/decoder",
-        "include/decoder/impl",
-        "include/encoder",
-        "include/encoder/impl",
-        "include/simple_dec",
-    ]
-
-    for inc in audio_codec_includes:
-        inc_path = os.path.join(audio_codec_dir, inc)
-        if os.path.exists(inc_path):
-            cg.add_build_flag(f"-I{inc_path}")
-
-    # Add prebuilt libraries for esp32p4
-    lib_dir = os.path.join(audio_codec_dir, "lib", "esp32p4")
-    if os.path.exists(lib_dir):
-        cg.add_build_flag(f"-L{lib_dir}")
-        cg.add_build_flag("-lesp_audio_codec")
-        cg.add_build_flag("-lesp_audio_simple_dec")
 
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
     cg.add(var.set_width(config[CONF_WIDTH]))
