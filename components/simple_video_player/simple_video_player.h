@@ -17,12 +17,17 @@ extern "C" {
 #include "esp_h264_types.h"
 }
 
-// esp_audio_codec for AAC decoding
+// esp_audio_codec for AAC decoding (optional)
+#if __has_include("esp_audio_dec.h")
+#define USE_ESP_AUDIO_CODEC 1
 extern "C" {
 #include "esp_audio_dec.h"
 #include "esp_audio_dec_reg.h"
 #include "esp_aac_dec.h"
 }
+#else
+#define USE_ESP_AUDIO_CODEC 0
+#endif
 
 
 namespace esphome {
@@ -192,7 +197,11 @@ class SimpleVideoPlayer : public Component {
 
   // Speaker and audio
   speaker::Speaker *speaker_{nullptr};
+#if USE_ESP_AUDIO_CODEC
   esp_audio_dec_handle_t aac_decoder_{nullptr};
+#else
+  void *aac_decoder_{nullptr};
+#endif
   uint8_t *audio_input_buffer_{nullptr};
   uint8_t *audio_output_buffer_{nullptr};
   size_t audio_input_size_{0};
