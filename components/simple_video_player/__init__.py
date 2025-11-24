@@ -63,14 +63,6 @@ async def to_code(config):
         if os.path.exists(inc_path):
             cg.add_build_flag(f"-I{inc_path}")
 
-    # Add source files to compile
-    src_dir = os.path.join(audio_codec_dir, "src")
-    if os.path.exists(src_dir):
-        for src_file in ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]:
-            src_path = os.path.join(src_dir, src_file)
-            if os.path.exists(src_path):
-                cg.add_library(None, src_path)
-
     # Add prebuilt libraries for esp32p4
     lib_dir = os.path.join(audio_codec_dir, "lib", "esp32p4")
     if os.path.exists(lib_dir):
