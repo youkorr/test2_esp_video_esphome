@@ -19,7 +19,7 @@ extern "C" {
 
 // esp_audio_codec for AAC decoding
 extern "C" {
-#include "esp_audio_dec.h"
+#include "include/decoder/esp_audio_dec.h"
 #include "esp_audio_dec_reg.h"
 #include "esp_aac_dec.h"
 }
