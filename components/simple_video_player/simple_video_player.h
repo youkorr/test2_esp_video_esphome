@@ -9,6 +9,13 @@
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
 
+// esp-h264 software decoder
+extern "C" {
+#include "esp_h264_dec.h"
+#include "esp_h264_dec_sw.h"
+#include "esp_h264_types.h"
+}
+
 namespace esphome {
 namespace simple_video_player {
 
@@ -16,6 +23,28 @@ enum class PlayerState {
   STOPPED,
   PLAYING,
   PAUSED
+};
+
+enum class MediaFormat {
+  UNKNOWN,
+  MJPEG,
+  MP4_H264
+};
+
+// MP4 sample entry
+struct Mp4Sample {
+  uint32_t offset;
+  uint32_t size;
+  uint32_t duration;
+  uint32_t timestamp_ms;
+  bool is_keyframe;
+};
+
+// Audio sample entry
+struct AudioSample {
+  uint32_t offset;
+  uint32_t size;
+  uint32_t timestamp_ms;
 };
 
 class SimpleVideoPlayer : public Component {
@@ -46,10 +75,41 @@ class SimpleVideoPlayer : public Component {
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
 
  protected:
-  bool init_decoder_();
+  // Format detection
+  MediaFormat detect_format_();
+
+  // MJPEG decoder
+  bool init_jpeg_decoder_();
+  bool read_next_mjpeg_frame_();
+  bool decode_mjpeg_frame_();
+
+  // H.264/MP4 decoder
+  bool init_h264_decoder_();
+  bool parse_mp4_();
+  bool read_mp4_box_(uint32_t &size, uint32_t &type);
+  bool parse_moov_(uint32_t size);
+  bool parse_trak_(uint32_t size, bool is_video);
+  bool parse_mdia_(uint32_t size, bool is_video);
+  bool parse_minf_(uint32_t size, bool is_video);
+  bool parse_stbl_(uint32_t size, bool is_video);
+  bool parse_stsd_(uint32_t size, bool is_video);
+  bool parse_avc1_(uint32_t size);
+  bool parse_avcc_(uint32_t size);
+  bool parse_mp4a_(uint32_t size);
+  bool parse_esds_(uint32_t size);
+  bool parse_stts_(uint32_t size, bool is_video);
+  bool parse_stsc_(uint32_t size, bool is_video);
+  bool parse_stsz_(uint32_t size, bool is_video);
+  bool parse_stco_(uint32_t size, bool is_video);
+  bool parse_stss_(uint32_t size);
+  bool read_next_mp4_sample_();
+  bool decode_h264_frame_();
+
+  // YUV to RGB conversion
+  void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
+
+  // Common functions
   bool open_video_file_();
-  bool read_next_frame_();
-  bool decode_frame_();
   void update_display_();
   void create_ui_();
   void create_controls_();
@@ -76,6 +136,7 @@ class SimpleVideoPlayer : public Component {
 
   // State
   PlayerState state_{PlayerState::STOPPED};
+  MediaFormat format_{MediaFormat::UNKNOWN};
   FILE *file_{nullptr};
   long file_size_{0};
   long current_pos_{0};
@@ -83,13 +144,35 @@ class SimpleVideoPlayer : public Component {
   uint32_t total_frames_{0};
 
   // Buffers
-  uint8_t *jpeg_buffer_{nullptr};
+  uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};
-  size_t jpeg_size_{0};
+  size_t input_size_{0};
   size_t rgb_buffer_size_{0};
 
-  // JPEG decoder
-  jpeg_decoder_handle_t decoder_{nullptr};
+  // JPEG decoder (for MJPEG)
+  jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+
+  // H.264 decoder (for MP4)
+  esp_h264_dec_handle_t h264_decoder_{nullptr};
+  std::vector<uint8_t> yuv_buffer_;
+  bool h264_decoder_ready_{false};
+
+  // MP4 parsing
+  std::vector<Mp4Sample> video_samples_;
+  std::vector<AudioSample> audio_samples_;
+  size_t current_video_sample_{0};
+  size_t current_audio_sample_{0};
+  uint8_t nal_length_size_{4};
+  std::vector<uint8_t> sps_;
+  std::vector<uint8_t> pps_;
+  bool sps_pps_sent_{false};
+  uint32_t video_timescale_{1000};
+  uint32_t audio_timescale_{44100};
+
+  // Audio info
+  uint32_t audio_sample_rate_{44100};
+  uint8_t audio_channels_{2};
+  std::vector<uint8_t> audio_config_;  // AAC config
 
   // LVGL objects
   lv_obj_t *parent_{nullptr};
