@@ -247,13 +247,16 @@ void VideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int 
       int uv_idx = (j / 2) * (w / 2) + (i / 2);
 
       int y = y_plane[y_idx];
-      int u = u_plane[uv_idx] - 128;
-      int v = v_plane[uv_idx] - 128;
+      int cb = u_plane[uv_idx] - 128;  // Cb (U)
+      int cr = v_plane[uv_idx] - 128;  // Cr (V)
 
-      // YUV to RGB conversion
-      int r = y + ((359 * v) >> 8);
-      int g = y - ((88 * u + 183 * v) >> 8);
-      int b = y + ((454 * u) >> 8);
+      // YCbCr to RGB conversion (BT.601)
+      // R = Y + 1.402 * Cr
+      // G = Y - 0.344 * Cb - 0.714 * Cr
+      // B = Y + 1.772 * Cb
+      int r = y + ((359 * cr) >> 8);
+      int g = y - ((88 * cb + 183 * cr) >> 8);
+      int b = y + ((454 * cb) >> 8);
 
       // Clamp values
       r = r < 0 ? 0 : (r > 255 ? 255 : r);
