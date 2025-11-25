@@ -573,17 +573,22 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   long start_pos = ftell(this->file_);
   long end_pos = start_pos + size;
 
-  // Skip to avcC box
-  fseek(this->file_, 78, SEEK_CUR);  // Skip fixed avc1 header
+  // Skip to avcC box (78 bytes: 6 reserved + 2 data_ref + 70 fields)
+  fseek(this->file_, 78, SEEK_CUR);
+  clearerr(this->file_);  // Clear any flags from previous operations
 
-  while (ftell(this->file_) < end_pos) {
+  while (ftell(this->file_) < end_pos && !feof(this->file_)) {
     uint32_t box_size, box_type;
-    if (!this->read_mp4_box_(box_size, box_type)) break;
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      clearerr(this->file_);  // Clear EOF flag immediately
+      break;
+    }
 
     if (box_type == make_fourcc('a', 'v', 'c', 'C')) {
       this->parse_avcc_(box_size - 8);
+      break;  // We found avcC, no need to continue
     } else {
-      if (box_size > 8) {
+      if (box_size > 8 && box_size < 1000000) {  // Sanity check
         fseek(this->file_, box_size - 8, SEEK_CUR);
       }
     }
@@ -591,7 +596,7 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
 
   // Ensure we're at the end of this box
   fseek(this->file_, end_pos, SEEK_SET);
-  clearerr(this->file_);  // Clear EOF flag in case we read past end
+  clearerr(this->file_);  // Clear any EOF/error flags
 
   return true;
 }
@@ -636,15 +641,20 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
 
   // Skip to esds
   fseek(this->file_, 28, SEEK_CUR);  // Skip fixed mp4a header
+  clearerr(this->file_);  // Clear any flags from previous operations
 
-  while (ftell(this->file_) < end_pos) {
+  while (ftell(this->file_) < end_pos && !feof(this->file_)) {
     uint32_t box_size, box_type;
-    if (!this->read_mp4_box_(box_size, box_type)) break;
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      clearerr(this->file_);  // Clear EOF flag immediately
+      break;
+    }
 
     if (box_type == make_fourcc('e', 's', 'd', 's')) {
       this->parse_esds_(box_size - 8);
+      break;  // We found esds, no need to continue
     } else {
-      if (box_size > 8) {
+      if (box_size > 8 && box_size < 1000000) {  // Sanity check
         fseek(this->file_, box_size - 8, SEEK_CUR);
       }
     }
@@ -652,7 +662,7 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
 
   // Ensure we're at the end of this box
   fseek(this->file_, end_pos, SEEK_SET);
-  clearerr(this->file_);  // Clear EOF flag in case we read past end
+  clearerr(this->file_);  // Clear any EOF/error flags
 
   return true;
 }
