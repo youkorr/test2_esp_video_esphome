@@ -516,6 +516,7 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
     long before_seek = ftell(this->file_);
     fseek(this->file_, box_start + box_size, SEEK_SET);
+    clearerr(this->file_);  // Clear any EOF/error flags
     ESP_LOGD(TAG, "  Repositioned from %ld to %ld (for next box)", before_seek, box_start + box_size);
   }
 
@@ -590,6 +591,7 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
 
   // Ensure we're at the end of this box
   fseek(this->file_, end_pos, SEEK_SET);
+  clearerr(this->file_);  // Clear EOF flag in case we read past end
 
   return true;
 }
@@ -650,6 +652,7 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
 
   // Ensure we're at the end of this box
   fseek(this->file_, end_pos, SEEK_SET);
+  clearerr(this->file_);  // Clear EOF flag in case we read past end
 
   return true;
 }
