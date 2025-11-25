@@ -359,6 +359,7 @@ bool SimpleVideoPlayer::parse_moov_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_trak_(uint32_t size, bool is_video) {
+  ESP_LOGD(TAG, "Parsing trak (is_video=%d)", is_video);
   long end_pos = ftell(this->file_) + size;
 
   while (ftell(this->file_) < end_pos) {
@@ -426,6 +427,7 @@ bool SimpleVideoPlayer::parse_minf_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
+  ESP_LOGD(TAG, "Parsing stbl (is_video=%d, size=%u)", is_video, size);
   long end_pos = ftell(this->file_) + size;
 
   // First pass - collect sample info
@@ -489,6 +491,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
   // Build sample list (simplified - assumes 1 sample per chunk)
   if (is_video && !sample_sizes.empty()) {
+    ESP_LOGI(TAG, "Building video samples: sizes=%u, offsets=%u, durations=%u, keyframes=%u",
+             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size());
+
     uint32_t timestamp = 0;
     for (size_t i = 0; i < sample_sizes.size() && i < chunk_offsets.size(); i++) {
       Mp4Sample sample;
@@ -503,6 +508,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       timestamp += sample.duration;
     }
     this->total_frames_ = this->video_samples_.size();
+    ESP_LOGI(TAG, "Created %u video samples", this->video_samples_.size());
+  } else if (is_video) {
+    ESP_LOGW(TAG, "No video samples created: sample_sizes empty=%d", sample_sizes.empty());
   }
 
   return true;
