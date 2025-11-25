@@ -1647,16 +1647,50 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
         }
       }
     } else if (id == EBML_ID_CODEC_PRIVATE) {
-      // For H.264, this contains SPS/PPS in AVCC format
-      if (codec_id == "V_MPEG4/ISO/AVC") {
+      // For H.264, this contains SPS/PPS in AVCC format (same as MP4 avcC box)
+      if (codec_id == "V_MPEG4/ISO/AVC" || codec_id == "V_AVC") {
         std::vector<uint8_t> codec_private(elem_size);
         fread(codec_private.data(), 1, elem_size, this->file_);
 
-        // Parse AVCC to extract SPS/PPS (simplified)
+        // Parse AVCC format to extract SPS/PPS
         if (elem_size > 7) {
+          // Byte 4: NAL length size - 1
           this->nal_length_size_ = (codec_private[4] & 0x03) + 1;
-          // Extract SPS and PPS from codec private data
-          // (This is simplified - full implementation would parse complete AVCC)
+
+          // Byte 5: Number of SPS (lower 5 bits)
+          uint8_t num_sps = codec_private[5] & 0x1F;
+          size_t offset = 6;
+
+          // Read SPS
+          for (int i = 0; i < num_sps && offset + 2 <= elem_size; i++) {
+            uint16_t sps_len = (codec_private[offset] << 8) | codec_private[offset + 1];
+            offset += 2;
+            if (offset + sps_len <= elem_size) {
+              this->sps_.resize(sps_len);
+              memcpy(this->sps_.data(), &codec_private[offset], sps_len);
+              offset += sps_len;
+            }
+          }
+
+          // Read number of PPS
+          if (offset < elem_size) {
+            uint8_t num_pps = codec_private[offset];
+            offset++;
+
+            // Read PPS
+            for (int i = 0; i < num_pps && offset + 2 <= elem_size; i++) {
+              uint16_t pps_len = (codec_private[offset] << 8) | codec_private[offset + 1];
+              offset += 2;
+              if (offset + pps_len <= elem_size) {
+                this->pps_.resize(pps_len);
+                memcpy(this->pps_.data(), &codec_private[offset], pps_len);
+                offset += pps_len;
+              }
+            }
+          }
+
+          ESP_LOGI(TAG, "MKV avcC: NAL length size=%d, SPS=%d bytes, PPS=%d bytes",
+                   this->nal_length_size_, this->sps_.size(), this->pps_.size());
         }
       } else {
         fseek(this->file_, elem_size, SEEK_CUR);
@@ -1783,6 +1817,13 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
 
   MkvSample &sample = this->mkv_samples_[this->current_mkv_sample_];
 
+  ESP_LOGD(TAG, "Reading MKV sample %zu: offset=%llu, size=%u, track=%u, keyframe=%d",
+           this->current_mkv_sample_,
+           (unsigned long long)sample.offset,
+           sample.size,
+           sample.track_number,
+           sample.is_keyframe);
+
   // Mark if we need SPS/PPS before keyframe
   if (sample.is_keyframe) {
     this->sps_pps_sent_ = false;
@@ -1796,7 +1837,8 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
 
   // Skip SimpleBlock header (track number, timecode, flags)
   // Track number is EBML variable-length integer (1-8 bytes)
-  this->read_ebml_vint_();  // Skip track number
+  uint64_t track_num = this->read_ebml_vint_();
+  ESP_LOGD(TAG, "  Track number from block: %llu", (unsigned long long)track_num);
 
   // Skip relative timecode (2 bytes)
   fseek(this->file_, 2, SEEK_CUR);
@@ -1809,8 +1851,17 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   uint32_t header_size = frame_start - header_start;
   uint32_t frame_size = sample.size - header_size;
 
+  ESP_LOGD(TAG, "  Header size: %u, Frame size: %u, Buffer size: %u",
+           header_size, frame_size, this->buffer_size_);
+
   if (frame_size > this->buffer_size_) {
     ESP_LOGW(TAG, "MKV sample too large: %u", frame_size);
+    this->current_mkv_sample_++;
+    return false;
+  }
+
+  if (frame_size == 0) {
+    ESP_LOGW(TAG, "MKV sample has zero frame size!");
     this->current_mkv_sample_++;
     return false;
   }
@@ -1820,6 +1871,13 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
     ESP_LOGW(TAG, "Failed to read MKV sample: expected %u bytes, got %zu", frame_size, bytes_read);
     return false;
   }
+
+  ESP_LOGD(TAG, "  Successfully read %zu bytes. First 4 bytes: %02X %02X %02X %02X",
+           bytes_read,
+           this->input_buffer_[0],
+           this->input_buffer_[1],
+           this->input_buffer_[2],
+           this->input_buffer_[3]);
 
   this->input_size_ = frame_size;
   this->current_time_ms_ = sample.timestamp_ns / 1000000;
