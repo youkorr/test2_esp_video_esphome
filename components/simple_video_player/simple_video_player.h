@@ -10,14 +10,12 @@
 #include "driver/jpeg_decode.h"
 #include "esphome/components/speaker/speaker.h"
 
-// esp-h264 software decoder
 extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
 }
 
-// esp_audio_codec for AAC decoding (optional)
 #if __has_include("esp_audio_dec.h")
 #define USE_ESP_AUDIO_CODEC 1
 extern "C" {
@@ -28,7 +26,6 @@ extern "C" {
 #else
 #define USE_ESP_AUDIO_CODEC 0
 #endif
-
 
 namespace esphome {
 namespace simple_video_player {
@@ -45,7 +42,6 @@ enum class MediaFormat {
   MP4_H264
 };
 
-// MP4 sample entry
 struct Mp4Sample {
   uint32_t offset;
   uint32_t size;
@@ -54,7 +50,6 @@ struct Mp4Sample {
   bool is_keyframe;
 };
 
-// Audio sample entry
 struct AudioSample {
   uint32_t offset;
   uint32_t size;
@@ -77,11 +72,8 @@ class SimpleVideoPlayer : public Component {
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override {
-    return setup_priority::LATE;
-  }
+  float get_setup_priority() const override { return setup_priority::LATE; }
 
-  // Playback control
   void play();
   void pause();
   void stop();
@@ -90,15 +82,12 @@ class SimpleVideoPlayer : public Component {
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
 
  protected:
-  // Format detection
   MediaFormat detect_format_();
 
-  // MJPEG decoder
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
 
-  // H.264/MP4 decoder
   bool init_h264_decoder_();
   bool parse_mp4_();
   bool read_mp4_box_(uint32_t &size, uint32_t &type);
@@ -120,16 +109,13 @@ class SimpleVideoPlayer : public Component {
   bool read_next_mp4_sample_();
   bool decode_h264_frame_();
 
-  // Audio decoding
   bool init_aac_decoder_();
   bool read_next_audio_sample_();
   bool decode_audio_frame_();
   void process_audio_();
 
-  // YUV to RGB conversion
   void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
-  // Common functions
   bool open_video_file_();
   void update_display_();
   void create_ui_();
@@ -137,7 +123,6 @@ class SimpleVideoPlayer : public Component {
   void show_controls_();
   void hide_controls_();
 
-  // LVGL callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
@@ -146,7 +131,6 @@ class SimpleVideoPlayer : public Component {
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
 
-  // Configuration
   std::string file_path_;
   int width_{800};
   int height_{480};
@@ -155,7 +139,6 @@ class SimpleVideoPlayer : public Component {
   bool loop_{true};
   bool controls_enabled_{true};
 
-  // State
   PlayerState state_{PlayerState::STOPPED};
   MediaFormat format_{MediaFormat::UNKNOWN};
   FILE *file_{nullptr};
@@ -164,21 +147,19 @@ class SimpleVideoPlayer : public Component {
   uint32_t frame_count_{0};
   uint32_t total_frames_{0};
 
-  // Buffers
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};
   size_t input_size_{0};
   size_t rgb_buffer_size_{0};
 
-  // JPEG decoder (for MJPEG)
+  lv_img_dsc_t frame_img_dsc_{};
+
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
-  // H.264 decoder (for MP4)
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
   bool h264_decoder_ready_{false};
 
-  // MP4 parsing
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;
   size_t current_video_sample_{0};
@@ -190,12 +171,10 @@ class SimpleVideoPlayer : public Component {
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
 
-  // Audio info
   uint32_t audio_sample_rate_{44100};
   uint8_t audio_channels_{2};
-  std::vector<uint8_t> audio_config_;  // AAC config
+  std::vector<uint8_t> audio_config_;
 
-  // Speaker and audio
   speaker::Speaker *speaker_{nullptr};
 #if USE_ESP_AUDIO_CODEC
   esp_audio_dec_handle_t aac_decoder_{nullptr};
@@ -209,7 +188,6 @@ class SimpleVideoPlayer : public Component {
   bool has_audio_{false};
   bool aac_decoder_ready_{false};
 
-  // LVGL objects
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
   lv_obj_t *play_btn_{nullptr};
@@ -222,16 +200,13 @@ class SimpleVideoPlayer : public Component {
   lv_timer_t *playback_timer_{nullptr};
   lv_timer_t *hide_timer_{nullptr};
 
-  // Frame timing
   uint32_t last_frame_time_{0};
-  uint32_t frame_interval_{20};  // ~50fps timer (MJPEG can process 4 frames per callback = ~200fps effective)
+  uint32_t frame_interval_{20};
 
-  // Controls visibility
   bool controls_visible_{true};
-  uint32_t hide_delay_ms_{3000};  // Auto-hide after 3 seconds
+  uint32_t hide_delay_ms_{3000};
 };
 
-// Action templates for automation
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
   void play(const Ts &...x) override { this->parent_->play(); }
@@ -255,4 +230,5 @@ template<typename... Ts> class ResumeAction : public Action<Ts...>, public Paren
 }  // namespace simple_video_player
 }  // namespace esphome
 
-#endif  // USE_ESP_IDF
+#endif
+
