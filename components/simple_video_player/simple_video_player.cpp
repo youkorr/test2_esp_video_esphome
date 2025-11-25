@@ -4,6 +4,7 @@
 
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
+#include "esp_timer.h"
 
 namespace esphome {
 namespace simple_video_player {
@@ -1592,37 +1593,46 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     return;
   }
 
+  static uint32_t last_callback_time = 0;
+  uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+
+  // Log timing for performance debugging (only every 30 frames to avoid spam)
+  static int callback_count = 0;
+  if (callback_count++ % 30 == 0) {
+    uint32_t actual_interval = current_time - last_callback_time;
+    ESP_LOGI(TAG, "Timer callback: actual interval=%lu ms, configured=%lu ms",
+             (unsigned long)actual_interval, (unsigned long)player->frame_interval_);
+  }
+  last_callback_time = current_time;
+
   bool got_frame = false;
   static bool first_frame_received = false;
 
   if (player->format_ == MediaFormat::MJPEG) {
-    // For MJPEG, process multiple frames per callback for smooth playback
-    // The hardware JPEG decoder is fast, process a few frames per timer tick
-    int frames_processed = 0;
-    const int max_frames_per_callback = 4;  // Process up to 4 frames per callback
+    uint32_t decode_start = esp_timer_get_time() / 1000;
 
-    while (frames_processed < max_frames_per_callback) {
-      if (player->read_next_mjpeg_frame_()) {
-        if (player->decode_mjpeg_frame_()) {
-          // Update current time (estimate based on frames and frame interval)
-          player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
+    // For MJPEG, process ONE frame per callback for precise timing
+    // The multi-frame approach was causing timing issues
+    if (player->read_next_mjpeg_frame_()) {
+      if (player->decode_mjpeg_frame_()) {
+        // Update current time (estimate based on frames and frame interval)
+        player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
 
-          // Estimate total duration for MJPEG if not set
-          if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
-            // Rough estimate: assume average frame size and continue from current position
-            uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
-            uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
-            player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
-          }
-
-          player->update_display_();
-          got_frame = true;
-          frames_processed++;
-        } else {
-          break;  // Decode failed, stop processing
+        // Estimate total duration for MJPEG if not set
+        if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
+          // Rough estimate: assume average frame size and continue from current position
+          uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
+          uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
+          player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
         }
-      } else {
-        break;  // No more frames available
+
+        player->update_display_();
+        got_frame = true;
+
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        if (callback_count % 30 == 0) {
+          ESP_LOGI(TAG, "MJPEG decode time: %lu ms", (unsigned long)decode_time);
+        }
       }
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
