@@ -1265,15 +1265,25 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
 }
 
 bool SimpleVideoPlayer::decode_h264_frame_() {
-  if (!this->h264_decoder_ready_ || this->input_size_ == 0) {
+  if (!this->h264_decoder_ready_) {
+    ESP_LOGW(TAG, "decode_h264_frame_: decoder not ready!");
     return false;
   }
+
+  if (this->input_size_ == 0) {
+    ESP_LOGW(TAG, "decode_h264_frame_: input_size is 0!");
+    return false;
+  }
+
+  ESP_LOGD(TAG, "decode_h264_frame_: input_size=%u, nal_length_size=%d, sps_pps_sent=%d, sps_size=%zu, pps_size=%zu",
+           this->input_size_, this->nal_length_size_, this->sps_pps_sent_, this->sps_.size(), this->pps_.size());
 
   // Convert AVCC to Annex-B format
   std::vector<uint8_t> annexb_data;
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
+    ESP_LOGD(TAG, "Prepending SPS (%zu bytes) and PPS (%zu bytes)", this->sps_.size(), this->pps_.size());
     // Start code
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
@@ -1310,6 +1320,14 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
                        this->input_buffer_ + offset,
                        this->input_buffer_ + offset + nalu_len);
     offset += nalu_len;
+  }
+
+  ESP_LOGD(TAG, "AVCC to Annex-B conversion: %u input bytes → %zu annexb bytes",
+           this->input_size_, annexb_data.size());
+
+  if (annexb_data.empty()) {
+    ESP_LOGW(TAG, "Annex-B data is empty after conversion!");
+    return false;
   }
 
   // Decode
@@ -2246,7 +2264,12 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   } else if (player->format_ == MediaFormat::MKV_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
+    ESP_LOGD(TAG, "MKV timer callback: current_sample=%zu, total_samples=%zu",
+             player->current_mkv_sample_, player->mkv_samples_.size());
+
     if (player->read_next_mkv_sample_()) {
+      ESP_LOGD(TAG, "MKV sample read successfully, input_size=%u, decoding...", player->input_size_);
+
       if (player->decode_h264_frame_()) {
         // Update current time from MKV sample timestamp
         if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
@@ -2259,7 +2282,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         if (callback_count % 30 == 0) {
           ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
+      } else {
+        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu", player->current_mkv_sample_ - 1);
       }
+    } else {
+      ESP_LOGD(TAG, "MKV read_next_sample returned false");
     }
     // Process audio
     player->process_audio_();
