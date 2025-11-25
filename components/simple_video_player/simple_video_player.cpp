@@ -688,6 +688,17 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       timestamp += sample.duration;
     }
     this->total_frames_ = this->video_samples_.size();
+
+    // Calculate total duration
+    if (!this->video_samples_.empty()) {
+      Mp4Sample &last_sample = this->video_samples_.back();
+      this->total_duration_ms_ = last_sample.timestamp_ms + (last_sample.duration * 1000 / this->video_timescale_);
+      ESP_LOGI(TAG, "Total video duration: %lu ms (%lu:%02lu)",
+               (unsigned long)this->total_duration_ms_,
+               (unsigned long)(this->total_duration_ms_ / 60000),
+               (unsigned long)((this->total_duration_ms_ / 1000) % 60));
+    }
+
     ESP_LOGI(TAG, "Created %u video samples", this->video_samples_.size());
   } else if (is_video) {
     ESP_LOGW(TAG, "No video samples created: sample_sizes empty=%d", sample_sizes.empty());
@@ -1186,6 +1197,13 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
 // COMMON FUNCTIONS
 // ==============================================
 
+void SimpleVideoPlayer::format_time_(char *buf, size_t buf_size, uint32_t time_ms) {
+  uint32_t total_seconds = time_ms / 1000;
+  uint32_t minutes = total_seconds / 60;
+  uint32_t seconds = total_seconds % 60;
+  snprintf(buf, buf_size, "%02lu:%02lu", (unsigned long)minutes, (unsigned long)seconds);
+}
+
 void SimpleVideoPlayer::update_display_() {
   if (this->canvas_ == nullptr) {
     return;
@@ -1204,8 +1222,13 @@ void SimpleVideoPlayer::update_display_() {
 
   // Update time label
   if (this->time_label_ != nullptr) {
-    char buf[32];
-    snprintf(buf, sizeof(buf), "Frame: %lu", (unsigned long)this->frame_count_);
+    char current_time[16], total_time[16];
+    char buf[40];
+
+    this->format_time_(current_time, sizeof(current_time), this->current_time_ms_);
+    this->format_time_(total_time, sizeof(total_time), this->total_duration_ms_);
+
+    snprintf(buf, sizeof(buf), "%s / %s", current_time, total_time);
     lv_label_set_text(this->time_label_, buf);
   }
 }
@@ -1218,6 +1241,14 @@ void SimpleVideoPlayer::create_ui_() {
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
                        this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_center(this->canvas_);
+
+  // Create loading spinner (shown during initial load, hidden after first frame)
+  this->loading_spinner_ = lv_spinner_create(parent, 1000, 60);
+  lv_obj_set_size(this->loading_spinner_, 50, 50);
+  lv_obj_center(this->loading_spinner_);
+  lv_obj_set_style_arc_width(this->loading_spinner_, 6, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(this->loading_spinner_, 6, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(this->loading_spinner_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);
 
   // Create invisible touch layer over the canvas
   this->touch_layer_ = lv_obj_create(parent);
@@ -1238,9 +1269,9 @@ void SimpleVideoPlayer::create_ui_() {
 void SimpleVideoPlayer::create_controls_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
-  // Controls container at bottom (use actual video width)
+  // Controls container at bottom (use actual video width) - made taller for badges
   this->controls_container_ = lv_obj_create(parent);
-  lv_obj_set_size(this->controls_container_, this->actual_width_, 60);
+  lv_obj_set_size(this->controls_container_, this->actual_width_, 90);
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
@@ -1272,18 +1303,44 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_center(stop_label);
   lv_obj_add_event_cb(this->stop_btn_, stop_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Progress slider
+  // Progress slider (enhanced style)
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_size(this->slider_, this->actual_width_ - 300, 10);
+  lv_obj_set_size(this->slider_, this->actual_width_ - 300, 12);
   lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 190, 0);
   lv_slider_set_range(this->slider_, 0, 100);
+
+  // Style the slider for better visibility
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x404040), LV_PART_MAIN);  // Dark gray background
+  lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);  // Blue indicator
+  lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);  // White knob
+  lv_obj_set_style_pad_all(this->slider_, 0, LV_PART_MAIN);  // No padding
+
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
 
-  // Frame counter
+  // Time counter (top row, right side)
   this->time_label_ = lv_label_create(this->controls_container_);
-  lv_label_set_text(this->time_label_, "Frame: 0");
-  lv_obj_align(this->time_label_, LV_ALIGN_RIGHT_MID, -10, 0);
+  lv_label_set_text(this->time_label_, "00:00 / 00:00");
+  lv_obj_align(this->time_label_, LV_ALIGN_TOP_RIGHT, -10, 5);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
+
+  // Format badge (bottom row, left side)
+  this->format_badge_ = lv_label_create(this->controls_container_);
+  const char *format_text = this->format_ == MediaFormat::MP4_H264 ? "MP4" : "MJPEG";
+  lv_label_set_text(this->format_badge_, format_text);
+  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -5);
+  lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_12, 0);
+
+  // Resolution label (bottom row, next to format)
+  this->resolution_label_ = lv_label_create(this->controls_container_);
+  char res_text[32];
+  snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
+  lv_label_set_text(this->resolution_label_, res_text);
+  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 80, -5);
+  lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_12, 0);
 }
 
 void SimpleVideoPlayer::play() {
@@ -1367,6 +1424,7 @@ void SimpleVideoPlayer::stop() {
   }
   this->frame_count_ = 0;
   this->current_pos_ = 0;
+  this->current_time_ms_ = 0;
 
   // Update slider
   if (this->slider_ != nullptr) {
@@ -1429,6 +1487,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   }
 
   bool got_frame = false;
+  static bool first_frame_received = false;
 
   if (player->format_ == MediaFormat::MJPEG) {
     // For MJPEG, process multiple frames per callback for smooth playback
@@ -1439,6 +1498,17 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     while (frames_processed < max_frames_per_callback) {
       if (player->read_next_mjpeg_frame_()) {
         if (player->decode_mjpeg_frame_()) {
+          // Update current time (estimate based on frames and frame interval)
+          player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
+
+          // Estimate total duration for MJPEG if not set
+          if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
+            // Rough estimate: assume average frame size and continue from current position
+            uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
+            uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
+            player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
+          }
+
           player->update_display_();
           got_frame = true;
           frames_processed++;
@@ -1452,12 +1522,24 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   } else if (player->format_ == MediaFormat::MP4_H264) {
     if (player->read_next_mp4_sample_()) {
       if (player->decode_h264_frame_()) {
+        // Update current time from video sample timestamp
+        if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
+          player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
+        }
         player->update_display_();
         got_frame = true;
       }
     }
     // Process audio
     player->process_audio_();
+  }
+
+  // Hide loading spinner after first frame
+  if (got_frame && !first_frame_received) {
+    first_frame_received = true;
+    if (player->loading_spinner_ != nullptr) {
+      lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
+    }
   }
 
   if (!got_frame) {

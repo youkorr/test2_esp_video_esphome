@@ -124,6 +124,7 @@ class SimpleVideoPlayer : public Component {
   void create_controls_();
   void show_controls_();
   void hide_controls_();
+  void format_time_(char *buf, size_t buf_size, uint32_t time_ms);
 
   static void play_btn_cb_(lv_event_t *e);
   static void pause_btn_cb_(lv_event_t *e);
@@ -201,6 +202,9 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *stop_btn_{nullptr};
   lv_obj_t *slider_{nullptr};
   lv_obj_t *time_label_{nullptr};
+  lv_obj_t *format_badge_{nullptr};
+  lv_obj_t *resolution_label_{nullptr};
+  lv_obj_t *loading_spinner_{nullptr};
   lv_obj_t *controls_container_{nullptr};
   lv_obj_t *touch_layer_{nullptr};
   lv_timer_t *playback_timer_{nullptr};
@@ -208,6 +212,8 @@ class SimpleVideoPlayer : public Component {
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{20};
+  uint32_t current_time_ms_{0};
+  uint32_t total_duration_ms_{0};
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{3000};
