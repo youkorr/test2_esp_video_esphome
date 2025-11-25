@@ -1,3 +1,4 @@
+// simple_video_player.cpp
 #include "simple_video_player.h"
 
 #ifdef USE_ESP_IDF
@@ -5,8 +6,8 @@
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 #include <algorithm>
-#include <vector>
 #include <cstring>
+#include <cstdio>
 
 namespace esphome {
 namespace simple_video_player {
@@ -17,35 +18,31 @@ static const char *const TAG = "simple_video_player";
 static uint32_t read_be32(FILE *f) {
   uint8_t buf[4];
   if (fread(buf, 1, 4, f) != 4) return 0;
-  return (uint32_t)buf[0] << 24 | (uint32_t)buf[1] << 16 | (uint32_t)buf[2] << 8 | buf[3];
+  return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) | ((uint32_t)buf[2] << 8) | buf[3];
 }
 
 static uint16_t read_be16(FILE *f) {
   uint8_t buf[2];
   if (fread(buf, 1, 2, f) != 2) return 0;
-  return (uint16_t)buf[0] << 8 | buf[1];
+  return ((uint16_t)buf[0] << 8) | buf[1];
 }
 
 static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-  return (uint32_t)a << 24 | (uint32_t)b << 16 | (uint32_t)c << 8 | d;
+  return ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)c << 8) | d;
 }
 
-// -------------------
-// Important notes for ESP32-P4
-// - No hardware JPEG decoder available; rely on optimized software decoder
-// - Use buffered file reads (not fgetc) to scan MJPEG frames
-// - Avoid LVGL copying by using lv_img_dsc_t that points to the RGB565 buffer
-// - Use a fast timer (1 ms) and a non-blocking decode pipeline
-// -------------------
-
+// ----------------------
+// Setup / lifecycle
+// ----------------------
 void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Setting up Simple Video Player...");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
   ESP_LOGI(TAG, "  Resolution: %dx%d", this->width_, this->height_);
 
-  // Allocate input buffer (enough for typical JPEG frames; allow user override)
-  if (this->buffer_size_ == 0) this->buffer_size_ = 256 * 1024;  // default 256 KB
+  // sensible defaults
+  if (this->buffer_size_ < 65536) this->buffer_size_ = 256 * 1024;  // 256KB default for MJPEG frames
 
+  // Allocate input buffer in SPIRAM if available
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_,
                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->input_buffer_ == nullptr) {
@@ -54,17 +51,18 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
-  // Allocate RGB buffer (RGB565)
+  // Allocate RGB buffer aligned for LVGL (RGB565)
   this->rgb_buffer_size_ = (size_t)this->width_ * (size_t)this->height_ * 2;
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->rgb_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer");
     this->mark_failed();
     return;
   }
+  std::memset(this->rgb_buffer_, 0x00, this->rgb_buffer_size_);
 
-  // Prepare lvgl image descriptor for zero-copy rendering
+  // Prepare LVGL image descriptor for zero-copy rendering
   std::memset(&this->frame_img_dsc_, 0, sizeof(this->frame_img_dsc_));
   this->frame_img_dsc_.header.cf = LV_IMG_CF_TRUE_COLOR;
   this->frame_img_dsc_.header.w = this->width_;
@@ -72,7 +70,7 @@ void SimpleVideoPlayer::setup() {
   this->frame_img_dsc_.data = this->rgb_buffer_;
   this->frame_img_dsc_.data_size = this->rgb_buffer_size_;
 
-  // Open video file
+  // Open file
   if (!this->open_video_file_()) {
     ESP_LOGE(TAG, "Failed to open video file");
     this->mark_failed();
@@ -83,24 +81,23 @@ void SimpleVideoPlayer::setup() {
   this->format_ = this->detect_format_();
   ESP_LOGI(TAG, "Detected format: %s",
            this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" :
-           (this->format_ == MediaFormat::MJPEG ? "MJPEG":"UNKNOWN"));
+           (this->format_ == MediaFormat::MJPEG ? "MJPEG" : "UNKNOWN"));
 
+  // Init decoders
   if (this->format_ == MediaFormat::MP4_H264) {
     if (!this->parse_mp4_()) {
       ESP_LOGE(TAG, "Failed to parse MP4 file");
       this->mark_failed();
       return;
     }
-
     if (!this->init_h264_decoder_()) {
       ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
       this->mark_failed();
       return;
     }
-
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize audio decoder - continuing without audio");
+        ESP_LOGW(TAG, "Failed to initialize AAC decoder - continuing without audio");
       }
     }
   } else if (this->format_ == MediaFormat::MJPEG) {
@@ -118,7 +115,7 @@ void SimpleVideoPlayer::setup() {
   // Create UI
   this->create_ui_();
 
-  // Create playback timer (1 ms) but paused - non-blocking decode in timer
+  // Timer: we use 1ms ticks and a non-blocking pipeline inside timer_cb_
   this->playback_timer_ = lv_timer_create(timer_cb_, 1, this);
   lv_timer_pause(this->playback_timer_);
 
@@ -130,38 +127,37 @@ void SimpleVideoPlayer::setup() {
 }
 
 void SimpleVideoPlayer::loop() {
-  // processing is performed in timer callback
+  // Main processing handled in timer callback
 }
 
 void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "Simple Video Player:");
   ESP_LOGCONFIG(TAG, "  File: %s", this->file_path_.c_str());
   ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", this->width_, this->height_);
-  ESP_LOGCONFIG(TAG, "  Format: %s",
-                this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
+  ESP_LOGCONFIG(TAG, "  Format: %s", this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
   ESP_LOGCONFIG(TAG, "  Buffer size: %u", this->buffer_size_);
   ESP_LOGCONFIG(TAG, "  Auto play: %s", this->auto_play_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
 }
 
+// ----------------------
+// File open / detect
+// ----------------------
 bool SimpleVideoPlayer::open_video_file_() {
   this->file_ = fopen(this->file_path_.c_str(), "rb");
   if (this->file_ == nullptr) {
     ESP_LOGE(TAG, "Failed to open file: %s", this->file_path_.c_str());
     return false;
   }
-
-  // file size
   fseek(this->file_, 0, SEEK_END);
   this->file_size_ = ftell(this->file_);
   fseek(this->file_, 0, SEEK_SET);
-
   ESP_LOGI(TAG, "Video file opened: %ld bytes", this->file_size_);
   return true;
 }
 
 MediaFormat SimpleVideoPlayer::detect_format_() {
   if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
-
   uint8_t header[8];
   if (fread(header, 1, sizeof(header), this->file_) != sizeof(header)) {
     fseek(this->file_, 0, SEEK_SET);
@@ -169,74 +165,60 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
   }
   fseek(this->file_, 0, SEEK_SET);
 
-  uint32_t box_type = (uint32_t)header[4] << 24 | (uint32_t)header[5] << 16 | (uint32_t)header[6] << 8 | header[7];
+  uint32_t box_type = ((uint32_t)header[4] << 24) | ((uint32_t)header[5] << 16) | ((uint32_t)header[6] << 8) | header[7];
   if (box_type == make_fourcc('f','t','y','p') || box_type == make_fourcc('m','o','o','v') ||
       box_type == make_fourcc('f','r','e','e') || box_type == make_fourcc('m','d','a','t')) {
     return MediaFormat::MP4_H264;
   }
-
-  if (header[0] == 0xFF && header[1] == 0xD8) {
-    return MediaFormat::MJPEG;
-  }
-
+  if (header[0] == 0xFF && header[1] == 0xD8) return MediaFormat::MJPEG;
   return MediaFormat::UNKNOWN;
 }
 
 // ==============================================
-// JPEG/MJPEG DECODER (buffered read, optimized)
+// JPEG/MJPEG
 // ==============================================
-
 bool SimpleVideoPlayer::init_jpeg_decoder_() {
-  // For ESP32-P4 we rely on the JPEG SW decoder interface (same as original), ensure config chosen
   jpeg_decode_engine_cfg_t cfg = {
     .intr_priority = 0,
-    .timeout_ms = 100,
+    .timeout_ms = 120,
   };
-
   esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to create JPEG decoder: %s", esp_err_to_name(ret));
     return false;
   }
-
   return true;
 }
 
-// Buffered MJPEG frame search using block reads (no fgetc())
+// Buffered MJPEG parser (no fgetc)
 bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   if (this->file_ == nullptr) return false;
 
-  // Use an intermediate scan buffer to find SOI (0xFFD8)
-  const size_t SCAN_SIZE = 8192;
-  uint8_t *scan_buf = (uint8_t *)heap_caps_malloc(SCAN_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (!scan_buf) {
+  const size_t SCAN_BUF = 8192;
+  uint8_t *scan = (uint8_t *)heap_caps_malloc(SCAN_BUF, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!scan) {
     ESP_LOGE(TAG, "Failed to allocate scan buffer");
     return false;
   }
 
   bool soi_found = false;
-  long base_pos = ftell(this->file_);
-
-  // search for SOI
+  // search SOI (FFD8)
   while (!soi_found) {
-    size_t n = fread(scan_buf, 1, SCAN_SIZE, this->file_);
+    size_t n = fread(scan, 1, SCAN_BUF, this->file_);
     if (n == 0) break;
     for (size_t i = 0; i + 1 < n; ++i) {
-      if (scan_buf[i] == 0xFF && scan_buf[i+1] == 0xD8) {
-        // compute file offset: current file pos - (n - i)
+      if (scan[i] == 0xFF && scan[i+1] == 0xD8) {
         long cur = ftell(this->file_);
-        long found_pos = cur - (long)(n - i);
-        fseek(this->file_, found_pos, SEEK_SET);
+        long found = cur - (long)(n - i);
+        fseek(this->file_, found, SEEK_SET);
         soi_found = true;
         break;
       }
     }
   }
-
-  heap_caps_free(scan_buf);
+  heap_caps_free(scan);
 
   if (!soi_found) {
-    // loop back if desired
     if (this->loop_) {
       fseek(this->file_, 0, SEEK_SET);
       return this->read_next_mjpeg_frame_();
@@ -244,12 +226,12 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     return false;
   }
 
-  // Now read a chunk large enough to contain the JPEG (bounded by input buffer size)
-  size_t read_bytes = fread(this->input_buffer_, 1, this->buffer_size_, this->file_);
-  if (read_bytes < 4) return false;
+  // Read up to buffer_size_ bytes containing the JPEG frame
+  size_t got = fread(this->input_buffer_, 1, this->buffer_size_, this->file_);
+  if (got < 4) return false;
 
-  // Find EOI marker (0xFFD9) within input_buffer_
-  for (size_t i = 2; i + 1 < read_bytes; ++i) {
+  // find EOI (FFD9)
+  for (size_t i = 2; i + 1 < got; ++i) {
     if (this->input_buffer_[i] == 0xFF && this->input_buffer_[i+1] == 0xD9) {
       this->input_size_ = i + 2;
       this->current_pos_ = ftell(this->file_);
@@ -258,8 +240,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     }
   }
 
-  // If not found, try reading more (rare) - but avoid infinite loops
-  // We'll treat as failure to keep code simple and robust
+  // EOI not found -> fail gracefully
   return false;
 }
 
@@ -273,23 +254,19 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
 
   uint32_t out_size = 0;
   esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
-                                        this->input_buffer_, this->input_size_,
-                                        this->rgb_buffer_, this->rgb_buffer_size_, &out_size);
-
+                                       this->input_buffer_, this->input_size_,
+                                       this->rgb_buffer_, this->rgb_buffer_size_,
+                                       &out_size);
   if (ret != ESP_OK) {
     ESP_LOGW(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
     return false;
   }
-
-  // out_size is number of bytes written to rgb_buffer_
   return (out_size > 0);
 }
 
 // ==============================================
-// H.264/MP4 DECODER (kept largely as original but
-// with small robustness improvements)
+// MP4/H264 parsing and decode
 // ==============================================
-
 bool SimpleVideoPlayer::init_h264_decoder_() {
   esp_h264_dec_cfg_sw_t cfg = { .pic_type = ESP_H264_RAW_FMT_I420 };
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
@@ -297,7 +274,6 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
     ESP_LOGE(TAG, "Failed to create H.264 decoder: err=%d", err);
     return false;
   }
-
   err = esp_h264_dec_open(this->h264_decoder_);
   if (err != ESP_H264_ERR_OK) {
     ESP_LOGE(TAG, "Failed to open H.264 decoder: err=%d", err);
@@ -305,10 +281,8 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
     this->h264_decoder_ = nullptr;
     return false;
   }
-
   size_t yuv_size = (size_t)this->width_ * (size_t)this->height_ * 3 / 2;
   this->yuv_buffer_.resize(yuv_size);
-
   this->h264_decoder_ready_ = true;
   ESP_LOGI(TAG, "H.264 decoder initialized");
   return true;
@@ -316,20 +290,16 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
 
 bool SimpleVideoPlayer::parse_mp4_() {
   if (this->file_ == nullptr) return false;
-
   fseek(this->file_, 0, SEEK_SET);
-
   while (!feof(this->file_)) {
-    uint32_t size, type;
+    uint32_t size = 0, type = 0;
     if (!this->read_mp4_box_(size, type)) break;
-
     if (type == make_fourcc('m','o','o','v')) {
       if (!this->parse_moov_(size - 8)) return false;
     } else {
       if (size > 8) fseek(this->file_, size - 8, SEEK_CUR);
     }
   }
-
   return !this->video_samples_.empty();
 }
 
@@ -337,12 +307,10 @@ bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
   long pos = ftell(this->file_);
   size = read_be32(this->file_);
   type = read_be32(this->file_);
-
   if (size < 8 || feof(this->file_)) {
     ESP_LOGD(TAG, "read_mp4_box_ failed at pos=%ld: size=%u, eof=%d", pos, size, feof(this->file_));
     return false;
   }
-
   return true;
 }
 
@@ -353,7 +321,7 @@ bool SimpleVideoPlayer::parse_moov_(uint32_t size) {
     if (!this->read_mp4_box_(box_size, box_type)) break;
     if (box_type == make_fourcc('t','r','a','k')) {
       long trak_start = ftell(this->file_);
-      this->parse_trak_(box_size - 8, true);
+      this->parse_trak_(box_size - 8, true);  // attempt as video track
       fseek(this->file_, trak_start + box_size - 8, SEEK_SET);
     } else {
       if (box_size > 8) fseek(this->file_, box_size - 8, SEEK_CUR);
@@ -418,7 +386,8 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
   while (ftell(this->file_) < end_pos) {
     long current_pos = ftell(this->file_);
-    uint32_t box_size, box_type; long box_start = current_pos;
+    uint32_t box_size, box_type;
+    long box_start = current_pos;
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
     if (box_type == make_fourcc('s','t','s','d')) {
@@ -454,6 +423,7 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     clearerr(this->file_);
   }
 
+  // Build simple sample list (assume 1 sample per chunk for simplicity)
   if (is_video && !sample_sizes.empty() && !chunk_offsets.empty()) {
     uint32_t timestamp = 0;
     for (size_t i = 0; i < sample_sizes.size() && i < chunk_offsets.size(); ++i) {
@@ -461,7 +431,7 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       sample.offset = chunk_offsets[i];
       sample.size = sample_sizes[i];
       sample.duration = (i < sample_durations.size()) ? sample_durations[i] : 1000;
-      sample.timestamp_ms = (uint32_t)(timestamp * 1000 / (this->video_timescale_ ? this->video_timescale_ : 1));
+      sample.timestamp_ms = (uint32_t)((uint64_t)timestamp * 1000 / (this->video_timescale_ ? this->video_timescale_ : 1));
       sample.is_keyframe = keyframes.empty() || (std::find(keyframes.begin(), keyframes.end(), (uint32_t)(i+1)) != keyframes.end());
       this->video_samples_.push_back(sample);
       timestamp += sample.duration;
@@ -474,7 +444,7 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
-  fseek(this->file_, 4, SEEK_CUR);
+  fseek(this->file_, 4, SEEK_CUR);  // version/flags
   uint32_t entry_count = read_be32(this->file_);
   for (uint32_t i = 0; i < entry_count; ++i) {
     uint32_t entry_size = read_be32(this->file_);
@@ -493,10 +463,11 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
 bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   long start_pos = ftell(this->file_);
   long end_pos = start_pos + size;
+  // skip reserved region to find avcC box
   fseek(this->file_, 78, SEEK_CUR);
   clearerr(this->file_);
   while (ftell(this->file_) < end_pos && !feof(this->file_)) {
-    uint32_t box_size, box_type;
+    uint32_t box_size = 0, box_type = 0;
     if (!this->read_mp4_box_(box_size, box_type)) break;
     if (box_type == make_fourcc('a','v','c','C')) {
       this->parse_avcc_(box_size - 8);
@@ -511,13 +482,13 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
-  fseek(this->file_, 4, SEEK_CUR);
-  uint8_t len_size_minus_one;
-  fread(&len_size_minus_one, 1, 1, this->file_);
+  fseek(this->file_, 4, SEEK_CUR);  // configurationVersion, profile, compatibility, level
+  uint8_t len_size_minus_one = 0;
+  if (fread(&len_size_minus_one, 1, 1, this->file_) != 1) return false;
   this->nal_length_size_ = (len_size_minus_one & 0x03) + 1;
 
-  uint8_t num_sps;
-  fread(&num_sps, 1, 1, this->file_);
+  uint8_t num_sps = 0;
+  if (fread(&num_sps, 1, 1, this->file_) != 1) return false;
   num_sps &= 0x1F;
   for (int i = 0; i < (int)num_sps; ++i) {
     uint16_t sps_len = read_be16(this->file_);
@@ -525,8 +496,8 @@ bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
     fread(this->sps_.data(), 1, sps_len, this->file_);
   }
 
-  uint8_t num_pps;
-  fread(&num_pps, 1, 1, this->file_);
+  uint8_t num_pps = 0;
+  if (fread(&num_pps, 1, 1, this->file_) != 1) return false;
   for (int i = 0; i < (int)num_pps; ++i) {
     uint16_t pps_len = read_be16(this->file_);
     this->pps_.resize(pps_len);
@@ -544,7 +515,7 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
   fseek(this->file_, 28, SEEK_CUR);
   clearerr(this->file_);
   while (ftell(this->file_) < end_pos && !feof(this->file_)) {
-    uint32_t box_size, box_type;
+    uint32_t box_size = 0, box_type = 0;
     if (!this->read_mp4_box_(box_size, box_type)) break;
     if (box_type == make_fourcc('e','s','d','s')) {
       this->parse_esds_(box_size - 8);
@@ -563,15 +534,15 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
   long end_pos = start_pos + size;
   fseek(this->file_, 4, SEEK_CUR);
   while (ftell(this->file_) < end_pos) {
-    uint8_t tag;
+    uint8_t tag = 0;
     if (fread(&tag, 1, 1, this->file_) != 1) break;
-    uint32_t len = 0; uint8_t b;
+    uint32_t len = 0; uint8_t b = 0;
     do {
       if (fread(&b, 1, 1, this->file_) != 1) break;
       len = (len << 7) | (b & 0x7F);
     } while (b & 0x80);
 
-    if (tag == 0x05) {
+    if (tag == 0x05) {  // DecoderSpecificInfo
       this->audio_config_.resize(len);
       fread(this->audio_config_.data(), 1, len, this->file_);
       this->has_audio_ = true;
@@ -588,9 +559,8 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
 }
 
 // ==============================================
-// AUDIO DECODER - left mostly unchanged
+// AUDIO (AAC) - optional (uses esp_audio_codec if available)
 // ==============================================
-
 bool SimpleVideoPlayer::init_aac_decoder_() {
 #if USE_ESP_AUDIO_CODEC
   if (this->speaker_ == nullptr || !this->has_audio_) return false;
@@ -613,7 +583,7 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
   }
 
   this->aac_decoder_ready_ = true;
-  ESP_LOGI(TAG, "AAC decoder initialized");
+  ESP_LOGI(TAG, "AAC decoder initialized: %d Hz, %d channels", this->audio_sample_rate_, this->audio_channels_);
   return true;
 #else
   ESP_LOGW(TAG, "AAC decoder not available - esp_audio_codec not found");
@@ -627,7 +597,8 @@ bool SimpleVideoPlayer::read_next_audio_sample_() {
   fseek(this->file_, sample.offset, SEEK_SET);
   if (sample.size > 8192) {
     ESP_LOGW(TAG, "Audio sample too large: %u", sample.size);
-    this->current_audio_sample_++; return false;
+    this->current_audio_sample_++;
+    return false;
   }
   size_t bytes_read = fread(this->audio_input_buffer_, 1, sample.size, this->file_);
   if (bytes_read != sample.size) return false;
@@ -668,31 +639,40 @@ void SimpleVideoPlayer::process_audio_() {
 }
 
 // ==============================================
-// MP4 sample read and decode
+// MP4 sample read / h264 decode
 // ==============================================
-
 bool SimpleVideoPlayer::read_next_mp4_sample_() {
   if (this->current_video_sample_ >= this->video_samples_.size()) {
     if (this->loop_) {
-      this->current_video_sample_ = 0; this->sps_pps_sent_ = false; this->frame_count_ = 0;
-    } else return false;
+      this->current_video_sample_ = 0;
+      this->sps_pps_sent_ = false;
+      this->frame_count_ = 0;
+    } else {
+      return false;
+    }
   }
 
   Mp4Sample &sample = this->video_samples_[this->current_video_sample_];
   fseek(this->file_, sample.offset, SEEK_SET);
   if (sample.size > this->buffer_size_) {
     ESP_LOGW(TAG, "Sample too large: %u > %u", sample.size, this->buffer_size_);
-    this->current_video_sample_++; return false;
+    this->current_video_sample_++;
+    return false;
   }
   size_t bytes_read = fread(this->input_buffer_, 1, sample.size, this->file_);
-  if (bytes_read != sample.size) { ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size); return false; }
+  if (bytes_read != sample.size) {
+    ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
+    return false;
+  }
   this->input_size_ = sample.size;
-  this->current_video_sample_++; this->frame_count_++;
+  this->current_video_sample_++;
+  this->frame_count_++;
   return true;
 }
 
 bool SimpleVideoPlayer::decode_h264_frame_() {
   if (!this->h264_decoder_ready_ || this->input_size_ == 0) return false;
+
   std::vector<uint8_t> annexb_data;
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
     annexb_data.insert(annexb_data.end(), {0x00,0x00,0x00,0x01});
@@ -716,11 +696,16 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   esp_h264_dec_in_frame_t in_frame = {};
   in_frame.raw_data.buffer = annexb_data.data();
   in_frame.raw_data.len = (uint32_t)annexb_data.size();
-  in_frame.consume = 0; in_frame.dts = 0; in_frame.pts = 0;
+  in_frame.consume = 0;
+  in_frame.dts = 0;
+  in_frame.pts = 0;
 
   esp_h264_dec_out_frame_t out_frame = {};
   esp_h264_err_t err = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
-  if (err != ESP_H264_ERR_OK) { ESP_LOGW(TAG, "H.264 decode error: %d", err); return false; }
+  if (err != ESP_H264_ERR_OK) {
+    ESP_LOGW(TAG, "H.264 decode error: %d", err);
+    return false;
+  }
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
     this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_, this->width_, this->height_);
@@ -729,6 +714,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   return false;
 }
 
+// YUV -> RGB565
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
   const uint8_t *y_plane = yuv;
   const uint8_t *u_plane = yuv + w * h;
@@ -740,7 +726,9 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
       int y = y_plane[j * w + i];
       int u = u_plane[(j / 2) * (w / 2) + (i / 2)];
       int v = v_plane[(j / 2) * (w / 2) + (i / 2)];
-      int c = y - 16; int d = u - 128; int e = v - 128;
+      int c = y - 16;
+      int d = u - 128;
+      int e = v - 128;
       int r = (298 * c + 409 * e + 128) >> 8;
       int g = (298 * c - 100 * d - 208 * e + 128) >> 8;
       int b = (298 * c + 516 * d + 128) >> 8;
@@ -753,13 +741,12 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
 }
 
 // ==============================================
-// UI + rendering (zero-copy)
+// UI / LVGL integration (zero-copy frame_img_dsc_)
 // ==============================================
-
 void SimpleVideoPlayer::update_display_() {
   if (this->canvas_ == nullptr) return;
 
-  // Update lvgl image descriptor to point to rgb buffer (zero-copy)
+  // frame_img_dsc_ data already points to rgb_buffer_
   this->frame_img_dsc_.data = this->rgb_buffer_;
   this->frame_img_dsc_.data_size = this->rgb_buffer_size_;
   lv_img_set_src(this->canvas_, &this->frame_img_dsc_);
@@ -771,18 +758,22 @@ void SimpleVideoPlayer::update_display_() {
   }
 
   if (this->time_label_ != nullptr) {
-    char buf[32]; snprintf(buf, sizeof(buf), "Frame: %lu", (unsigned long)this->frame_count_);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "Frame: %lu", (unsigned long)this->frame_count_);
     lv_label_set_text(this->time_label_, buf);
   }
 }
 
 void SimpleVideoPlayer::create_ui_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
+
+  // Create LVGL image object (canvas_) and set zero-copy descriptor
   this->canvas_ = lv_img_create(parent);
   lv_obj_set_size(this->canvas_, this->width_, this->height_);
   lv_obj_center(this->canvas_);
   lv_img_set_src(this->canvas_, &this->frame_img_dsc_);
 
+  // Touch layer (invisible) to show/hide controls
   this->touch_layer_ = lv_obj_create(parent);
   lv_obj_remove_style_all(this->touch_layer_);
   lv_obj_set_size(this->touch_layer_, this->width_, this->height_);
@@ -799,12 +790,14 @@ void SimpleVideoPlayer::create_ui_() {
 
 void SimpleVideoPlayer::create_controls_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
+
   this->controls_container_ = lv_obj_create(parent);
   lv_obj_set_size(this->controls_container_, this->width_, 60);
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
 
+  // Play button
   this->play_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->play_btn_, 50, 40);
   lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, 0);
@@ -813,6 +806,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_center(play_label);
   lv_obj_add_event_cb(this->play_btn_, play_btn_cb_, LV_EVENT_CLICKED, this);
 
+  // Pause button
   this->pause_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->pause_btn_, 50, 40);
   lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 70, 0);
@@ -821,6 +815,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_center(pause_label);
   lv_obj_add_event_cb(this->pause_btn_, pause_btn_cb_, LV_EVENT_CLICKED, this);
 
+  // Stop button
   this->stop_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->stop_btn_, 50, 40);
   lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 130, 0);
@@ -829,26 +824,31 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_center(stop_label);
   lv_obj_add_event_cb(this->stop_btn_, stop_btn_cb_, LV_EVENT_CLICKED, this);
 
+  // Slider
   this->slider_ = lv_slider_create(this->controls_container_);
   lv_obj_set_size(this->slider_, this->width_ - 300, 10);
   lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 190, 0);
   lv_slider_set_range(this->slider_, 0, 100);
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
 
+  // Time label
   this->time_label_ = lv_label_create(this->controls_container_);
   lv_label_set_text(this->time_label_, "Frame: 0");
   lv_obj_align(this->time_label_, LV_ALIGN_RIGHT_MID, -10, 0);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
 }
 
+// Playback control
 void SimpleVideoPlayer::play() {
   if (this->state_ == PlayerState::PLAYING) return;
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) fseek(this->file_, 0, SEEK_SET);
-    else if (this->format_ == MediaFormat::MP4_H264) { this->current_video_sample_ = 0; this->sps_pps_sent_ = false; }
+    else if (this->format_ == MediaFormat::MP4_H264) {
+      this->current_video_sample_ = 0;
+      this->sps_pps_sent_ = false;
+    }
     this->frame_count_ = 0;
   }
-
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) lv_timer_resume(this->playback_timer_);
   if (this->hide_timer_ != nullptr && this->controls_visible_) { lv_timer_reset(this->hide_timer_); lv_timer_resume(this->hide_timer_); }
@@ -859,7 +859,8 @@ void SimpleVideoPlayer::pause() {
   if (this->state_ != PlayerState::PLAYING) return;
   this->state_ = PlayerState::PAUSED;
   if (this->playback_timer_ != nullptr) lv_timer_pause(this->playback_timer_);
-  this->show_controls_(); if (this->hide_timer_ != nullptr) lv_timer_pause(this->hide_timer_);
+  this->show_controls_();
+  if (this->hide_timer_ != nullptr) lv_timer_pause(this->hide_timer_);
   ESP_LOGI(TAG, "Playback paused");
 }
 
@@ -876,17 +877,27 @@ void SimpleVideoPlayer::stop() {
   if (this->playback_timer_ != nullptr) lv_timer_pause(this->playback_timer_);
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) fseek(this->file_, 0, SEEK_SET);
   else if (this->format_ == MediaFormat::MP4_H264) { this->current_video_sample_ = 0; this->sps_pps_sent_ = false; }
-  this->frame_count_ = 0; this->current_pos_ = 0;
+  this->frame_count_ = 0;
+  this->current_pos_ = 0;
   if (this->slider_ != nullptr) lv_slider_set_value(this->slider_, 0, LV_ANIM_OFF);
-  this->show_controls_(); if (this->hide_timer_ != nullptr) lv_timer_pause(this->hide_timer_);
+  this->show_controls_();
+  if (this->hide_timer_ != nullptr) lv_timer_pause(this->hide_timer_);
   ESP_LOGI(TAG, "Playback stopped");
 }
 
-// Static callbacks
-void SimpleVideoPlayer::play_btn_cb_(lv_event_t *e) { SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e)); if (player->is_paused()) player->resume(); else player->play(); }
-void SimpleVideoPlayer::pause_btn_cb_(lv_event_t *e) { SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e)); player->pause(); }
-void SimpleVideoPlayer::stop_btn_cb_(lv_event_t *e) { SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e)); player->stop(); }
-
+// LVGL callbacks (static)
+void SimpleVideoPlayer::play_btn_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  if (player->is_paused()) player->resume(); else player->play();
+}
+void SimpleVideoPlayer::pause_btn_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  player->pause();
+}
+void SimpleVideoPlayer::stop_btn_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  player->stop();
+}
 void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
   lv_obj_t *slider = lv_event_get_target(e);
@@ -895,33 +906,42 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
     long new_pos = (player->file_size_ * value) / 100;
     if (player->file_ != nullptr) { fseek(player->file_, new_pos, SEEK_SET); player->current_pos_ = new_pos; }
   } else if (player->format_ == MediaFormat::MP4_H264) {
-    size_t new_sample = (player->video_samples_.size() * value) / 100;
-    if (new_sample >= player->video_samples_.size()) new_sample = player->video_samples_.size() - 1;
-    player->current_video_sample_ = new_sample; player->sps_pps_sent_ = false;
+    if (!player->video_samples_.empty()) {
+      size_t new_sample = (player->video_samples_.size() * value) / 100;
+      if (new_sample >= player->video_samples_.size()) new_sample = player->video_samples_.size() - 1;
+      player->current_video_sample_ = new_sample;
+      player->sps_pps_sent_ = false;
+    }
   }
 }
 
+// Timer: non-blocking decode loop
 void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
   if (player->state_ != PlayerState::PLAYING) return;
 
-  // Non-blocking processing loop: try to decode at most a few frames per timer tick
   bool got_frame = false;
 
   if (player->format_ == MediaFormat::MJPEG) {
     int frames_processed = 0;
-    const int max_frames_per_callback = 3; // safe small number
+    const int max_frames_per_callback = 3; // tuned small for P4 reliability
     while (frames_processed < max_frames_per_callback) {
       if (player->read_next_mjpeg_frame_()) {
         if (player->decode_mjpeg_frame_()) {
-          player->update_display_(); got_frame = true; frames_processed++;
+          player->update_display_();
+          got_frame = true;
+          frames_processed++;
         } else break;
       } else break;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
     if (player->read_next_mp4_sample_()) {
-      if (player->decode_h264_frame_()) { player->update_display_(); got_frame = true; }
+      if (player->decode_h264_frame_()) {
+        player->update_display_();
+        got_frame = true;
+      }
     }
+    // audio processing
     player->process_audio_();
   }
 
@@ -930,14 +950,25 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   }
 }
 
-void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) { SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data); player->hide_controls_(); lv_timer_pause(timer); }
-void SimpleVideoPlayer::touch_cb_(lv_event_t *e) { SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e)); if (player->controls_visible_) player->hide_controls_(); else player->show_controls_(); }
+void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+  player->hide_controls_();
+  lv_timer_pause(timer);
+}
+
+void SimpleVideoPlayer::touch_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  if (player->controls_visible_) player->hide_controls_(); else player->show_controls_();
+}
 
 void SimpleVideoPlayer::show_controls_() {
   if (this->controls_container_ == nullptr) return;
   lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
   this->controls_visible_ = true;
-  if (this->state_ == PlayerState::PLAYING && this->hide_timer_ != nullptr) { lv_timer_reset(this->hide_timer_); lv_timer_resume(this->hide_timer_); }
+  if (this->state_ == PlayerState::PLAYING && this->hide_timer_ != nullptr) {
+    lv_timer_reset(this->hide_timer_);
+    lv_timer_resume(this->hide_timer_);
+  }
 }
 
 void SimpleVideoPlayer::hide_controls_() {
@@ -947,15 +978,18 @@ void SimpleVideoPlayer::hide_controls_() {
   if (this->hide_timer_ != nullptr) lv_timer_pause(this->hide_timer_);
 }
 
-} // namespace simple_video_player
-} // namespace esphome
+}  // namespace simple_video_player
+}  // namespace esphome
 
-#else // !USE_ESP_IDF
+#else  // !USE_ESP_IDF
 
 namespace esphome {
 namespace simple_video_player {
 
-void SimpleVideoPlayer::setup() { ESP_LOGE("simple_video_player","Requires ESP-IDF"); this->mark_failed(); }
+void SimpleVideoPlayer::setup() {
+  ESP_LOGE("simple_video_player", "Requires ESP-IDF");
+  this->mark_failed();
+}
 void SimpleVideoPlayer::loop() {}
 void SimpleVideoPlayer::dump_config() {}
 void SimpleVideoPlayer::play() {}
@@ -963,8 +997,9 @@ void SimpleVideoPlayer::pause() {}
 void SimpleVideoPlayer::stop() {}
 void SimpleVideoPlayer::resume() {}
 
-} // namespace simple_video_player
-} // namespace esphome
+}  // namespace simple_video_player
+}  // namespace esphome
 
-#endif // USE_ESP_IDF
+#endif  // USE_ESP_IDF
+
 
