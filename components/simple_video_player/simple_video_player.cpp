@@ -61,6 +61,12 @@ void SimpleVideoPlayer::setup() {
       this->actual_width_ = this->width_;
       this->actual_height_ = this->height_;
     }
+
+    // Auto-detect framerate from AVI header (if present)
+    if (!this->detect_avi_framerate_()) {
+      ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+      // Keep default frame_interval_ = 20ms (50fps)
+    }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
     this->actual_width_ = this->width_;
@@ -294,6 +300,88 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
   }
 
   // Restore file position
+  fseek(this->file_, original_pos, SEEK_SET);
+  return false;
+}
+
+bool SimpleVideoPlayer::detect_avi_framerate_() {
+  if (this->file_ == nullptr) return false;
+
+  // Save current file position
+  long original_pos = ftell(this->file_);
+  fseek(this->file_, 0, SEEK_SET);
+
+  // Read AVI header to detect framerate
+  uint8_t header[12];
+  if (fread(header, 1, 12, this->file_) != 12) {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Check for RIFF header
+  if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') {
+    // Not an AVI file, might be raw MJPEG stream - use default framerate
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Check for AVI marker
+  if (header[8] != 'A' || header[9] != 'V' || header[10] != 'I' || header[11] != ' ') {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Parse LIST hdrl to find avih (AVI main header)
+  uint8_t list_header[12];
+  if (fread(list_header, 1, 12, this->file_) != 12) {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Check for LIST hdrl
+  if (list_header[0] != 'L' || list_header[1] != 'I' || list_header[2] != 'S' || list_header[3] != 'T') {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  if (list_header[8] != 'h' || list_header[9] != 'd' || list_header[10] != 'r' || list_header[11] != 'l') {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Read avih chunk header
+  uint8_t avih_header[8];
+  if (fread(avih_header, 1, 8, this->file_) != 8) {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Check for avih marker
+  if (avih_header[0] != 'a' || avih_header[1] != 'v' || avih_header[2] != 'i' || avih_header[3] != 'h') {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Read microseconds per frame (first field in avih data)
+  uint32_t us_per_frame;
+  if (fread(&us_per_frame, 4, 1, this->file_) != 1) {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // AVI uses little-endian format, ESP32 is also little-endian, so no conversion needed
+  if (us_per_frame > 0 && us_per_frame < 1000000) {  // Sanity check (1-1000 fps)
+    // Calculate framerate and frame interval
+    float fps = 1000000.0f / us_per_frame;
+    this->frame_interval_ = us_per_frame / 1000;  // Convert microseconds to milliseconds
+
+    ESP_LOGI(TAG, "AVI framerate detected: %.2f fps (interval: %lu ms)",
+             fps, (unsigned long)this->frame_interval_);
+
+    fseek(this->file_, original_pos, SEEK_SET);
+    return true;
+  }
+
   fseek(this->file_, original_pos, SEEK_SET);
   return false;
 }

@@ -84,6 +84,7 @@ class SimpleVideoPlayer : public Component {
  protected:
   MediaFormat detect_format_();
   bool detect_jpeg_resolution_(int &width, int &height);
+  bool detect_avi_framerate_();
   bool extract_mp4_resolution_();
 
   bool init_jpeg_decoder_();
