@@ -224,7 +224,7 @@ class SimpleVideoPlayer : public Component {
 
   // Frame timing
   uint32_t last_frame_time_{0};
-  uint32_t frame_interval_{16};  // ~60fps default (MJPEG can process 3 frames per callback = ~180fps effective)
+  uint32_t frame_interval_{10};  // ~100fps timer (MJPEG can process 10 frames per callback = ~1000fps effective)
 
   // Controls visibility
   bool controls_visible_{true};

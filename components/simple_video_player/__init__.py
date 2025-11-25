@@ -31,7 +31,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_FILE_PATH): cv.string,
     cv.Optional(CONF_WIDTH, default=800): cv.positive_int,
     cv.Optional(CONF_HEIGHT, default=480): cv.positive_int,
-    cv.Optional(CONF_BUFFER_SIZE, default=100000): cv.positive_int,
+    cv.Optional(CONF_BUFFER_SIZE, default=512000): cv.positive_int,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,

@@ -1200,10 +1200,10 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
   if (player->format_ == MediaFormat::MJPEG) {
     // For MJPEG, process multiple frames per callback to maximize framerate
-    // The hardware JPEG decoder is very fast, so we can decode several frames
-    // within the timer interval (33ms) to achieve 60+ fps
+    // The hardware JPEG decoder is very fast, so we can decode many frames
+    // within the timer interval to achieve high fps
     int frames_processed = 0;
-    const int max_frames_per_callback = 3;  // Process up to 3 frames per callback
+    const int max_frames_per_callback = 10;  // Process up to 10 frames per callback for maximum speed
 
     while (frames_processed < max_frames_per_callback) {
       if (player->read_next_mjpeg_frame_()) {
