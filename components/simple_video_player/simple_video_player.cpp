@@ -1636,6 +1636,8 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
       }
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
+    uint32_t decode_start = esp_timer_get_time() / 1000;
+
     if (player->read_next_mp4_sample_()) {
       if (player->decode_h264_frame_()) {
         // Update current time from video sample timestamp
@@ -1644,6 +1646,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         }
         player->update_display_();
         got_frame = true;
+
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        if (callback_count % 30 == 0) {
+          ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
+        }
       }
     }
     // Process audio
