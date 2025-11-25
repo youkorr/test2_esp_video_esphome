@@ -1247,7 +1247,7 @@ void SimpleVideoPlayer::create_ui_() {
   lv_label_set_text(this->loading_spinner_, "Loading...");
   lv_obj_center(this->loading_spinner_);
   lv_obj_set_style_text_color(this->loading_spinner_, lv_color_hex(0x00A8FF), 0);
-  lv_obj_set_style_text_font(this->loading_spinner_, &lv_font_montserrat_20, 0);
+  lv_obj_set_style_text_font(this->loading_spinner_, &lv_font_montserrat_16, 0);
 
   // Create invisible touch layer over the canvas
   this->touch_layer_ = lv_obj_create(parent);
