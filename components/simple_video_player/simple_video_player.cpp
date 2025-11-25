@@ -1792,6 +1792,12 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
           sample.timestamp_ns = (cluster_timecode + relative_tc) * this->mkv_timecode_scale_;
 
           if (sample.track_number == this->mkv_video_track_) {
+            // Debug log for first few samples
+            if (sample_count < 5) {
+              ESP_LOGD(TAG, "Sample %d: track=%u, flags=0x%02X, keyframe=%d, offset=%ld, size=%llu",
+                       sample_count, sample.track_number, flags, sample.is_keyframe,
+                       cstart, (unsigned long long)csize);
+            }
             this->mkv_samples_.push_back(sample);
             sample_count++;
           }
@@ -1813,8 +1819,25 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
     this->total_duration_ms_ = this->mkv_samples_.back().timestamp_ns / 1000000;
   }
 
-  ESP_LOGI(TAG, "Pre-parsed %u MKV samples, duration: %lu ms",
-           this->total_frames_, (unsigned long)this->total_duration_ms_);
+  // Count and log keyframes
+  int keyframe_count = 0;
+  ESP_LOGI(TAG, "MKV Keyframe analysis (first 10 samples):");
+  for (size_t i = 0; i < this->mkv_samples_.size() && i < 10; i++) {
+    if (this->mkv_samples_[i].is_keyframe) {
+      keyframe_count++;
+      ESP_LOGI(TAG, "  Sample %zu: KEYFRAME, offset=%llu, size=%u",
+               i, (unsigned long long)this->mkv_samples_[i].offset, this->mkv_samples_[i].size);
+    } else {
+      ESP_LOGD(TAG, "  Sample %zu: P-frame, offset=%llu, size=%u",
+               i, (unsigned long long)this->mkv_samples_[i].offset, this->mkv_samples_[i].size);
+    }
+  }
+  for (size_t i = 10; i < this->mkv_samples_.size(); i++) {
+    if (this->mkv_samples_[i].is_keyframe) keyframe_count++;
+  }
+
+  ESP_LOGI(TAG, "Pre-parsed %u MKV samples, duration: %lu ms, keyframes: %d",
+           this->total_frames_, (unsigned long)this->total_duration_ms_, keyframe_count);
 
   // Reset to first cluster for playback
   fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
@@ -2066,6 +2089,18 @@ void SimpleVideoPlayer::play() {
       fseek(this->file_, 0, SEEK_SET);
     } else if (this->format_ == MediaFormat::MP4_H264) {
       this->current_video_sample_ = 0;
+      this->sps_pps_sent_ = false;
+    } else if (this->format_ == MediaFormat::MKV_H264) {
+      // Find first keyframe to start playback
+      size_t first_keyframe = 0;
+      for (size_t i = 0; i < this->mkv_samples_.size(); i++) {
+        if (this->mkv_samples_[i].is_keyframe) {
+          first_keyframe = i;
+          ESP_LOGI(TAG, "Starting playback from first keyframe at sample %zu", first_keyframe);
+          break;
+        }
+      }
+      this->current_mkv_sample_ = first_keyframe;
       this->sps_pps_sent_ = false;
     }
     this->frame_count_ = 0;
