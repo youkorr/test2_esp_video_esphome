@@ -1,4 +1,3 @@
-// simple_video_player.cpp
 #include "simple_video_player.h"
 
 #ifdef USE_ESP_IDF
@@ -14,7 +13,9 @@ namespace simple_video_player {
 
 static const char *const TAG = "simple_video_player";
 
-// Helper to read big-endian values
+// ----------------------------------------
+// Helpers pour les valeurs big-endian
+// ----------------------------------------
 static uint32_t read_be32(FILE *f) {
   uint8_t buf[4];
   if (fread(buf, 1, 4, f) != 4) return 0;
@@ -31,45 +32,37 @@ static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
   return ((uint32_t)a << 24) | ((uint32_t)b << 16) | ((uint32_t)c << 8) | d;
 }
 
-// ----------------------
+// ==============================================
 // Setup / lifecycle
-// ----------------------
+// ==============================================
 void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Setting up Simple Video Player...");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
   ESP_LOGI(TAG, "  Resolution: %dx%d", this->width_, this->height_);
 
-  // sensible defaults
-  if (this->buffer_size_ < 65536) this->buffer_size_ = 256 * 1024;  // 256KB default for MJPEG frames
+  if (this->buffer_size_ < 65536) this->buffer_size_ = 256 * 1024;  // 256KB default
 
-  // Allocate input buffer in SPIRAM if available
+  // Allocation du buffer d'entrée
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_,
                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (this->input_buffer_ == nullptr) {
+  if (!this->input_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate input buffer");
     this->mark_failed();
     return;
   }
 
-  // Align width/height to 16 bytes for JPEG decoder
-  int aligned_width = (this->width_ + 15) & ~0x0F;
-  int aligned_height = (this->height_ + 15) & ~0x0F;
-
-  // Allocate RGB buffer aligned for LVGL (RGB565)
-  this->rgb_buffer_size_ = (size_t)aligned_width * (size_t)aligned_height * 2;
+  // Allocation du buffer RGB
+  this->rgb_buffer_size_ = (size_t)this->width_ * this->height_ * 2;
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (this->rgb_buffer_ == nullptr) {
+  if (!this->rgb_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer");
     this->mark_failed();
     return;
   }
   std::memset(this->rgb_buffer_, 0x00, this->rgb_buffer_size_);
 
-  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes (aligned %dx%d)", (unsigned)this->rgb_buffer_size_,
-           aligned_width, aligned_height);
-
-  // Prepare LVGL image descriptor for zero-copy rendering
+  // Préparer LVGL image descriptor
   std::memset(&this->frame_img_dsc_, 0, sizeof(this->frame_img_dsc_));
   this->frame_img_dsc_.header.cf = LV_IMG_CF_TRUE_COLOR;
   this->frame_img_dsc_.header.w = this->width_;
@@ -77,67 +70,47 @@ void SimpleVideoPlayer::setup() {
   this->frame_img_dsc_.data = this->rgb_buffer_;
   this->frame_img_dsc_.data_size = this->rgb_buffer_size_;
 
-  // Open file
+  // Ouvrir le fichier
   if (!this->open_video_file_()) {
     ESP_LOGE(TAG, "Failed to open video file");
     this->mark_failed();
     return;
   }
-}
 
-
-  // Detect format
+  // Détecter le format
   this->format_ = this->detect_format_();
   ESP_LOGI(TAG, "Detected format: %s",
            this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" :
            (this->format_ == MediaFormat::MJPEG ? "MJPEG" : "UNKNOWN"));
 
-  // Init decoders
+  // Initialisation des décodeurs
   if (this->format_ == MediaFormat::MP4_H264) {
-    if (!this->parse_mp4_()) {
-      ESP_LOGE(TAG, "Failed to parse MP4 file");
-      this->mark_failed();
-      return;
-    }
-    if (!this->init_h264_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-      this->mark_failed();
-      return;
-    }
-    if (this->speaker_ != nullptr && this->has_audio_) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize AAC decoder - continuing without audio");
-      }
-    }
+    if (!this->parse_mp4_()) { ESP_LOGE(TAG, "Failed to parse MP4"); this->mark_failed(); return; }
+    if (!this->init_h264_decoder_()) { ESP_LOGE(TAG, "Failed to init H264"); this->mark_failed(); return; }
+    if (this->speaker_ && this->has_audio_) { this->init_aac_decoder_(); }
   } else if (this->format_ == MediaFormat::MJPEG) {
-    if (!this->init_jpeg_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
-      this->mark_failed();
-      return;
-    }
+    if (!this->init_jpeg_decoder_()) { ESP_LOGE(TAG, "Failed to init JPEG"); this->mark_failed(); return; }
   } else {
     ESP_LOGE(TAG, "Unknown media format");
     this->mark_failed();
     return;
   }
 
-  // Create UI
+  // Création de l'UI LVGL
   this->create_ui_();
 
-  // Timer: we use 1ms ticks and a non-blocking pipeline inside timer_cb_
+  // Timer pour décodage non bloquant
   this->playback_timer_ = lv_timer_create(timer_cb_, 1, this);
   lv_timer_pause(this->playback_timer_);
 
-  if (this->auto_play_) {
-    this->play();
-  }
-
+  if (this->auto_play_) this->play();
   ESP_LOGI(TAG, "Simple Video Player initialized");
 }
 
-void SimpleVideoPlayer::loop() {
-  // Main processing handled in timer callback
-}
+// ==============================================
+// Loop / dump
+// ==============================================
+void SimpleVideoPlayer::loop() {}
 
 void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "Simple Video Player:");
@@ -149,36 +122,28 @@ void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
 }
 
-// ----------------------
-// File open / detect
-// ----------------------
+// ==============================================
+// Fichier / détection
+// ==============================================
 bool SimpleVideoPlayer::open_video_file_() {
   this->file_ = fopen(this->file_path_.c_str(), "rb");
-  if (this->file_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to open file: %s", this->file_path_.c_str());
-    return false;
-  }
+  if (!this->file_) { ESP_LOGE(TAG, "Failed to open file"); return false; }
   fseek(this->file_, 0, SEEK_END);
   this->file_size_ = ftell(this->file_);
   fseek(this->file_, 0, SEEK_SET);
-  ESP_LOGI(TAG, "Video file opened: %ld bytes", this->file_size_);
+  ESP_LOGI(TAG, "Video file size: %ld bytes", this->file_size_);
   return true;
 }
 
 MediaFormat SimpleVideoPlayer::detect_format_() {
-  if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
+  if (!this->file_) return MediaFormat::UNKNOWN;
   uint8_t header[8];
-  if (fread(header, 1, sizeof(header), this->file_) != sizeof(header)) {
-    fseek(this->file_, 0, SEEK_SET);
-    return MediaFormat::UNKNOWN;
-  }
+  if (fread(header, 1, sizeof(header), this->file_) != sizeof(header)) { fseek(this->file_, 0, SEEK_SET); return MediaFormat::UNKNOWN; }
   fseek(this->file_, 0, SEEK_SET);
 
   uint32_t box_type = ((uint32_t)header[4] << 24) | ((uint32_t)header[5] << 16) | ((uint32_t)header[6] << 8) | header[7];
   if (box_type == make_fourcc('f','t','y','p') || box_type == make_fourcc('m','o','o','v') ||
-      box_type == make_fourcc('f','r','e','e') || box_type == make_fourcc('m','d','a','t')) {
-    return MediaFormat::MP4_H264;
-  }
+      box_type == make_fourcc('f','r','e','e') || box_type == make_fourcc('m','d','a','t')) return MediaFormat::MP4_H264;
   if (header[0] == 0xFF && header[1] == 0xD8) return MediaFormat::MJPEG;
   return MediaFormat::UNKNOWN;
 }
@@ -1010,6 +975,7 @@ void SimpleVideoPlayer::resume() {}
 }  // namespace esphome
 
 #endif  // USE_ESP_IDF
+
 
 
 
