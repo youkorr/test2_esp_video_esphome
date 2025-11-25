@@ -25,6 +25,7 @@ CONF_LOOP = "loop"
 CONF_SHOW_CONTROLS = "show_controls"
 CONF_PARENT_ID = "parent_id"
 CONF_SPEAKER = "speaker"
+CONF_FPS = "fps"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -37,6 +38,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
+    cv.Optional(CONF_FPS): cv.positive_float,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -51,6 +53,9 @@ async def to_code(config):
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+    if CONF_FPS in config:
+        cg.add(var.set_fps(config[CONF_FPS]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

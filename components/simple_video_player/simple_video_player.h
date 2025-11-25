@@ -67,6 +67,12 @@ class SimpleVideoPlayer : public Component {
   void set_show_controls(bool b) { controls_enabled_ = b; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
   void set_speaker(speaker::Speaker *spk) { speaker_ = spk; }
+  void set_fps(float fps) {
+    if (fps > 0 && fps <= 120) {
+      frame_interval_ = (uint32_t)(1000.0f / fps);
+      fps_override_ = true;
+    }
+  }
 
   void setup() override;
   void loop() override;
@@ -146,6 +152,7 @@ class SimpleVideoPlayer : public Component {
   bool auto_play_{true};
   bool loop_{true};
   bool controls_enabled_{true};
+  bool fps_override_{false};
 
   PlayerState state_{PlayerState::STOPPED};
   MediaFormat format_{MediaFormat::UNKNOWN};

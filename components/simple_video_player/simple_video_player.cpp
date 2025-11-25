@@ -62,10 +62,15 @@ void SimpleVideoPlayer::setup() {
       this->actual_height_ = this->height_;
     }
 
-    // Auto-detect framerate from AVI header (if present)
-    if (!this->detect_avi_framerate_()) {
-      ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
-      // Keep default frame_interval_ = 20ms (50fps)
+    // Auto-detect framerate from AVI header (if present and not overridden by user)
+    if (!this->fps_override_) {
+      if (!this->detect_avi_framerate_()) {
+        ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+        // Keep default frame_interval_ = 20ms (50fps)
+      }
+    } else {
+      ESP_LOGI(TAG, "Using user-configured framerate: %.2f fps (interval: %lu ms)",
+               1000.0f / this->frame_interval_, (unsigned long)this->frame_interval_);
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
@@ -788,12 +793,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
       // Calculate average framerate and adjust playback timer interval
       // This ensures smooth playback matching the video's actual framerate
-      if (this->total_duration_ms_ > 0 && this->video_samples_.size() > 0) {
+      if (!this->fps_override_ && this->total_duration_ms_ > 0 && this->video_samples_.size() > 0) {
         float actual_fps = (this->video_samples_.size() * 1000.0f) / this->total_duration_ms_;
         this->frame_interval_ = (uint32_t)(1000.0f / actual_fps);
 
         ESP_LOGI(TAG, "Detected framerate: %.2f fps, base timer interval: %lu ms",
                  actual_fps, (unsigned long)this->frame_interval_);
+      } else if (this->fps_override_) {
+        ESP_LOGI(TAG, "Using user-configured framerate (overriding auto-detection)");
       }
     }
 
