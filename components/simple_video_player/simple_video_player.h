@@ -83,6 +83,8 @@ class SimpleVideoPlayer : public Component {
 
  protected:
   MediaFormat detect_format_();
+  bool detect_jpeg_resolution_(int &width, int &height);
+  bool extract_mp4_resolution_();
 
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
@@ -132,8 +134,12 @@ class SimpleVideoPlayer : public Component {
   static void touch_cb_(lv_event_t *e);
 
   std::string file_path_;
-  int width_{800};
-  int height_{480};
+  int width_{800};   // Default/configured width (used if auto-detection fails)
+  int height_{480};  // Default/configured height (used if auto-detection fails)
+  int actual_width_{0};   // Detected actual video width
+  int actual_height_{0};  // Detected actual video height
+  int aligned_width_{0};  // 16-byte aligned width for decoder
+  int aligned_height_{0}; // 16-byte aligned height for decoder
   size_t buffer_size_{100000};
   bool auto_play_{true};
   bool loop_{true};

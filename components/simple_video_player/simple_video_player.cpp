@@ -30,23 +30,12 @@ static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Setting up Simple Video Player...");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
-  ESP_LOGI(TAG, "  Resolution: %dx%d", this->width_, this->height_);
 
   // Allocate input buffer
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_,
                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->input_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate input buffer");
-    this->mark_failed();
-    return;
-  }
-
-  // Allocate RGB buffer
-  this->rgb_buffer_size_ = this->width_ * this->height_ * 2;  // RGB565
-  this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (this->rgb_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate RGB buffer");
     this->mark_failed();
     return;
   }
@@ -63,9 +52,43 @@ void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Detected format: %s",
            this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
 
+  // Auto-detect resolution from video file
+  if (this->format_ == MediaFormat::MJPEG) {
+    if (this->detect_jpeg_resolution_(this->actual_width_, this->actual_height_)) {
+      ESP_LOGI(TAG, "Auto-detected JPEG resolution: %dx%d", this->actual_width_, this->actual_height_);
+    } else {
+      ESP_LOGW(TAG, "Failed to auto-detect resolution, using configured: %dx%d", this->width_, this->height_);
+      this->actual_width_ = this->width_;
+      this->actual_height_ = this->height_;
+    }
+  } else {
+    // For MP4, use configured dimensions initially (will be updated during parsing)
+    this->actual_width_ = this->width_;
+    this->actual_height_ = this->height_;
+  }
+
+  // Calculate 16-byte aligned dimensions for decoder
+  this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+  this->aligned_height_ = (this->actual_height_ + 15) & ~15;
+
+  ESP_LOGI(TAG, "Video resolution: %dx%d (actual) -> %dx%d (aligned)",
+           this->actual_width_, this->actual_height_,
+           this->aligned_width_, this->aligned_height_);
+
+  // Allocate RGB buffer with aligned dimensions
+  this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
+  this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (this->rgb_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+    this->mark_failed();
+    return;
+  }
+  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
-    // Parse MP4 file
+    // Parse MP4 file (this will extract resolution)
     if (!this->parse_mp4_()) {
       ESP_LOGE(TAG, "Failed to parse MP4 file");
       this->mark_failed();
@@ -73,6 +96,34 @@ void SimpleVideoPlayer::setup() {
     }
     ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
              this->video_samples_.size(), this->audio_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
 
     // Initialize H.264 decoder
     if (!this->init_h264_decoder_()) {
@@ -118,10 +169,15 @@ void SimpleVideoPlayer::loop() {
 void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "Simple Video Player:");
   ESP_LOGCONFIG(TAG, "  File: %s", this->file_path_.c_str());
-  ESP_LOGCONFIG(TAG, "  Resolution: %dx%d", this->width_, this->height_);
+  ESP_LOGCONFIG(TAG, "  Configured resolution: %dx%d", this->width_, this->height_);
+  if (this->actual_width_ > 0 && this->actual_height_ > 0) {
+    ESP_LOGCONFIG(TAG, "  Detected resolution: %dx%d (aligned: %dx%d)",
+                  this->actual_width_, this->actual_height_,
+                  this->aligned_width_, this->aligned_height_);
+  }
   ESP_LOGCONFIG(TAG, "  Format: %s",
                 this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
-  ESP_LOGCONFIG(TAG, "  Buffer size: %u", this->buffer_size_);
+  ESP_LOGCONFIG(TAG, "  Buffer size: %u bytes (RGB: %u bytes)", this->buffer_size_, this->rgb_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Auto play: %s", this->auto_play_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
 }
@@ -167,6 +223,88 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
   }
 
   return MediaFormat::UNKNOWN;
+}
+
+bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
+  if (this->file_ == nullptr) return false;
+
+  // Save current file position
+  long original_pos = ftell(this->file_);
+  fseek(this->file_, 0, SEEK_SET);
+
+  // Read first frame to get dimensions
+  // Search for JPEG start marker (FFD8)
+  int c1 = 0, c2 = 0;
+  while ((c1 = fgetc(this->file_)) != EOF) {
+    if (c1 == 0xFF) {
+      c2 = fgetc(this->file_);
+      if (c2 == 0xD8) {
+        break;
+      }
+    }
+  }
+
+  if (c1 == EOF) {
+    fseek(this->file_, original_pos, SEEK_SET);
+    return false;
+  }
+
+  // Now parse JPEG markers to find SOF (Start of Frame)
+  // SOF markers: FFC0-FFCF (we care about FFC0, FFC2 mainly)
+  while (true) {
+    // Find next marker
+    c1 = fgetc(this->file_);
+    if (c1 != 0xFF) continue;
+
+    // Skip padding 0xFF bytes
+    do {
+      c2 = fgetc(this->file_);
+    } while (c2 == 0xFF);
+
+    if (c2 == EOF) break;
+
+    // Check for SOF markers (C0-CF, except C4, C8, CC which are DHT, JPG, DAC)
+    if ((c2 >= 0xC0 && c2 <= 0xC3) || (c2 >= 0xC5 && c2 <= 0xC7) ||
+        (c2 >= 0xC9 && c2 <= 0xCB) || (c2 >= 0xCD && c2 <= 0xCF)) {
+      // SOF marker found - read dimensions
+      uint16_t length = read_be16(this->file_);
+      uint8_t precision = fgetc(this->file_);
+      height = read_be16(this->file_);
+      width = read_be16(this->file_);
+
+      // Restore file position
+      fseek(this->file_, original_pos, SEEK_SET);
+      return true;
+    }
+
+    // For other markers, skip their data
+    if (c2 == 0xD8 || c2 == 0xD9 || c2 == 0x01 || (c2 >= 0xD0 && c2 <= 0xD7)) {
+      // No length field for these markers
+      continue;
+    }
+
+    // Read marker length and skip
+    uint16_t marker_len = read_be16(this->file_);
+    if (marker_len >= 2) {
+      fseek(this->file_, marker_len - 2, SEEK_CUR);
+    }
+
+    // Safety check - don't parse too far
+    if (ftell(this->file_) > 100000) break;
+  }
+
+  // Restore file position
+  fseek(this->file_, original_pos, SEEK_SET);
+  return false;
+}
+
+bool SimpleVideoPlayer::extract_mp4_resolution_() {
+  // Resolution will be extracted during avc1 parsing
+  // This is called after MP4 parsing completes to update dimensions
+  if (this->actual_width_ > 0 && this->actual_height_ > 0) {
+    return true;
+  }
+  return false;
 }
 
 // ==============================================
@@ -295,12 +433,12 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
     return false;
   }
 
-  // Allocate YUV buffer for decoded frames
-  size_t yuv_size = this->width_ * this->height_ * 3 / 2;  // I420
+  // Allocate YUV buffer for decoded frames (using actual dimensions)
+  size_t yuv_size = this->actual_width_ * this->actual_height_ * 3 / 2;  // I420
   this->yuv_buffer_.resize(yuv_size);
 
   this->h264_decoder_ready_ = true;
-  ESP_LOGI(TAG, "H.264 decoder initialized");
+  ESP_LOGI(TAG, "H.264 decoder initialized for %dx%d", this->actual_width_, this->actual_height_);
 
   return true;
 }
@@ -432,7 +570,8 @@ bool SimpleVideoPlayer::parse_minf_(uint32_t size, bool is_video) {
 
 bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   ESP_LOGD(TAG, "Parsing stbl (is_video=%d, size=%u)", is_video, size);
-  long end_pos = ftell(this->file_) + size;
+  long start_pos = ftell(this->file_);
+  long end_pos = start_pos + size;
 
   // First pass - collect sample info
   std::vector<uint32_t> sample_sizes;
@@ -442,12 +581,24 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
   while (ftell(this->file_) < end_pos) {
     long current_pos = ftell(this->file_);
+
+    // Safety check - don't go past end
+    if (current_pos >= end_pos) {
+      ESP_LOGD(TAG, "  Reached end of stbl box");
+      break;
+    }
+
     ESP_LOGD(TAG, "  Loop iteration: pos=%ld, end_pos=%ld", current_pos, end_pos);
 
     uint32_t box_size, box_type;
-    long box_start = current_pos;
     if (!this->read_mp4_box_(box_size, box_type)) {
       ESP_LOGD(TAG, "  read_mp4_box_ failed, breaking loop");
+      break;
+    }
+
+    // Sanity check box size
+    if (box_size < 8 || box_size > (end_pos - current_pos)) {
+      ESP_LOGW(TAG, "  Invalid box size %u at pos %ld, breaking", box_size, current_pos);
       break;
     }
 
@@ -457,12 +608,10 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     fourcc[1] = (box_type >> 16) & 0xFF;
     fourcc[2] = (box_type >> 8) & 0xFF;
     fourcc[3] = box_type & 0xFF;
-    ESP_LOGD(TAG, "  stbl box: '%s' size=%u", fourcc, box_size);
+    ESP_LOGD(TAG, "  stbl box: '%s' size=%u at pos=%ld", fourcc, box_size, current_pos);
 
     if (box_type == make_fourcc('s', 't', 's', 'd')) {
       this->parse_stsd_(box_size - 8, is_video);
-      ESP_LOGD(TAG, "  After stsd: pos=%ld, box_end=%ld, end_pos=%ld",
-               ftell(this->file_), box_start + box_size, end_pos);
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
       ESP_LOGD(TAG, "  Reading stsz...");
@@ -514,10 +663,10 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
     }
 
-    long before_seek = ftell(this->file_);
-    fseek(this->file_, box_start + box_size, SEEK_SET);
-    clearerr(this->file_);  // Clear any EOF/error flags
-    ESP_LOGD(TAG, "  Repositioned from %ld to %ld (for next box)", before_seek, box_start + box_size);
+    // Position to next box
+    long next_box_pos = current_pos + box_size;
+    fseek(this->file_, next_box_pos, SEEK_SET);
+    ESP_LOGD(TAG, "  Positioned to next box at %ld", next_box_pos);
   }
 
   // Build sample list (simplified - assumes 1 sample per chunk)
@@ -573,11 +722,27 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   long start_pos = ftell(this->file_);
   long end_pos = start_pos + size;
 
-  // Skip to avcC box (78 bytes: 6 reserved + 2 data_ref + 70 fields)
-  fseek(this->file_, 78, SEEK_CUR);
+  // Skip: 6 bytes reserved + 2 bytes data_reference_index + 16 bytes video pre-defined
+  fseek(this->file_, 24, SEEK_CUR);
+
+  // Read width and height (2 bytes each, big-endian)
+  uint16_t vid_width = read_be16(this->file_);
+  uint16_t vid_height = read_be16(this->file_);
+
+  // Update actual dimensions if not already set
+  if (this->actual_width_ == 0 || this->actual_width_ == this->width_) {
+    this->actual_width_ = vid_width;
+    this->actual_height_ = vid_height;
+    ESP_LOGI(TAG, "Extracted video dimensions from avc1: %dx%d", vid_width, vid_height);
+  }
+
+  // Skip remaining fields to get to child boxes (78 - 24 - 4 = 50 bytes)
+  fseek(this->file_, 50, SEEK_CUR);
   clearerr(this->file_);  // Clear any flags from previous operations
 
+  // Parse child boxes to find avcC
   while (ftell(this->file_) < end_pos && !feof(this->file_)) {
+    long current_pos = ftell(this->file_);
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) {
       clearerr(this->file_);  // Clear EOF flag immediately
@@ -589,7 +754,14 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
       break;  // We found avcC, no need to continue
     } else {
       if (box_size > 8 && box_size < 1000000) {  // Sanity check
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        long next_pos = current_pos + box_size;
+        if (next_pos <= end_pos) {
+          fseek(this->file_, next_pos, SEEK_SET);
+        } else {
+          break;
+        }
+      } else {
+        break;
       }
     }
   }
@@ -968,9 +1140,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   }
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
-    // Convert I420 to RGB565
+    // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
-                                   this->width_, this->height_);
+                                   this->actual_width_, this->actual_height_);
     return true;
   }
 
@@ -1019,8 +1191,9 @@ void SimpleVideoPlayer::update_display_() {
     return;
   }
 
+  // Use actual dimensions for display (decoder output is aligned but we display actual size)
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
-                       this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
+                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_);
 
   // Update slider position
@@ -1040,16 +1213,16 @@ void SimpleVideoPlayer::update_display_() {
 void SimpleVideoPlayer::create_ui_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
-  // Create canvas for video display
+  // Create canvas for video display (use actual dimensions)
   this->canvas_ = lv_canvas_create(parent);
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
-                       this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
+                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_center(this->canvas_);
 
   // Create invisible touch layer over the canvas
   this->touch_layer_ = lv_obj_create(parent);
   lv_obj_remove_style_all(this->touch_layer_);
-  lv_obj_set_size(this->touch_layer_, this->width_, this->height_);
+  lv_obj_set_size(this->touch_layer_, this->actual_width_, this->actual_height_);
   lv_obj_center(this->touch_layer_);
   lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(this->touch_layer_, touch_cb_, LV_EVENT_CLICKED, this);
@@ -1065,9 +1238,9 @@ void SimpleVideoPlayer::create_ui_() {
 void SimpleVideoPlayer::create_controls_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
-  // Controls container at bottom
+  // Controls container at bottom (use actual video width)
   this->controls_container_ = lv_obj_create(parent);
-  lv_obj_set_size(this->controls_container_, this->width_, 60);
+  lv_obj_set_size(this->controls_container_, this->actual_width_, 60);
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
@@ -1101,7 +1274,7 @@ void SimpleVideoPlayer::create_controls_() {
 
   // Progress slider
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_size(this->slider_, this->width_ - 300, 10);
+  lv_obj_set_size(this->slider_, this->actual_width_ - 300, 10);
   lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 190, 0);
   lv_slider_set_range(this->slider_, 0, 100);
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
