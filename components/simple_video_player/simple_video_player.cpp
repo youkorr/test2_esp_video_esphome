@@ -103,7 +103,7 @@ void SimpleVideoPlayer::setup() {
   this->create_ui_();
 
   // Timer pour décodage non bloquant, basé sur FPS
-  int interval_ms = 1000 / (this->fps_ > 0 ? this->fps_ : 30);
+  int interval_ms = 33; // 1000 / 30 fps ≈ 33ms
   this->playback_timer_ = lv_timer_create(timer_cb_, interval_ms, this);
   lv_timer_pause(this->playback_timer_);
 
