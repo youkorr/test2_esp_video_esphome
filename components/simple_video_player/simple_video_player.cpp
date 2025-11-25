@@ -328,10 +328,14 @@ bool SimpleVideoPlayer::parse_mp4_() {
 }
 
 bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
+  long pos = ftell(this->file_);
   size = read_be32(this->file_);
   type = read_be32(this->file_);
 
-  if (size == 0 || feof(this->file_)) return false;
+  if (size == 0 || feof(this->file_)) {
+    ESP_LOGD(TAG, "read_mp4_box_ failed at pos=%ld: size=%u, eof=%d", pos, size, feof(this->file_));
+    return false;
+  }
 
   return true;
 }
@@ -437,9 +441,15 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   std::vector<uint32_t> keyframes;
 
   while (ftell(this->file_) < end_pos) {
+    long current_pos = ftell(this->file_);
+    ESP_LOGD(TAG, "  Loop iteration: pos=%ld, end_pos=%ld", current_pos, end_pos);
+
     uint32_t box_size, box_type;
-    long box_start = ftell(this->file_);
-    if (!this->read_mp4_box_(box_size, box_type)) break;
+    long box_start = current_pos;
+    if (!this->read_mp4_box_(box_size, box_type)) {
+      ESP_LOGD(TAG, "  read_mp4_box_ failed, breaking loop");
+      break;
+    }
 
     // Log box type as 4-char string for debugging
     char fourcc[5] = {0};
