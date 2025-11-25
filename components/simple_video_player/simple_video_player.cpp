@@ -52,15 +52,12 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
-  // Allocation du buffer RGB avec alignement 16 pixels + marge sécurité
+  // Allocation du buffer RGB avec alignement 16px
   int rgb_w = ((this->width_ + 15) / 16) * 16;
   int rgb_h = ((this->height_ + 15) / 16) * 16;
-  this->rgb_buffer_size_ = (size_t)rgb_w * (size_t)rgb_h * 2; // RGB565
-  this->rgb_buffer_size_ += 16384; // marge sécurité
-
+  this->rgb_buffer_size_ = (size_t)rgb_w * (size_t)rgb_h * 2 + 16384; // RGB565 + marge
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(
-      64, this->rgb_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
-  );
+      64, this->rgb_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (!this->rgb_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer");
     this->mark_failed();
@@ -105,8 +102,9 @@ void SimpleVideoPlayer::setup() {
   // Création de l'UI LVGL
   this->create_ui_();
 
-  // Timer pour décodage non bloquant
-  this->playback_timer_ = lv_timer_create(timer_cb_, 1, this);
+  // Timer pour décodage non bloquant, basé sur FPS
+  int interval_ms = 1000 / (this->fps_ > 0 ? this->fps_ : 30);
+  this->playback_timer_ = lv_timer_create(timer_cb_, interval_ms, this);
   lv_timer_pause(this->playback_timer_);
 
   if (this->auto_play_) this->play();
@@ -144,15 +142,22 @@ bool SimpleVideoPlayer::open_video_file_() {
 MediaFormat SimpleVideoPlayer::detect_format_() {
   if (!this->file_) return MediaFormat::UNKNOWN;
   uint8_t header[8];
-  if (fread(header, 1, sizeof(header), this->file_) != sizeof(header)) { fseek(this->file_, 0, SEEK_SET); return MediaFormat::UNKNOWN; }
+  if (fread(header, 1, sizeof(header), this->file_) != sizeof(header)) {
+    fseek(this->file_, 0, SEEK_SET);
+    return MediaFormat::UNKNOWN;
+  }
   fseek(this->file_, 0, SEEK_SET);
 
-  uint32_t box_type = ((uint32_t)header[4] << 24) | ((uint32_t)header[5] << 16) | ((uint32_t)header[6] << 8) | header[7];
+  uint32_t box_type = ((uint32_t)header[4] << 24) | ((uint32_t)header[5] << 16) |
+                      ((uint32_t)header[6] << 8) | header[7];
   if (box_type == make_fourcc('f','t','y','p') || box_type == make_fourcc('m','o','o','v') ||
-      box_type == make_fourcc('f','r','e','e') || box_type == make_fourcc('m','d','a','t')) return MediaFormat::MP4_H264;
+      box_type == make_fourcc('f','r','e','e') || box_type == make_fourcc('m','d','a','t')) 
+    return MediaFormat::MP4_H264;
   if (header[0] == 0xFF && header[1] == 0xD8) return MediaFormat::MJPEG;
   return MediaFormat::UNKNOWN;
 }
+
+
 
 // ==============================================
 // JPEG/MJPEG
