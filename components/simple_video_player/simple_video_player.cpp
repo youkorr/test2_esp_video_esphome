@@ -451,6 +451,8 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
     if (box_type == make_fourcc('s', 't', 's', 'd')) {
       this->parse_stsd_(box_size - 8, is_video);
+      ESP_LOGD(TAG, "  After stsd: pos=%ld, box_end=%ld, end_pos=%ld",
+               ftell(this->file_), box_start + box_size, end_pos);
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
       ESP_LOGD(TAG, "  Reading stsz...");
@@ -502,7 +504,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
     }
 
+    long before_seek = ftell(this->file_);
     fseek(this->file_, box_start + box_size, SEEK_SET);
+    ESP_LOGD(TAG, "  Repositioned from %ld to %ld (for next box)", before_seek, box_start + box_size);
   }
 
   // Build sample list (simplified - assumes 1 sample per chunk)
@@ -555,7 +559,8 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
-  long end_pos = ftell(this->file_) + size;
+  long start_pos = ftell(this->file_);
+  long end_pos = start_pos + size;
 
   // Skip to avcC box
   fseek(this->file_, 78, SEEK_CUR);  // Skip fixed avc1 header
@@ -572,6 +577,9 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
       }
     }
   }
+
+  // Ensure we're at the end of this box
+  fseek(this->file_, end_pos, SEEK_SET);
 
   return true;
 }
@@ -611,10 +619,11 @@ bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
+  long start_pos = ftell(this->file_);
+  long end_pos = start_pos + size;
+
   // Skip to esds
   fseek(this->file_, 28, SEEK_CUR);  // Skip fixed mp4a header
-
-  long end_pos = ftell(this->file_) + size - 28;
 
   while (ftell(this->file_) < end_pos) {
     uint32_t box_size, box_type;
@@ -628,6 +637,9 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
       }
     }
   }
+
+  // Ensure we're at the end of this box
+  fseek(this->file_, end_pos, SEEK_SET);
 
   return true;
 }
