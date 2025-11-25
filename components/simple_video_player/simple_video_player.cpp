@@ -1209,27 +1209,29 @@ void SimpleVideoPlayer::update_display_() {
     return;
   }
 
-  // Use actual dimensions for display (decoder output is aligned but we display actual size)
-  lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+  // Only invalidate canvas to trigger redraw (buffer is already set in create_ui_)
   lv_obj_invalidate(this->canvas_);
 
-  // Update slider position
-  if (this->slider_ != nullptr && this->total_frames_ > 0) {
-    int progress = (this->frame_count_ * 100) / this->total_frames_;
-    lv_slider_set_value(this->slider_, progress, LV_ANIM_OFF);
-  }
+  // Update UI controls only every 15 frames (~0.5 second at 30fps) to reduce overhead
+  // This significantly improves video playback performance on ESP32-P4
+  if (this->frame_count_ % 15 == 0) {
+    // Update slider position
+    if (this->slider_ != nullptr && this->total_frames_ > 0) {
+      int progress = (this->frame_count_ * 100) / this->total_frames_;
+      lv_slider_set_value(this->slider_, progress, LV_ANIM_OFF);
+    }
 
-  // Update time label
-  if (this->time_label_ != nullptr) {
-    char current_time[16], total_time[16];
-    char buf[40];
+    // Update time label
+    if (this->time_label_ != nullptr) {
+      char current_time[16], total_time[16];
+      char buf[40];
 
-    this->format_time_(current_time, sizeof(current_time), this->current_time_ms_);
-    this->format_time_(total_time, sizeof(total_time), this->total_duration_ms_);
+      this->format_time_(current_time, sizeof(current_time), this->current_time_ms_);
+      this->format_time_(total_time, sizeof(total_time), this->total_duration_ms_);
 
-    snprintf(buf, sizeof(buf), "%s / %s", current_time, total_time);
-    lv_label_set_text(this->time_label_, buf);
+      snprintf(buf, sizeof(buf), "%s / %s", current_time, total_time);
+      lv_label_set_text(this->time_label_, buf);
+    }
   }
 }
 
