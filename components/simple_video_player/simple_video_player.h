@@ -131,6 +131,7 @@ class SimpleVideoPlayer : public Component {
   bool parse_mkv_();
   uint64_t read_ebml_id_();
   uint64_t read_ebml_size_();
+  uint64_t read_ebml_vint_();  // Read EBML variable-length integer (for data values)
   bool read_ebml_uint_(uint64_t size, uint64_t &value);
   bool read_ebml_string_(uint64_t size, std::string &value);
   bool parse_mkv_segment_(uint64_t size);

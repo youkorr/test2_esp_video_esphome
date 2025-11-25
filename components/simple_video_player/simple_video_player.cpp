@@ -1457,6 +1457,35 @@ uint64_t SimpleVideoPlayer::read_ebml_size_() {
   return size;
 }
 
+uint64_t SimpleVideoPlayer::read_ebml_vint_() {
+  uint8_t first_byte;
+  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+    return 0;
+  }
+
+  // Determine length from leading zeros (same as size encoding)
+  int len = 0;
+  uint8_t mask = 0;
+  if (first_byte & 0x80) { len = 1; mask = 0x7F; }
+  else if (first_byte & 0x40) { len = 2; mask = 0x3F; }
+  else if (first_byte & 0x20) { len = 3; mask = 0x1F; }
+  else if (first_byte & 0x10) { len = 4; mask = 0x0F; }
+  else if (first_byte & 0x08) { len = 5; mask = 0x07; }
+  else if (first_byte & 0x04) { len = 6; mask = 0x03; }
+  else if (first_byte & 0x02) { len = 7; mask = 0x01; }
+  else if (first_byte & 0x01) { len = 8; mask = 0x00; }
+  else return 0;
+
+  uint64_t value = first_byte & mask;
+  for (int i = 1; i < len; i++) {
+    uint8_t byte;
+    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    value = (value << 8) | byte;
+  }
+
+  return value;
+}
+
 bool SimpleVideoPlayer::read_ebml_uint_(uint64_t size, uint64_t &value) {
   value = 0;
   for (uint64_t i = 0; i < size && i < 8; i++) {
@@ -1693,10 +1722,9 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
           sample.offset = cstart;
           sample.size = csize;
 
-          // Read track number (variable int)
-          uint8_t track_byte;
-          fread(&track_byte, 1, 1, this->file_);
-          sample.track_number = track_byte & 0x7F;
+          // Read track number (EBML variable-length integer)
+          uint64_t track_num = this->read_ebml_vint_();
+          sample.track_number = (uint16_t)track_num;
 
           // Read relative timecode (int16 big-endian)
           int16_t relative_tc;
@@ -1763,19 +1791,24 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   // Seek to sample
   fseek(this->file_, sample.offset, SEEK_SET);
 
-  // Re-read to get to the frame data
-  // (We need to skip track number, timecode, flags)
-  uint8_t track_byte;
-  fread(&track_byte, 1, 1, this->file_);
+  // Save position before reading header
+  long header_start = ftell(this->file_);
 
-  int16_t relative_tc;
-  fread(&relative_tc, 2, 1, this->file_);
+  // Skip SimpleBlock header (track number, timecode, flags)
+  // Track number is EBML variable-length integer (1-8 bytes)
+  this->read_ebml_vint_();  // Skip track number
 
-  uint8_t flags;
-  fread(&flags, 1, 1, this->file_);
+  // Skip relative timecode (2 bytes)
+  fseek(this->file_, 2, SEEK_CUR);
 
-  // Now read frame data
-  uint32_t frame_size = sample.size - 4;  // Subtract header bytes
+  // Skip flags (1 byte)
+  fseek(this->file_, 1, SEEK_CUR);
+
+  // Calculate header size and frame size
+  long frame_start = ftell(this->file_);
+  uint32_t header_size = frame_start - header_start;
+  uint32_t frame_size = sample.size - header_size;
+
   if (frame_size > this->buffer_size_) {
     ESP_LOGW(TAG, "MKV sample too large: %u", frame_size);
     this->current_mkv_sample_++;
@@ -1784,7 +1817,7 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
 
   size_t bytes_read = fread(this->input_buffer_, 1, frame_size, this->file_);
   if (bytes_read != frame_size) {
-    ESP_LOGW(TAG, "Failed to read MKV sample");
+    ESP_LOGW(TAG, "Failed to read MKV sample: expected %u bytes, got %zu", frame_size, bytes_read);
     return false;
   }
 
