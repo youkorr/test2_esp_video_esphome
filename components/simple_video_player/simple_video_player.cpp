@@ -1165,6 +1165,11 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
 
   Mp4Sample &sample = this->video_samples_[this->current_video_sample_];
 
+  // Mark if we need to send SPS/PPS before this keyframe
+  if (sample.is_keyframe) {
+    this->sps_pps_sent_ = false;  // Reset flag to prepend SPS/PPS to keyframe
+  }
+
   // Seek to sample position
   fseek(this->file_, sample.offset, SEEK_SET);
 
