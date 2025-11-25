@@ -39,7 +39,8 @@ enum class PlayerState {
 enum class MediaFormat {
   UNKNOWN,
   MJPEG,
-  MP4_H264
+  MP4_H264,
+  MKV_H264
 };
 
 struct Mp4Sample {
@@ -54,6 +55,14 @@ struct AudioSample {
   uint32_t offset;
   uint32_t size;
   uint32_t timestamp_ms;
+};
+
+struct MkvSample {
+  uint64_t offset;
+  uint32_t size;
+  uint64_t timestamp_ns;  // Matroska uses nanoseconds
+  uint16_t track_number;
+  bool is_keyframe;
 };
 
 class SimpleVideoPlayer : public Component {
@@ -117,6 +126,19 @@ class SimpleVideoPlayer : public Component {
   bool parse_stss_(uint32_t size);
   bool read_next_mp4_sample_();
   bool decode_h264_frame_();
+
+  // MKV/Matroska parsing
+  bool parse_mkv_();
+  uint64_t read_ebml_id_();
+  uint64_t read_ebml_size_();
+  bool read_ebml_uint_(uint64_t size, uint64_t &value);
+  bool read_ebml_string_(uint64_t size, std::string &value);
+  bool parse_mkv_segment_(uint64_t size);
+  bool parse_mkv_info_(uint64_t size);
+  bool parse_mkv_tracks_(uint64_t size);
+  bool parse_mkv_track_entry_(uint64_t size);
+  bool parse_mkv_clusters_();
+  bool read_next_mkv_sample_();
 
   bool init_aac_decoder_();
   bool read_next_audio_sample_();
@@ -185,6 +207,15 @@ class SimpleVideoPlayer : public Component {
   bool sps_pps_sent_{false};
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
+
+  // MKV/Matroska data
+  std::vector<MkvSample> mkv_samples_;
+  size_t current_mkv_sample_{0};
+  uint64_t mkv_timecode_scale_{1000000};  // Default 1ms in nanoseconds
+  uint16_t mkv_video_track_{0};
+  uint16_t mkv_audio_track_{0};
+  uint64_t mkv_segment_start_{0};
+  uint64_t mkv_cluster_start_{0};
 
   uint32_t audio_sample_rate_{44100};
   uint8_t audio_channels_{2};

@@ -50,8 +50,11 @@ void SimpleVideoPlayer::setup() {
 
   // Detect format
   this->format_ = this->detect_format_();
-  ESP_LOGI(TAG, "Detected format: %s",
-           this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
+  const char *format_str = "UNKNOWN";
+  if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
+  else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
+  ESP_LOGI(TAG, "Detected format: %s", format_str);
 
   // Auto-detect resolution from video file
   if (this->format_ == MediaFormat::MJPEG) {
@@ -151,6 +154,66 @@ void SimpleVideoPlayer::setup() {
         // Continue without audio
       }
     }
+  } else if (this->format_ == MediaFormat::MKV_H264) {
+    // Parse MKV file (this will extract resolution)
+    if (!this->parse_mkv_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV file");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV header parsed, video track: %u, audio track: %u",
+             this->mkv_video_track_, this->mkv_audio_track_);
+
+    // Parse clusters to build sample index
+    if (!this->parse_mkv_clusters_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV clusters");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV clusters parsed: %u samples", this->mkv_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MKV parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
+
+    // Initialize H.264 decoder
+    if (!this->init_h264_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+      this->mark_failed();
+      return;
+    }
+
+    // Initialize audio decoder if speaker is configured
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
+      }
+    }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -187,8 +250,11 @@ void SimpleVideoPlayer::dump_config() {
                   this->actual_width_, this->actual_height_,
                   this->aligned_width_, this->aligned_height_);
   }
-  ESP_LOGCONFIG(TAG, "  Format: %s",
-                this->format_ == MediaFormat::MP4_H264 ? "MP4/H.264" : "MJPEG");
+  const char *format_str = "UNKNOWN";
+  if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
+  else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
+  ESP_LOGCONFIG(TAG, "  Format: %s", format_str);
   ESP_LOGCONFIG(TAG, "  Buffer size: %u bytes (RGB: %u bytes)", this->buffer_size_, this->rgb_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Auto play: %s", this->auto_play_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
@@ -219,6 +285,11 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
     return MediaFormat::UNKNOWN;
   }
   fseek(this->file_, 0, SEEK_SET);
+
+  // Check for Matroska/MKV EBML header (0x1A45DFA3)
+  if (header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3) {
+    return MediaFormat::MKV_H264;
+  }
 
   // Check for MP4 box types
   uint32_t box_type = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
@@ -1305,6 +1376,427 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
 }
 
 // ==============================================
+// MKV/MATROSKA PARSER
+// ==============================================
+
+// EBML/Matroska element IDs
+#define EBML_ID_HEADER        0x1A45DFA3
+#define EBML_ID_SEGMENT       0x18538067
+#define EBML_ID_INFO          0x1549A966
+#define EBML_ID_TIMECODE_SCALE 0x2AD7B1
+#define EBML_ID_DURATION      0x4489
+#define EBML_ID_TRACKS        0x1654AE6B
+#define EBML_ID_TRACK_ENTRY   0xAE
+#define EBML_ID_TRACK_NUMBER  0xD7
+#define EBML_ID_TRACK_TYPE    0x83
+#define EBML_ID_CODEC_ID      0x86
+#define EBML_ID_CODEC_PRIVATE 0x63A2
+#define EBML_ID_VIDEO         0xE0
+#define EBML_ID_PIXEL_WIDTH   0xB0
+#define EBML_ID_PIXEL_HEIGHT  0xBA
+#define EBML_ID_AUDIO         0xE1
+#define EBML_ID_SAMPLING_FREQ 0xB5
+#define EBML_ID_CHANNELS      0x9F
+#define EBML_ID_CLUSTER       0x1F43B675
+#define EBML_ID_TIMECODE      0xE7
+#define EBML_ID_SIMPLE_BLOCK  0xA3
+#define EBML_ID_BLOCK_GROUP   0xA0
+#define EBML_ID_BLOCK         0xA1
+#define EBML_ID_BLOCK_DURATION 0x9B
+
+uint64_t SimpleVideoPlayer::read_ebml_id_() {
+  uint8_t first_byte;
+  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+    return 0;
+  }
+
+  // Determine ID length from leading zeros
+  int len = 0;
+  if (first_byte & 0x80) len = 1;
+  else if (first_byte & 0x40) len = 2;
+  else if (first_byte & 0x20) len = 3;
+  else if (first_byte & 0x10) len = 4;
+  else return 0;
+
+  uint64_t id = first_byte;
+  for (int i = 1; i < len; i++) {
+    uint8_t byte;
+    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    id = (id << 8) | byte;
+  }
+
+  return id;
+}
+
+uint64_t SimpleVideoPlayer::read_ebml_size_() {
+  uint8_t first_byte;
+  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+    return 0;
+  }
+
+  // Determine size length from leading zeros
+  int len = 0;
+  uint8_t mask = 0;
+  if (first_byte & 0x80) { len = 1; mask = 0x7F; }
+  else if (first_byte & 0x40) { len = 2; mask = 0x3F; }
+  else if (first_byte & 0x20) { len = 3; mask = 0x1F; }
+  else if (first_byte & 0x10) { len = 4; mask = 0x0F; }
+  else if (first_byte & 0x08) { len = 5; mask = 0x07; }
+  else if (first_byte & 0x04) { len = 6; mask = 0x03; }
+  else if (first_byte & 0x02) { len = 7; mask = 0x01; }
+  else if (first_byte & 0x01) { len = 8; mask = 0x00; }
+  else return 0;
+
+  uint64_t size = first_byte & mask;
+  for (int i = 1; i < len; i++) {
+    uint8_t byte;
+    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    size = (size << 8) | byte;
+  }
+
+  return size;
+}
+
+bool SimpleVideoPlayer::read_ebml_uint_(uint64_t size, uint64_t &value) {
+  value = 0;
+  for (uint64_t i = 0; i < size && i < 8; i++) {
+    uint8_t byte;
+    if (fread(&byte, 1, 1, this->file_) != 1) return false;
+    value = (value << 8) | byte;
+  }
+  return true;
+}
+
+bool SimpleVideoPlayer::read_ebml_string_(uint64_t size, std::string &value) {
+  if (size > 1024) return false;  // Sanity check
+  value.resize(size);
+  return fread(&value[0], 1, size, this->file_) == size;
+}
+
+bool SimpleVideoPlayer::parse_mkv_() {
+  ESP_LOGI(TAG, "Parsing MKV file...");
+
+  // Read EBML header
+  uint64_t id = read_ebml_id_();
+  if (id != EBML_ID_HEADER) {
+    ESP_LOGE(TAG, "Invalid MKV: EBML header not found");
+    return false;
+  }
+
+  uint64_t header_size = read_ebml_size_();
+  fseek(this->file_, header_size, SEEK_CUR);  // Skip EBML header content
+
+  // Read Segment
+  id = read_ebml_id_();
+  if (id != EBML_ID_SEGMENT) {
+    ESP_LOGE(TAG, "Invalid MKV: Segment not found");
+    return false;
+  }
+
+  uint64_t segment_size = read_ebml_size_();
+  this->mkv_segment_start_ = ftell(this->file_);
+
+  return parse_mkv_segment_(segment_size);
+}
+
+bool SimpleVideoPlayer::parse_mkv_segment_(uint64_t size) {
+  uint64_t end_pos = this->mkv_segment_start_ + size;
+
+  while (ftell(this->file_) < (long)end_pos) {
+    uint64_t id = read_ebml_id_();
+    if (id == 0) break;
+
+    uint64_t elem_size = read_ebml_size_();
+    long elem_start = ftell(this->file_);
+
+    if (id == EBML_ID_INFO) {
+      if (!parse_mkv_info_(elem_size)) {
+        ESP_LOGW(TAG, "Failed to parse Info");
+      }
+    } else if (id == EBML_ID_TRACKS) {
+      if (!parse_mkv_tracks_(elem_size)) {
+        ESP_LOGW(TAG, "Failed to parse Tracks");
+      }
+    } else if (id == EBML_ID_CLUSTER) {
+      // Found first cluster - stop parsing metadata
+      this->mkv_cluster_start_ = elem_start;
+      ESP_LOGI(TAG, "Found first Cluster at offset %ld", elem_start);
+      break;
+    } else {
+      // Skip unknown elements
+      fseek(this->file_, elem_start + elem_size, SEEK_SET);
+    }
+  }
+
+  return this->mkv_video_track_ > 0;
+}
+
+bool SimpleVideoPlayer::parse_mkv_info_(uint64_t size) {
+  long end_pos = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end_pos) {
+    uint64_t id = read_ebml_id_();
+    if (id == 0) break;
+
+    uint64_t elem_size = read_ebml_size_();
+
+    if (id == EBML_ID_TIMECODE_SCALE) {
+      read_ebml_uint_(elem_size, this->mkv_timecode_scale_);
+      ESP_LOGI(TAG, "TimecodeScale: %llu ns", (unsigned long long)this->mkv_timecode_scale_);
+    } else if (id == EBML_ID_DURATION) {
+      // Duration is a float in Matroska timecode units
+      // For simplicity, we'll skip it and calculate from samples
+      fseek(this->file_, elem_size, SEEK_CUR);
+    } else {
+      fseek(this->file_, elem_size, SEEK_CUR);
+    }
+  }
+
+  return true;
+}
+
+bool SimpleVideoPlayer::parse_mkv_tracks_(uint64_t size) {
+  long end_pos = ftell(this->file_) + size;
+
+  while (ftell(this->file_) < end_pos) {
+    uint64_t id = read_ebml_id_();
+    if (id == 0) break;
+
+    uint64_t elem_size = read_ebml_size_();
+
+    if (id == EBML_ID_TRACK_ENTRY) {
+      if (!parse_mkv_track_entry_(elem_size)) {
+        ESP_LOGW(TAG, "Failed to parse TrackEntry");
+      }
+    } else {
+      fseek(this->file_, elem_size, SEEK_CUR);
+    }
+  }
+
+  ESP_LOGI(TAG, "Video track: %u, Audio track: %u", this->mkv_video_track_, this->mkv_audio_track_);
+  return this->mkv_video_track_ > 0;
+}
+
+bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
+  long end_pos = ftell(this->file_) + size;
+  uint16_t track_number = 0;
+  uint64_t track_type = 0;
+  std::string codec_id;
+  int width = 0, height = 0;
+
+  while (ftell(this->file_) < end_pos) {
+    uint64_t id = read_ebml_id_();
+    if (id == 0) break;
+
+    uint64_t elem_size = read_ebml_size_();
+    long elem_start = ftell(this->file_);
+
+    if (id == EBML_ID_TRACK_NUMBER) {
+      uint64_t num;
+      read_ebml_uint_(elem_size, num);
+      track_number = (uint16_t)num;
+    } else if (id == EBML_ID_TRACK_TYPE) {
+      read_ebml_uint_(elem_size, track_type);
+    } else if (id == EBML_ID_CODEC_ID) {
+      read_ebml_string_(elem_size, codec_id);
+    } else if (id == EBML_ID_VIDEO) {
+      // Parse video dimensions
+      long video_end = elem_start + elem_size;
+      while (ftell(this->file_) < video_end) {
+        uint64_t vid_id = read_ebml_id_();
+        uint64_t vid_size = read_ebml_size_();
+        if (vid_id == EBML_ID_PIXEL_WIDTH) {
+          uint64_t w;
+          read_ebml_uint_(vid_size, w);
+          width = (int)w;
+        } else if (vid_id == EBML_ID_PIXEL_HEIGHT) {
+          uint64_t h;
+          read_ebml_uint_(vid_size, h);
+          height = (int)h;
+        } else {
+          fseek(this->file_, vid_size, SEEK_CUR);
+        }
+      }
+    } else if (id == EBML_ID_CODEC_PRIVATE) {
+      // For H.264, this contains SPS/PPS in AVCC format
+      if (codec_id == "V_MPEG4/ISO/AVC") {
+        std::vector<uint8_t> codec_private(elem_size);
+        fread(codec_private.data(), 1, elem_size, this->file_);
+
+        // Parse AVCC to extract SPS/PPS (simplified)
+        if (elem_size > 7) {
+          this->nal_length_size_ = (codec_private[4] & 0x03) + 1;
+          // Extract SPS and PPS from codec private data
+          // (This is simplified - full implementation would parse complete AVCC)
+        }
+      } else {
+        fseek(this->file_, elem_size, SEEK_CUR);
+      }
+    } else {
+      fseek(this->file_, elem_start + elem_size, SEEK_SET);
+    }
+  }
+
+  // Store track info
+  if (track_type == 1 && (codec_id == "V_MPEG4/ISO/AVC" || codec_id == "V_AVC")) {
+    // Video track
+    this->mkv_video_track_ = track_number;
+    if (width > 0 && height > 0) {
+      this->actual_width_ = width;
+      this->actual_height_ = height;
+      ESP_LOGI(TAG, "Found H.264 video track %u: %dx%d", track_number, width, height);
+    }
+  } else if (track_type == 2 && (codec_id == "A_AAC" || codec_id.find("AAC") != std::string::npos)) {
+    // Audio track
+    this->mkv_audio_track_ = track_number;
+    this->has_audio_ = true;
+    ESP_LOGI(TAG, "Found AAC audio track %u", track_number);
+  }
+
+  return true;
+}
+
+bool SimpleVideoPlayer::parse_mkv_clusters_() {
+  // Seek to first cluster
+  fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+
+  uint64_t cluster_timecode = 0;
+  int sample_count = 0;
+  const int max_samples = 300;  // Limit pre-parsing to avoid memory issues
+
+  ESP_LOGI(TAG, "Pre-parsing MKV clusters (max %d samples)...", max_samples);
+
+  while (sample_count < max_samples && !feof(this->file_)) {
+    uint64_t id = read_ebml_id_();
+    if (id == 0) break;
+
+    uint64_t elem_size = read_ebml_size_();
+    long elem_start = ftell(this->file_);
+    long elem_end = elem_start + elem_size;
+
+    if (id == EBML_ID_CLUSTER) {
+      // Parse cluster
+      cluster_timecode = 0;
+
+      while (ftell(this->file_) < elem_end && sample_count < max_samples) {
+        uint64_t cid = read_ebml_id_();
+        if (cid == 0) break;
+
+        uint64_t csize = read_ebml_size_();
+        long cstart = ftell(this->file_);
+
+        if (cid == EBML_ID_TIMECODE) {
+          read_ebml_uint_(csize, cluster_timecode);
+        } else if (cid == EBML_ID_SIMPLE_BLOCK) {
+          // Parse SimpleBlock
+          MkvSample sample;
+          sample.offset = cstart;
+          sample.size = csize;
+
+          // Read track number (variable int)
+          uint8_t track_byte;
+          fread(&track_byte, 1, 1, this->file_);
+          sample.track_number = track_byte & 0x7F;
+
+          // Read relative timecode (int16 big-endian)
+          int16_t relative_tc;
+          fread(&relative_tc, 2, 1, this->file_);
+          relative_tc = (relative_tc >> 8) | ((relative_tc & 0xFF) << 8);
+
+          // Read flags
+          uint8_t flags;
+          fread(&flags, 1, 1, this->file_);
+          sample.is_keyframe = (flags & 0x80) != 0;
+
+          // Calculate absolute timestamp
+          sample.timestamp_ns = (cluster_timecode + relative_tc) * this->mkv_timecode_scale_;
+
+          if (sample.track_number == this->mkv_video_track_) {
+            this->mkv_samples_.push_back(sample);
+            sample_count++;
+          }
+
+          fseek(this->file_, cstart + csize, SEEK_SET);
+        } else {
+          fseek(this->file_, cstart + csize, SEEK_SET);
+        }
+      }
+
+      fseek(this->file_, elem_end, SEEK_SET);
+    } else {
+      fseek(this->file_, elem_end, SEEK_SET);
+    }
+  }
+
+  this->total_frames_ = this->mkv_samples_.size();
+  if (!this->mkv_samples_.empty()) {
+    this->total_duration_ms_ = this->mkv_samples_.back().timestamp_ns / 1000000;
+  }
+
+  ESP_LOGI(TAG, "Pre-parsed %u MKV samples, duration: %lu ms",
+           this->total_frames_, (unsigned long)this->total_duration_ms_);
+
+  // Reset to first cluster for playback
+  fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+  return this->total_frames_ > 0;
+}
+
+bool SimpleVideoPlayer::read_next_mkv_sample_() {
+  if (this->current_mkv_sample_ >= this->mkv_samples_.size()) {
+    if (this->loop_) {
+      this->current_mkv_sample_ = 0;
+      this->frame_count_ = 0;
+      this->sps_pps_sent_ = false;
+      fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+    } else {
+      return false;
+    }
+  }
+
+  MkvSample &sample = this->mkv_samples_[this->current_mkv_sample_];
+
+  // Mark if we need SPS/PPS before keyframe
+  if (sample.is_keyframe) {
+    this->sps_pps_sent_ = false;
+  }
+
+  // Seek to sample
+  fseek(this->file_, sample.offset, SEEK_SET);
+
+  // Re-read to get to the frame data
+  // (We need to skip track number, timecode, flags)
+  uint8_t track_byte;
+  fread(&track_byte, 1, 1, this->file_);
+
+  int16_t relative_tc;
+  fread(&relative_tc, 2, 1, this->file_);
+
+  uint8_t flags;
+  fread(&flags, 1, 1, this->file_);
+
+  // Now read frame data
+  uint32_t frame_size = sample.size - 4;  // Subtract header bytes
+  if (frame_size > this->buffer_size_) {
+    ESP_LOGW(TAG, "MKV sample too large: %u", frame_size);
+    this->current_mkv_sample_++;
+    return false;
+  }
+
+  size_t bytes_read = fread(this->input_buffer_, 1, frame_size, this->file_);
+  if (bytes_read != frame_size) {
+    ESP_LOGW(TAG, "Failed to read MKV sample");
+    return false;
+  }
+
+  this->input_size_ = frame_size;
+  this->current_time_ms_ = sample.timestamp_ns / 1000000;
+  this->current_mkv_sample_++;
+  this->frame_count_++;
+
+  return true;
+}
+
+// ==============================================
 // COMMON FUNCTIONS
 // ==============================================
 
@@ -1655,6 +2147,26 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
         if (callback_count % 30 == 0) {
           ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
+        }
+      }
+    }
+    // Process audio
+    player->process_audio_();
+  } else if (player->format_ == MediaFormat::MKV_H264) {
+    uint32_t decode_start = esp_timer_get_time() / 1000;
+
+    if (player->read_next_mkv_sample_()) {
+      if (player->decode_h264_frame_()) {
+        // Update current time from MKV sample timestamp
+        if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
+          player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
+        }
+        player->update_display_();
+        got_frame = true;
+
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        if (callback_count % 30 == 0) {
+          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
       }
     }
