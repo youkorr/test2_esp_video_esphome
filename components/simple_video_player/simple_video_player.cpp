@@ -697,6 +697,16 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
                (unsigned long)this->total_duration_ms_,
                (unsigned long)(this->total_duration_ms_ / 60000),
                (unsigned long)((this->total_duration_ms_ / 1000) % 60));
+
+      // Calculate average framerate and adjust playback timer interval
+      // This ensures smooth playback matching the video's actual framerate
+      if (this->total_duration_ms_ > 0 && this->video_samples_.size() > 0) {
+        float actual_fps = (this->video_samples_.size() * 1000.0f) / this->total_duration_ms_;
+        this->frame_interval_ = (uint32_t)(1000.0f / actual_fps);
+
+        ESP_LOGI(TAG, "Detected framerate: %.2f fps, base timer interval: %lu ms",
+                 actual_fps, (unsigned long)this->frame_interval_);
+      }
     }
 
     ESP_LOGI(TAG, "Created %u video samples", this->video_samples_.size());
