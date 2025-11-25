@@ -51,8 +51,12 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
+  // Align width/height to 16 bytes for JPEG decoder
+  int aligned_width = (this->width_ + 15) & ~0x0F;
+  int aligned_height = (this->height_ + 15) & ~0x0F;
+
   // Allocate RGB buffer aligned for LVGL (RGB565)
-  this->rgb_buffer_size_ = (size_t)this->width_ * (size_t)this->height_ * 2;
+  this->rgb_buffer_size_ = (size_t)aligned_width * (size_t)aligned_height * 2;
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                           MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->rgb_buffer_ == nullptr) {
@@ -61,6 +65,9 @@ void SimpleVideoPlayer::setup() {
     return;
   }
   std::memset(this->rgb_buffer_, 0x00, this->rgb_buffer_size_);
+
+  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes (aligned %dx%d)", (unsigned)this->rgb_buffer_size_,
+           aligned_width, aligned_height);
 
   // Prepare LVGL image descriptor for zero-copy rendering
   std::memset(&this->frame_img_dsc_, 0, sizeof(this->frame_img_dsc_));
@@ -76,6 +83,8 @@ void SimpleVideoPlayer::setup() {
     this->mark_failed();
     return;
   }
+}
+
 
   // Detect format
   this->format_ = this->detect_format_();
