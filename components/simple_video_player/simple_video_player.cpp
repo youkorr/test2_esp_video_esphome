@@ -441,10 +441,19 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     long box_start = ftell(this->file_);
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
+    // Log box type as 4-char string for debugging
+    char fourcc[5] = {0};
+    fourcc[0] = (box_type >> 24) & 0xFF;
+    fourcc[1] = (box_type >> 16) & 0xFF;
+    fourcc[2] = (box_type >> 8) & 0xFF;
+    fourcc[3] = box_type & 0xFF;
+    ESP_LOGD(TAG, "  stbl box: '%s' size=%u", fourcc, box_size);
+
     if (box_type == make_fourcc('s', 't', 's', 'd')) {
       this->parse_stsd_(box_size - 8, is_video);
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
+      ESP_LOGD(TAG, "  Reading stsz...");
       fseek(this->file_, 4, SEEK_CUR);  // version/flags
       uint32_t sample_size = read_be32(this->file_);
       uint32_t count = read_be32(this->file_);
@@ -457,16 +466,20 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       } else {
         sample_sizes.assign(count, sample_size);
       }
+      ESP_LOGD(TAG, "  stsz: %u samples", sample_sizes.size());
     } else if (box_type == make_fourcc('s', 't', 'c', 'o')) {
       // Chunk offsets
+      ESP_LOGD(TAG, "  Reading stco...");
       fseek(this->file_, 4, SEEK_CUR);  // version/flags
       uint32_t count = read_be32(this->file_);
       chunk_offsets.reserve(count);
       for (uint32_t i = 0; i < count; i++) {
         chunk_offsets.push_back(read_be32(this->file_));
       }
+      ESP_LOGD(TAG, "  stco: %u offsets", chunk_offsets.size());
     } else if (box_type == make_fourcc('s', 't', 't', 's')) {
       // Sample durations
+      ESP_LOGD(TAG, "  Reading stts...");
       fseek(this->file_, 4, SEEK_CUR);  // version/flags
       uint32_t count = read_be32(this->file_);
       for (uint32_t i = 0; i < count; i++) {
@@ -476,14 +489,17 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
           sample_durations.push_back(duration);
         }
       }
+      ESP_LOGD(TAG, "  stts: %u durations", sample_durations.size());
     } else if (box_type == make_fourcc('s', 't', 's', 's')) {
       // Sync samples (keyframes)
+      ESP_LOGD(TAG, "  Reading stss...");
       fseek(this->file_, 4, SEEK_CUR);  // version/flags
       uint32_t count = read_be32(this->file_);
       keyframes.reserve(count);
       for (uint32_t i = 0; i < count; i++) {
         keyframes.push_back(read_be32(this->file_));
       }
+      ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
     }
 
     fseek(this->file_, box_start + box_size, SEEK_SET);
