@@ -19,7 +19,8 @@ static const char *const TAG = "simple_video_player";
 static uint32_t read_be32(FILE *f) {
   uint8_t buf[4];
   if (fread(buf, 1, 4, f) != 4) return 0;
-  return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) | ((uint32_t)buf[2] << 8) | buf[3];
+  return ((uint32_t)buf[0] << 24) | ((uint32_t)buf[1] << 16) |
+         ((uint32_t)buf[2] << 8) | buf[3];
 }
 
 static uint16_t read_be16(FILE *f) {
@@ -51,10 +52,15 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
-  // Allocation du buffer RGB
-  this->rgb_buffer_size_ = (size_t)this->width_ * this->height_ * 2;
-  this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  // Allocation du buffer RGB avec alignement 16 pixels + marge sécurité
+  int rgb_w = ((this->width_ + 15) / 16) * 16;
+  int rgb_h = ((this->height_ + 15) / 16) * 16;
+  this->rgb_buffer_size_ = (size_t)rgb_w * (size_t)rgb_h * 2; // RGB565
+  this->rgb_buffer_size_ += 16384; // marge sécurité
+
+  this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(
+      64, this->rgb_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
+  );
   if (!this->rgb_buffer_) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer");
     this->mark_failed();
