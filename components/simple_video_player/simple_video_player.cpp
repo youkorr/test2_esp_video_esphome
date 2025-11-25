@@ -1242,13 +1242,12 @@ void SimpleVideoPlayer::create_ui_() {
                        this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
   lv_obj_center(this->canvas_);
 
-  // Create loading spinner (shown during initial load, hidden after first frame)
-  this->loading_spinner_ = lv_spinner_create(parent, 1000, 60);
-  lv_obj_set_size(this->loading_spinner_, 50, 50);
+  // Create loading indicator (shown during initial load, hidden after first frame)
+  this->loading_spinner_ = lv_label_create(parent);
+  lv_label_set_text(this->loading_spinner_, "Loading...");
   lv_obj_center(this->loading_spinner_);
-  lv_obj_set_style_arc_width(this->loading_spinner_, 6, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(this->loading_spinner_, 6, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(this->loading_spinner_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);
+  lv_obj_set_style_text_color(this->loading_spinner_, lv_color_hex(0x00A8FF), 0);
+  lv_obj_set_style_text_font(this->loading_spinner_, &lv_font_montserrat_20, 0);
 
   // Create invisible touch layer over the canvas
   this->touch_layer_ = lv_obj_create(parent);
@@ -1331,7 +1330,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_label_set_text(this->format_badge_, format_text);
   lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -5);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_14, 0);
 
   // Resolution label (bottom row, next to format)
   this->resolution_label_ = lv_label_create(this->controls_container_);
@@ -1340,7 +1339,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_label_set_text(this->resolution_label_, res_text);
   lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 80, -5);
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_14, 0);
 }
 
 void SimpleVideoPlayer::play() {
