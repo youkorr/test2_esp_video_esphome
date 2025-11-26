@@ -339,7 +339,80 @@ ffprobe -select_streams v -show_frames -show_entries frame=pict_type \
 
 ### Problèmes courants
 
-#### 1. "Connection refused" sur port 554
+#### 1. Conflits avec lvgl_camera_display (FPS réduit)
+
+**Symptôme** : FPS réduit ou saccadé quand rtsp_server et lvgl_camera_display sont actifs en même temps.
+
+**Cause** : Les deux composants appellent `capture_frame()` simultanément, créant une compétition pour les buffers de la caméra. Cela réduit le FPS disponible pour chaque composant.
+
+**Solution recommandée** : Utilisez **SOIT** rtsp_server **SOIT** lvgl_camera_display, pas les deux en même temps.
+
+**Configuration avec switches (recommandé)** :
+```yaml
+switch:
+  - platform: template
+    name: "RTSP Server"
+    id: rtsp_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          // Désactiver lvgl_camera_display d'abord
+          auto *lvgl_disp = id(lvgl_cam_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }
+          // Activer rtsp_server
+          auto *rtsp = id(rtsp_srv);
+          if (rtsp != nullptr) {
+            rtsp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *rtsp = id(rtsp_srv);
+          if (rtsp != nullptr) {
+            rtsp->set_enabled(false);
+          }
+
+  - platform: template
+    name: "LVGL Camera Display"
+    id: lvgl_display_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          // Désactiver rtsp_server d'abord
+          auto *rtsp = id(rtsp_srv);
+          if (rtsp != nullptr) {
+            rtsp->set_enabled(false);
+          }
+          // Activer lvgl_camera_display
+          auto *lvgl_disp = id(lvgl_cam_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *lvgl_disp = id(lvgl_cam_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }
+```
+
+**Pourquoi ce problème existe** :
+- `capture_frame()` fait un DQBUF (dequeue buffer) puis QBUF (requeue buffer) à chaque appel
+- Quand deux composants appellent `capture_frame()` en même temps, ils se battent pour les 3 buffers disponibles
+- Cela réduit le temps disponible pour encoder/afficher chaque frame
+- Résultat : FPS réduit de ~30 FPS à ~10-15 FPS pour chaque composant
+
+**Vérification** : Les logs afficheront des avertissements si le conflit est détecté :
+```
+[rtsp_server] Camera already streaming - possibly started by another component
+[rtsp_server] This may cause frame conflicts and reduced FPS
+[rtsp_server] For best performance, disable lvgl_camera_display when using rtsp_server
+```
+
+#### 2. "Connection refused" sur port 554
 
 **Cause** : Port 554 nécessite privilèges root sur certains systèmes.
 

@@ -97,6 +97,15 @@ void RTSPServer::loop() {
         vTaskDelete(this->streaming_task_handle_);
         this->streaming_task_handle_ = nullptr;
       }
+
+      // Stop camera streaming if we started it
+      if (this->camera_ && this->camera_->is_streaming()) {
+        ESP_LOGI(TAG, "Stopping camera streaming...");
+        this->camera_->stop_streaming();
+      }
+
+      // Cleanup H.264 encoder
+      this->cleanup_h264_encoder_();
     }
     return;  // Don't handle connections when disabled
   }
@@ -136,13 +145,26 @@ esp_err_t RTSPServer::init_h264_encoder_() {
 
   // Ensure camera is streaming
   if (!this->camera_->is_streaming()) {
-    ESP_LOGW(TAG, "Camera not streaming yet, starting stream...");
+    ESP_LOGI(TAG, "Camera not streaming yet, starting stream...");
+    ESP_LOGI(TAG, "NOTE: If lvgl_camera_display is also enabled, it may cause frame conflicts");
+    ESP_LOGI(TAG, "      For best performance, use ONLY rtsp_server OR lvgl_camera_display");
+
     if (!this->camera_->start_streaming()) {
       ESP_LOGE(TAG, "Failed to start camera streaming");
+      ESP_LOGE(TAG, "Possible causes:");
+      ESP_LOGE(TAG, "  1. Camera pipeline not ready");
+      ESP_LOGE(TAG, "  2. Another component already owns the camera");
+      ESP_LOGE(TAG, "  3. Hardware error");
       return ESP_FAIL;
     }
+
+    ESP_LOGI(TAG, "Camera streaming started successfully");
     // Let camera pipeline stabilize
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(200));  // Increased from 100ms to 200ms for better stability
+  } else {
+    ESP_LOGW(TAG, "Camera already streaming - possibly started by another component");
+    ESP_LOGW(TAG, "This may cause frame conflicts and reduced FPS");
+    ESP_LOGW(TAG, "For best performance, disable lvgl_camera_display when using rtsp_server");
   }
 
   uint16_t width = this->camera_->get_image_width();
@@ -879,10 +901,29 @@ esp_err_t RTSPServer::encode_and_stream_frame_() {
   if (!this->camera_ || !this->h264_encoder_)
     return ESP_FAIL;
 
+  // Check if camera is streaming
+  if (!this->camera_->is_streaming()) {
+    static uint32_t last_warning = 0;
+    if (millis() - last_warning > 5000) {  // Log every 5 seconds
+      ESP_LOGW(TAG, "Camera not streaming - cannot capture frames");
+      ESP_LOGW(TAG, "Make sure no other component (like lvgl_camera_display) is interfering");
+      last_warning = millis();
+    }
+    return ESP_FAIL;
+  }
+
   // 🔴 IMPORTANT : on utilise la même API que camera_web_server
   // capture_frame() + get_image_data() → RGB565
   if (!this->camera_->capture_frame()) {
-    ESP_LOGW(TAG, "Failed to capture frame from camera");
+    static uint32_t fail_count = 0;
+    static uint32_t last_log = 0;
+    fail_count++;
+    if (millis() - last_log > 5000) {  // Log every 5 seconds
+      ESP_LOGW(TAG, "Failed to capture frame from camera (failed %u times)", fail_count);
+      ESP_LOGW(TAG, "This usually happens when another component is also calling capture_frame()");
+      last_log = millis();
+      fail_count = 0;
+    }
     return ESP_FAIL;
   }
 
@@ -1190,7 +1231,7 @@ void RTSPServer::remove_session_(int socket_fd) {
 
 void RTSPServer::cleanup_inactive_sessions_() {
   uint32_t now = millis();
-  const uint32_t timeout = 60000;
+  const uint32_t timeout = 0xFFFFFFFF;  // Disabled (~49 days max) - for 24/7 surveillance, sessions never timeout during streaming
 
   for (auto &s: this->sessions_) {
     if (s.active && (now - s.last_activity > timeout)) {
