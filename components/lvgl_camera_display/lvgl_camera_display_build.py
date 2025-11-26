@@ -49,15 +49,13 @@ if os.path.exists(esp_dl_dir):
     esp_dl_sources = [
         # Detection base
         "vision/detect/dl_detect_base.cpp",
-        "vision/detect/dl_detect_define.cpp",
         "vision/detect/dl_detect_postprocessor.cpp",
         "vision/detect/dl_detect_pico_postprocessor.cpp",
         "vision/detect/dl_detect_mnp_postprocessor.cpp",
         "vision/detect/dl_detect_msr_postprocessor.cpp",
 
         # Image processing (for draw_hollow_rectangle)
-        "vision/image/dl_image.cpp",
-        "vision/image/dl_image_color.cpp",
+        "vision/image/dl_image_draw.cpp",
         "vision/image/dl_image_jpeg.cpp",
         "vision/image/dl_image_preprocessor.cpp",
 
