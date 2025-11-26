@@ -1248,17 +1248,50 @@ esp_err_t RTSPServer::send_rtp_tcp_interleaved_(RTSPSession &session, const uint
   header[2] = (len >> 8) & 0xFF;           // Length high byte
   header[3] = len & 0xFF;                  // Length low byte
 
-  // Send header + packet
-  // Note: We could use writev() for better performance, but send() twice is simpler
-  ssize_t sent = send(session.socket_fd, header, 4, 0);
-  if (sent != 4) {
-    ESP_LOGW(TAG, "Failed to send TCP interleaved header: %d", errno);
+  // Send header with retry on EAGAIN/EWOULDBLOCK
+  ssize_t sent = 0;
+  int retries = 3;
+  while (retries > 0) {
+    sent = send(session.socket_fd, header, 4, 0);
+    if (sent == 4) {
+      break;  // Success
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // TCP buffer full, wait a bit and retry
+      vTaskDelay(pdMS_TO_TICKS(1));  // 1ms delay
+      retries--;
+      continue;
+    }
+    // Other error
+    ESP_LOGW(TAG, "Failed to send TCP interleaved header: %d (errno=%d)", sent, errno);
     return ESP_FAIL;
   }
 
-  sent = send(session.socket_fd, packet, len, 0);
+  if (sent != 4) {
+    // Max retries reached, drop packet silently
+    return ESP_FAIL;
+  }
+
+  // Send packet with retry on EAGAIN/EWOULDBLOCK
+  retries = 3;
+  while (retries > 0) {
+    sent = send(session.socket_fd, packet, len, 0);
+    if (sent == (ssize_t)len) {
+      break;  // Success
+    }
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      // TCP buffer full, wait a bit and retry
+      vTaskDelay(pdMS_TO_TICKS(1));  // 1ms delay
+      retries--;
+      continue;
+    }
+    // Other error
+    ESP_LOGW(TAG, "Failed to send TCP interleaved RTP packet: %d (errno=%d)", sent, errno);
+    return ESP_FAIL;
+  }
+
   if (sent != (ssize_t)len) {
-    ESP_LOGW(TAG, "Failed to send TCP interleaved RTP packet: %d", errno);
+    // Max retries reached, drop packet silently
     return ESP_FAIL;
   }
 
