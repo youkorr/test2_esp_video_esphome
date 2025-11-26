@@ -3,9 +3,10 @@
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
-#include "human_face_detect.hpp"
-#include "pedestrian_detect.hpp"
-#include "dl_image.hpp"
+
+// Forward declarations pour les composants ESP-IDF
+class HumanFaceDetect;
+class PedestrianDetect;
 
 namespace esphome {
 namespace lvgl_camera_display {
