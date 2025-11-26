@@ -3,9 +3,9 @@
 #include "esphome/core/application.h"
 
 // ESP-IDF detection components - now enabled with proper Kconfig options
-#include "../human_face_detect/human_face_detect.hpp"
-#include "../pedestrian_detect/pedestrian_detect.hpp"
-#include "../esp-dl/vision/image/dl_image.hpp"
+#include "human_face_detect.hpp"
+#include "pedestrian_detect.hpp"
+#include "dl_image.hpp"
 
 // Detection is now enabled
 // #define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
