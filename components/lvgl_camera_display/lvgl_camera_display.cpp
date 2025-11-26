@@ -38,9 +38,22 @@ void LVGLCameraDisplay::setup() {
     }
   }
 
+  // Initialiser le détecteur de piétons si activé
+  if (this->pedestrian_detection_enabled_) {
+    ESP_LOGI(TAG, "🚶 Initialisation de la détection de piétons...");
+    try {
+      this->pedestrian_detector_ = new PedestrianDetect();
+      ESP_LOGI(TAG, "✅ Détecteur de piétons initialisé");
+    } catch (const std::exception& e) {
+      ESP_LOGE(TAG, "❌ Échec de l'initialisation du détecteur de piétons: %s", e.what());
+      this->pedestrian_detection_enabled_ = false;
+    }
+  }
+
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
   ESP_LOGI(TAG, "   Face detection: %s", this->face_detection_enabled_ ? "ENABLED" : "DISABLED");
+  ESP_LOGI(TAG, "   Pedestrian detection: %s", this->pedestrian_detection_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
@@ -179,9 +192,10 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // Détecter et dessiner les visages avant d'afficher
-  if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
-    this->detect_and_draw_faces_(img_data, width, height);
+  // Détecter et dessiner les objets avant d'afficher
+  if ((this->face_detection_enabled_ && this->face_detector_ != nullptr) ||
+      (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr)) {
+    this->detect_and_draw_objects_(img_data, width, height);
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
@@ -202,8 +216,8 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   }
 }
 
-void LVGLCameraDisplay::detect_and_draw_faces_(uint8_t* img_data, uint16_t width, uint16_t height) {
-  if (img_data == nullptr || this->face_detector_ == nullptr) {
+void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height) {
+  if (img_data == nullptr) {
     return;
   }
 
@@ -215,53 +229,89 @@ void LVGLCameraDisplay::detect_and_draw_faces_(uint8_t* img_data, uint16_t width
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Détecter les visages
-  uint32_t t1 = millis();
-  std::list<dl::detect::result_t> &results = this->face_detector_->run(img);
-  uint32_t t2 = millis();
-
-  // Log des statistiques toutes les 100 frames
+  // Statistiques
   static uint32_t detect_count = 0;
-  static uint32_t total_detect_time = 0;
-  static uint32_t total_faces_detected = 0;
+  static uint32_t total_face_time = 0;
+  static uint32_t total_ped_time = 0;
+  static uint32_t total_faces = 0;
+  static uint32_t total_pedestrians = 0;
 
   detect_count++;
-  total_detect_time += (t2 - t1);
-  total_faces_detected += results.size();
 
-  if (detect_count % 100 == 0) {
-    float avg_time = total_detect_time / 100.0f;
-    float avg_faces = total_faces_detected / 100.0f;
-    ESP_LOGI(TAG, "🔍 Face detection: %.1fms avg | %.1f faces avg", avg_time, avg_faces);
-    total_detect_time = 0;
-    total_faces_detected = 0;
+  // Détecter les visages
+  if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
+    uint32_t t1 = millis();
+    std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+    uint32_t t2 = millis();
+
+    total_face_time += (t2 - t1);
+    total_faces += face_results.size();
+
+    // Dessiner les rectangles VERTS pour les visages
+    std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
+    for (auto &result : face_results) {
+      dl::image::draw_hollow_rectangle(
+        img,
+        result.box[0], result.box[1],
+        result.box[2], result.box[3],
+        green, 3
+      );
+
+      // Log la première détection
+      static bool first_face = true;
+      if (first_face) {
+        ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
+                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+        first_face = false;
+      }
+    }
   }
 
-  // Dessiner les rectangles pour chaque visage détecté
-  for (auto &result : results) {
-    // Couleur verte pour les rectangles (format RGB565)
-    // En RGB565: R(5 bits) G(6 bits) B(5 bits)
-    // Vert: 0x07E0
-    std::vector<uint8_t> color = {0x00, 0xF8};  // Vert en RGB565 big-endian
+  // Détecter les piétons
+  if (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr) {
+    uint32_t t1 = millis();
+    std::list<dl::detect::result_t> &ped_results = this->pedestrian_detector_->run(img);
+    uint32_t t2 = millis();
 
-    // Dessiner le rectangle
-    dl::image::draw_hollow_rectangle(
-      img,
-      result.box[0],  // x1
-      result.box[1],  // y1
-      result.box[2],  // x2
-      result.box[3],  // y2
-      color,
-      3  // line width
-    );
+    total_ped_time += (t2 - t1);
+    total_pedestrians += ped_results.size();
 
-    // Log la première détection
-    static bool first_face = true;
-    if (first_face && results.size() > 0) {
-      ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
-               result.box[0], result.box[1], result.box[2], result.box[3], result.score);
-      first_face = false;
+    // Dessiner les rectangles BLEUS pour les piétons
+    std::vector<uint8_t> blue = {0x1F, 0x00};  // Bleu en RGB565 big-endian
+    for (auto &result : ped_results) {
+      dl::image::draw_hollow_rectangle(
+        img,
+        result.box[0], result.box[1],
+        result.box[2], result.box[3],
+        blue, 3
+      );
+
+      // Log la première détection
+      static bool first_ped = true;
+      if (first_ped) {
+        ESP_LOGI(TAG, "🚶 Piéton détecté: box=[%d,%d,%d,%d] score=%.2f",
+                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+        first_ped = false;
+      }
     }
+  }
+
+  // Log des statistiques toutes les 100 frames
+  if (detect_count % 100 == 0) {
+    if (this->face_detection_enabled_) {
+      float avg_time = total_face_time / 100.0f;
+      float avg_faces = total_faces / 100.0f;
+      ESP_LOGI(TAG, "🔍 Face detection: %.1fms avg | %.1f faces avg", avg_time, avg_faces);
+    }
+    if (this->pedestrian_detection_enabled_) {
+      float avg_time = total_ped_time / 100.0f;
+      float avg_peds = total_pedestrians / 100.0f;
+      ESP_LOGI(TAG, "🚶 Pedestrian detection: %.1fms avg | %.1f pedestrians avg", avg_time, avg_peds);
+    }
+    total_face_time = 0;
+    total_ped_time = 0;
+    total_faces = 0;
+    total_pedestrians = 0;
   }
 }
 

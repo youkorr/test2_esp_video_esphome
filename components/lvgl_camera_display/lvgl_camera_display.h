@@ -2,9 +2,10 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
-#include "../mipi_dsi_cam/mipi_dsi_cam.h"
-#include "../human_face_detect/human_face_detect.hpp"
-#include "../esp-dl/vision/image/dl_image.hpp"
+#include "mipi_dsi_cam.h"
+#include "human_face_detect.hpp"
+#include "pedestrian_detect.hpp"
+#include "dl_image.hpp"
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -20,6 +21,7 @@ class LVGLCameraDisplay : public Component {
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
   void set_face_detection_enabled(bool enabled) { this->face_detection_enabled_ = enabled; }
+  void set_pedestrian_detection_enabled(bool enabled) { this->pedestrian_detection_enabled_ = enabled; }
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -41,6 +43,7 @@ class LVGLCameraDisplay : public Component {
   bool canvas_warning_shown_{false};
   bool enabled_{false};  // LVGL camera display enabled/disabled by switch
   bool face_detection_enabled_{false};  // Face detection enabled/disabled
+  bool pedestrian_detection_enabled_{false};  // Pedestrian detection enabled/disabled
 
   uint32_t last_fps_time_{0};
 
@@ -49,12 +52,13 @@ class LVGLCameraDisplay : public Component {
   // Buffer pool tracking (pour release après affichage)
   mipi_dsi_cam::SimpleBufferElement *displayed_buffer_{nullptr};
 
-  // Face detection
+  // Detection models
   HumanFaceDetect *face_detector_{nullptr};
+  PedestrianDetect *pedestrian_detector_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();
-  void detect_and_draw_faces_(uint8_t* img_data, uint16_t width, uint16_t height);
+  void detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height);
 };
 
 }  // namespace lvgl_camera_display

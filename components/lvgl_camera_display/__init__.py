@@ -9,6 +9,7 @@ CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FACE_DETECTION = "face_detection"
+CONF_PEDESTRIAN_DETECTION = "pedestrian_detection"
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -23,6 +24,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL, default="33ms"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_FACE_DETECTION, default=False): cv.boolean,
+    cv.Optional(CONF_PEDESTRIAN_DETECTION, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -38,3 +40,6 @@ async def to_code(config):
 
     if config[CONF_FACE_DETECTION]:
         cg.add(var.set_face_detection_enabled(True))
+
+    if config[CONF_PEDESTRIAN_DETECTION]:
+        cg.add(var.set_pedestrian_detection_enabled(True))
