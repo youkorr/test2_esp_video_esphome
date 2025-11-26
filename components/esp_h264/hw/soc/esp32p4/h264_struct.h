@@ -1,5 +1,5 @@
 /**
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
  *
  *  SPDX-License-Identifier: Apache-2.0
  */
@@ -556,20 +556,7 @@ typedef union {
          *  gate only when mv merge work\\1: Force open the clock gate for mv merge
          */
         uint32_t mv_merge_clk_en: 1;
-
-        /** cur_mb_rdcmb_clk_en : R/W; bitpos: [26]; default: 0;
-         *  Configures whether or not to open the clock gate for cur_mb read macroblock.
-         *  0: Open the clock gate only when cur_mb read macroblock work
-         *  1: Force open the clock gate for  cur_mb read macroblock
-         */
-        uint32_t cur_mb_rdcmb_clk_en: 1;
-        /** cur_mb_refresh_reggroup_clk_en : R/W; bitpos: [27]; default: 0;
-         *  Configures whether or not to open the clock gate for cur_mb refresh register group.
-         *  0: Open the clock gate only when cur_mb refresh register group work
-         *  1: Force open the clock gate for  cur_mb  refresh register group
-         */
-        uint32_t cur_mb_refresh_reggroup_clk_en: 1;
-        uint32_t reserved_28: 4;
+        uint32_t reserved_26: 6;
     };
     uint32_t val;
 } h264_conf_reg_t;
@@ -620,168 +607,6 @@ typedef union {
     uint32_t val;
 } h264_debug_dma_sel_reg_t;
 
-/** Type of a_ori_conf register
- *  Video A original picture configuration register.
- */
-typedef union {
-    struct {
-        /** ori_color_space : R/W; bitpos: [2:0]; default: 4;
-         *  Configures video A original picture color space.
-         *  0: RGB888
-         *  1: RGB565
-         *  2: YUV444
-         *  3: YUV422
-         *  4: YUV420
-         *  5: GRAY
-         *  Others: Invalid
-         */
-        uint32_t ori_color_space: 3;
-        uint32_t reserved_3: 29;
-    };
-    uint32_t val;
-} h264_ori_conf_reg_t;
-
-/** Type of ori_debug_conf register
- *  Original picture debug configuration register.
- */
-typedef union {
-    struct {
-        /** dbg_replace_ori_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configures whether to replace original picture pixels.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_ori_data_en: 1;
-        /** dbg_replace_ori_data : R/W; bitpos: [24:1]; default: 0;
-         *  Configures original picture pixels to be replaced. When the original picture color
-         *  space is RGB, byte0~2 is BGR. When the original picture color space is YUV, byte0~2
-         *  is VUY. When the original picture color space is GRAY, byte0 is GRAY.
-         */
-        uint32_t dbg_replace_ori_data: 24;
-        uint32_t reserved_25: 7;
-    };
-    uint32_t val;
-} h264_ori_debug_conf_reg_t;
-
-/** Type of mv_merge_debug_conf register
- *  Original picture debug configuration register.
- */
-typedef union {
-    struct {
-        /** dbg_replace_mv_merge_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configures whether to replace mv merge data.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_mv_merge_data_en: 1;
-        /** dbg_replace_mv_merge_data : R/W; bitpos: [8:1]; default: 0;
-         *  Configures mv merge data to be replaced.
-         */
-        uint32_t dbg_replace_mv_merge_data: 8;
-        uint32_t reserved_9: 23;
-    };
-    uint32_t val;
-} h264_mv_merge_debug_conf_reg_t;
-
-/** Type of bs_debug_cong register
- *  Encode bitstream debug configuration register
- */
-typedef union {
-    struct {
-        /** dbg_replace_wr_bs_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configures whether or not to replace bs data.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_wr_bs_data_en: 1;
-        /** dbg_replace_wr_bs_data : R/W; bitpos: [8:1]; default: 0;
-         *  Configures bs data to be replaced
-         */
-        uint32_t dbg_replace_wr_bs_data: 8;
-        uint32_t reserved_9: 23;
-    };
-    uint32_t val;
-} h264_bs_debug_cong_reg_t;
-
-/** Type of db_wr_temp_debug_cong register
- *  Deblocking filter write temp debug configuration register
- */
-typedef union {
-    struct {
-        /** dbg_replace_wr_db_temp_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configure deblocking filter whether or not to replace write temp data.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_wr_db_temp_data_en: 1;
-        /** dbg_replace_wr_db_temp_data : R/W; bitpos: [24:1]; default: 0;
-         *  Configure deblocking filter write temp data to be replaced.byte0~2 is VUY
-         */
-        uint32_t dbg_replace_wr_db_temp_data: 24;
-        uint32_t reserved_25: 7;
-    };
-    uint32_t val;
-} h264_db_wr_temp_debug_cong_reg_t;
-
-/** Type of db_rd_temp_debug_cong register
- *  Deblocking filter read temp debug configuration register
- */
-typedef union {
-    struct {
-        /** dbg_replace_rd_db_temp_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configure deblocking filter whether or not to replace read temp data.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_rd_db_temp_data_en: 1;
-        /** dbg_replace_rd_db_temp_data : R/W; bitpos: [24:1]; default: 0;
-         *  Configure deblocking filter read temp data to be replaced.byte0~2 is VUY
-         */
-        uint32_t dbg_replace_rd_db_temp_data: 24;
-        uint32_t reserved_25: 7;
-    };
-    uint32_t val;
-} h264_db_rd_temp_debug_cong_reg_t;
-
-/** Type of db_wr_debug_cong register
- *  Deblocking filter final data debug configuration register
- */
-typedef union {
-    struct {
-        /** dbg_replace_wr_db_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configure deblocking filter whether or not to replace write data.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_wr_db_data_en: 1;
-        /** dbg_replace_wr_db_data : R/W; bitpos: [24:1]; default: 0;
-         *  Configure deblocking filter write data to be replaced.byte0~2 is VUY
-         */
-        uint32_t dbg_replace_wr_db_data: 24;
-        uint32_t reserved_25: 7;
-    };
-    uint32_t val;
-} h264_db_wr_debug_cong_reg_t;
-
-/** Type of ref_debug_cong register
- *  Deblocking filter final data debug configuration register
- */
-typedef union {
-    struct {
-        /** dbg_replace_ref_data_en : R/W; bitpos: [0]; default: 0;
-         *  Configure whether to replace reference picture pixels.
-         *  0: not replace
-         *  1: replace
-         */
-        uint32_t dbg_replace_ref_data_en: 1;
-        /** dbg_replace_ref_data : R/W; bitpos: [24:1]; default: 0;
-         *  Configure reference picture pixels to be replaced.byte0~2 is VUY
-         */
-        uint32_t dbg_replace_ref_data: 24;
-        uint32_t reserved_25: 7;
-    };
-    uint32_t val;
-} h264_ref_debug_cong_reg_t;
 
 /** Group: Status Register */
 /** Type of rc_status0 register
@@ -938,8 +763,11 @@ typedef union {
          *  Represents cavlc module ctrl FSM info.
          */
         uint32_t cavlc_ctrl_debug_state: 2;
-
-        uint32_t reserved_19: 14;
+        /** bs_buffer_debug_state : RO; bitpos: [18]; default: 0;
+         *  Represents bs buffer overflow info.
+         */
+        uint32_t bs_buffer_debug_state: 1;
+        uint32_t reserved_19: 13;
     };
     uint32_t val;
 } h264_debug_info1_reg_t;
@@ -1054,12 +882,7 @@ typedef union {
          *  internal mem done.
          */
         uint32_t dma_move_2mb_line_done_int_raw: 1;
-        /** bs_buffer_overflow_int_raw : R/WTC/SS; bitpos: [4]; default: 0;
-         *  Raw status bit: The raw interrupt status of H264_BS_BUFFER_OVERFLOW_INT. Triggered
-         *  when H264 bit stream buffer overflow.
-         */
-        uint32_t bs_buffer_overflow_int_raw: 1;
-        uint32_t reserved_5: 27;
+        uint32_t reserved_4: 28;
     };
     uint32_t val;
 } h264_int_raw_reg_t;
@@ -1089,12 +912,7 @@ typedef union {
          *  Valid only when the H264_DMA_MOVE_2MB_LINE_DONE_INT_ENA is set to 1.
          */
         uint32_t dma_move_2mb_line_done_int_st: 1;
-        /** bs_buffer_overflow_int_st : RO; bitpos: [4]; default: 0;
-         *  Masked status bit: The masked interrupt status of H264_BS_BUFFER_OVERFLOW_INT.
-         *  Valid only when the H264_BS_BUFFER_OVERFLOW_INT_ENA is set to 1.
-         */
-        uint32_t bs_buffer_overflow_int_st: 1;
-        uint32_t reserved_5: 27;
+        uint32_t reserved_4: 28;
     };
     uint32_t val;
 } h264_int_st_reg_t;
@@ -1120,11 +938,7 @@ typedef union {
          *  Enable bit: Write 1 to enable H264_DMA_MOVE_2MB_LINE_DONE_INT.
          */
         uint32_t dma_move_2mb_line_done_int_ena: 1;
-        /** bs_buffer_overflow_int_ena : R/W; bitpos: [4]; default: 0;
-         *  Enable bit: Write 1 to enable H264_BS_BUFFER_OVERFLOW_INT.
-         */
-        uint32_t bs_buffer_overflow_int_ena: 1;
-        uint32_t reserved_5: 27;
+        uint32_t reserved_4: 28;
     };
     uint32_t val;
 } h264_int_ena_reg_t;
@@ -1150,11 +964,7 @@ typedef union {
          *  Clear bit: Write 1 to clear H264_DMA_MOVE_2MB_LINE_DONE_INT.
          */
         uint32_t dma_move_2mb_line_done_int_clr: 1;
-        /** bs_buffer_overflow_int_clr : WT; bitpos: [4]; default: 0;
-         *  Clear bit: Write 1 to clear H264_BS_BUFFER_OVERFLOW_INT.
-         */
-        uint32_t bs_buffer_overflow_int_clr: 1;
-        uint32_t reserved_5: 27;
+        uint32_t reserved_4: 28;
     };
     uint32_t val;
 } h264_int_clr_reg_t;
@@ -1166,7 +976,7 @@ typedef union {
  */
 typedef union {
     struct {
-        /** ledc_date : R/W; bitpos: [27:0]; default: 37823232;
+        /** ledc_date : R/W; bitpos: [27:0]; default: 36717120;
          *  Configures the version.
          */
         uint32_t ledc_date: 28;
@@ -1215,18 +1025,11 @@ typedef struct {
     volatile h264_debug_info1_reg_t debug_info1;
     volatile h264_debug_info2_reg_t debug_info2;
     volatile h264_date_reg_t date;
-    volatile h264_ori_conf_reg_t ori_conf[2];
-    volatile h264_ori_debug_conf_reg_t ori_debug_conf;
-    volatile h264_mv_merge_debug_conf_reg_t mv_merge_debug_conf;
-    volatile h264_bs_debug_cong_reg_t bs_debug_cong;
-    volatile h264_db_wr_temp_debug_cong_reg_t db_wr_temp_debug_cong;
-    volatile h264_db_rd_temp_debug_cong_reg_t db_rd_temp_debug_cong;
-    volatile h264_db_wr_debug_cong_reg_t db_wr_debug_cong;
-    volatile h264_ref_debug_cong_reg_t ref_debug_cong;
 } h264_dev_t;
 
+
 #ifndef __cplusplus
-_Static_assert(sizeof(h264_dev_t) == 0x118, "Invalid size of h264_dev_t structure");
+_Static_assert(sizeof(h264_dev_t) == 0xf4, "Invalid size of h264_dev_t structure");
 #endif
 
 #ifdef __cplusplus

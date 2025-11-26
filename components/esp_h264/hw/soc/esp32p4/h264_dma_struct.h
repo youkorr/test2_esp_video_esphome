@@ -1,5 +1,5 @@
 /**
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2023-2024 Espressif Systems (Shanghai) CO LTD
  *
  *  SPDX-License-Identifier: Apache-2.0
  */
@@ -1227,8 +1227,8 @@ typedef union {
         /** out_cmdfifo_buf_len_hb : RO; bitpos: [12:0]; default: 0;
          *  only for debug
          */
-        uint32_t out_cmdfifo_buf_len_hb: 28;
-        uint32_t reserved_13: 4;
+        uint32_t out_cmdfifo_buf_len_hb: 13;
+        uint32_t reserved_13: 19;
     };
     uint32_t val;
 } h264_dma_out_buf_len_chn_reg_t;
@@ -1768,21 +1768,6 @@ typedef union {
     uint32_t val;
 } h264_dma_rx_ch5_counter_reg_t;
 
-/** Group: pbyte register */
-/** Type of pbyte register
- *  image pbyte register
- */
-typedef union {
-    struct {
-        /** ori_pbyte : R/W; bitpos: [3:0]; default: 2;
-         *  configures bytes per pixel for ori img. 0: 0.5byte/pix, 1: 1byte/pix, 2:
-         *  1.5byte/pix, 3: 2byte/pix, 4: 3byte/pix
-         */
-        uint32_t ori_pbyte: 4;
-        uint32_t reserved_4: 28;
-    };
-    uint32_t val;
-} h264_dma_pbyte_reg_t;
 
 typedef struct {
     volatile h264_dma_out_conf0_chn_reg_t conf0;
@@ -1889,12 +1874,11 @@ typedef struct {
     volatile h264_dma_rx_ch1_counter_reg_t rx_ch1_counter;
     volatile h264_dma_rx_ch2_counter_reg_t rx_ch2_counter;
     volatile h264_dma_rx_ch5_counter_reg_t rx_ch5_counter;
-    volatile h264_dma_pbyte_reg_t pbyte;
-    uint32_t debug_regs[23];
 } h264_dma_dev_t;
 
+
 #ifndef __cplusplus
-_Static_assert(sizeof(h264_dma_dev_t) == 0xbc4, "Invalid size of h264_dma_dev_t structure");
+_Static_assert(sizeof(h264_dma_dev_t) == 0xb64, "Invalid size of h264_dma_dev_t structure");
 #endif
 
 #ifdef __cplusplus
