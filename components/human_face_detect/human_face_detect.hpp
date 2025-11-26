@@ -31,6 +31,9 @@ public:
         m_msr(new MSR(msr_model_name)), m_mnp(new MNP(mnp_model_name)) {};
     ~MSRMNP();
     std::list<dl::detect::result_t> &run(const dl::image::img_t &img) override;
+    Detect &set_score_thr(float score_thr, int idx = 0) override;
+    Detect &set_nms_thr(float nms_thr, int idx = 0) override;
+    dl::Model *get_raw_model(int idx = 0) override;
 };
 
 } // namespace human_face_detect

@@ -19,12 +19,12 @@ MSR::MSR(const char *model_name)
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -38,11 +38,11 @@ MNP::MNP(const char *model_name)
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
 }
 
 MNP::~MNP()
@@ -84,10 +84,6 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         latency[1].end();
 
         latency[2].start();
-        m_postprocessor->set_resize_scale_x(m_image_preprocessor->get_resize_scale_x());
-        m_postprocessor->set_resize_scale_y(m_image_preprocessor->get_resize_scale_y());
-        m_postprocessor->set_top_left_x(m_image_preprocessor->get_top_left_x());
-        m_postprocessor->set_top_left_y(m_image_preprocessor->get_top_left_y());
         m_postprocessor->postprocess();
         latency[2].end();
     }
@@ -117,6 +113,30 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
 {
     std::list<dl::detect::result_t> &candidates = m_msr->run(img);
     return m_mnp->run(img, candidates);
+}
+
+dl::detect::Detect &MSRMNP::set_score_thr(float score_thr, int idx)
+{
+    if (idx == 0 || idx == -1) {
+        m_msr->set_score_thr(score_thr, 0);
+    }
+    return *this;
+}
+
+dl::detect::Detect &MSRMNP::set_nms_thr(float nms_thr, int idx)
+{
+    if (idx == 0 || idx == -1) {
+        m_msr->set_nms_thr(nms_thr, 0);
+    }
+    return *this;
+}
+
+dl::Model *MSRMNP::get_raw_model(int idx)
+{
+    if (idx == 0) {
+        return m_msr->get_raw_model(0);
+    }
+    return nullptr;
 }
 
 } // namespace human_face_detect
