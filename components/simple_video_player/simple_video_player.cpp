@@ -1,4 +1,5 @@
 #include "simple_video_player.h"
+#include "convert_movie_with_normalisation.sh"
 
 #ifdef USE_ESP_IDF
 
