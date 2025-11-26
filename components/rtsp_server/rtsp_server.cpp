@@ -1231,7 +1231,7 @@ void RTSPServer::remove_session_(int socket_fd) {
 
 void RTSPServer::cleanup_inactive_sessions_() {
   uint32_t now = millis();
-  const uint32_t timeout = 60000;
+  const uint32_t timeout = 300000;  // 5 minutes (increased from 60s to prevent premature timeouts during streaming)
 
   for (auto &s: this->sessions_) {
     if (s.active && (now - s.last_activity > timeout)) {
