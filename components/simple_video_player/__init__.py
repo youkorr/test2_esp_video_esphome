@@ -7,9 +7,6 @@ from esphome.components import speaker
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
-# ESP-IDF components needed for H.264 and AAC decoding
-ESP_IDF_COMPONENTS = ["esp_h264", "esp_audio_codec"]
-
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
 SimpleVideoPlayer = simple_video_player_ns.class_("SimpleVideoPlayer", cg.Component)
 
@@ -28,18 +25,20 @@ CONF_LOOP = "loop"
 CONF_SHOW_CONTROLS = "show_controls"
 CONF_PARENT_ID = "parent_id"
 CONF_SPEAKER = "speaker"
+CONF_FPS = "fps"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
     cv.Required(CONF_FILE_PATH): cv.string,
     cv.Optional(CONF_WIDTH, default=800): cv.positive_int,
     cv.Optional(CONF_HEIGHT, default=480): cv.positive_int,
-    cv.Optional(CONF_BUFFER_SIZE, default=100000): cv.positive_int,
+    cv.Optional(CONF_BUFFER_SIZE, default=200000): cv.positive_int,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
+    cv.Optional(CONF_FPS): cv.positive_float,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -54,6 +53,9 @@ async def to_code(config):
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+    if CONF_FPS in config:
+        cg.add(var.set_fps(config[CONF_FPS]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
