@@ -1,4 +1,5 @@
 #include "simple_video_player.h"
+#include "convert_movie_with_normalisation.sh"
 
 #ifdef USE_ESP_IDF
 
@@ -1387,8 +1388,9 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
       g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
       b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
 
-      // Convert to RGB565
-      rgb565[j * w + i] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+      // Convert to RGB565 using LVGL color (handles endianness)
+      lv_color_t color = lv_color_make(r, g, b);
+      rgb565[j * w + i] = color.full;
     }
   }
 }
