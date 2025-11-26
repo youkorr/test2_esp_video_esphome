@@ -17,6 +17,11 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+// Ensure ENOBUFS is defined (some platforms might not have it)
+#ifndef ENOBUFS
+#define ENOBUFS 105
+#endif
+
 namespace esphome {
 namespace rtsp_server {
 
@@ -392,6 +397,14 @@ void RTSPServer::handle_rtsp_connections_() {
   if (client_fd >= 0) {
     if (this->sessions_.size() < this->max_clients_) {
       ESP_LOGI(TAG, "New RTSP client from %s", inet_ntoa(client_addr.sin_addr));
+
+      // Increase TCP send buffer for streaming (default is often 8KB, we need more for 3+ Mbps)
+      int send_buffer_size = 256 * 1024;  // 256 KB send buffer
+      if (setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size)) < 0) {
+        ESP_LOGW(TAG, "Failed to set SO_SNDBUF, using default");
+      } else {
+        ESP_LOGI(TAG, "TCP send buffer set to %d KB", send_buffer_size / 1024);
+      }
 
       RTSPSession session = {};
       session.socket_fd = client_fd;
@@ -1256,9 +1269,9 @@ esp_err_t RTSPServer::send_rtp_tcp_interleaved_(RTSPSession &session, const uint
     if (sent == 4) {
       break;  // Success
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      // TCP buffer full, wait a bit and retry
-      vTaskDelay(pdMS_TO_TICKS(1));  // 1ms delay
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == -ENOBUFS || errno == ENOBUFS) {
+      // TCP buffer full or no buffers available, wait a bit and retry
+      vTaskDelay(pdMS_TO_TICKS(2));  // 2ms delay for buffer space
       retries--;
       continue;
     }
@@ -1279,9 +1292,9 @@ esp_err_t RTSPServer::send_rtp_tcp_interleaved_(RTSPSession &session, const uint
     if (sent == (ssize_t)len) {
       break;  // Success
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-      // TCP buffer full, wait a bit and retry
-      vTaskDelay(pdMS_TO_TICKS(1));  // 1ms delay
+    if (errno == EAGAIN || errno == EWOULDBLOCK || errno == -ENOBUFS || errno == ENOBUFS) {
+      // TCP buffer full or no buffers available, wait a bit and retry
+      vTaskDelay(pdMS_TO_TICKS(2));  // 2ms delay for buffer space
       retries--;
       continue;
     }
