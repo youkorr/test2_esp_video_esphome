@@ -14,6 +14,12 @@ extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
+#include "libtinyh264.a"
+#include "libopenh264.a"
+#include "basetype.h"
+#include "h264bsd_decoder.h"
+
+
 }
 
 #if __has_include("include/decoder/esp_audio_dec.h")
