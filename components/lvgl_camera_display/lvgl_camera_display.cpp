@@ -2,10 +2,13 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// Includes pour les composants ESP-IDF avec chemins relatifs
-#include "../human_face_detect/human_face_detect.hpp"
-#include "../pedestrian_detect/pedestrian_detect.hpp"
-#include "../esp-dl/vision/image/dl_image.hpp"
+// Désactiver temporairement les includes ESP-IDF car ils ne sont pas compatibles avec ESPHome build
+// Pour utiliser la détection, il faudra compiler avec ESP-IDF directement
+// #include "../human_face_detect/human_face_detect.hpp"
+// #include "../pedestrian_detect/pedestrian_detect.hpp"
+// #include "../esp-dl/vision/image/dl_image.hpp"
+
+#define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -31,6 +34,9 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
+  // Détection désactivée pour la compilation ESPHome
+  // Les composants ESP-IDF (human_face_detect, pedestrian_detect) ne sont pas compatibles avec le build ESPHome
+#ifndef ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION
   // Initialiser le détecteur de visages si activé
   if (this->face_detection_enabled_) {
     ESP_LOGI(TAG, "🔍 Initialisation de la détection faciale...");
@@ -54,6 +60,15 @@ void LVGLCameraDisplay::setup() {
       this->pedestrian_detection_enabled_ = false;
     }
   }
+#else
+  if (this->face_detection_enabled_ || this->pedestrian_detection_enabled_) {
+    ESP_LOGW(TAG, "⚠️  Détection faciale/piétons désactivée dans cette version");
+    ESP_LOGW(TAG, "   Les composants ESP-IDF ne sont pas compatibles avec le build ESPHome");
+    ESP_LOGW(TAG, "   Pour activer la détection, compiler avec ESP-IDF directement");
+    this->face_detection_enabled_ = false;
+    this->pedestrian_detection_enabled_ = false;
+  }
+#endif
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
@@ -222,6 +237,7 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
 }
 
 void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height) {
+#ifndef ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION
   if (img_data == nullptr) {
     return;
   }
@@ -318,6 +334,12 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
     total_faces = 0;
     total_pedestrians = 0;
   }
+#else
+  // Détection désactivée - ne rien faire
+  (void)img_data;
+  (void)width;
+  (void)height;
+#endif
 }
 
 }  // namespace lvgl_camera_display
