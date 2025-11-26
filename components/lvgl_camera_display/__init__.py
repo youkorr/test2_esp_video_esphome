@@ -38,16 +38,6 @@ async def to_code(config):
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
 
-    # Ajouter les chemins d'include pour les composants ESP-IDF
-    if config[CONF_FACE_DETECTION] or config[CONF_PEDESTRIAN_DETECTION]:
-        # Ajouter les chemins d'include pour esp-dl et détection
-        cg.add_build_flag("-I$PROJECT_DIR/components/human_face_detect")
-        cg.add_build_flag("-I$PROJECT_DIR/components/pedestrian_detect")
-        cg.add_build_flag("-I$PROJECT_DIR/components/esp-dl/vision/image")
-        cg.add_build_flag("-I$PROJECT_DIR/components/esp-dl/vision/detect")
-        cg.add_build_flag("-I$PROJECT_DIR/components/esp-dl/dl/model/include")
-        cg.add_build_flag("-I$PROJECT_DIR/components/esp-dl/dl/tensor/include")
-
     if config[CONF_FACE_DETECTION]:
         cg.add(var.set_face_detection_enabled(True))
 

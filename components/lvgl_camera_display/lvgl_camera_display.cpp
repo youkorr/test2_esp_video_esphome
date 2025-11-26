@@ -2,11 +2,10 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// Includes pour les composants ESP-IDF
-// Les chemins sont ajoutés via add_build_flag dans __init__.py
-#include "human_face_detect.hpp"
-#include "pedestrian_detect.hpp"
-#include "dl_image.hpp"
+// Includes pour les composants ESP-IDF avec chemins relatifs
+#include "../human_face_detect/human_face_detect.hpp"
+#include "../pedestrian_detect/pedestrian_detect.hpp"
+#include "../esp-dl/vision/image/dl_image.hpp"
 
 namespace esphome {
 namespace lvgl_camera_display {
