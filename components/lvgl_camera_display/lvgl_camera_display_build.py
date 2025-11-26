@@ -56,7 +56,6 @@ if os.path.exists(esp_dl_dir):
 
         # Image processing (for draw_hollow_rectangle)
         "vision/image/dl_image_draw.cpp",
-        "vision/image/dl_image_jpeg.cpp",
         "vision/image/dl_image_preprocessor.cpp",
 
         # Model loading
