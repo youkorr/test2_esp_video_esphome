@@ -45,10 +45,47 @@ async def to_code(config):
     if config[CONF_PEDESTRIAN_DETECTION]:
         cg.add(var.set_pedestrian_detection_enabled(True))
 
-    # Add build script for ESP-DL detection components
+    # Add ESP-DL detection components include paths
     component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+
+    # Add human_face_detect include path
+    human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
+    if os.path.exists(human_face_detect_dir):
+        cg.add_build_flag(f"-I{human_face_detect_dir}")
+
+    # Add pedestrian_detect include path
+    pedestrian_detect_dir = os.path.join(parent_components_dir, "pedestrian_detect")
+    if os.path.exists(pedestrian_detect_dir):
+        cg.add_build_flag(f"-I{pedestrian_detect_dir}")
+
+    # Add ESP-DL include paths
+    esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
+    if os.path.exists(esp_dl_dir):
+        esp_dl_includes = [
+            "dl",
+            "dl/tool/include",
+            "dl/tensor/include",
+            "dl/base",
+            "dl/base/isa",
+            "dl/base/isa/esp32p4",
+            "dl/math/include",
+            "dl/model/include",
+            "dl/module/include",
+            "fbs_loader/include",
+            "vision/detect",
+            "vision/image",
+            "vision/image/isa",
+            "vision/image/isa/esp32p4",
+            "vision/recognition",
+            "vision/classification",
+        ]
+        for inc in esp_dl_includes:
+            inc_path = os.path.join(esp_dl_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
+    # Add build script for compiling ESP-DL sources
     build_script_path = os.path.join(component_dir, "lvgl_camera_display_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-    else:
-        raise cv.Invalid(f"Build script not found: {build_script_path}")
