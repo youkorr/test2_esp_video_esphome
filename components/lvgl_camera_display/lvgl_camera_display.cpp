@@ -26,8 +26,21 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
+  // Initialiser le détecteur de visages si activé
+  if (this->face_detection_enabled_) {
+    ESP_LOGI(TAG, "🔍 Initialisation de la détection faciale...");
+    try {
+      this->face_detector_ = new HumanFaceDetect();
+      ESP_LOGI(TAG, "✅ Détecteur de visages initialisé");
+    } catch (const std::exception& e) {
+      ESP_LOGE(TAG, "❌ Échec de l'initialisation du détecteur de visages: %s", e.what());
+      this->face_detection_enabled_ = false;
+    }
+  }
+
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
+  ESP_LOGI(TAG, "   Face detection: %s", this->face_detection_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
@@ -166,6 +179,11 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
+  // Détecter et dessiner les visages avant d'afficher
+  if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
+    this->detect_and_draw_faces_(img_data, width, height);
+  }
+
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
@@ -173,7 +191,7 @@ void LVGLCameraDisplay::update_canvas_() {
   this->displayed_buffer_ = buffer;
 }
 
-void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
+void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
   ESP_LOGI(TAG, "🎨 Canvas configuré: %p", canvas);
 
@@ -181,6 +199,69 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t w = lv_obj_get_width(canvas);
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Taille canvas: %dx%d", w, h);
+  }
+}
+
+void LVGLCameraDisplay::detect_and_draw_faces_(uint8_t* img_data, uint16_t width, uint16_t height) {
+  if (img_data == nullptr || this->face_detector_ == nullptr) {
+    return;
+  }
+
+  // Créer la structure d'image pour esp-dl
+  dl::image::img_t img = {
+    .data = img_data,
+    .width = width,
+    .height = height,
+    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+  };
+
+  // Détecter les visages
+  uint32_t t1 = millis();
+  std::list<dl::detect::result_t> &results = this->face_detector_->run(img);
+  uint32_t t2 = millis();
+
+  // Log des statistiques toutes les 100 frames
+  static uint32_t detect_count = 0;
+  static uint32_t total_detect_time = 0;
+  static uint32_t total_faces_detected = 0;
+
+  detect_count++;
+  total_detect_time += (t2 - t1);
+  total_faces_detected += results.size();
+
+  if (detect_count % 100 == 0) {
+    float avg_time = total_detect_time / 100.0f;
+    float avg_faces = total_faces_detected / 100.0f;
+    ESP_LOGI(TAG, "🔍 Face detection: %.1fms avg | %.1f faces avg", avg_time, avg_faces);
+    total_detect_time = 0;
+    total_faces_detected = 0;
+  }
+
+  // Dessiner les rectangles pour chaque visage détecté
+  for (auto &result : results) {
+    // Couleur verte pour les rectangles (format RGB565)
+    // En RGB565: R(5 bits) G(6 bits) B(5 bits)
+    // Vert: 0x07E0
+    std::vector<uint8_t> color = {0x00, 0xF8};  // Vert en RGB565 big-endian
+
+    // Dessiner le rectangle
+    dl::image::draw_hollow_rectangle(
+      img,
+      result.box[0],  // x1
+      result.box[1],  // y1
+      result.box[2],  // x2
+      result.box[3],  // y2
+      color,
+      3  // line width
+    );
+
+    // Log la première détection
+    static bool first_face = true;
+    if (first_face && results.size() > 0) {
+      ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
+               result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+      first_face = false;
+    }
   }
 }
 

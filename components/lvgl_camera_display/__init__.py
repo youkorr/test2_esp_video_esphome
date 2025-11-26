@@ -8,6 +8,7 @@ AUTO_LOAD = ["mipi_dsi_cam"]
 CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
+CONF_FACE_DETECTION = "face_detection"
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -21,15 +22,19 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL, default="33ms"): cv.positive_time_period_milliseconds,
+    cv.Optional(CONF_FACE_DETECTION, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
+
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
-    
+
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
+
+    if config[CONF_FACE_DETECTION]:
+        cg.add(var.set_face_detection_enabled(True))
