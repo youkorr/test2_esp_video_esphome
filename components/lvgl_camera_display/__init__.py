@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
+import os
 
 DEPENDENCIES = ["lvgl", "mipi_dsi_cam"]
 AUTO_LOAD = ["mipi_dsi_cam"]
@@ -43,3 +44,11 @@ async def to_code(config):
 
     if config[CONF_PEDESTRIAN_DETECTION]:
         cg.add(var.set_pedestrian_detection_enabled(True))
+
+    # Add build script for ESP-DL detection components
+    component_dir = os.path.dirname(__file__)
+    build_script_path = os.path.join(component_dir, "lvgl_camera_display_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+    else:
+        raise cv.Invalid(f"Build script not found: {build_script_path}")
