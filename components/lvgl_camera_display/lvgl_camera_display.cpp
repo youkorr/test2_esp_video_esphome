@@ -2,10 +2,10 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// Includes pour les composants ESP-IDF
-#include "human_face_detect.hpp"
-#include "pedestrian_detect.hpp"
-#include "dl_image.hpp"
+// Includes pour les composants ESP-IDF (chemins relatifs)
+#include "../human_face_detect/human_face_detect.hpp"
+#include "../pedestrian_detect/pedestrian_detect.hpp"
+#include "../esp-dl/vision/image/dl_image.hpp"
 
 namespace esphome {
 namespace lvgl_camera_display {
