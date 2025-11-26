@@ -2,13 +2,13 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// Désactiver temporairement les includes ESP-IDF car ils ne sont pas compatibles avec ESPHome build
-// Pour utiliser la détection, il faudra compiler avec ESP-IDF directement
-// #include "../human_face_detect/human_face_detect.hpp"
-// #include "../pedestrian_detect/pedestrian_detect.hpp"
-// #include "../esp-dl/vision/image/dl_image.hpp"
+// ESP-IDF detection components - now enabled with proper Kconfig options
+#include "../human_face_detect/human_face_detect.hpp"
+#include "../pedestrian_detect/pedestrian_detect.hpp"
+#include "../esp-dl/vision/image/dl_image.hpp"
 
-#define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
+// Detection is now enabled
+// #define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
 
 namespace esphome {
 namespace lvgl_camera_display {
