@@ -206,6 +206,48 @@ if os.path.exists(esp_sccb_intf_dir):
             print(f"[ESP-Video Build] + esp_sccb_intf/{src}")
 
 # ========================================================================
+# Sources esp_audio_codec (for AAC audio decoding)
+# ========================================================================
+esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+esp_audio_codec_sources = [
+    "src/audio_decoder_reg.c",
+    "src/audio_encoder_reg.c",
+    "src/simple_decoder_reg.c",
+]
+
+# Audio codec include paths
+audio_codec_includes = [
+    "include",
+    "include/decoder",
+    "include/decoder/impl",
+    "include/encoder",
+    "include/encoder/impl",
+    "include/simple_dec",
+]
+
+if os.path.exists(esp_audio_codec_dir):
+    # Add include paths
+    for inc in audio_codec_includes:
+        inc_path = os.path.join(esp_audio_codec_dir, inc)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+            print(f"[ESP-Video Build] 📁 Include audio codec ajouté: {inc}")
+
+    # Add source files
+    for src in esp_audio_codec_sources:
+        src_path = os.path.join(esp_audio_codec_dir, src)
+        if os.path.exists(src_path):
+            sources_to_add.append(src_path)
+            print(f"[ESP-Video Build] + esp_audio_codec/{src}")
+
+    # Add prebuilt libraries for esp32p4
+    audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+    if os.path.exists(audio_codec_lib_dir):
+        env.Append(LIBPATH=[audio_codec_lib_dir])
+        env.Append(LIBS=["esp_audio_codec", "esp_audio_simple_dec"])
+        print(f"[ESP-Video Build] 📚 Bibliothèques audio codec ajoutées: libesp_audio_codec.a, libesp_audio_simple_dec.a")
+
+# ========================================================================
 # Embarquer les fichiers JSON IPA des capteurs comme binary data
 # ========================================================================
 # print("")
