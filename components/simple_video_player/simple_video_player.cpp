@@ -480,7 +480,7 @@ bool SimpleVideoPlayer::extract_mp4_resolution_() {
 bool SimpleVideoPlayer::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t cfg = {
     .intr_priority = 0,
-    .timeout_ms = 40,
+    .timeout_ms = 20,
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
