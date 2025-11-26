@@ -1231,7 +1231,7 @@ void RTSPServer::remove_session_(int socket_fd) {
 
 void RTSPServer::cleanup_inactive_sessions_() {
   uint32_t now = millis();
-  const uint32_t timeout = 3600000;  // 1 hour - appropriate for surveillance cameras streaming 24/7 (Frigate, etc.)
+  const uint32_t timeout = 0xFFFFFFFF;  // Disabled (~49 days max) - for 24/7 surveillance, sessions never timeout during streaming
 
   for (auto &s: this->sessions_) {
     if (s.active && (now - s.last_activity > timeout)) {
