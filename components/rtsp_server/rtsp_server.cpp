@@ -556,15 +556,42 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
   std::string transport_line = this->get_request_line_(request, "Transport");
   ESP_LOGD(TAG, "Transport: '%s'", transport_line.c_str());
 
+  // Check for TCP interleaved mode (RTP over RTSP/TCP)
   if (transport_line.find("interleaved") != std::string::npos ||
       transport_line.find("RTP/AVP/TCP") != std::string::npos) {
-    ESP_LOGW(TAG, "TCP interleaved not supported (use UDP)");
+    ESP_LOGI(TAG, "TCP interleaved mode requested");
+
+    // Parse interleaved channel numbers (format: "interleaved=0-1")
+    size_t pos = transport_line.find("interleaved=");
+    if (pos != std::string::npos) {
+      int rtp_ch = 0, rtcp_ch = 1;
+      sscanf(transport_line.c_str() + pos, "interleaved=%d-%d", &rtp_ch, &rtcp_ch);
+      session.rtp_channel = (uint8_t)rtp_ch;
+      session.rtcp_channel = (uint8_t)rtcp_ch;
+    }
+
+    session.tcp_interleaved = true;
+
+    if (session.session_id.empty()) {
+      session.session_id = this->generate_session_id_();
+    }
+    session.state = RTSPState::READY;
+
     std::map<std::string, std::string> headers;
     headers["CSeq"] = std::to_string(cseq);
-    this->send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
+    headers["Session"] = session.session_id;
+    headers["Transport"] =
+        "RTP/AVP/TCP;unicast;interleaved=" + std::to_string(session.rtp_channel) +
+        "-" + std::to_string(session.rtcp_channel);
+
+    this->send_rtsp_response_(session.socket_fd, 200, "OK", headers);
+
+    ESP_LOGI(TAG, "Session %s setup with TCP interleaved (channels %d-%d)",
+             session.session_id.c_str(), session.rtp_channel, session.rtcp_channel);
     return;
   }
 
+  // UDP mode (original code)
   size_t pos = transport_line.find("client_port=");
   if (pos != std::string::npos) {
     int rtp_port, rtcp_port;
@@ -578,6 +605,8 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
     this->send_rtsp_response_(session.socket_fd, 461, "Unsupported Transport", headers);
     return;
   }
+
+  session.tcp_interleaved = false;
 
   if (session.session_id.empty()) {
     session.session_id = this->generate_session_id_();
@@ -594,7 +623,7 @@ void RTSPServer::handle_setup_(RTSPSession &session, const std::string &request)
 
   this->send_rtsp_response_(session.socket_fd, 200, "OK", headers);
 
-  ESP_LOGI(TAG, "Session %s setup, client RTP port: %d",
+  ESP_LOGI(TAG, "Session %s setup with UDP (client RTP port: %d)",
            session.session_id.c_str(), session.client_rtp_port);
 }
 
@@ -1107,16 +1136,24 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
 
     memcpy(packet + sizeof(RTPHeader), data, len);
 
+    size_t packet_len = sizeof(RTPHeader) + len;
+
     for (auto &session: this->sessions_) {
       if (session.active && session.state == RTSPState::PLAYING) {
-        struct sockaddr_in dest = session.client_addr;
-        dest.sin_port = htons(session.client_rtp_port);
-        sendto(this->rtp_socket_,
-               packet,
-               sizeof(RTPHeader) + len,
-               0,
-               (struct sockaddr *) &dest,
-               sizeof(dest));
+        if (session.tcp_interleaved) {
+          // TCP interleaved mode - send over RTSP TCP connection
+          this->send_rtp_tcp_interleaved_(session, packet, packet_len, session.rtp_channel);
+        } else {
+          // UDP mode - send to client's RTP port
+          struct sockaddr_in dest = session.client_addr;
+          dest.sin_port = htons(session.client_rtp_port);
+          sendto(this->rtp_socket_,
+                 packet,
+                 packet_len,
+                 0,
+                 (struct sockaddr *) &dest,
+                 sizeof(dest));
+        }
       }
     }
 
@@ -1171,14 +1208,20 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
 
     for (auto &session: this->sessions_) {
       if (session.active && session.state == RTSPState::PLAYING) {
-        struct sockaddr_in dest = session.client_addr;
-        dest.sin_port = htons(session.client_rtp_port);
-        sendto(this->rtp_socket_,
-               packet,
-               packet_size,
-               0,
-               (struct sockaddr *) &dest,
-               sizeof(dest));
+        if (session.tcp_interleaved) {
+          // TCP interleaved mode - send over RTSP TCP connection
+          this->send_rtp_tcp_interleaved_(session, packet, packet_size, session.rtp_channel);
+        } else {
+          // UDP mode - send to client's RTP port
+          struct sockaddr_in dest = session.client_addr;
+          dest.sin_port = htons(session.client_rtp_port);
+          sendto(this->rtp_socket_,
+                 packet,
+                 packet_size,
+                 0,
+                 (struct sockaddr *) &dest,
+                 sizeof(dest));
+        }
       }
     }
 
@@ -1187,6 +1230,38 @@ esp_err_t RTSPServer::send_h264_rtp_(const uint8_t *data, size_t len, bool marke
   }
 
   ESP_LOGV(TAG, "Sent NAL in %u fragments", (unsigned) fragments);
+  return ESP_OK;
+}
+
+esp_err_t RTSPServer::send_rtp_tcp_interleaved_(RTSPSession &session, const uint8_t *packet, size_t len, uint8_t channel) {
+  // TCP interleaved framing: $ + channel + length(2 bytes big-endian) + RTP packet
+  // RFC 2326 Section 10.12
+
+  if (!session.active || session.state != RTSPState::PLAYING) {
+    return ESP_FAIL;
+  }
+
+  // Build interleaved frame header
+  uint8_t header[4];
+  header[0] = '$';                          // Magic byte
+  header[1] = channel;                      // Channel number (0 for RTP, 1 for RTCP)
+  header[2] = (len >> 8) & 0xFF;           // Length high byte
+  header[3] = len & 0xFF;                  // Length low byte
+
+  // Send header + packet
+  // Note: We could use writev() for better performance, but send() twice is simpler
+  ssize_t sent = send(session.socket_fd, header, 4, 0);
+  if (sent != 4) {
+    ESP_LOGW(TAG, "Failed to send TCP interleaved header: %d", errno);
+    return ESP_FAIL;
+  }
+
+  sent = send(session.socket_fd, packet, len, 0);
+  if (sent != (ssize_t)len) {
+    ESP_LOGW(TAG, "Failed to send TCP interleaved RTP packet: %d", errno);
+    return ESP_FAIL;
+  }
+
   return ESP_OK;
 }
 

@@ -60,6 +60,11 @@ struct RTSPSession {
   struct sockaddr_in client_addr;
   uint32_t last_activity;
   bool active;
+
+  // TCP interleaved mode support
+  bool tcp_interleaved{false};     // True if using RTP over RTSP/TCP
+  uint8_t rtp_channel{0};          // Interleaved channel for RTP (usually 0)
+  uint8_t rtcp_channel{1};         // Interleaved channel for RTCP (usually 1)
 };
 
 class RTSPServer : public Component {
@@ -167,6 +172,7 @@ class RTSPServer : public Component {
   esp_err_t convert_rgb565_to_yuv420_(const uint8_t *rgb565, uint8_t *yuv420,
                                        uint16_t width, uint16_t height);
   esp_err_t send_h264_rtp_(const uint8_t *data, size_t len, bool marker);
+  esp_err_t send_rtp_tcp_interleaved_(RTSPSession &session, const uint8_t *packet, size_t len, uint8_t channel);
   void parse_and_cache_nal_units_(const uint8_t *data, size_t len);
   std::vector<std::pair<const uint8_t *, size_t>> parse_nal_units_(const uint8_t *data, size_t len);
 
