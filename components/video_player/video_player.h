@@ -6,180 +6,282 @@
 
 #ifdef USE_ESP_IDF
 
-// LVGL
 #include "lvgl.h"
+#include "driver/jpeg_decode.h"
+#include "esphome/components/speaker/speaker.h"
 
-// esp-h264 software decoder
 extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
 }
 
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
-#include <string.h>
-
-#endif  // USE_ESP_IDF
+#if __has_include("esp_audio_dec.h")
+#define USE_ESP_AUDIO_CODEC 1
+extern "C" {
+#include "esp_audio_dec.h"
+#include "esp_audio_dec_default.h"
+#include "esp_aac_dec.h"
+}
+#else
+#define USE_ESP_AUDIO_CODEC 0
+#endif
 
 namespace esphome {
-namespace video_player {
+namespace simple_video_player {
 
-// MP4 sample entry
+enum class PlayerState {
+  STOPPED,
+  PLAYING,
+  PAUSED
+};
+
+enum class MediaFormat {
+  UNKNOWN,
+  MJPEG,
+  MP4_H264,
+  MKV_H264
+};
+
 struct Mp4Sample {
   uint32_t offset;
   uint32_t size;
   uint32_t duration;
+  uint32_t timestamp_ms;
   bool is_keyframe;
 };
 
-class VideoPlayer : public Component {
- public:
-  // --------- Configuration depuis YAML -------------
-  void set_source_path(const std::string &path) { source_path_ = path; }
-  void set_device_path(const std::string &path) { device_path_ = path; }
+struct AudioSample {
+  uint32_t offset;
+  uint32_t size;
+  uint32_t timestamp_ms;
+};
 
+struct MkvSample {
+  uint64_t offset;
+  uint32_t size;
+  uint64_t timestamp_ns;  // Matroska uses nanoseconds
+  uint16_t track_number;
+  bool is_keyframe;
+};
+
+class SimpleVideoPlayer : public Component {
+ public:
+  void set_file_path(const std::string &path) { file_path_ = path; }
   void set_width(int w) { width_ = w; }
   void set_height(int h) { height_ = h; }
-  void set_resolution(int w, int h) { width_ = w; height_ = h; }
-
-  void set_autoplay(bool b) { autoplay_ = b; }
+  void set_buffer_size(size_t size) { buffer_size_ = size; }
+  void set_auto_play(bool b) { auto_play_ = b; }
   void set_loop(bool b) { loop_ = b; }
-#ifdef USE_ESP_IDF
+  void set_show_controls(bool b) { controls_enabled_ = b; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
-#endif
+  void set_speaker(speaker::Speaker *spk) { speaker_ = spk; }
+  void set_fps(float fps) {
+    if (fps > 0 && fps <= 120) {
+      frame_interval_ = (uint32_t)(1000.0f / fps);
+      fps_override_ = true;
+    }
+  }
 
-  // --------- ESPHome ----------
   void setup() override;
   void loop() override;
+  void dump_config() override;
 
-  // --------- Contrôle vidéo depuis automations ---------
+  float get_setup_priority() const override { return setup_priority::LATE; }
+
   void play();
   void pause();
   void stop();
-  bool is_playing() const { return playing_; }
-
-  float get_setup_priority() const override {
-    return setup_priority::LATE;  // comme le LVGL panel
-  }
+  void resume();
+  bool is_playing() const { return state_ == PlayerState::PLAYING; }
+  bool is_paused() const { return state_ == PlayerState::PAUSED; }
 
  protected:
+  MediaFormat detect_format_();
+  bool detect_jpeg_resolution_(int &width, int &height);
+  bool detect_avi_framerate_();
+  bool extract_mp4_resolution_();
 
-  // ============================
-  // H.264 SOFTWARE DECODER
-  // ============================
+  bool init_jpeg_decoder_();
+  bool read_next_mjpeg_frame_();
+  bool decode_mjpeg_frame_();
 
-  // --- init, deinit decoder ---
-  esp_err_t init_decoder_();
-  void deinit_decoder_();
-
-  // --- YUV to RGB conversion ---
-  void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
-
-  // --- MP4 parsing ---
+  bool init_h264_decoder_();
   bool parse_mp4_();
   bool read_mp4_box_(uint32_t &size, uint32_t &type);
   bool parse_moov_(uint32_t size);
-  bool parse_trak_(uint32_t size);
-  bool parse_mdia_(uint32_t size);
-  bool parse_minf_(uint32_t size);
-  bool parse_stbl_(uint32_t size);
-  bool parse_stsd_(uint32_t size);
+  bool parse_trak_(uint32_t size, bool is_video);
+  bool parse_mdia_(uint32_t size, bool is_video);
+  bool parse_minf_(uint32_t size, bool is_video);
+  bool parse_stbl_(uint32_t size, bool is_video);
+  bool parse_stsd_(uint32_t size, bool is_video);
   bool parse_avc1_(uint32_t size);
   bool parse_avcc_(uint32_t size);
-  bool parse_stts_(uint32_t size);
-  bool parse_stsc_(uint32_t size);
-  bool parse_stsz_(uint32_t size);
-  bool parse_stco_(uint32_t size);
+  bool parse_mp4a_(uint32_t size);
+  bool parse_esds_(uint32_t size);
+  bool parse_stts_(uint32_t size, bool is_video);
+  bool parse_stsc_(uint32_t size, bool is_video);
+  bool parse_stsz_(uint32_t size, bool is_video);
+  bool parse_stco_(uint32_t size, bool is_video);
   bool parse_stss_(uint32_t size);
-  // Fragmented MP4 support
-  bool parse_moof_(uint32_t size, long mdat_start);
-  bool parse_traf_(uint32_t size, long mdat_start);
-  bool parse_trun_(uint32_t size, long mdat_start);
+  bool read_next_mp4_sample_();
+  bool decode_h264_frame_();
 
-  // --- lecture du fichier H.264 ---
-  size_t read_h264_chunk_(uint8_t *buf, size_t max_size);
-  size_t read_next_mp4_sample_(uint8_t *buf, size_t max_size);
+  // MKV/Matroska parsing
+  bool parse_mkv_();
+  uint64_t read_ebml_id_();
+  uint64_t read_ebml_size_();
+  uint64_t read_ebml_vint_();  // Read EBML variable-length integer (for data values)
+  bool read_ebml_uint_(uint64_t size, uint64_t &value);
+  bool read_ebml_string_(uint64_t size, std::string &value);
+  bool parse_mkv_segment_(uint64_t size);
+  bool parse_mkv_info_(uint64_t size);
+  bool parse_mkv_tracks_(uint64_t size);
+  bool parse_mkv_track_entry_(uint64_t size);
+  bool parse_mkv_clusters_();
+  bool read_next_mkv_sample_();
 
-  // --- decode une frame ---
-  bool feed_and_decode_one_frame_();
+  bool init_aac_decoder_();
+  bool read_next_audio_sample_();
+  bool decode_audio_frame_();
+  void process_audio_();
 
-  // --- update LVGL ---
-  void update_lvgl_frame_(const uint8_t *rgb565, size_t len);
+  void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
-  // =================================
-  // Membres
-  // =================================
+  bool open_video_file_();
+  void update_display_();
+  void create_ui_();
+  void create_controls_();
+  void show_controls_();
+  void hide_controls_();
+  void format_time_(char *buf, size_t buf_size, uint32_t time_ms);
 
-  // Chemin du fichier vidéo (ex: "/sdcard/video.mp4")
-  std::string source_path_;
+  static void play_btn_cb_(lv_event_t *e);
+  static void pause_btn_cb_(lv_event_t *e);
+  static void stop_btn_cb_(lv_event_t *e);
+  static void slider_cb_(lv_event_t *e);
+  static void timer_cb_(lv_timer_t *timer);
+  static void hide_timer_cb_(lv_timer_t *timer);
+  static void touch_cb_(lv_event_t *e);
 
-  // Chemin du device H.264 (ex: "/dev/video30")
-  std::string device_path_;
+  std::string file_path_;
+  int width_{800};   // Default/configured width (used if auto-detection fails)
+  int height_{480};  // Default/configured height (used if auto-detection fails)
+  int actual_width_{0};   // Detected actual video width
+  int actual_height_{0};  // Detected actual video height
+  int aligned_width_{0};  // 16-byte aligned width for decoder
+  int aligned_height_{0}; // 16-byte aligned height for decoder
+  size_t buffer_size_{100000};
+  bool auto_play_{true};
+  bool loop_{true};
+  bool controls_enabled_{true};
+  bool fps_override_{false};
 
-  // Résolution de sortie
-  int width_{0};
-  int height_{0};
+  PlayerState state_{PlayerState::STOPPED};
+  MediaFormat format_{MediaFormat::UNKNOWN};
+  FILE *file_{nullptr};
+  long file_size_{0};
+  long current_pos_{0};
+  uint32_t frame_count_{0};
+  uint32_t total_frames_{0};
 
-  // Contrôle
-  bool autoplay_{false};
-  bool loop_{false};
-  bool playing_{false};
-  bool eof_{false};
+  uint8_t *input_buffer_{nullptr};
+  uint8_t *rgb_buffer_{nullptr};
+  size_t input_size_{0};
+  size_t rgb_buffer_size_{0};
 
-  // MP4 parsing
-  bool is_mp4_{false};
-  std::vector<Mp4Sample> samples_;
-  size_t current_sample_{0};
-  uint8_t nal_length_size_{4};  // Usually 4 bytes for length prefix
+  lv_img_dsc_t frame_img_dsc_{};
+
+  jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+
+  esp_h264_dec_handle_t h264_decoder_{nullptr};
+  std::vector<uint8_t> yuv_buffer_;
+  bool h264_decoder_ready_{false};
+
+  std::vector<Mp4Sample> video_samples_;
+  std::vector<AudioSample> audio_samples_;
+  size_t current_video_sample_{0};
+  size_t current_audio_sample_{0};
+  uint8_t nal_length_size_{4};
   std::vector<uint8_t> sps_;
   std::vector<uint8_t> pps_;
   bool sps_pps_sent_{false};
+  uint32_t video_timescale_{1000};
+  uint32_t audio_timescale_{44100};
 
-#ifdef USE_ESP_IDF
+  // MKV/Matroska data
+  std::vector<MkvSample> mkv_samples_;
+  size_t current_mkv_sample_{0};
+  uint64_t mkv_timecode_scale_{1000000};  // Default 1ms in nanoseconds
+  uint16_t mkv_video_track_{0};
+  uint16_t mkv_audio_track_{0};
+  uint64_t mkv_segment_start_{0};
+  uint64_t mkv_cluster_start_{0};
 
-  // Handle LVGL
+  uint32_t audio_sample_rate_{44100};
+  uint8_t audio_channels_{2};
+  std::vector<uint8_t> audio_config_;
+
+  speaker::Speaker *speaker_{nullptr};
+#if USE_ESP_AUDIO_CODEC
+  esp_audio_dec_handle_t aac_decoder_{nullptr};
+#else
+  void *aac_decoder_{nullptr};
+#endif
+  uint8_t *audio_input_buffer_{nullptr};
+  uint8_t *audio_output_buffer_{nullptr};
+  size_t audio_input_size_{0};
+  size_t audio_output_size_{0};
+  bool has_audio_{false};
+  bool aac_decoder_ready_{false};
+
   lv_obj_t *parent_{nullptr};
-  lv_obj_t *img_obj_{nullptr};
-  lv_img_dsc_t img_dsc_{};
+  lv_obj_t *canvas_{nullptr};
+  lv_obj_t *play_btn_{nullptr};
+  lv_obj_t *pause_btn_{nullptr};
+  lv_obj_t *stop_btn_{nullptr};
+  lv_obj_t *slider_{nullptr};
+  lv_obj_t *time_label_{nullptr};
+  lv_obj_t *format_badge_{nullptr};
+  lv_obj_t *resolution_label_{nullptr};
+  lv_obj_t *loading_spinner_{nullptr};
+  lv_obj_t *controls_container_{nullptr};
+  lv_obj_t *touch_layer_{nullptr};
+  lv_timer_t *playback_timer_{nullptr};
+  lv_timer_t *hide_timer_{nullptr};
 
-  // Buffer RGB565 for LVGL
-  std::vector<uint8_t> frame_buffer_;
+  uint32_t last_frame_time_{0};
+  uint32_t frame_interval_{20};
+  uint32_t current_time_ms_{0};
+  uint32_t total_duration_ms_{0};
 
-  // esp-h264 software decoder
-  esp_h264_dec_handle_t decoder_{nullptr};
-
-  // Input buffer for encoded H.264 data
-  std::vector<uint8_t> input_buffer_;
-
-  // Output buffer for decoded I420 data
-  std::vector<uint8_t> yuv_buffer_;
-
-  // Fichier H.264
-  FILE *file_{nullptr};
-
-  bool decoder_ready_{false};
-
-#endif  // USE_ESP_IDF
+  bool controls_visible_{true};
+  uint32_t hide_delay_ms_{3000};
 };
 
-// Action templates for automation
-template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<VideoPlayer> {
+template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
   void play(const Ts &...x) override { this->parent_->play(); }
 };
 
-template<typename... Ts> class PauseAction : public Action<Ts...>, public Parented<VideoPlayer> {
+template<typename... Ts> class PauseAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
   void play(const Ts &...x) override { this->parent_->pause(); }
 };
 
-template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<VideoPlayer> {
+template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
  public:
   void play(const Ts &...x) override { this->parent_->stop(); }
 };
 
-}  // namespace video_player
+template<typename... Ts> class ResumeAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {
+ public:
+  void play(const Ts &...x) override { this->parent_->resume(); }
+};
+
+}  // namespace simple_video_player
 }  // namespace esphome
+
+#endif
+
 
