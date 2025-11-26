@@ -45,6 +45,17 @@ async def to_code(config):
     if config[CONF_PEDESTRIAN_DETECTION]:
         cg.add(var.set_pedestrian_detection_enabled(True))
 
+    # Add ESP-DL detection component defines (from Kconfig)
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_TYPE=0")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION=0")
+    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_PICO_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")
+    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_TYPE=0")
+    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0")
+    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
     # Add ESP-DL detection components include paths
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)

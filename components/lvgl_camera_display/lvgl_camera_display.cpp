@@ -34,41 +34,23 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // Détection désactivée pour la compilation ESPHome
-  // Les composants ESP-IDF (human_face_detect, pedestrian_detect) ne sont pas compatibles avec le build ESPHome
-#ifndef ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION
-  // Initialiser le détecteur de visages si activé
-  if (this->face_detection_enabled_) {
-    ESP_LOGI(TAG, "🔍 Initialisation de la détection faciale...");
-    try {
-      this->face_detector_ = new HumanFaceDetect();
-      ESP_LOGI(TAG, "✅ Détecteur de visages initialisé");
-    } catch (const std::exception& e) {
-      ESP_LOGE(TAG, "❌ Échec de l'initialisation du détecteur de visages: %s", e.what());
-      this->face_detection_enabled_ = false;
-    }
-  }
-
-  // Initialiser le détecteur de piétons si activé
-  if (this->pedestrian_detection_enabled_) {
-    ESP_LOGI(TAG, "🚶 Initialisation de la détection de piétons...");
-    try {
-      this->pedestrian_detector_ = new PedestrianDetect();
-      ESP_LOGI(TAG, "✅ Détecteur de piétons initialisé");
-    } catch (const std::exception& e) {
-      ESP_LOGE(TAG, "❌ Échec de l'initialisation du détecteur de piétons: %s", e.what());
-      this->pedestrian_detection_enabled_ = false;
-    }
-  }
-#else
+  // TODO: Detection temporarily disabled due to ESP-DL version incompatibility
+  // The ESP-DL DetectWrapper class has changed its interface and now requires
+  // a pure virtual load_model() method that HumanFaceDetect/PedestrianDetect don't implement.
+  // This is a known incompatibility between the component versions.
+  //
+  // Possible solutions:
+  // 1. Update human_face_detect/pedestrian_detect to implement load_model()
+  // 2. Use the internal implementations directly (human_face_detect::MSRMNP, pedestrian_detect::Pico)
+  // 3. Create wrapper classes that bridge the API gap
   if (this->face_detection_enabled_ || this->pedestrian_detection_enabled_) {
-    ESP_LOGW(TAG, "⚠️  Détection faciale/piétons désactivée dans cette version");
-    ESP_LOGW(TAG, "   Les composants ESP-IDF ne sont pas compatibles avec le build ESPHome");
-    ESP_LOGW(TAG, "   Pour activer la détection, compiler avec ESP-IDF directement");
+    ESP_LOGW(TAG, "⚠️  Détection faciale/piétons temporairement désactivée");
+    ESP_LOGW(TAG, "   Incompatibilité de version ESP-DL (méthode load_model() manquante)");
+    ESP_LOGW(TAG, "   Les classes HumanFaceDetect/PedestrianDetect sont abstraites");
+    ESP_LOGW(TAG, "   Une mise à jour des composants est nécessaire");
     this->face_detection_enabled_ = false;
     this->pedestrian_detection_enabled_ = false;
   }
-#endif
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
