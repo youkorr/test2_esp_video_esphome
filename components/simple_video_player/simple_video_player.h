@@ -16,11 +16,11 @@ extern "C" {
 #include "esp_h264_types.h"
 }
 
-#if __has_include("esp_audio_dec.h")
+#if __has_include("include/decoder/esp_audio_dec.h")
 #define USE_ESP_AUDIO_CODEC 1
 extern "C" {
-#include "esp_audio_dec.h"
-#include "esp_audio_dec_default.h"
+#include "include/decoder/esp_audio_dec.h"
+#include "esp_audio_dec_reg.h"
 #include "esp_aac_dec.h"
 }
 #else

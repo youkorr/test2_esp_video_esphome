@@ -1084,7 +1084,7 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
   }
 
   // Register AAC decoder
-  esp_audio_dec_register_default();
+  esp_audio_dec_register(ESP_AUDIO_TYPE_AAC, esp_aac_dec_init);
 
   // Configure AAC decoder
   esp_aac_dec_cfg_t aac_cfg = {
