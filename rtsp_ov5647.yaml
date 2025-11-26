@@ -153,10 +153,10 @@ rtsp_server:
   # URL avec auth: rtsp://youkorr:youkorr123@<IP>:554/stream
 
   # Paramètres encodeur H.264 hardware
-  bitrate: 2000000         # 2 Mbps (recommandé pour 800x640)
-  gop: 30                  # GOP de 30 frames (1 keyframe/sec @ 30fps)
-  qp_min: 10               # Qualité minimale
-  qp_max: 40               # Qualité maximale
+  bitrate: 4000000         # 4 Mbps (qualité améliorée pour 800x600, similaire à JPEG quality 80)
+  gop: 15                  # GOP de 15 frames (plus de keyframes = moins de saccades)
+  qp_min: 10               # Qualité minimale (0 = meilleure qualité)
+  qp_max: 32               # Qualité maximale réduite (moins de compression = meilleure qualité)
 
   # Réseau
   rtp_port: 5004           # Port RTP
