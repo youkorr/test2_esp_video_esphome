@@ -34,22 +34,28 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
-  // TODO: Detection temporarily disabled due to ESP-DL version incompatibility
-  // The ESP-DL DetectWrapper class has changed its interface and now requires
-  // a pure virtual load_model() method that HumanFaceDetect/PedestrianDetect don't implement.
-  // This is a known incompatibility between the component versions.
-  //
-  // Possible solutions:
-  // 1. Update human_face_detect/pedestrian_detect to implement load_model()
-  // 2. Use the internal implementations directly (human_face_detect::MSRMNP, pedestrian_detect::Pico)
-  // 3. Create wrapper classes that bridge the API gap
-  if (this->face_detection_enabled_ || this->pedestrian_detection_enabled_) {
-    ESP_LOGW(TAG, "⚠️  Détection faciale/piétons temporairement désactivée");
-    ESP_LOGW(TAG, "   Incompatibilité de version ESP-DL (méthode load_model() manquante)");
-    ESP_LOGW(TAG, "   Les classes HumanFaceDetect/PedestrianDetect sont abstraites");
-    ESP_LOGW(TAG, "   Une mise à jour des composants est nécessaire");
-    this->face_detection_enabled_ = false;
-    this->pedestrian_detection_enabled_ = false;
+  // Initialize face detector if enabled
+  if (this->face_detection_enabled_) {
+    ESP_LOGI(TAG, "🔍 Initializing face detection...");
+    this->face_detector_ = new HumanFaceDetect();
+    if (this->face_detector_ != nullptr) {
+      ESP_LOGI(TAG, "✅ Face detector initialized");
+    } else {
+      ESP_LOGE(TAG, "❌ Failed to initialize face detector");
+      this->face_detection_enabled_ = false;
+    }
+  }
+
+  // Initialize pedestrian detector if enabled
+  if (this->pedestrian_detection_enabled_) {
+    ESP_LOGI(TAG, "🚶 Initializing pedestrian detection...");
+    this->pedestrian_detector_ = new PedestrianDetect();
+    if (this->pedestrian_detector_ != nullptr) {
+      ESP_LOGI(TAG, "✅ Pedestrian detector initialized");
+    } else {
+      ESP_LOGE(TAG, "❌ Failed to initialize pedestrian detector");
+      this->pedestrian_detection_enabled_ = false;
+    }
   }
 
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
