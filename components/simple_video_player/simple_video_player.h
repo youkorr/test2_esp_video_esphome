@@ -80,6 +80,7 @@ class SimpleVideoPlayer : public Component {
     if (fps > 0 && fps <= 120) {
       frame_interval_ = (uint32_t)(1000.0f / fps);
       fps_override_ = true;
+      ESP_LOGI("simple_video_player", "FPS configured: %.2f (interval: %u ms)", fps, frame_interval_);
     }
   }
 
