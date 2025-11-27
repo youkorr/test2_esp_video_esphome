@@ -19,32 +19,43 @@ esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
-    tinyh264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+    # Try openh264 first (more optimized but larger)
+    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    h264_lib_name = "openh264"
 
-    if os.path.exists(tinyh264_lib):
-        print(f"[Simple Video Player] Found tinyh264 library: {tinyh264_lib}")
+    if not os.path.exists(h264_lib):
+        # Fallback to tinyh264
+        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+        h264_lib_name = "tinyh264"
+
+    if os.path.exists(h264_lib):
+        print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")
 
         # Add library path
         env.Append(LIBPATH=[h264_lib_dir])
 
-        # Add include paths for h264bsd decoder
-        tinyh264_inc = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
-        if os.path.exists(tinyh264_inc):
-            env.Append(CPPPATH=[tinyh264_inc])
-            print(f"[Simple Video Player] Added tinyh264 include path")
+        # Add include paths for decoder
+        if h264_lib_name == "tinyh264":
+            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
+        else:  # openh264
+            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc")
+
+        if os.path.exists(h264_inc):
+            env.Append(CPPPATH=[h264_inc])
+            print(f"[Simple Video Player] Added {h264_lib_name} include path")
 
         # Force linking with --whole-archive to override compiled esp_h264_dec_sw.o
-        # This ensures tinyh264 symbols take precedence over any duplicate symbols
+        # This ensures library symbols take precedence over any duplicate symbols
         env.Append(LINKFLAGS=[
             "-Wl,--whole-archive",
-            tinyh264_lib,
+            h264_lib,
             "-Wl,--no-whole-archive"
         ])
 
-        print("[Simple Video Player] ✓ Linked optimized tinyh264 decoder library (with --whole-archive)")
+        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library (with --whole-archive)")
         print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~10-20ms")
     else:
-        print(f"[Simple Video Player] ⚠️  tinyh264 library not found at {tinyh264_lib}")
+        print(f"[Simple Video Player] ⚠️  H.264 decoder library not found in {h264_lib_dir}")
 else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
