@@ -54,9 +54,10 @@ if os.path.exists(esp_dl_dir):
         "vision/detect/dl_detect_mnp_postprocessor.cpp",
         "vision/detect/dl_detect_msr_postprocessor.cpp",
 
-        # Image processing (for draw_hollow_rectangle)
+        # Image processing (for draw_hollow_rectangle and ImageTransformer)
         "vision/image/dl_image_draw.cpp",
         "vision/image/dl_image_preprocessor.cpp",
+        "vision/image/dl_image_process.cpp",
 
         # Model loading
         "dl/model/src/dl_model_base.cpp",
@@ -66,6 +67,7 @@ if os.path.exists(esp_dl_dir):
 
         # Tool functions
         "dl/tool/src/dl_tool.cpp",
+        "dl/tool/isa/esp32p4/dl_esp32p4_memcpy.S",
     ]
 
     for src in esp_dl_sources:
