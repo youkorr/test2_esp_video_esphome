@@ -25,6 +25,7 @@ CONF_LOOP = "loop"
 CONF_SHOW_CONTROLS = "show_controls"
 CONF_PARENT_ID = "parent_id"
 CONF_SPEAKER = "speaker"
+CONF_MEDIA_PLAYER_ENTITY = "media_player_entity"
 CONF_FPS = "fps"
 
 CONFIG_SCHEMA = cv.Schema({
@@ -38,6 +39,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
+    cv.Optional(CONF_MEDIA_PLAYER_ENTITY): cv.string,
     cv.Optional(CONF_FPS): cv.positive_float,
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -64,6 +66,9 @@ async def to_code(config):
     if CONF_SPEAKER in config:
         spk = await cg.get_variable(config[CONF_SPEAKER])
         cg.add(var.set_speaker(spk))
+
+    if CONF_MEDIA_PLAYER_ENTITY in config:
+        cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
 
     # Add esp_audio_codec include paths for AAC decoder support
     import os
