@@ -39,7 +39,10 @@ void LVGLCameraDisplay::setup() {
     ESP_LOGI(TAG, "🔍 Initializing face detection...");
     this->face_detector_ = new HumanFaceDetect();
     if (this->face_detector_ != nullptr) {
-      ESP_LOGI(TAG, "✅ Face detector initialized");
+      // Lower thresholds for better detection (default is 0.5)
+      this->face_detector_->set_score_thr(0.3);  // More sensitive
+      this->face_detector_->set_nms_thr(0.3);    // Less overlap filtering
+      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.3, nms_thr=0.3)");
     } else {
       ESP_LOGE(TAG, "❌ Failed to initialize face detector");
       this->face_detection_enabled_ = false;
@@ -247,14 +250,21 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
 
   detect_count++;
 
-  // Détecter les visages
+  // Détecter les visages (avec frame skipping pour améliorer les performances)
+  // Skip 2 frames, detect on the 3rd (runs 1/3 of the time)
   if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
-    uint32_t t1 = millis();
-    std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
-    uint32_t t2 = millis();
+    this->face_detection_frame_skip_++;
 
-    total_face_time += (t2 - t1);
-    total_faces += face_results.size();
+    // Only run face detection every 3rd frame
+    if (this->face_detection_frame_skip_ >= 3) {
+      this->face_detection_frame_skip_ = 0;
+
+      uint32_t t1 = millis();
+      std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+      uint32_t t2 = millis();
+
+      total_face_time += (t2 - t1);
+      total_faces += face_results.size();
 
     // Dessiner les rectangles VERTS pour les visages
     std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
@@ -274,6 +284,7 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
         first_face = false;
       }
     }
+    } // End of frame skip check
   }
 
   // Détecter les piétons

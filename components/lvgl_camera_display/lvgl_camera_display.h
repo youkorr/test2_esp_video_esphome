@@ -57,6 +57,9 @@ class LVGLCameraDisplay : public Component {
   HumanFaceDetect *face_detector_{nullptr};
   PedestrianDetect *pedestrian_detector_{nullptr};
 
+  // Frame skipping for face detection (to improve performance)
+  uint32_t face_detection_frame_skip_{0};
+
   void update_camera_frame_();
   void update_canvas_();
   void detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height);
