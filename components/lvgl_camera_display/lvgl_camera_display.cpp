@@ -39,7 +39,10 @@ void LVGLCameraDisplay::setup() {
     ESP_LOGI(TAG, "🔍 Initializing face detection...");
     this->face_detector_ = new HumanFaceDetect();
     if (this->face_detector_ != nullptr) {
-      ESP_LOGI(TAG, "✅ Face detector initialized");
+      // Ultra-low thresholds for maximum sensitivity (default is 0.5)
+      this->face_detector_->set_score_thr(0.2);  // Very sensitive
+      this->face_detector_->set_nms_thr(0.2);    // Minimal overlap filtering
+      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.2, nms_thr=0.2 - ultra-sensitive)");
     } else {
       ESP_LOGE(TAG, "❌ Failed to initialize face detector");
       this->face_detection_enabled_ = false;
@@ -247,14 +250,21 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
 
   detect_count++;
 
-  // Détecter les visages
+  // Détecter les visages (avec frame skipping pour améliorer les performances)
+  // Skip 4 frames, detect on the 5th (runs 1/5 of the time = very fast)
   if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
-    uint32_t t1 = millis();
-    std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
-    uint32_t t2 = millis();
+    this->face_detection_frame_skip_++;
 
-    total_face_time += (t2 - t1);
-    total_faces += face_results.size();
+    // Only run face detection every 5th frame (was 3rd - now even faster)
+    if (this->face_detection_frame_skip_ >= 5) {
+      this->face_detection_frame_skip_ = 0;
+
+      uint32_t t1 = millis();
+      std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+      uint32_t t2 = millis();
+
+      total_face_time += (t2 - t1);
+      total_faces += face_results.size();
 
     // Dessiner les rectangles VERTS pour les visages
     std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
@@ -274,6 +284,7 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
         first_face = false;
       }
     }
+    } // End of frame skip check
   }
 
   // Détecter les piétons

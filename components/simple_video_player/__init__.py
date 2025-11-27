@@ -65,6 +65,26 @@ async def to_code(config):
         spk = await cg.get_variable(config[CONF_SPEAKER])
         cg.add(var.set_speaker(spk))
 
+    # Add esp_audio_codec include paths for AAC decoder support
+    import os
+    component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+
+    audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(audio_codec_dir):
+        # Add main include directory
+        cg.add_build_flag(f"-I{audio_codec_dir}/include")
+        # Add decoder include directory
+        cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder")
+        # Add codec implementations
+        cg.add_build_flag(f"-I{audio_codec_dir}/include/codec")
+        cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder/impl")
+
+    # Add build script for linking H264 and audio codec libraries
+    build_script_path = os.path.join(component_dir, "simple_video_player_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+
 
 # Action schemas
 SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA = cv.Schema({

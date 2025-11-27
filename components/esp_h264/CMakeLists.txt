@@ -53,4 +53,29 @@ idf_component_register(
 
 message(STATUS "ESP H.264 component registered")
 
+# Link prebuilt optimized decoder libraries
+idf_build_get_property(target IDF_TARGET)
+
+if("${target}" STREQUAL "esp32p4")
+    # Add include directories for decoder libraries
+    target_include_directories(${COMPONENT_LIB} PRIVATE
+        "sw/libs/tinyh264_inc"
+        "sw/libs/openh264_inc"
+    )
+
+    # Link prebuilt tinyh264 library (default, smaller and faster for most use cases)
+    add_prebuilt_library(tinyh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libtinyh264.a"
+                        PRIV_REQUIRES ${COMPONENT_NAME})
+    target_link_libraries(${COMPONENT_LIB} INTERFACE tinyh264_lib)
+
+    message(STATUS "ESP H.264: Linked optimized tinyh264 library for ${target}")
+
+    # Optionally, you can use openh264 instead (larger but may be better for some videos)
+    # Uncomment the lines below and comment out tinyh264 above to use openh264:
+    # add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
+    #                     PRIV_REQUIRES ${COMPONENT_NAME})
+    # target_link_libraries(${COMPONENT_LIB} INTERFACE openh264_lib)
+    # message(STATUS "ESP H.264: Linked optimized openh264 library for ${target}")
+endif()
+
 
