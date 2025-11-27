@@ -143,12 +143,19 @@ dl::Model *MSRMNP::get_raw_model(int idx)
 
 HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
 {
+    ESP_LOGI("human_face_detect", "Constructor called: model_type=%d", (int)model_type);
     switch (model_type) {
     case model_type_t::MSRMNP_S8_V1: {
 #if CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+        ESP_LOGI("human_face_detect", "Loading MSRMNP models from flash rodata...");
         m_model =
             new human_face_detect::MSRMNP("human_face_detect_msr_s8_v1.espdl", "human_face_detect_mnp_s8_v1.espdl");
+        if (m_model) {
+            ESP_LOGI("human_face_detect", "✅ MSRMNP model loaded successfully!");
+        } else {
+            ESP_LOGE("human_face_detect", "❌ Failed to create MSRMNP model!");
+        }
 #else
         if (sdcard_model_dir) {
             char msr_dir[128];
