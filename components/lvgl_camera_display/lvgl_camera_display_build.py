@@ -42,6 +42,15 @@ if os.path.exists(pedestrian_detect_dir):
             print(f"[LVGL Camera Display] + {src}")
 
 # ========================================================================
+# Custom dotprod implementation (without ESP-DSP dependency)
+# ========================================================================
+# Add our custom dotprod implementation that doesn't require ESP-DSP
+dotprod_no_dsp = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
+if os.path.exists(dotprod_no_dsp):
+    sources_to_add.append(dotprod_no_dsp)
+    print("[LVGL Camera Display] + dl_base_dotprod_no_dsp.cpp (ESP-DSP free version)")
+
+# ========================================================================
 # ESP-DL Sources (compile by directories like CMakeLists.txt)
 # ========================================================================
 esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
