@@ -22,12 +22,12 @@ extern "C" {
 
 }
 
-#if __has_include("include/decoder/esp_audio_dec.h")
+#if __has_include("decoder/esp_audio_dec.h")
 #define USE_ESP_AUDIO_CODEC 1
 extern "C" {
-#include "include/decoder/esp_audio_dec.h"
-#include "esp_audio_dec_reg.h"
-#include "esp_aac_dec.h"
+#include "decoder/esp_audio_dec.h"
+#include "decoder/esp_audio_dec_reg.h"
+#include "decoder/impl/esp_aac_dec.h"
 }
 #else
 #define USE_ESP_AUDIO_CODEC 0
