@@ -25,8 +25,12 @@ Pico::Pico(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
 #endif
+    // Adjust anchor sizes for close-range pedestrian detection (50cm+)
+    // Original: {{8,8,4,4}, {16,16,8,8}, {32,32,16,16}}
+    // Added larger anchors for detecting people at closer distances
     m_postprocessor =
-        new dl::detect::PicoPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+        new dl::detect::PicoPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10,
+            {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}, {64, 64, 32, 32}, {128, 128, 64, 64}, {256, 256, 128, 128}});
 }
 
 } // namespace pedestrian_detect
