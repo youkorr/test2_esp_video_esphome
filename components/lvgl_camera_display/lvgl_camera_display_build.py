@@ -308,30 +308,23 @@ if sources_to_add:
             objects
         )
 
-        # Link both our library and libfbs_model.a with --whole-archive
-        # This ensures all symbols are included, resolving circular dependencies
-        fbs_lib_path = os.path.join(parent_components_dir, "esp-dl", "fbs_loader", "lib", "esp32p4", "libfbs_model.a")
+        # Add our library to linkage first (Prepend = add at beginning)
+        env.Prepend(LIBS=[lib])
 
-        if os.path.exists(fbs_lib_path):
-            # Pass the File nodes directly to LINKFLAGS for proper resolution
-            lib_node = lib[0]  # SCons File node
-            fbs_lib_node = env.File(fbs_lib_path)  # Convert to File node
+        # Use library groups to resolve circular dependencies between our lib and libfbs_model.a
+        # libfbs_model.a is already added via Prepend earlier in the script
+        # Add linker flags to handle circular dependencies
+        env.Append(LINKFLAGS=[
+            "-Wl,--start-group",
+        ])
+        # The libraries will be inserted here by SCons
+        env.Append(_LIBFLAGS=[
+            "-Wl,--end-group"
+        ])
 
-            # Add both libraries with --whole-archive
-            env.Append(LINKFLAGS=[
-                "-Wl,--whole-archive",
-                lib_node,
-                fbs_lib_node,
-                "-Wl,--no-whole-archive"
-            ])
-
-            print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled")
-            print(f"[LVGL Camera Display] ✓ liblvgl_camera_display_detect.a created")
-            print(f"[LVGL Camera Display] ✓ Both libraries linked with --whole-archive")
-        else:
-            print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib_path}")
-            # Fallback: just add our library normally
-            env.Prepend(LIBS=[lib])
+        print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled")
+        print(f"[LVGL Camera Display] ✓ liblvgl_camera_display_detect.a created")
+        print(f"[LVGL Camera Display] ✓ Libraries will be linked with --start-group/--end-group")
 else:
     print("[LVGL Camera Display] ⚠️  No sources to compile")
 
