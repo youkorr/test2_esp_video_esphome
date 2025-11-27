@@ -313,8 +313,9 @@ if sources_to_add:
         fbs_lib_path = os.path.join(parent_components_dir, "esp-dl", "fbs_loader", "lib", "esp32p4", "libfbs_model.a")
 
         if os.path.exists(fbs_lib_path):
-            # Get the absolute path of our library
-            lib_path = lib[0].get_abspath()
+            # Use the SCons node directly - it will be resolved correctly during linking
+            # Convert to string to get the path that SCons will use
+            lib_path = str(lib[0])
 
             # Add both libraries with --whole-archive
             env.Append(LINKFLAGS=[
