@@ -2,6 +2,14 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
+// ESP-IDF detection components - now enabled with proper Kconfig options
+#include "human_face_detect.hpp"
+#include "pedestrian_detect.hpp"
+#include "dl_image.hpp"
+
+// Detection is now enabled
+// #define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
+
 namespace esphome {
 namespace lvgl_camera_display {
 
@@ -26,8 +34,34 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
+  // Initialize face detector if enabled
+  if (this->face_detection_enabled_) {
+    ESP_LOGI(TAG, "🔍 Initializing face detection...");
+    this->face_detector_ = new HumanFaceDetect();
+    if (this->face_detector_ != nullptr) {
+      ESP_LOGI(TAG, "✅ Face detector initialized");
+    } else {
+      ESP_LOGE(TAG, "❌ Failed to initialize face detector");
+      this->face_detection_enabled_ = false;
+    }
+  }
+
+  // Initialize pedestrian detector if enabled
+  if (this->pedestrian_detection_enabled_) {
+    ESP_LOGI(TAG, "🚶 Initializing pedestrian detection...");
+    this->pedestrian_detector_ = new PedestrianDetect();
+    if (this->pedestrian_detector_ != nullptr) {
+      ESP_LOGI(TAG, "✅ Pedestrian detector initialized");
+    } else {
+      ESP_LOGE(TAG, "❌ Failed to initialize pedestrian detector");
+      this->pedestrian_detection_enabled_ = false;
+    }
+  }
+
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
+  ESP_LOGI(TAG, "   Face detection: %s", this->face_detection_enabled_ ? "ENABLED" : "DISABLED");
+  ESP_LOGI(TAG, "   Pedestrian detection: %s", this->pedestrian_detection_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
@@ -166,6 +200,12 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
+  // Détecter et dessiner les objets avant d'afficher
+  if ((this->face_detection_enabled_ && this->face_detector_ != nullptr) ||
+      (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr)) {
+    this->detect_and_draw_objects_(img_data, width, height);
+  }
+
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
@@ -173,7 +213,7 @@ void LVGLCameraDisplay::update_canvas_() {
   this->displayed_buffer_ = buffer;
 }
 
-void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) { 
+void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
   ESP_LOGI(TAG, "🎨 Canvas configuré: %p", canvas);
 
@@ -182,6 +222,112 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Taille canvas: %dx%d", w, h);
   }
+}
+
+void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height) {
+#ifndef ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION
+  if (img_data == nullptr) {
+    return;
+  }
+
+  // Créer la structure d'image pour esp-dl
+  dl::image::img_t img = {
+    .data = img_data,
+    .width = width,
+    .height = height,
+    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+  };
+
+  // Statistiques
+  static uint32_t detect_count = 0;
+  static uint32_t total_face_time = 0;
+  static uint32_t total_ped_time = 0;
+  static uint32_t total_faces = 0;
+  static uint32_t total_pedestrians = 0;
+
+  detect_count++;
+
+  // Détecter les visages
+  if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
+    uint32_t t1 = millis();
+    std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+    uint32_t t2 = millis();
+
+    total_face_time += (t2 - t1);
+    total_faces += face_results.size();
+
+    // Dessiner les rectangles VERTS pour les visages
+    std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
+    for (auto &result : face_results) {
+      dl::image::draw_hollow_rectangle(
+        img,
+        result.box[0], result.box[1],
+        result.box[2], result.box[3],
+        green, 3
+      );
+
+      // Log la première détection
+      static bool first_face = true;
+      if (first_face) {
+        ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
+                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+        first_face = false;
+      }
+    }
+  }
+
+  // Détecter les piétons
+  if (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr) {
+    uint32_t t1 = millis();
+    std::list<dl::detect::result_t> &ped_results = this->pedestrian_detector_->run(img);
+    uint32_t t2 = millis();
+
+    total_ped_time += (t2 - t1);
+    total_pedestrians += ped_results.size();
+
+    // Dessiner les rectangles BLEUS pour les piétons
+    std::vector<uint8_t> blue = {0x1F, 0x00};  // Bleu en RGB565 big-endian
+    for (auto &result : ped_results) {
+      dl::image::draw_hollow_rectangle(
+        img,
+        result.box[0], result.box[1],
+        result.box[2], result.box[3],
+        blue, 3
+      );
+
+      // Log la première détection
+      static bool first_ped = true;
+      if (first_ped) {
+        ESP_LOGI(TAG, "🚶 Piéton détecté: box=[%d,%d,%d,%d] score=%.2f",
+                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+        first_ped = false;
+      }
+    }
+  }
+
+  // Log des statistiques toutes les 100 frames
+  if (detect_count % 100 == 0) {
+    if (this->face_detection_enabled_) {
+      float avg_time = total_face_time / 100.0f;
+      float avg_faces = total_faces / 100.0f;
+      ESP_LOGI(TAG, "🔍 Face detection: %.1fms avg | %.1f faces avg", avg_time, avg_faces);
+    }
+    if (this->pedestrian_detection_enabled_) {
+      float avg_time = total_ped_time / 100.0f;
+      float avg_peds = total_pedestrians / 100.0f;
+      ESP_LOGI(TAG, "🚶 Pedestrian detection: %.1fms avg | %.1f pedestrians avg", avg_time, avg_peds);
+    }
+    total_face_time = 0;
+    total_ped_time = 0;
+    total_faces = 0;
+    total_pedestrians = 0;
+  }
+#else
+  // Détection désactivée - ne rien faire
+  (void)img_data;
+  (void)width;
+  (void)height;
+#endif
 }
 
 }  // namespace lvgl_camera_display
