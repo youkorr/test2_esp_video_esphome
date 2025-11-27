@@ -4,6 +4,7 @@ Compile les sources nécessaires pour la détection faciale et piétonne
 """
 
 import os
+import glob
 Import("env")
 
 # Obtenir le répertoire du composant
@@ -41,43 +42,72 @@ if os.path.exists(pedestrian_detect_dir):
             print(f"[LVGL Camera Display] + {src}")
 
 # ========================================================================
-# ESP-DL Sources (only what we need for detection)
+# ESP-DL Sources (compile by directories like CMakeLists.txt)
 # ========================================================================
 esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
 if os.path.exists(esp_dl_dir):
-    # Only compile specific files needed for detection, avoiding esp_dsp.h dependencies
-    esp_dl_sources = [
-        # Detection base
-        "vision/detect/dl_detect_base.cpp",
-        "vision/detect/dl_detect_postprocessor.cpp",
-        "vision/detect/dl_detect_pico_postprocessor.cpp",
-        "vision/detect/dl_detect_mnp_postprocessor.cpp",
-        "vision/detect/dl_detect_msr_postprocessor.cpp",
-
-        # Image processing (for draw_hollow_rectangle and ImageTransformer)
-        "vision/image/dl_image_draw.cpp",
-        "vision/image/dl_image_preprocessor.cpp",
-        "vision/image/dl_image_process.cpp",
-
-        # Model loading
-        "dl/model/src/dl_model_base.cpp",
-
-        # Tensor operations (basic)
-        "dl/tensor/src/dl_tensor_base.cpp",
-
-        # Tool functions
-        "dl/tool/src/dl_tool.cpp",
-        "dl/tool/isa/esp32p4/dl_esp32p4_memcpy.S",
+    # Add ESP-DL include directories (from CMakeLists.txt)
+    esp_dl_include_dirs = [
+        "dl",
+        "dl/tool/include",
+        "dl/tensor/include",
+        "dl/base",
+        "dl/base/isa",
+        "dl/base/isa/esp32p4",
+        "dl/math/include",
+        "dl/model/include",
+        "dl/module/include",
+        "fbs_loader/include",
+        "vision/detect",
+        "vision/image",
+        "vision/image/isa",
+        "vision/image/isa/esp32p4",
+        "vision/recognition",
+        "vision/classification",
     ]
 
-    for src in esp_dl_sources:
-        src_path = os.path.join(esp_dl_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
-        else:
-            print(f"[LVGL Camera Display] ⚠️  Source not found: {src}")
+    for inc_dir in esp_dl_include_dirs:
+        inc_path = os.path.join(esp_dl_dir, inc_dir)
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
 
-    print(f"[LVGL Camera Display] ✓ ESP-DL: {len([s for s in sources_to_add if 'esp-dl' in s])} source files")
+    print(f"[LVGL Camera Display] ✓ ESP-DL: Added {len(esp_dl_include_dirs)} include directories")
+
+    # Based on ESP-DL CMakeLists.txt, compile all sources from these directories
+    # This ensures all dependencies are resolved
+    esp_dl_source_dirs = [
+        # Core DL components
+        "dl/tool/src",
+        "dl/tool/isa/esp32p4",       # ESP32-P4 optimized assembly
+        "dl/tensor/src",
+        "dl/base",                    # All base operations
+        "dl/base/isa/esp32p4",       # ESP32-P4 optimized base operations
+        "dl/math/src",
+        "dl/model/src",
+        "dl/module/src",
+        "fbs_loader/src",
+
+        # Vision components (needed for detection)
+        "vision/detect",              # Detection algorithms
+        "vision/image",               # Image processing
+        "vision/image/isa/esp32p4",  # ESP32-P4 optimized image operations
+    ]
+
+    esp_dl_count = 0
+    for src_dir in esp_dl_source_dirs:
+        src_dir_path = os.path.join(esp_dl_dir, src_dir)
+        if os.path.exists(src_dir_path):
+            # Find all .cpp, .c, and .S files in this directory (non-recursive)
+            patterns = ['*.cpp', '*.c', '*.S']
+            for pattern in patterns:
+                files = glob.glob(os.path.join(src_dir_path, pattern))
+                for src_file in files:
+                    sources_to_add.append(src_file)
+                    esp_dl_count += 1
+        else:
+            print(f"[LVGL Camera Display] ⚠️  Directory not found: {src_dir}")
+
+    print(f"[LVGL Camera Display] ✓ ESP-DL: {esp_dl_count} source files from {len(esp_dl_source_dirs)} directories")
 
 # ========================================================================
 # Compile sources
