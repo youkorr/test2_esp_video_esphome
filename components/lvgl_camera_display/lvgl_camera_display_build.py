@@ -311,16 +311,10 @@ if sources_to_add:
         # Add our library to linkage first (Prepend = add at beginning)
         env.Prepend(LIBS=[lib])
 
-        # Use library groups to resolve circular dependencies between our lib and libfbs_model.a
-        # libfbs_model.a is already added via Prepend earlier in the script
-        # Add linker flags to handle circular dependencies
-        env.Append(LINKFLAGS=[
-            "-Wl,--start-group",
-        ])
-        # The libraries will be inserted here by SCons
-        env.Append(_LIBFLAGS=[
-            "-Wl,--end-group"
-        ])
+        # Wrap all libraries in --start-group/--end-group to resolve circular dependencies
+        # between our library and libfbs_model.a (already added via Prepend earlier)
+        # This modifies the _LIBFLAGS construction variable to wrap the library list
+        env['_LIBFLAGS'] = '-Wl,--start-group ' + env['_LIBFLAGS'] + ' -Wl,--end-group'
 
         print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled")
         print(f"[LVGL Camera Display] ✓ liblvgl_camera_display_detect.a created")
