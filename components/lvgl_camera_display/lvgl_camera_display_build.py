@@ -14,6 +14,35 @@ parent_components_dir = os.path.dirname(component_dir)
 
 print("[LVGL Camera Display] Build script running...")
 
+# ========================================================================
+# Add CONFIG defines for detection models (from Kconfig defaults)
+# ========================================================================
+# These CONFIG values are normally set by Kconfig/menuconfig in ESP-IDF,
+# but need to be defined manually in PlatformIO/ESPHome environment
+
+# ESP32-P4 target
+env.Append(CPPDEFINES=[
+    ("CONFIG_IDF_TARGET_ESP32P4", "1"),
+])
+
+# Human face detection configuration
+env.Append(CPPDEFINES=[
+    ("CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1", "1"),         # Enable MSRMNP S8 V1 model
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),           # Model type = MSRMNP_S8_V1
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"), # Model in flash rodata
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),       # Location = flash rodata
+])
+
+# Pedestrian detection configuration
+env.Append(CPPDEFINES=[
+    ("CONFIG_PEDESTRIAN_DETECT_PICO_S8_V1", "1"),           # Enable PICO S8 V1 model
+    ("CONFIG_PEDESTRIAN_DETECT_MODEL_TYPE", "0"),           # Model type = PICO_S8_V1
+    ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA", "1"), # Model in flash rodata
+    ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),       # Location = flash rodata
+])
+
+print("[LVGL Camera Display] ✓ CONFIG defines added for detection models")
+
 # Liste des sources à compiler
 sources_to_add = []
 
