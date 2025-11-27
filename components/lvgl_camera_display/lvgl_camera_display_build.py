@@ -302,24 +302,35 @@ if sources_to_add:
             print(f"[LVGL Camera Display] ⚠️  Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # Instead of creating a static library, directly add objects to extra_objs
-        # This ensures proper symbol resolution with libfbs_model.a
-        env.Append(EXTRA_OBJS=objects)
+        # Create static library
+        lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "liblvgl_camera_display_detect"),
+            objects
+        )
 
-        # Add fbs_model library
-        # Using -Wl,--whole-archive to force inclusion of all symbols
-        fbs_lib_path = env.File(os.path.join(parent_components_dir, "esp-dl", "fbs_loader", "lib", "esp32p4", "libfbs_model.a"))
-        if os.path.exists(str(fbs_lib_path)):
+        # Link both our library and libfbs_model.a with --whole-archive
+        # This ensures all symbols are included, resolving circular dependencies
+        fbs_lib_path = os.path.join(parent_components_dir, "esp-dl", "fbs_loader", "lib", "esp32p4", "libfbs_model.a")
+
+        if os.path.exists(fbs_lib_path):
+            # Get the absolute path of our library
+            lib_path = lib[0].get_abspath()
+
+            # Add both libraries with --whole-archive
             env.Append(LINKFLAGS=[
                 "-Wl,--whole-archive",
-                str(fbs_lib_path),
+                lib_path,
+                fbs_lib_path,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled as objects")
-            print(f"[LVGL Camera Display] ✓ Objects added directly to firmware linkage")
-            print(f"[LVGL Camera Display] ✓ libfbs_model.a linked with --whole-archive")
+
+            print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled")
+            print(f"[LVGL Camera Display] ✓ liblvgl_camera_display_detect.a created")
+            print(f"[LVGL Camera Display] ✓ Both libraries linked with --whole-archive")
         else:
-            print(f"[LVGL Camera Display] ⚠️  Could not find libfbs_model.a at {fbs_lib_path}")
+            print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib_path}")
+            # Fallback: just add our library normally
+            env.Prepend(LIBS=[lib])
 else:
     print("[LVGL Camera Display] ⚠️  No sources to compile")
 
