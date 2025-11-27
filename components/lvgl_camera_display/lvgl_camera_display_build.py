@@ -93,6 +93,13 @@ if os.path.exists(esp_dl_dir):
         "vision/image/isa/esp32p4",  # ESP32-P4 optimized image operations
     ]
 
+    # Files to exclude (missing external dependencies)
+    esp_dl_exclude_files = [
+        "dl_base_dotprod.cpp",       # Requires esp_dsp.h (ESP-DSP library)
+        "dl_image_jpeg.cpp",         # Requires ESP-JPEG library
+        "dl_image_bmp.cpp",          # May have dependencies we don't need
+    ]
+
     esp_dl_count = 0
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
@@ -102,8 +109,13 @@ if os.path.exists(esp_dl_dir):
             for pattern in patterns:
                 files = glob.glob(os.path.join(src_dir_path, pattern))
                 for src_file in files:
-                    sources_to_add.append(src_file)
-                    esp_dl_count += 1
+                    # Check if file should be excluded
+                    basename = os.path.basename(src_file)
+                    if basename not in esp_dl_exclude_files:
+                        sources_to_add.append(src_file)
+                        esp_dl_count += 1
+                    else:
+                        print(f"[LVGL Camera Display] ⊘ Excluded: {basename}")
         else:
             print(f"[LVGL Camera Display] ⚠️  Directory not found: {src_dir}")
 
