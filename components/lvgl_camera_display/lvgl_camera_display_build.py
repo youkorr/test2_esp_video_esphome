@@ -288,6 +288,10 @@ if os.path.exists(esp_dl_dir):
     else:
         print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib}")
 
+    # Add mbedTLS crypto library (required by fbs_loader for AES encryption)
+    env.Append(LIBS=["mbedcrypto"])
+    print("[LVGL Camera Display] ✓ ESP-DL: Added mbedcrypto (for encrypted model support)")
+
 # ========================================================================
 # Compile sources
 # ========================================================================
