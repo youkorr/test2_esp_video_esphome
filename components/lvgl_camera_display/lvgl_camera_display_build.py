@@ -276,6 +276,16 @@ if os.path.exists(esp_dl_dir):
 
     print(f"[LVGL Camera Display] ✓ ESP-DL: {esp_dl_count} source files from {len(esp_dl_source_dirs)} directories")
 
+    # Add prebuilt FBS model library (required for FlatBuffers model loading)
+    fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
+    fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
+    if os.path.exists(fbs_lib):
+        env.Append(LIBPATH=[fbs_lib_dir])
+        env.Append(LIBS=["fbs_model"])
+        print(f"[LVGL Camera Display] ✓ ESP-DL: Added libfbs_model.a (FlatBuffers loader)")
+    else:
+        print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib}")
+
 # ========================================================================
 # Compile sources
 # ========================================================================
