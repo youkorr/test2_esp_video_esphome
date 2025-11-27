@@ -288,9 +288,16 @@ if os.path.exists(esp_dl_dir):
     else:
         print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib}")
 
-    # Add mbedTLS crypto library (required by fbs_loader for AES encryption)
-    env.Append(LIBS=["mbedcrypto"])
-    print("[LVGL Camera Display] ✓ ESP-DL: Added mbedcrypto (for encrypted model support)")
+    # Add mbedTLS AES stub implementation (for unencrypted models)
+    # fbs_loader needs mbedTLS AES symbols, but they won't be called at runtime
+    # since we use unencrypted models (mode == 0 in fbs_loader)
+    # Add include path for stub mbedtls header
+    env.Append(CPPPATH=[component_dir])  # For mbedtls/aes.h
+
+    mbedtls_stub = os.path.join(component_dir, "mbedtls_aes_stub.c")
+    if os.path.exists(mbedtls_stub):
+        sources_to_add.append(mbedtls_stub)
+        print("[LVGL Camera Display] + mbedtls_aes_stub.c (satisfies linker for unencrypted models)")
 
 # ========================================================================
 # Compile sources
