@@ -251,12 +251,12 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
   detect_count++;
 
   // Détecter les visages (avec frame skipping pour améliorer les performances)
-  // Skip 2 frames, detect on the 3rd (runs 1/3 of the time)
+  // Skip 4 frames, detect on the 5th (runs 1/5 of the time = very fast)
   if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
     this->face_detection_frame_skip_++;
 
-    // Only run face detection every 3rd frame
-    if (this->face_detection_frame_skip_ >= 3) {
+    // Only run face detection every 5th frame (was 3rd - now even faster)
+    if (this->face_detection_frame_skip_ >= 5) {
       this->face_detection_frame_skip_ = 0;
 
       uint32_t t1 = millis();
