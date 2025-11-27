@@ -25,8 +25,11 @@ MSR::MSR(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
+    // Adjust anchor sizes to detect faces at 20-30cm distance
+    // Original: {{16, 16}, {32, 32}} and {{64, 64}, {128, 128}}
+    // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}, {64, 64}}}, {16, 16, 9, 9, {{128, 128}, {256, 256}, {512, 512}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -46,7 +49,10 @@ MNP::MNP(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    // Adjust anchor sizes for close-range face detection (20-30cm)
+    // Original: {{48, 48}}
+    // Added larger anchors: {{96, 96}, {192, 192}, {384, 384}}
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
 }
 
 MNP::~MNP()
