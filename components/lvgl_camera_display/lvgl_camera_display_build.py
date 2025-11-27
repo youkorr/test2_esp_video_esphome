@@ -277,11 +277,13 @@ if os.path.exists(esp_dl_dir):
     print(f"[LVGL Camera Display] ✓ ESP-DL: {esp_dl_count} source files from {len(esp_dl_source_dirs)} directories")
 
     # Add prebuilt FBS model library (required for FlatBuffers model loading)
+    # IMPORTANT: Must be linked BEFORE our library to resolve symbols
     fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
     fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
     if os.path.exists(fbs_lib):
         env.Append(LIBPATH=[fbs_lib_dir])
-        env.Append(LIBS=["fbs_model"])
+        # Use Prepend to ensure fbs_model is linked early
+        env.Prepend(LIBS=["fbs_model"])
         print(f"[LVGL Camera Display] ✓ ESP-DL: Added libfbs_model.a (FlatBuffers loader)")
     else:
         print(f"[LVGL Camera Display] ⚠️  libfbs_model.a not found at {fbs_lib}")
@@ -300,17 +302,24 @@ if sources_to_add:
             print(f"[LVGL Camera Display] ⚠️  Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # Create static library
-        lib = env.StaticLibrary(
-            os.path.join("$BUILD_DIR", "liblvgl_camera_display_detect"),
-            objects
-        )
+        # Instead of creating a static library, directly add objects to extra_objs
+        # This ensures proper symbol resolution with libfbs_model.a
+        env.Append(EXTRA_OBJS=objects)
 
-        # Add library to linkage
-        env.Prepend(LIBS=[lib])
-
-        print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled")
-        print(f"[LVGL Camera Display] ✓ liblvgl_camera_display_detect.a created")
+        # Add fbs_model library
+        # Using -Wl,--whole-archive to force inclusion of all symbols
+        fbs_lib_path = env.File(os.path.join(parent_components_dir, "esp-dl", "fbs_loader", "lib", "esp32p4", "libfbs_model.a"))
+        if os.path.exists(str(fbs_lib_path)):
+            env.Append(LINKFLAGS=[
+                "-Wl,--whole-archive",
+                str(fbs_lib_path),
+                "-Wl,--no-whole-archive"
+            ])
+            print(f"[LVGL Camera Display] ✓ {len(sources_to_add)} source files compiled as objects")
+            print(f"[LVGL Camera Display] ✓ Objects added directly to firmware linkage")
+            print(f"[LVGL Camera Display] ✓ libfbs_model.a linked with --whole-archive")
+        else:
+            print(f"[LVGL Camera Display] ⚠️  Could not find libfbs_model.a at {fbs_lib_path}")
 else:
     print("[LVGL Camera Display] ⚠️  No sources to compile")
 
