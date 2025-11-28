@@ -130,7 +130,7 @@ esp_err_t CameraWebServer::start_server_() {
   config.ctrl_port = this->port_ + 1;
   config.max_uri_handlers = 8;
   config.max_open_sockets = 3;
-  config.stack_size = 8192;
+  config.stack_size = 16384;
 
   ESP_LOGI(TAG, "Starting HTTP server on port %d", config.server_port);
 
