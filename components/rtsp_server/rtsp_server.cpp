@@ -165,7 +165,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
 
     ESP_LOGI(TAG, "Camera streaming started successfully");
     // Let camera pipeline stabilize
-    vTaskDelay(pdMS_TO_TICKS(200));  // Increased from 100ms to 200ms for better stability
+    vTaskDelay(pdMS_TO_TICKS(100));  // Increased from 100ms to 200ms for better stability
   } else {
     ESP_LOGW(TAG, "Camera already streaming - possibly started by another component");
     ESP_LOGW(TAG, "This may cause frame conflicts and reduced FPS");
@@ -229,13 +229,13 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   esp_h264_enc_cfg_hw_t cfg = {
       .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,
       .gop = this->gop_,
-      .fps = 30,
+      .fps = 15,
       .res = {.width = width, .height = height},
       .rc = {.bitrate = this->bitrate_, .qp_min = this->qp_min_, .qp_max = this->qp_max_},
   };
 
   ESP_LOGI(TAG,
-           "Encoder config: %dx%d @ 30fps, GOP=%d, bitrate=%d, QP=%d-%d",
+           "Encoder config: %dx%d @ 15fps, GOP=%d, bitrate=%d, QP=%d-%d",
            width, height, this->gop_, this->bitrate_, this->qp_min_, this->qp_max_);
 
   esp_h264_err_t ret = esp_h264_enc_hw_new(&cfg, &this->h264_encoder_);
