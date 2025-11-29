@@ -179,7 +179,7 @@ class SimpleVideoPlayer : public Component {
   int actual_height_{0};  // Detected actual video height
   int aligned_width_{0};  // 16-byte aligned width for decoder
   int aligned_height_{0}; // 16-byte aligned height for decoder
-  size_t buffer_size_{100000};
+  size_t buffer_size_{150000};
   bool auto_play_{true};
   bool loop_{true};
   bool controls_enabled_{true};
@@ -260,7 +260,7 @@ class SimpleVideoPlayer : public Component {
   lv_timer_t *hide_timer_{nullptr};
 
   uint32_t last_frame_time_{0};
-  uint32_t frame_interval_{20};
+  uint32_t frame_interval_{10};
   uint32_t current_time_ms_{0};
   uint32_t total_duration_ms_{0};
 
