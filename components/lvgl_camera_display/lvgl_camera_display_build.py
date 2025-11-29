@@ -27,7 +27,8 @@ env.Append(CPPDEFINES=[
 
 # Human face detection configuration
 env.Append(CPPDEFINES=[
-    ("CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1", "1"),         # Enable MSRMNP S8 V1 model
+    ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
+    ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),# Enable MSRMNP S8 V1 model
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),           # Model type = MSRMNP_S8_V1
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"), # Model in flash rodata
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),       # Location = flash rodata
