@@ -85,21 +85,17 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         candidate.box[3] = candidate.box[1] + side;
         candidate.limit_box(img.width, img.height);
 
-        // -------------------- Preprocess --------------------
         latency[0].start();
         m_image_preprocessor->preprocess(img, candidate.box);
         latency[0].end();
 
-        // -------------------- Model inference --------------------
         latency[1].start();
         m_model->run();
         latency[1].end();
 
-        // -------------------- Postprocess --------------------
         latency[2].start();
-        // Remplacement des setters obsolètes :
-        // On applique la transformation correcte via ImagePreprocessor
-        m_postprocessor->postprocess();  // Postprocess sans appels obsolètes
+        // Appel moderne sans setters obsolètes
+        m_postprocessor->postprocess();
         latency[2].end();
     }
 
@@ -135,7 +131,7 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
     return m_mnp->run(img, candidates);
 }
 
-// -------------------- HumanFaceDetect constructor --------------------
+// -------------------- HumanFaceDetect --------------------
 HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
 {
     switch (model_type) {
@@ -164,5 +160,8 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t mode
     }
     }
 }
+
+} // namespace human_face_detect
+
 
 
