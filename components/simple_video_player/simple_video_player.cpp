@@ -1,5 +1,6 @@
 #include "simple_video_player.h"
 
+
 #ifdef USE_ESP_IDF
 
 #include "esphome/core/log.h"
@@ -70,20 +71,17 @@ void SimpleVideoPlayer::setup() {
     if (!this->fps_override_) {
       if (!this->detect_avi_framerate_()) {
         ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+        // Keep default frame_interval_ = 20ms (50fps)
       }
+    } else {
+      ESP_LOGI(TAG, "Using user-configured framerate: %.2f fps (interval: %lu ms)",
+               1000.0f / this->frame_interval_, (unsigned long)this->frame_interval_);
     }
-
-    // Toujours forcer 1x pour MJPEG
-    this->frame_interval_ = 20;  // 50 fps → vitesse normale
-    ESP_LOGI(TAG, "MJPEG frame interval set to %lu ms (1x speed)", (unsigned long)this->frame_interval_);
   } else {
-    // For MP4/H.264 or MKV, use configured dimensions initially
+    // For MP4, use configured dimensions initially (will be updated during parsing)
+    this->frame_interval_ = 20;  
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;
-
-    // Définir facteur de vitesse à 1x
-    this->playback_speed_ = 1.0f;
-    ESP_LOGI(TAG, "MP4/H.264 playback speed set to %.1fx", this->playback_speed_);
   }
 
   // Calculate 16-byte aligned dimensions for decoder
@@ -105,20 +103,121 @@ void SimpleVideoPlayer::setup() {
   }
   ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
 
-  // Initialize decoder
-  if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MKV_H264) {
+  // Initialize appropriate decoder
+  if (this->format_ == MediaFormat::MP4_H264) {
+    // Parse MP4 file (this will extract resolution)
+    if (!this->parse_mp4_()) {
+      ESP_LOGE(TAG, "Failed to parse MP4 file");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
+             this->video_samples_.size(), this->audio_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
+
+    // Initialize H.264 decoder
     if (!this->init_h264_decoder_()) {
       ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
       this->mark_failed();
       return;
     }
 
+    // Initialize audio decoder if speaker is configured
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
         ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
       }
     }
-  } else if (this->format_ == MediaFormat::MJPEG) {
+  } else if (this->format_ == MediaFormat::MKV_H264) {
+    // Parse MKV file (this will extract resolution)
+    if (!this->parse_mkv_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV file");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV header parsed, video track: %u, audio track: %u",
+             this->mkv_video_track_, this->mkv_audio_track_);
+
+    // Parse clusters to build sample index
+    if (!this->parse_mkv_clusters_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV clusters");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV clusters parsed: %u samples", this->mkv_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MKV parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
+
+    // Initialize H.264 decoder
+    if (!this->init_h264_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+      this->mark_failed();
+      return;
+    }
+
+    // Initialize audio decoder if speaker is configured
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
+      }
+    }
+  } else {
+    // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
       ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
       this->mark_failed();
@@ -2315,6 +2414,9 @@ void SimpleVideoPlayer::resume() {}
 
 #endif  // USE_ESP_IDF
 
+
+
+	
 
 
 
