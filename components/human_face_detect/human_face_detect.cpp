@@ -43,30 +43,34 @@ MSR::MSR(const char *model_name)
     );
 }
 
+// === MNP ===
 MNP::MNP(const char *model_name)
 {
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
     m_model = new dl::Model(
         path, model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #else
-    m_model =
-        new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
+    m_model = new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
+
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
         m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Adjust anchor sizes for close-range face detection (20-30cm)
-    // Original: {{48, 48}}
-    // Added larger anchors: {{96, 96}, {192, 192}, {384, 384}}
-    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10, {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
+
+    std::vector<dl::detect::MNPAnchor> anchors = {
+        {1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}
+    };
+
+    m_postprocessor = new dl::detect::MNPPostprocessor(
+        m_model, m_image_preprocessor, 0.3, 0.3, 10, anchors
+    );
 }
 
+// === Destructeur MNP ===
 MNP::~MNP()
 {
     if (m_model) {
@@ -81,12 +85,16 @@ MNP::~MNP()
         delete m_postprocessor;
         m_postprocessor = nullptr;
     }
-};
+}
 
-std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list<dl::detect::result_t> &candidates)
+// === Méthode run MNP ===
+std::list<dl::detect::result_t> &MNP::run(
+    const dl::image::img_t &img,
+    std::list<dl::detect::result_t> &candidates)
 {
     dl::tool::Latency latency[3] = {dl::tool::Latency(10), dl::tool::Latency(10), dl::tool::Latency(10)};
     m_postprocessor->clear_result();
+
     for (auto &candidate : candidates) {
         int center_x = (candidate.box[0] + candidate.box[2]) >> 1;
         int center_y = (candidate.box[1] + candidate.box[3]) >> 1;
@@ -109,8 +117,8 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         m_postprocessor->postprocess();
         latency[2].end();
     }
-    m_postprocessor->nms();
 
+    m_postprocessor->nms();
     std::list<dl::detect::result_t> &result = m_postprocessor->get_result(img.width, img.height);
 
     if (!candidates.empty()) {
@@ -122,18 +130,14 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
     return result;
 }
 
+// === Destructeur MSRMNP ===
 MSRMNP::~MSRMNP()
 {
-    if (m_msr) {
-        delete m_msr;
-        m_msr = nullptr;
-    }
-    if (m_mnp) {
-        delete m_mnp;
-        m_mnp = nullptr;
-    }
+    if (m_msr) { delete m_msr; m_msr = nullptr; }
+    if (m_mnp) { delete m_mnp; m_mnp = nullptr; }
 }
 
+// === Méthode run MSRMNP ===
 std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
 {
     std::list<dl::detect::result_t> &candidates = m_msr->run(img);
