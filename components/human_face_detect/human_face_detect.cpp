@@ -6,10 +6,8 @@ static const char *path = (const char *)human_face_detect_espdl;
 #elif CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_PARTITION
 static const char *path = "human_face_det";
 #endif
-
 namespace human_face_detect {
 
-// -------------------- MSR --------------------
 MSR::MSR(const char *model_name)
 {
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
@@ -19,20 +17,22 @@ MSR::MSR(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
-
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-
+    // Adjust anchor sizes to detect faces at 20-30cm distance
+    // Original: {{16, 16}, {32, 32}} and {{64, 64}, {128, 128}}
+    // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10,
-        {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.3, 0.3, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}, {64, 64}}}, {16, 16, 9, 9, {{128, 128}, {256, 256}, {512, 512}}}});
 }
 
-// -------------------- MNP --------------------
 MNP::MNP(const char *model_name)
 {
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
@@ -42,15 +42,19 @@ MNP::MNP(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
-
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    // Adjust anchor sizes for close-range face detection (20-30cm)
+    // Original: {{48, 48}}
+    // Added larger anchors: {{96, 96}, {192, 192}, {384, 384}}
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10, {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
 }
 
 MNP::~MNP()
@@ -67,14 +71,12 @@ MNP::~MNP()
         delete m_postprocessor;
         m_postprocessor = nullptr;
     }
-}
+};
 
-// -------------------- MNP::run --------------------
 std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list<dl::detect::result_t> &candidates)
 {
     dl::tool::Latency latency[3] = {dl::tool::Latency(10), dl::tool::Latency(10), dl::tool::Latency(10)};
     m_postprocessor->clear_result();
-
     for (auto &candidate : candidates) {
         int center_x = (candidate.box[0] + candidate.box[2]) >> 1;
         int center_y = (candidate.box[1] + candidate.box[3]) >> 1;
@@ -85,38 +87,28 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         candidate.box[3] = candidate.box[1] + side;
         candidate.limit_box(img.width, img.height);
 
-        // -------------------- Preprocess --------------------
         latency[0].start();
         m_image_preprocessor->preprocess(img, candidate.box);
         latency[0].end();
 
-        // -------------------- Model inference --------------------
         latency[1].start();
         m_model->run();
         latency[1].end();
 
-        // -------------------- Postprocess --------------------
         latency[2].start();
-        // Remplacement des setters obsolètes :
-        // On applique la transformation correcte via ImagePreprocessor
-        m_postprocessor->postprocess();  // Postprocess sans appels obsolètes
+        m_postprocessor->postprocess();
         latency[2].end();
     }
-
     m_postprocessor->nms();
-
     std::list<dl::detect::result_t> &result = m_postprocessor->get_result(img.width, img.height);
-
-    if (!candidates.empty()) {
+    if (candidates.size() > 0) {
         latency[0].print("detect", "preprocess");
         latency[1].print("detect", "forward");
         latency[2].print("detect", "postprocess");
     }
-
     return result;
 }
 
-// -------------------- MSRMNP --------------------
 MSRMNP::~MSRMNP()
 {
     if (m_msr) {
@@ -133,6 +125,31 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
 {
     std::list<dl::detect::result_t> &candidates = m_msr->run(img);
     return m_mnp->run(img, candidates);
+}
+
+dl::detect::Detect &MSRMNP::set_score_thr(float score_thr, int idx)
+{
+    if (idx == 0 || idx == -1) {
+        m_msr->set_score_thr(score_thr, 0);
+    }
+    return *this;
+}
+
+dl::detect::Detect &MSRMNP::set_nms_thr(float nms_thr, int idx)
+{
+    if (idx == 0 || idx == -1) {
+        m_msr->set_nms_thr(nms_thr, 0);
+    }
+    return *this;
+}
+
+dl::Model *MSRMNP::get_raw_model(int idx)
+{
+    if (idx == 0) {
+        return m_msr->get_raw_model(0);
+    }
+    return nullptr;
+}
 
 } // namespace human_face_detect
 
@@ -169,7 +186,6 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t mode
     }
     }
 }
-
 
 
 
