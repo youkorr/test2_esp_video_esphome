@@ -134,6 +134,42 @@ dl::Model *MSRMNP::get_raw_model(int idx)
     return nullptr;
 }
 
+
+} // namespace human_face_detect
+
+HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
+{
+    ESP_LOGI("human_face_detect", "Constructor called: model_type=%d", (int)model_type);
+    switch (model_type) {
+    case model_type_t::MSRMNP_S8_V1: {
+#if CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1
+#if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+        ESP_LOGI("human_face_detect", "Loading MSRMNP models from flash rodata...");
+        m_model =
+            new human_face_detect::MSRMNP("human_face_detect_msr_s8_v1.espdl", "human_face_detect_mnp_s8_v1.espdl");
+        if (m_model) {
+            ESP_LOGI("human_face_detect", "✅ MSRMNP model loaded successfully!");
+        } else {
+            ESP_LOGE("human_face_detect", "❌ Failed to create MSRMNP model!");
+        }
+#else
+        if (sdcard_model_dir) {
+            char msr_dir[128];
+            snprintf(msr_dir, sizeof(msr_dir), "%s/human_face_detect_msr_s8_v1.espdl", sdcard_model_dir);
+            char mnp_dir[128];
+            snprintf(mnp_dir, sizeof(mnp_dir), "%s/human_face_detect_mnp_s8_v1.espdl", sdcard_model_dir);
+            m_model = new human_face_detect::MSRMNP(msr_dir, mnp_dir);
+        } else {
+            ESP_LOGE("human_face_detect", "please pass sdcard mount point as parameter.");
+        }
+#endif
+#else
+        ESP_LOGE("human_face_detect", "human_face_detect_msrmnp_s8_v1 is not selected in menuconfig.");
+#endif
+        break;
+    }
+    }
+}
 // -------------------- HumanFaceDetect --------------------
 HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, HumanFaceDetect::model_type_t model_type)
 {
@@ -165,7 +201,6 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, HumanFaceDetect::
     }
 }
 
-} // namespace human_face_detect
 
 
 
