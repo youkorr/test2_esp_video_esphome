@@ -399,11 +399,11 @@ void RTSPServer::handle_rtsp_connections_() {
       ESP_LOGI(TAG, "New RTSP client from %s", inet_ntoa(client_addr.sin_addr));
 
       // Increase TCP send buffer for streaming (default is often 8KB, we need more for 3+ Mbps)
-      int send_buffer_size = 256 * 1024;  // 256 KB send buffer
+      int send_buffer_size = 256 * 2048;  // 256 KB send buffer
       if (setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size)) < 0) {
         ESP_LOGW(TAG, "Failed to set SO_SNDBUF, using default");
       } else {
-        ESP_LOGI(TAG, "TCP send buffer set to %d KB", send_buffer_size / 1024);
+        ESP_LOGI(TAG, "TCP send buffer set to %d KB", send_buffer_size / 2048);
       }
 
       RTSPSession session = {};
