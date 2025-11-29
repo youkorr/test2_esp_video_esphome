@@ -4,14 +4,15 @@
 # - 4 video devices (/dev/video0, /dev/video10, /dev/video11, /dev/video20)
 # - Sockets réseau (lwip)
 # - Autres VFS (UART, etc.)
-CONFIG_VFS_MAX_COUNT=16
+#CONFIG_VFS_MAX_COUNT=16
 
 # Augmenter aussi le nombre maximal de file descriptors
 # Par défaut: CONFIG_LWIP_MAX_SOCKETS=10
-CONFIG_LWIP_MAX_SOCKETS=16
+#CONFIG_LWIP_MAX_SOCKETS=16
 
 # Enable ESP-DL human face detection
-CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=y
+CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1=y
+CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1=y
 CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=y
 
 # Enable ESP-DL pedestrian detection
