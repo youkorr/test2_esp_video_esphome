@@ -6,31 +6,41 @@ static const char *path = (const char *)human_face_detect_espdl;
 #elif CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_PARTITION
 static const char *path = "human_face_det";
 #endif
+
 namespace human_face_detect {
 
+// === MSR ===
 MSR::MSR(const char *model_name)
 {
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
     m_model = new dl::Model(
         path, model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #else
-    m_model =
-        new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
+    m_model = new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
+
 #if CONFIG_IDF_TARGET_ESP32P4
     // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
     // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
         m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Adjust anchor sizes to detect faces at 20-30cm distance
-    // Original: {{16, 16}, {32, 32}} and {{64, 64}, {128, 128}}
-    // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
-    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
+
+    // Définir les ancres pour la détection des visages à courte distance
+    // Original: {{16,16},{32,32}} et {{64,64},{128,128}}
+    // Ajouté: {{256,256},{512,512}}
+    // Seuils abaissés: score_thr=0.3, nms_thr=0.3 pour meilleure détection
+    std::vector<dl::detect::MSRAnchor> anchors = {
+        {8, 8, 9, 9, {{16, 16}, {32, 32}, {256, 256}, {512, 512}}},
+        {16, 16, 9, 9, {{64, 64}, {128, 128}}}
+    };
+
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, 0.3, 0.3, 10, anchors
+    );
 }
 
 MNP::MNP(const char *model_name)
