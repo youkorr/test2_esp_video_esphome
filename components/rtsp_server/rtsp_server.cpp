@@ -165,7 +165,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
 
     ESP_LOGI(TAG, "Camera streaming started successfully");
     // Let camera pipeline stabilize
-    vTaskDelay(pdMS_TO_TICKS(100));  // Increased from 100ms to 200ms for better stability
+    vTaskDelay(pdMS_TO_TICKS(200));  // Increased from 100ms to 200ms for better stability
   } else {
     ESP_LOGW(TAG, "Camera already streaming - possibly started by another component");
     ESP_LOGW(TAG, "This may cause frame conflicts and reduced FPS");
@@ -399,11 +399,11 @@ void RTSPServer::handle_rtsp_connections_() {
       ESP_LOGI(TAG, "New RTSP client from %s", inet_ntoa(client_addr.sin_addr));
 
       // Increase TCP send buffer for streaming (default is often 8KB, we need more for 3+ Mbps)
-      int send_buffer_size = 256 * 2048;  // 256 KB send buffer
+      int send_buffer_size = 256 * 1024;  // 256 KB send buffer
       if (setsockopt(client_fd, SOL_SOCKET, SO_SNDBUF, &send_buffer_size, sizeof(send_buffer_size)) < 0) {
         ESP_LOGW(TAG, "Failed to set SO_SNDBUF, using default");
       } else {
-        ESP_LOGI(TAG, "TCP send buffer set to %d KB", send_buffer_size / 2048);
+        ESP_LOGI(TAG, "TCP send buffer set to %d KB", send_buffer_size / 1024);
       }
 
       RTSPSession session = {};
@@ -661,7 +661,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",
-        32768,        // 16 KB stack
+        16384,        // 16 KB stack
         this,
         6,
         &this->streaming_task_handle_,
