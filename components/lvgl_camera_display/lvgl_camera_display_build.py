@@ -260,8 +260,6 @@ if os.path.exists(esp_dl_dir):
         "vision/image/isa/esp32p4",
         "vision/recognition",
         "vision/classification",
-        "audio/common",
-        "audio/speech_features",
     ]
 
     for inc_dir in esp_dl_include_dirs:
@@ -299,8 +297,6 @@ if os.path.exists(esp_dl_dir):
         "vision/image/isa/esp32p4",
         "vision/recognition",
         "vision/classification",
-        "audio/common",
-        "audio/speech_features",
     ]
 
     # Files to exclude (missing external dependencies)
