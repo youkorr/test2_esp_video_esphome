@@ -51,19 +51,18 @@ MNP::MNP(const char *model_name)
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
         m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-
-    m_postprocessor = new dl::detect::MNPPostprocessor(
-        m_model, m_image_preprocessor, 0.3, 0.3, 10,
-        std::initializer_list<std::initializer_list<int>>{
-            {1, 1, 0, 0, 48, 48, 96, 96, 192, 192, 384, 384}
-        }
-    );
+    // Adjust anchor sizes for close-range face detection (20-30cm)
+    // Original: {{48, 48}}
+    // Added larger anchors: {{96, 96}, {192, 192}, {384, 384}}
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10, {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
 }
 
 // === Destructeur MNP ===
