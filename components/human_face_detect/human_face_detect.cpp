@@ -84,10 +84,9 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         latency[1].end();
 
         latency[2].start();
-        m_postprocessor->set_resize_scale_x(m_image_preprocessor->get_resize_scale_x());
-        m_postprocessor->set_resize_scale_y(m_image_preprocessor->get_resize_scale_y());
-        m_postprocessor->set_top_left_x(m_image_preprocessor->get_top_left_x());
-        m_postprocessor->set_top_left_y(m_image_preprocessor->get_top_left_y());
+        // Remplacement des setters obsolètes par l'API moderne :
+        // on passe l'objet ImagePreprocessor au postprocesseur (overload courant dans ESP-DL récent)
+        m_postprocessor->set_preprocess_params(*m_image_preprocessor);
         m_postprocessor->postprocess();
         latency[2].end();
     }
@@ -147,3 +146,4 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t mode
     }
     }
 }
+
