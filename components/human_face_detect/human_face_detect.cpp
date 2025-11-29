@@ -30,8 +30,7 @@ MSR::MSR(const char *model_name)
     // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
     // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10,
-        {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
