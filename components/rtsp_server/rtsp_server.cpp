@@ -165,7 +165,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
 
     ESP_LOGI(TAG, "Camera streaming started successfully");
     // Let camera pipeline stabilize
-    vTaskDelay(pdMS_TO_TICKS(200));  // Increased from 100ms to 200ms for better stability
+    vTaskDelay(pdMS_TO_TICKS(100));  // Increased from 100ms to 200ms for better stability
   } else {
     ESP_LOGW(TAG, "Camera already streaming - possibly started by another component");
     ESP_LOGW(TAG, "This may cause frame conflicts and reduced FPS");
