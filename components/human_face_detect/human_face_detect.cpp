@@ -135,7 +135,7 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
     return m_mnp->run(img, candidates);
 
 } // namespace human_face_detect
-// -------------------- HumanFaceDetect constructor --------------------
+
 HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
 {
     switch (model_type) {
