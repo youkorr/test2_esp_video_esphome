@@ -18,13 +18,20 @@ MSR::MSR(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
+    // Adjust anchor sizes to detect faces at 20-30cm distance
+    // Original: {{16, 16}, {32, 32}} and {{64, 64}, {128, 128}}
+    // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, 0.5, 0.5, 10,
+        {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -36,15 +43,19 @@ MNP::MNP(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
-
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    // Adjust anchor sizes for close-range face detection (20-30cm)
+    // Original: {{48, 48}}
+    // Added larger anchors: {{96, 96}, {192, 192}, {384, 384}}
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10, {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
 }
 
 MNP::~MNP()
