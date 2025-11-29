@@ -20,8 +20,6 @@ MSR::MSR(const char *model_name)
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // So we only use DL_IMAGE_CAP_RGB_SWAP, NOT DL_IMAGE_CAP_RGB565_BIG_ENDIAN
     m_image_preprocessor = new dl::image::ImagePreprocessor(
         m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
@@ -33,13 +31,12 @@ MSR::MSR(const char *model_name)
     // Original: {{16,16},{32,32}} et {{64,64},{128,128}}
     // Ajouté: {{256,256},{512,512}}
     // Seuils abaissés: score_thr=0.3, nms_thr=0.3 pour meilleure détection
-    std::vector<dl::detect::MSRAnchor> anchors = {
-        {8, 8, 9, 9, {{16, 16}, {32, 32}, {256, 256}, {512, 512}}},
-        {16, 16, 9, 9, {{64, 64}, {128, 128}}}
-    };
-
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.3, 0.3, 10, anchors
+        m_model, 0.3, 0.3, 10,
+        std::initializer_list<std::initializer_list<int>>{
+            {8, 8, 9, 9, 16, 16, 32, 32, 256, 256, 512, 512},
+            {16, 16, 9, 9, 64, 64, 128, 128}
+        }
     );
 }
 
@@ -61,30 +58,20 @@ MNP::MNP(const char *model_name)
         m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
 
-    std::vector<dl::detect::MNPAnchor> anchors = {
-        {1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}
-    };
-
     m_postprocessor = new dl::detect::MNPPostprocessor(
-        m_model, m_image_preprocessor, 0.3, 0.3, 10, anchors
+        m_model, m_image_preprocessor, 0.3, 0.3, 10,
+        std::initializer_list<std::initializer_list<int>>{
+            {1, 1, 0, 0, 48, 48, 96, 96, 192, 192, 384, 384}
+        }
     );
 }
 
 // === Destructeur MNP ===
 MNP::~MNP()
 {
-    if (m_model) {
-        delete m_model;
-        m_model = nullptr;
-    }
-    if (m_image_preprocessor) {
-        delete m_image_preprocessor;
-        m_image_preprocessor = nullptr;
-    }
-    if (m_postprocessor) {
-        delete m_postprocessor;
-        m_postprocessor = nullptr;
-    }
+    if (m_model) { delete m_model; m_model = nullptr; }
+    if (m_image_preprocessor) { delete m_image_preprocessor; m_image_preprocessor = nullptr; }
+    if (m_postprocessor) { delete m_postprocessor; m_postprocessor = nullptr; }
 }
 
 // === Méthode run MNP ===
