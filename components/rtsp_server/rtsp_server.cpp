@@ -229,7 +229,7 @@ esp_err_t RTSPServer::init_h264_encoder_() {
   esp_h264_enc_cfg_hw_t cfg = {
       .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY,
       .gop = this->gop_,
-      .fps = 30,
+      .fps = 15,
       .res = {.width = width, .height = height},
       .rc = {.bitrate = this->bitrate_, .qp_min = this->qp_min_, .qp_max = this->qp_max_},
   };
@@ -661,9 +661,9 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",
-        16384,        // 16 KB stack
+        32768,        // 16 KB stack
         this,
-        5,
+        6,
         &this->streaming_task_handle_,
         1
     );
