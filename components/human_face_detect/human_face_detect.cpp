@@ -22,14 +22,15 @@ MSR::MSR(const char *model_name)
 
 #if CONFIG_IDF_TARGET_ESP32P4
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
 
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, 0.5, 0.5, 10,
-        {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.3, 0.3, 10,
+        {{8, 8, 9, 9, {{16, 16}, {32, 32}, {64, 64}}},
+         {16, 16, 9, 9, {{128, 128}, {256, 256}, {512, 512}}}});
 }
 
 // -------------------- MNP --------------------
@@ -45,31 +46,23 @@ MNP::MNP(const char *model_name)
 
 #if CONFIG_IDF_TARGET_ESP32P4
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
 
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    m_postprocessor = new dl::detect::MNPPostprocessor(
+        m_model, m_image_preprocessor, 0.3, 0.3, 10,
+        {{1, 1, 0, 0, {{48, 48}, {96, 96}, {192, 192}, {384, 384}}}});
 }
 
 MNP::~MNP()
 {
-    if (m_model) {
-        delete m_model;
-        m_model = nullptr;
-    }
-    if (m_image_preprocessor) {
-        delete m_image_preprocessor;
-        m_image_preprocessor = nullptr;
-    }
-    if (m_postprocessor) {
-        delete m_postprocessor;
-        m_postprocessor = nullptr;
-    }
+    if (m_model) { delete m_model; m_model = nullptr; }
+    if (m_image_preprocessor) { delete m_image_preprocessor; m_image_preprocessor = nullptr; }
+    if (m_postprocessor) { delete m_postprocessor; m_postprocessor = nullptr; }
 }
 
-// -------------------- MNP::run --------------------
 std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list<dl::detect::result_t> &candidates)
 {
     dl::tool::Latency latency[3] = {dl::tool::Latency(10), dl::tool::Latency(10), dl::tool::Latency(10)};
@@ -94,7 +87,6 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         latency[1].end();
 
         latency[2].start();
-        // Appel moderne sans setters obsolètes
         m_postprocessor->postprocess();
         latency[2].end();
     }
@@ -102,7 +94,6 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
     m_postprocessor->nms();
 
     std::list<dl::detect::result_t> &result = m_postprocessor->get_result(img.width, img.height);
-
     if (!candidates.empty()) {
         latency[0].print("detect", "preprocess");
         latency[1].print("detect", "forward");
@@ -115,14 +106,8 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
 // -------------------- MSRMNP --------------------
 MSRMNP::~MSRMNP()
 {
-    if (m_msr) {
-        delete m_msr;
-        m_msr = nullptr;
-    }
-    if (m_mnp) {
-        delete m_mnp;
-        m_mnp = nullptr;
-    }
+    if (m_msr) { delete m_msr; m_msr = nullptr; }
+    if (m_mnp) { delete m_mnp; m_mnp = nullptr; }
 }
 
 std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
@@ -131,17 +116,36 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
     return m_mnp->run(img, candidates);
 }
 
-// -------------------- HumanFaceDetect --------------------
-HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
+dl::detect::Detect &MSRMNP::set_score_thr(float score_thr, int idx)
 {
+    if (idx == 0 || idx == -1) { m_msr->set_score_thr(score_thr, 0); }
+    return *this;
+}
+
+dl::detect::Detect &MSRMNP::set_nms_thr(float nms_thr, int idx)
+{
+    if (idx == 0 || idx == -1) { m_msr->set_nms_thr(nms_thr, 0); }
+    return *this;
+}
+
+dl::Model *MSRMNP::get_raw_model(int idx)
+{
+    if (idx == 0) { return m_msr->get_raw_model(0); }
+    return nullptr;
+}
+
+// -------------------- HumanFaceDetect --------------------
+HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, HumanFaceDetect::model_type_t model_type)
+{
+    ESP_LOGI("human_face_detect", "Constructor called: model_type=%d", (int)model_type);
     switch (model_type) {
-    case model_type_t::MSRMNP_S8_V1: {
+    case HumanFaceDetect::model_type_t::MSRMNP_S8_V1: {
 #if CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+        ESP_LOGI("human_face_detect", "Loading MSRMNP models from flash rodata...");
         m_model = new human_face_detect::MSRMNP(
             "human_face_detect_msr_s8_v1.espdl",
-            "human_face_detect_mnp_s8_v1.espdl"
-        );
+            "human_face_detect_mnp_s8_v1.espdl");
 #else
         if (sdcard_model_dir) {
             char msr_dir[128];
@@ -162,6 +166,7 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t mode
 }
 
 } // namespace human_face_detect
+
 
 
 
