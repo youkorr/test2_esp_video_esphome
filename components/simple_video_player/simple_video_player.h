@@ -14,7 +14,6 @@ extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
-#include "h264_io.h"
 #include "basetype.h"
 #include "h264bsd_decoder.h"
 
