@@ -131,7 +131,7 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
@@ -191,7 +191,7 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
