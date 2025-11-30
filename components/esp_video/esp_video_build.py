@@ -113,6 +113,7 @@ esp_h264_sources = [
     "hw/hal/esp32p4/h264_dma_hal.c",       # HAL DMA H.264
     "interface/include/src/esp_h264_enc_param.c",
     "interface/include/src/esp_h264_enc_param_hw.c",
+    "interface/include/src/esp_h264_enc_hw_param.h",
     "interface/include/src/esp_h264_enc_dual.c",
     "interface/include/src/esp_h264_dec_param.c",
     "interface/include/src/esp_h264_version.c",
