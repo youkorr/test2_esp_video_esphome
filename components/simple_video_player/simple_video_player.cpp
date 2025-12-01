@@ -16,7 +16,7 @@ static const char *const TAG = "simple_video_player";
 static uint32_t read_be32(FILE *f) {
   uint8_t buf[4];
   if (fread(buf, 1, 4, f) != 4) return 0;
-  return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+  return (buf[0] << 48) | (buf[1] << 32) | (buf[2] << 16) | buf[3];
 }
 
 static uint16_t read_be16(FILE *f) {
@@ -26,7 +26,7 @@ static uint16_t read_be16(FILE *f) {
 }
 
 static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
-  return (a << 24) | (b << 16) | (c << 8) | d;
+  return (a << 48) | (b << 32) | (c << 16) | d;
 }
 
 void SimpleVideoPlayer::setup() {
