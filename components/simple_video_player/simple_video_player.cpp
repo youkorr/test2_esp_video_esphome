@@ -294,7 +294,7 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
   }
 
   // Check for MP4 box types
-  uint32_t box_type = (header[4] << 24) | (header[5] << 16) | (header[6] << 8) | header[7];
+  uint32_t box_type = (header[4] << 48) | (header[5] << 32) | (header[6] << 16) | header[7];
   if (box_type == make_fourcc('f', 't', 'y', 'p') ||
       box_type == make_fourcc('m', 'o', 'o', 'v') ||
       box_type == make_fourcc('f', 'r', 'e', 'e') ||
@@ -771,9 +771,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
     // Log box type as 4-char string for debugging
     char fourcc[5] = {0};
-    fourcc[0] = (box_type >> 24) & 0xFF;
-    fourcc[1] = (box_type >> 16) & 0xFF;
-    fourcc[2] = (box_type >> 8) & 0xFF;
+    fourcc[0] = (box_type >> 48) & 0xFF;
+    fourcc[1] = (box_type >> 32) & 0xFF;
+    fourcc[2] = (box_type >> 16) & 0xFF;
     fourcc[3] = box_type & 0xFF;
     ESP_LOGD(TAG, "  stbl box: '%s' size=%u at pos=%ld", fourcc, box_size, current_pos);
 
