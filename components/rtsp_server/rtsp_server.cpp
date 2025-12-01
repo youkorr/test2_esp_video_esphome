@@ -661,7 +661,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
     BaseType_t result = xTaskCreatePinnedToCore(
         streaming_task_wrapper_,
         "rtsp_stream",
-        16384,        // 16 KB stack
+        32768,        // 16 KB stack
         this,
         6,
         &this->streaming_task_handle_,
