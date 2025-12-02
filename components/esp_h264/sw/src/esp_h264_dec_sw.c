@@ -19,7 +19,7 @@ typedef struct esp_h264_dec_sw_handle {
     esp_h264_dec_param_t  param_hd;
     uint32_t              width;
     uint32_t              height;
-    ISVCDecoder           *dec_hd;      // OpenH264 decoder handle
+    ISVCDecoder           dec_hd;       // OpenH264 decoder handle (already a pointer type)
     uint32_t              out_len;
     unsigned char         *out_planes[3]; // Y, U, V plane pointers for OpenH264
 } esp_h264_dec_sw_handle_t;
@@ -44,7 +44,9 @@ static esp_h264_err_t dec_process(esp_h264_dec_handle_t dec, esp_h264_dec_in_fra
     memset(sw_hd->out_planes, 0, sizeof(sw_hd->out_planes));
 
     // Call OpenH264 DecodeFrameNoDelay (recommended API)
-    DECODING_STATE retCode = sw_hd->dec_hd->DecodeFrameNoDelay(
+    // In C, ISVCDecoder is a pointer to vtable, so we use (*decoder)->Method(decoder, ...) syntax
+    DECODING_STATE retCode = (*sw_hd->dec_hd)->DecodeFrameNoDelay(
+        sw_hd->dec_hd,
         in_frame->raw_data.buffer,
         in_frame->raw_data.len,
         sw_hd->out_planes,
@@ -71,7 +73,6 @@ static esp_h264_err_t dec_process(esp_h264_dec_handle_t dec, esp_h264_dec_in_fra
             return ESP_H264_ERR_ARG;
         } else if (retCode == dsFramePending) {
             // Not an error - just need more data
-            ESP_H264_LOGD(TAG, "Frame pending - need more data");
             return ESP_H264_ERR_OK;
         } else {
             ESP_H264_LOGE(TAG, "Decoding error (0x%x)", retCode);
@@ -99,11 +100,10 @@ static esp_h264_err_t dec_process(esp_h264_dec_handle_t dec, esp_h264_dec_in_fra
         out_frame->pts = in_frame->pts;
         out_frame->dts = in_frame->dts;
 
-        ESP_H264_LOGD(TAG, "Frame decoded: %ux%u, size=%u bytes", sw_hd->width, sw_hd->height, sw_hd->out_len);
+        ESP_H264_LOGI(TAG, "Frame decoded: %ux%u, size=%u bytes", sw_hd->width, sw_hd->height, sw_hd->out_len);
         return ESP_H264_ERR_OK;
     } else {
         // No frame output yet (e.g., SPS/PPS parsed, waiting for I-frame)
-        ESP_H264_LOGD(TAG, "Non-picture NAL parsed (SPS/PPS or incomplete frame)");
         return ESP_H264_ERR_OK;
     }
 }
@@ -124,7 +124,8 @@ static esp_h264_err_t dec_del(esp_h264_dec_handle_t dec)
         esp_h264_dec_sw_handle_t *sw_hd = __containerof(dec, esp_h264_dec_sw_handle_t, base);
         if (sw_hd->dec_hd) {
             // Uninitialize OpenH264 decoder
-            sw_hd->dec_hd->Uninitialize();
+            // In C, use (*decoder)->Method(decoder, ...) syntax
+            (*sw_hd->dec_hd)->Uninitialize(sw_hd->dec_hd);
 
             // Destroy OpenH264 decoder
             WelsDestroyDecoder(sw_hd->dec_hd);
@@ -165,17 +166,12 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     sDecParam.eEcActiveIdc = ERROR_CON_SLICE_COPY;  // Error concealment mode
 
     // Initialize OpenH264 decoder
-    long initRet = sw_hd->dec_hd->Initialize(&sDecParam);
+    // In C, use (*decoder)->Method(decoder, ...) syntax
+    long initRet = (*sw_hd->dec_hd)->Initialize(sw_hd->dec_hd, &sDecParam);
     ESP_H264_GOTO_ON_FALSE(initRet == 0, ret = ESP_H264_ERR_FAIL, __dec_exit__, TAG, "Failed to initialize OpenH264 decoder (err=%ld)", initRet);
 
-    // Set video format to I420 (YUV 4:2:0 planar)
-    int32_t videoFormat = videoFormatI420;
-    long optRet = sw_hd->dec_hd->SetOption(DECODER_OPTION_DATAFORMAT, &videoFormat);
-    if (optRet != 0) {
-        ESP_H264_LOGW(TAG, "Failed to set video format option (err=%ld), continuing anyway", optRet);
-    }
-
     // Note: OpenH264 auto-detects H.264 profile from SPS (Baseline, Main, High, etc.)
+    // The decoder outputs I420 (YUV 4:2:0 planar) format by default
     // The profile_idc parameter in cfg is now fully supported!
     ESP_H264_LOGI(TAG, "H.264 Decoder initialized (OpenH264 supports ALL profiles: Baseline/Main/High/High10/High422/High444)");
 
