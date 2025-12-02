@@ -218,6 +218,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
 bool NetworkCamera::init_h264_decoder_() {
   esp_h264_dec_cfg_sw_t dec_cfg = {};
   dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
+  dec_cfg.profile_idc = ESP_H264_PROFILE_AUTO;  // Auto-detect profile from stream (supports Baseline, Main, High, etc.)
 
   esp_h264_err_t ret = esp_h264_dec_sw_new(&dec_cfg, &this->h264_decoder_);
   if (ret != ESP_H264_ERR_OK) {
@@ -231,7 +232,7 @@ bool NetworkCamera::init_h264_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "H264 decoder initialized");
+  ESP_LOGI(TAG, "H264 decoder initialized with AUTO profile detection (Baseline/Main/High compatible)");
   return true;
 }
 

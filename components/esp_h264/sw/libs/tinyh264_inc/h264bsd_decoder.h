@@ -63,6 +63,7 @@ typedef struct {
     u32 dualTaskEnable;
     u32 dualTaskCore;
     u32 dualTaskPriority;
+    u32 profileIdc;           /* H.264 profile_idc (0=auto-detect, 66=baseline, 77=main, 100=high, etc) */
 } h264bsd_cfg_t;
 
 #define H264BSD_CFG_DEFAULT()  \
@@ -70,6 +71,7 @@ typedef struct {
     .dualTaskEnable = 0,       \
     .dualTaskCore = 1,         \
     .dualTaskPriority = 17,    \
+    .profileIdc = 0,           \
 }
 
 /*------------------------------------------------------------------------------

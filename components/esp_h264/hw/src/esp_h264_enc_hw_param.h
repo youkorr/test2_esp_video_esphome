@@ -30,13 +30,14 @@ extern "C" {
  * @brief  Configure information
  */
 typedef struct esp_h264_set_cfg {
-    esp_h264_set_dev_t device;   /*<! Device handle that configure encoders of different channels */
-    uint16_t           width;    /*<! Width of picture */
-    uint16_t           height;   /*<! Height of picture */
-    uint8_t            qp_min;   /*<! The minimum quantization parameter(QP) */
-    uint8_t            qp_max;   /*<! The maximum quantization parameter(QP) */
-    uint8_t            fps;      /*<! Frames per second */
-    uint32_t           bitrate;  /*<! Bit per second */
+    esp_h264_set_dev_t device;      /*<! Device handle that configure encoders of different channels */
+    uint16_t           width;       /*<! Width of picture */
+    uint16_t           height;      /*<! Height of picture */
+    uint8_t            qp_min;      /*<! The minimum quantization parameter(QP) */
+    uint8_t            qp_max;      /*<! The maximum quantization parameter(QP) */
+    uint8_t            fps;         /*<! Frames per second */
+    uint32_t           bitrate;     /*<! Bit per second */
+    uint8_t            profile_idc; /*<! H.264 profile (66=Baseline, 77=Main, 100=High, etc., 0=auto/default) */
 } esp_h264_enc_hw_param_cfg_t;
 
 /**
