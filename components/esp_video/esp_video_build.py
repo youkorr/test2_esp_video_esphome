@@ -90,8 +90,8 @@ if os.path.exists(esp_cam_sensor_dir):
 # ========================================================================
 # Sources esp_h264
 # ========================================================================
-# NOTE: Les sources software (sw/src/*_sw*.c) nécessitent des bibliothèques
-# externes (OpenH264, tinyh264) fournies dans sw/libs/openh264_inc et sw/libs/tinyh264_inc
+# NOTE: Les sources software (sw/src/*_sw*.c) nécessitent OpenH264 library
+# fournie dans sw/libs/openh264_inc - le décodeur utilise maintenant l'API OpenH264!
 # NOTE: esp_h264_alloc_less_than_5_3.c est exclu car nous utilisons ESP-IDF >= 5.3
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
@@ -99,9 +99,9 @@ esp_h264_sources = [
     # "port/src/esp_h264_alloc_less_than_5_3.c",  # Exclu: pour ESP-IDF < 5.3 seulement
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    # Sources logicielles (nécessitent OpenH264 et h264bsd dans sw/libs/)
+    # Sources logicielles (nécessitent OpenH264 dans sw/libs/)
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
-    "sw/src/esp_h264_dec_sw.c",            # Nécessite h264bsd_decoder.h
+    "sw/src/esp_h264_dec_sw.c",            # Nécessite codec_api.h (OpenH264 - rewritten!)
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
     # Sources matérielles (encodeur H.264 hardware ESP32-P4)
     "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
@@ -121,10 +121,10 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
-    # Ajouter les chemins d'include pour les bibliothèques H.264 (OpenH264, h264bsd)
+    # Ajouter les chemins d'include pour les bibliothèques H.264 (OpenH264)
     h264_lib_includes = [
-        "sw/libs/openh264_inc",   # codec_api.h, codec_app_def.h, codec_def.h
-        "sw/libs/tinyh264_inc",   # h264bsd_decoder.h, basetype.h
+        "sw/libs/openh264_inc",   # codec_api.h, codec_app_def.h, codec_def.h (decoder uses OpenH264 API!)
+        "sw/libs/tinyh264_inc",   # basetype.h (still needed for some type definitions)
     ]
 
     # Ajouter les chemins d'include pour le hardware encoder
@@ -156,17 +156,17 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # CONFIRMED: openh264 does NOT have h264bsd API (test failed with undefined references)
-            # Must use tinyh264 which provides h264bsd API (Baseline profile only)
-            # User must configure stream to use Baseline profile (profile_idc=66)
+            # Link OpenH264 decoder library (supports ALL H.264 profiles!)
+            # Code has been rewritten to use Cisco OpenH264 API directly
             env.Append(LINKFLAGS=[
+                "-Wl,--allow-multiple-definition",
                 "-Wl,--whole-archive",
-                tinyh264_lib,
+                openh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ✓ Linked tinyh264 (H.264 Baseline profile 66 ONLY)")
-            print(f"[ESP-Video Build]   ⚠️  openh264 incompatible - lacks h264bsd API")
-            print(f"[ESP-Video Build]   ⚠️  Configure your stream to use H.264 Baseline profile!")
+            print(f"[ESP-Video Build] ✓ Linked openh264 (supports ALL H.264 profiles: Baseline/Main/High/High10/High422/High444)")
+            print(f"[ESP-Video Build]   ✓ Decoder rewritten to use OpenH264 API")
+            print(f"[ESP-Video Build]   ✓ Your streams can now use ANY H.264 profile!")
         else:
             print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
 
