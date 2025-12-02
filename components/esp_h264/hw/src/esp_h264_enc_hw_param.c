@@ -27,6 +27,7 @@ typedef struct esp_h264_param {
     uint16_t                   height;
     uint8_t                    mb_width;
     uint8_t                    mb_height;
+    uint8_t                    profile_idc;     /* H.264 profile (66=Baseline, 77=Main, 100=High, etc.) */
     uint8_t                   *nal_buf;
     uint8_t                    nal_buf_len;
     uint16_t                   nal_bit_len;
@@ -59,7 +60,7 @@ static esp_h264_err_t set_fps(esp_h264_enc_param_handle_t handle, uint8_t fps)
     if (param->rc_hd) {
         esp_h264_enc_hw_rc_set_bt_fps(param->rc_hd, param->bitrate, param->fps);
     }
-    esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps);
+    esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps, param->profile_idc);
     esp_h264_mutex_unlock(param->mutex);
     return ESP_H264_ERR_OK;
 }
@@ -301,6 +302,7 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     param->qp_init = (cfg->qp_min + cfg->qp_max) >> 1;
     param->fps = cfg->fps;
     param->bitrate = cfg->bitrate;
+    param->profile_idc = (cfg->profile_idc == 0) ? 66 : cfg->profile_idc;  /* Default to Baseline (66) if not specified */
     h264_hal_set_qp(param->device, param->qp_init);
     h264_hal_get_mbres(param->device, &param->mb_width, &param->mb_height);
 
@@ -316,7 +318,7 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     param->nal_buf_len = SPS_PPS_BUF_SIZE;
     param->nal_buf = (uint8_t *)esp_h264_calloc_prefer(1, param->nal_buf_len, &actual_size, ESP_H264_MEM_INTERNAL, ESP_H264_MEM_SPIRAM);
     ESP_H264_GOTO_ON_FALSE(param->nal_buf, ESP_H264_ERR_MEM, __exit__, TAG, "No memory for NAL");
-    param->nal_bit_len = esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps);
+    param->nal_bit_len = esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps, param->profile_idc);
     param->nal_bit_len += esp_h264_enc_set_pps(param->nal_buf + (param->nal_bit_len >> 3), param->nal_buf_len - (param->nal_bit_len >> 3), param->qp_init, true);
 
     /** Allocated reference frame and DB memory */

@@ -3,6 +3,8 @@
 #include "esphome/core/application.h"
 
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
@@ -126,21 +128,45 @@ void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
       }
       last_time = now;
     }
+  } else {
+    // Debug: Log when no frame is ready (only every 100 attempts)
+    static uint32_t no_frame_count = 0;
+    no_frame_count++;
+    if (no_frame_count == 100 || no_frame_count % 500 == 0) {
+      if (cam->protocol_ == Protocol::RTSP) {
+        ESP_LOGW(TAG, "No H264 frames decoded yet (%u attempts)", no_frame_count);
+      } else {
+        ESP_LOGW(TAG, "No JPEG frames decoded yet (%u attempts)", no_frame_count);
+      }
+    }
   }
 }
 
 bool NetworkCamera::init_buffers_() {
-  // RGB565 buffer size: width * height * 2 bytes
-  this->rgb565_buffer_size_ = this->width_ * this->height_ * 2;
+  // ESP32-P4 JPEG decoder requires dimensions to be 16-byte aligned
+  // Round up to nearest multiple of 16
+  uint32_t aligned_width = (this->width_ + 15) & ~15;
+  uint32_t aligned_height = (this->height_ + 15) & ~15;
 
-  // Allocate double buffers for RGB565
-  this->rgb565_buffer_a_ = (uint8_t *)heap_caps_malloc(this->rgb565_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  this->rgb565_buffer_b_ = (uint8_t *)heap_caps_malloc(this->rgb565_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  ESP_LOGI(TAG, "Image dimensions: %ux%u (configured) → %ux%u (16-byte aligned)",
+           this->width_, this->height_, aligned_width, aligned_height);
+
+  // RGB565 buffer size: aligned_width * aligned_height * 2 bytes
+  this->rgb565_buffer_size_ = aligned_width * aligned_height * 2;
+
+  // Allocate double buffers for RGB565 with 64-byte alignment for JPEG decoder
+  // Using heap_caps_aligned_alloc instead of jpeg_alloc_decoder_mem to avoid initialization issues
+  this->rgb565_buffer_a_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb565_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  this->rgb565_buffer_b_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb565_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
   if (this->rgb565_buffer_a_ == nullptr || this->rgb565_buffer_b_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate RGB565 buffers (%u bytes each)", this->rgb565_buffer_size_);
+    ESP_LOGE(TAG, "Failed to allocate aligned RGB565 buffers (%u bytes each)", this->rgb565_buffer_size_);
     return false;
   }
+
+  ESP_LOGI(TAG, "Allocated 64-byte aligned RGB565 buffers in SPIRAM: %u bytes each", this->rgb565_buffer_size_);
 
   this->current_display_buffer_ = this->rgb565_buffer_a_;
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
@@ -192,6 +218,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
 bool NetworkCamera::init_h264_decoder_() {
   esp_h264_dec_cfg_sw_t dec_cfg = {};
   dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
+  dec_cfg.profile_idc = ESP_H264_PROFILE_AUTO;  // openh264 supports all profiles - auto-detect
 
   esp_h264_err_t ret = esp_h264_dec_sw_new(&dec_cfg, &this->h264_decoder_);
   if (ret != ESP_H264_ERR_OK) {
@@ -205,7 +232,7 @@ bool NetworkCamera::init_h264_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "H264 decoder initialized");
+  ESP_LOGI(TAG, "H264 decoder initialized (openh264 supports Baseline/Main/High profiles)");
   return true;
 }
 
@@ -352,6 +379,27 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
+  // Log JPEG header info for debugging
+  static bool logged_jpeg_info = false;
+  if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
+    ESP_LOGI(TAG, "JPEG Header Analysis:");
+    ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
+    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (should be FFD8)",
+             this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
+
+    // Look for SOF (Start of Frame) markers to identify JPEG type
+    for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
+      if (this->jpeg_buffer_[i] == 0xFF) {
+        uint8_t marker = this->jpeg_buffer_[i + 1];
+        if (marker == 0xC0) ESP_LOGI(TAG, "  Found SOF0 (Baseline DCT) at offset %u", i);
+        if (marker == 0xC1) ESP_LOGW(TAG, "  Found SOF1 (Extended Sequential) at offset %u", i);
+        if (marker == 0xC2) ESP_LOGW(TAG, "  Found SOF2 (Progressive DCT) at offset %u - NOT SUPPORTED BY HARDWARE!", i);
+        if (marker == 0xC3) ESP_LOGW(TAG, "  Found SOF3 (Lossless) at offset %u", i);
+      }
+    }
+    logged_jpeg_info = true;
+  }
+
   jpeg_decode_cfg_t decode_cfg = {
       .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
@@ -365,9 +413,12 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
 
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
+             this->jpeg_data_len_, this->rgb565_buffer_size_);
     return false;
   }
 
+  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
   return true;
 }
 
@@ -533,14 +584,66 @@ bool NetworkCamera::connect_rtsp_stream_() {
   }
 
   // DESCRIBE
-  if (!this->send_rtsp_request_("DESCRIBE", full_url, "Accept: application/sdp\r\n")) {
+  std::string sdp_response;
+  if (!this->send_rtsp_request_("DESCRIBE", full_url, "Accept: application/sdp\r\n", &sdp_response)) {
     this->disconnect_rtsp_stream_();
     return false;
   }
 
+  // Parse SDP to get control URL for video track
+  std::string control_url = full_url;
+  size_t control_pos = sdp_response.find("a=control:");
+  if (control_pos != std::string::npos) {
+    size_t start = control_pos + 10; // Length of "a=control:"
+    size_t end = sdp_response.find('\r', start);
+    if (end == std::string::npos) {
+      end = sdp_response.find('\n', start);
+    }
+    if (end != std::string::npos) {
+      std::string control = sdp_response.substr(start, end - start);
+
+      // Remove ALL whitespace characters (spaces, tabs, newlines) from the string
+      control.erase(std::remove_if(control.begin(), control.end(),
+                                   [](unsigned char c) { return std::isspace(c); }),
+                   control.end());
+
+      ESP_LOGI(TAG, "SDP control attribute (cleaned): '%s'", control.c_str());
+
+      // If control is a relative URL, append to base URL
+      if (control.empty()) {
+        control_url = full_url;
+      } else if (control.find("://") != std::string::npos) {
+        // Absolute URL
+        control_url = control;
+      } else if (control[0] == '/') {
+        // Relative to server root
+        size_t scheme_end = full_url.find("://");
+        if (scheme_end != std::string::npos) {
+          size_t path_start = full_url.find('/', scheme_end + 3);
+          if (path_start != std::string::npos) {
+            control_url = full_url.substr(0, path_start) + control;
+          } else {
+            control_url = full_url + control;
+          }
+        }
+      } else {
+        // Relative to current path - append to full_url
+        if (full_url.back() == '/') {
+          control_url = full_url + control;
+        } else {
+          control_url = full_url + "/" + control;
+        }
+      }
+      ESP_LOGI(TAG, "Using control URL from SDP: %s", control_url.c_str());
+    }
+  } else {
+    // Try common fallbacks
+    ESP_LOGW(TAG, "No control URL in SDP, trying common patterns...");
+    control_url = full_url; // Some cameras use the base URL
+  }
+
   // SETUP with TCP interleaved transport
-  std::string setup_url = full_url + "/trackID=1";
-  if (!this->send_rtsp_request_("SETUP", setup_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
+  if (!this->send_rtsp_request_("SETUP", control_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
     this->disconnect_rtsp_stream_();
     return false;
   }
@@ -583,7 +686,7 @@ void NetworkCamera::disconnect_rtsp_stream_() {
 }
 
 bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
-                                       const std::string &extra_headers) {
+                                       const std::string &extra_headers, std::string *response_body) {
   char request[768];
 
   // Build Authorization header if credentials available
@@ -606,7 +709,7 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
   }
 
   // Receive response
-  char response[2048];
+  char response[4096];  // Increased size for SDP content
   int len = recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
   if (len <= 0) {
     ESP_LOGE(TAG, "Failed to receive RTSP response");
@@ -631,6 +734,11 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
         ESP_LOGI(TAG, "RTSP Session: %s", this->rtsp_session_.c_str());
       }
     }
+  }
+
+  // If caller wants the response body (for SDP parsing)
+  if (response_body != nullptr) {
+    *response_body = std::string(response);
   }
 
   ESP_LOGI(TAG, "RTSP %s OK", method.c_str());
@@ -733,8 +841,57 @@ bool NetworkCamera::fetch_rtp_frame_() {
     // Check NAL unit type
     uint8_t nal_type = nal_data[0] & 0x1F;
 
-    if (nal_type >= 1 && nal_type <= 23) {
-      // Single NAL unit
+    // H.264 NAL unit types:
+    // 7 = SPS (Sequence Parameter Set)
+    // 8 = PPS (Picture Parameter Set)
+    // 5 = IDR (I-frame)
+    // 1 = Non-IDR (P-frame)
+
+    if (nal_type == 7) {
+      // SPS - cache it (with start code)
+      if (nal_len + 4 <= sizeof(this->sps_cache_)) {
+        this->sps_len_ = 0;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x01;
+        memcpy(this->sps_cache_ + this->sps_len_, nal_data, nal_len);
+        this->sps_len_ += nal_len;
+        this->has_sps_ = true;
+        ESP_LOGI(TAG, "Cached SPS: %u bytes", this->sps_len_);
+      }
+      // Don't add SPS to main buffer - it will be prepended to I-frames
+    } else if (nal_type == 8) {
+      // PPS - cache it (with start code)
+      if (nal_len + 4 <= sizeof(this->pps_cache_)) {
+        this->pps_len_ = 0;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x01;
+        memcpy(this->pps_cache_ + this->pps_len_, nal_data, nal_len);
+        this->pps_len_ += nal_len;
+        this->has_pps_ = true;
+        ESP_LOGI(TAG, "Cached PPS: %u bytes", this->pps_len_);
+      }
+      // Don't add PPS to main buffer - it will be prepended to I-frames
+    } else if (nal_type >= 1 && nal_type <= 23) {
+      // Picture NAL unit (I-frame, P-frame, etc.)
+      // If this is an I-frame (IDR), prepend cached SPS/PPS
+      if (nal_type == 5 && this->has_sps_ && this->has_pps_) {
+        // Prepend SPS and PPS to the buffer before the I-frame
+        if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
+          // Add SPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+          this->h264_data_len_ += this->sps_len_;
+          // Add PPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+          this->h264_data_len_ += this->pps_len_;
+          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame", this->sps_len_, this->pps_len_);
+        }
+      }
+
+      // Add the picture NAL unit itself
       if (this->h264_data_len_ + nal_len + 4 < this->h264_buffer_size_) {
         // Add start code
         this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -755,6 +912,20 @@ bool NetworkCamera::fetch_rtp_frame_() {
       if (start) {
         // Start of fragmented NAL
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
+
+        // If this is a fragmented I-frame, prepend SPS/PPS
+        if (fu_type == 5 && this->has_sps_ && this->has_pps_) {
+          if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
+            // Add SPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+            this->h264_data_len_ += this->sps_len_;
+            // Add PPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+            this->h264_data_len_ += this->pps_len_;
+            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame", this->sps_len_, this->pps_len_);
+          }
+        }
+
         if (this->h264_data_len_ + nal_len + 3 < this->h264_buffer_size_) {
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -774,7 +945,8 @@ bool NetworkCamera::fetch_rtp_frame_() {
     }
 
     // Marker bit indicates end of frame
-    if (marker) {
+    // Only set frame_complete for actual picture data (not SPS/PPS)
+    if (marker && nal_type != 7 && nal_type != 8) {
       frame_complete = true;
     }
   }
@@ -894,13 +1066,7 @@ void NetworkCamera::swap_buffers_() {
 
 void NetworkCamera::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
-  ESP_LOGI(TAG, "Canvas configured: %p", canvas);
-
-  if (canvas != nullptr) {
-    lv_coord_t w = lv_obj_get_width(canvas);
-    lv_coord_t h = lv_obj_get_height(canvas);
-    ESP_LOGI(TAG, "  Canvas size: %dx%d", w, h);
-  }
+  ESP_LOGD(TAG, "Canvas configured: %p (will render at %ux%u)", canvas, this->width_, this->height_);
 }
 
 void NetworkCamera::dump_config() {

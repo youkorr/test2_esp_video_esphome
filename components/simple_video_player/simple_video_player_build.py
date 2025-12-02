@@ -19,14 +19,16 @@ esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
-    # Try openh264 first (more optimized but larger)
+    # Force openh264 (supports ALL H.264 profiles: Baseline, Main, High)
     h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
     h264_lib_name = "openh264"
 
     if not os.path.exists(h264_lib):
-        # Fallback to tinyh264
+        # Fallback to tinyh264 (Baseline ONLY)
         h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
         h264_lib_name = "tinyh264"
+        print("[Simple Video Player] ⚠️  WARNING: Using tinyh264 (Baseline profile only)")
+        print("[Simple Video Player]     For Main/High profile support, ensure libopenh264.a exists")
 
     if os.path.exists(h264_lib):
         print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")

@@ -1,0 +1,7 @@
+{
+  "name": "Multi Camera Display",
+  "description": "Display multiple network cameras in a grid layout with fullscreen view (Eufy-style)",
+  "version": "1.0.0",
+  "codeowners": ["@esphome"],
+  "dependencies": ["network_camera"]
+}

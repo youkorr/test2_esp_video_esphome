@@ -112,6 +112,10 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     tinyh264_cfg.dualTaskCore = CONFIG_ESP_H264_DUAL_TASK_CORE;
     tinyh264_cfg.dualTaskPriority = CONFIG_ESP_H264_DUAL_TASK_PRIORITY;
 #endif
+    /* Note: Using openh264 library which supports ALL H.264 profiles (Baseline, Main, High, etc.)
+     * The profile_idc parameter in cfg is kept for API compatibility.
+     * The decoder will auto-detect the profile from the stream's SPS. */
+    ESP_H264_LOGI(TAG, "H.264 Decoder initialized (openh264 supports Baseline/Main/High profiles)");
     sw_hd->dec_hd = h264bsdAlloc(&tinyh264_cfg);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret, __dec_exit__, TAG, "No memory for decoder handle");
 

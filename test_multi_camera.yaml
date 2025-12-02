@@ -1,0 +1,37 @@
+# Test minimal pour multi_camera_display
+esphome:
+  name: test-multi-camera
+  platform: ESP32
+  board: esp32-s3-devkitc-1
+
+wifi:
+  ssid: "test"
+  password: "test"
+
+logger:
+
+# Charger les composants depuis ce repo local
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [network_camera, multi_camera_display]
+
+# Configuration minimale
+lvgl:
+  displays:
+    - platform: ...  # Votre display
+
+network_camera:
+  - id: cam1
+    url: "rtsp://192.168.1.56:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    canvas_id: test_canvas
+
+multi_camera_display:
+  id: multi_display
+  canvas_id: test_canvas
+  cameras:
+    - camera_id: cam1

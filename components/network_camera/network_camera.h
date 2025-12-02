@@ -110,6 +110,14 @@ class NetworkCamera : public Component {
   size_t h264_buffer_size_{0};
   size_t h264_data_len_{0};
 
+  // H264 SPS/PPS caching (required for proper decoder initialization)
+  uint8_t sps_cache_[128]{0};  // SPS cache (typically < 50 bytes)
+  size_t sps_len_{0};
+  uint8_t pps_cache_[64]{0};   // PPS cache (typically < 20 bytes)
+  size_t pps_len_{0};
+  bool has_sps_{false};
+  bool has_pps_{false};
+
   // YUV buffer for H264 output
   uint8_t *yuv_buffer_{nullptr};
   size_t yuv_buffer_size_{0};
@@ -130,7 +138,7 @@ class NetworkCamera : public Component {
   bool connect_rtsp_stream_();
   void disconnect_rtsp_stream_();
   bool init_h264_decoder_();
-  bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "");
+  bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "", std::string *response_body = nullptr);
   bool parse_rtsp_response_(std::string &response);
   bool fetch_rtp_frame_();
   bool decode_h264_to_yuv_();

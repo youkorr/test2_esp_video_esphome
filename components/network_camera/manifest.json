@@ -1,0 +1,7 @@
+{
+  "name": "Network Camera",
+  "description": "Stream network cameras (RTSP/MJPEG) to LVGL display with hardware H264 decoding",
+  "version": "1.0.0",
+  "codeowners": ["@esphome"],
+  "dependencies": ["wifi"]
+}

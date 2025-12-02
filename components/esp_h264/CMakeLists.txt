@@ -63,19 +63,19 @@ if("${target}" STREQUAL "esp32p4")
         "sw/libs/openh264_inc"
     )
 
-    # Link prebuilt tinyh264 library (default, smaller and faster for most use cases)
-    add_prebuilt_library(tinyh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libtinyh264.a"
+    # Link prebuilt openh264 library (supports ALL H.264 profiles: Baseline, Main, High, etc.)
+    add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
                         PRIV_REQUIRES ${COMPONENT_NAME})
-    target_link_libraries(${COMPONENT_LIB} INTERFACE tinyh264_lib)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC openh264_lib)
 
-    message(STATUS "ESP H.264: Linked optimized tinyh264 library for ${target}")
+    message(STATUS "ESP H.264: Linked optimized openh264 library for ${target} (supports Baseline/Main/High profiles)")
 
-    # Optionally, you can use openh264 instead (larger but may be better for some videos)
-    # Uncomment the lines below and comment out tinyh264 above to use openh264:
-    # add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
+    # Alternative: Use tinyh264 (smaller but ONLY Baseline profile)
+    # Uncomment the lines below and comment out openh264 above to use tinyh264:
+    # add_prebuilt_library(tinyh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libtinyh264.a"
     #                     PRIV_REQUIRES ${COMPONENT_NAME})
-    # target_link_libraries(${COMPONENT_LIB} INTERFACE openh264_lib)
-    # message(STATUS "ESP H.264: Linked optimized openh264 library for ${target}")
+    # target_link_libraries(${COMPONENT_LIB} INTERFACE tinyh264_lib)
+    # message(STATUS "ESP H.264: Linked optimized tinyh264 library for ${target}")
 endif()
 
 
