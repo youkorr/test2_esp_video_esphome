@@ -156,26 +156,31 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link BOTH libraries with proper order for symbol resolution
-            # With --allow-multiple-definition, we want openh264 symbols to take precedence
-            # Link tinyh264 FIRST, then openh264 LAST - last definition wins
-            env.Append(LINKFLAGS=[
-                "-Wl,--allow-multiple-definition",
-            ])
-            # Link tinyh264 first (provides base h264bsd symbols)
-            env.Append(LINKFLAGS=[
-                "-Wl,--whole-archive",
-                tinyh264_lib,
-                "-Wl,--no-whole-archive"
-            ])
-            # Link openh264 AFTER - its symbols will override tinyh264's
+            # TEST: Link ONLY openh264 to see if it has h264bsd symbols
+            # If this causes "undefined reference" errors, openh264 doesn't have h264bsd API
+            # If it compiles, we can check if profile check is bypassed
             env.Append(LINKFLAGS=[
                 "-Wl,--whole-archive",
                 openh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ✓ Linked tinyh264 then openh264 (openh264 symbols take precedence)")
-            print(f"[ESP-Video Build]   Order: tinyh264 → openh264 (last definition wins with --allow-multiple-definition)")
+            print(f"[ESP-Video Build] ⚠️  TEST: Linking ONLY openh264 (no tinyh264)")
+            print(f"[ESP-Video Build]   If build fails with 'undefined reference', openh264 lacks h264bsd API")
+
+            # COMMENTED OUT: tinyh264 linking for testing
+            # env.Append(LINKFLAGS=[
+            #     "-Wl,--allow-multiple-definition",
+            # ])
+            # env.Append(LINKFLAGS=[
+            #     "-Wl,--whole-archive",
+            #     tinyh264_lib,
+            #     "-Wl,--no-whole-archive"
+            # ])
+            # env.Append(LINKFLAGS=[
+            #     "-Wl,--whole-archive",
+            #     openh264_lib,
+            #     "-Wl,--no-whole-archive"
+            # ])
         else:
             print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
 
