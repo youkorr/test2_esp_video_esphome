@@ -33,7 +33,7 @@ CONFIG_SCHEMA = cv.All(
 
 async def to_code(config):
     # ESP32-P4 specific build flags for hardware decoders (once for all cameras)
-    cg.add_platformio_option("lib_deps", ["esp32-camera"])
+    # Note: H264/JPEG decoders are built-in ESP-IDF components for ESP32-P4
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
     cg.add_build_flag("-DCONFIG_JPEG_ENABLE_DEBUG_LOG=0")
     cg.add_build_flag("-DCONFIG_ESP_H264_DECODER=1")
