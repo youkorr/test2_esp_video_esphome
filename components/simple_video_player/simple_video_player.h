@@ -177,7 +177,7 @@ class SimpleVideoPlayer : public Component {
   int actual_height_{0};  // Detected actual video height
   int aligned_width_{0};  // 16-byte aligned width for decoder
   int aligned_height_{0}; // 16-byte aligned height for decoder
-  size_t buffer_size_{150000};
+  size_t buffer_size_{300000};  // Larger buffer size from main branch
   bool auto_play_{true};
   bool loop_{true};
   bool controls_enabled_{true};
