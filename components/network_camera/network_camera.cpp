@@ -3,6 +3,8 @@
 #include "esphome/core/application.h"
 
 #include <cstring>
+#include <algorithm>
+#include <cctype>
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <sys/select.h>
@@ -561,14 +563,13 @@ bool NetworkCamera::connect_rtsp_stream_() {
     }
     if (end != std::string::npos) {
       std::string control = sdp_response.substr(start, end - start);
-      // Trim ALL whitespace including spaces
-      size_t first = control.find_first_not_of(" \t\r\n");
-      size_t last = control.find_last_not_of(" \t\r\n");
-      if (first != std::string::npos && last != std::string::npos) {
-        control = control.substr(first, last - first + 1);
-      }
 
-      ESP_LOGI(TAG, "SDP control attribute: '%s'", control.c_str());
+      // Remove ALL whitespace characters (spaces, tabs, newlines) from the string
+      control.erase(std::remove_if(control.begin(), control.end(),
+                                   [](unsigned char c) { return std::isspace(c); }),
+                   control.end());
+
+      ESP_LOGI(TAG, "SDP control attribute (cleaned): '%s'", control.c_str());
 
       // If control is a relative URL, append to base URL
       if (control.empty()) {
