@@ -146,25 +146,31 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[inc_path])
             print(f"[ESP-Video Build] 📁 Include H.264 HW ajouté: {inc}")
 
-    # Link H.264 library (openh264) globally with proper flags
+    # Link BOTH H.264 libraries globally (tinyh264 for API, openh264 for decoder)
     h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
     if os.path.exists(h264_static_libs_dir):
         openh264_lib = os.path.join(h264_static_libs_dir, "libopenh264.a")
-        if os.path.exists(openh264_lib):
+        tinyh264_lib = os.path.join(h264_static_libs_dir, "libtinyh264.a")
+
+        if os.path.exists(openh264_lib) and os.path.exists(tinyh264_lib):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
-            # Use LIBS to add the library for linking
-            env.Append(LIBS=["openh264"])
-            # Add global linker flags for multiple definition and whole-archive
+
+            # Link BOTH libraries - tinyh264 might provide h264bsd wrapper, openh264 provides decoder
+            # Use --allow-multiple-definition to handle any symbol conflicts
             env.Append(LINKFLAGS=[
                 "-Wl,--allow-multiple-definition",
                 "-Wl,--whole-archive",
                 openh264_lib,
+                "-Wl,--no-whole-archive",
+                "-Wl,--whole-archive",
+                tinyh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ✓ Linked openh264 globally (Baseline/Main/High profiles, --whole-archive)")
+            print(f"[ESP-Video Build] ✓ Linked openh264 + tinyh264 globally (--whole-archive, --allow-multiple-definition)")
+            print(f"[ESP-Video Build]   tinyh264: h264bsd API wrapper, openh264: full profile support")
         else:
-            print(f"[ESP-Video Build] ⚠️  openh264 not found at {openh264_lib}")
+            print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
 
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
