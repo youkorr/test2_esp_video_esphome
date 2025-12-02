@@ -370,6 +370,27 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
+  // Log JPEG header info for debugging
+  static bool logged_jpeg_info = false;
+  if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
+    ESP_LOGI(TAG, "JPEG Header Analysis:");
+    ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
+    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (should be FFD8)",
+             this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
+
+    // Look for SOF (Start of Frame) markers to identify JPEG type
+    for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
+      if (this->jpeg_buffer_[i] == 0xFF) {
+        uint8_t marker = this->jpeg_buffer_[i + 1];
+        if (marker == 0xC0) ESP_LOGI(TAG, "  Found SOF0 (Baseline DCT) at offset %u", i);
+        if (marker == 0xC1) ESP_LOGW(TAG, "  Found SOF1 (Extended Sequential) at offset %u", i);
+        if (marker == 0xC2) ESP_LOGW(TAG, "  Found SOF2 (Progressive DCT) at offset %u - NOT SUPPORTED BY HARDWARE!", i);
+        if (marker == 0xC3) ESP_LOGW(TAG, "  Found SOF3 (Lossless) at offset %u", i);
+      }
+    }
+    logged_jpeg_info = true;
+  }
+
   jpeg_decode_cfg_t decode_cfg = {
       .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
@@ -383,9 +404,12 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
 
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
+             this->jpeg_data_len_, this->rgb565_buffer_size_);
     return false;
   }
 
+  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
   return true;
 }
 
