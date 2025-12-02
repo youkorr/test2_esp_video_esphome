@@ -110,6 +110,14 @@ class NetworkCamera : public Component {
   size_t h264_buffer_size_{0};
   size_t h264_data_len_{0};
 
+  // H264 SPS/PPS caching (required for proper decoder initialization)
+  uint8_t sps_cache_[128]{0};  // SPS cache (typically < 50 bytes)
+  size_t sps_len_{0};
+  uint8_t pps_cache_[64]{0};   // PPS cache (typically < 20 bytes)
+  size_t pps_len_{0};
+  bool has_sps_{false};
+  bool has_pps_{false};
+
   // YUV buffer for H264 output
   uint8_t *yuv_buffer_{nullptr};
   size_t yuv_buffer_size_{0};

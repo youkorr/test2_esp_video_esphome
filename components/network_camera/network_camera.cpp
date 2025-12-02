@@ -841,8 +841,57 @@ bool NetworkCamera::fetch_rtp_frame_() {
     // Check NAL unit type
     uint8_t nal_type = nal_data[0] & 0x1F;
 
-    if (nal_type >= 1 && nal_type <= 23) {
-      // Single NAL unit
+    // H.264 NAL unit types:
+    // 7 = SPS (Sequence Parameter Set)
+    // 8 = PPS (Picture Parameter Set)
+    // 5 = IDR (I-frame)
+    // 1 = Non-IDR (P-frame)
+
+    if (nal_type == 7) {
+      // SPS - cache it (with start code)
+      if (nal_len + 4 <= sizeof(this->sps_cache_)) {
+        this->sps_len_ = 0;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x00;
+        this->sps_cache_[this->sps_len_++] = 0x01;
+        memcpy(this->sps_cache_ + this->sps_len_, nal_data, nal_len);
+        this->sps_len_ += nal_len;
+        this->has_sps_ = true;
+        ESP_LOGI(TAG, "Cached SPS: %u bytes", this->sps_len_);
+      }
+      // Don't add SPS to main buffer - it will be prepended to I-frames
+    } else if (nal_type == 8) {
+      // PPS - cache it (with start code)
+      if (nal_len + 4 <= sizeof(this->pps_cache_)) {
+        this->pps_len_ = 0;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x00;
+        this->pps_cache_[this->pps_len_++] = 0x01;
+        memcpy(this->pps_cache_ + this->pps_len_, nal_data, nal_len);
+        this->pps_len_ += nal_len;
+        this->has_pps_ = true;
+        ESP_LOGI(TAG, "Cached PPS: %u bytes", this->pps_len_);
+      }
+      // Don't add PPS to main buffer - it will be prepended to I-frames
+    } else if (nal_type >= 1 && nal_type <= 23) {
+      // Picture NAL unit (I-frame, P-frame, etc.)
+      // If this is an I-frame (IDR), prepend cached SPS/PPS
+      if (nal_type == 5 && this->has_sps_ && this->has_pps_) {
+        // Prepend SPS and PPS to the buffer before the I-frame
+        if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
+          // Add SPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+          this->h264_data_len_ += this->sps_len_;
+          // Add PPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+          this->h264_data_len_ += this->pps_len_;
+          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame", this->sps_len_, this->pps_len_);
+        }
+      }
+
+      // Add the picture NAL unit itself
       if (this->h264_data_len_ + nal_len + 4 < this->h264_buffer_size_) {
         // Add start code
         this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -863,6 +912,20 @@ bool NetworkCamera::fetch_rtp_frame_() {
       if (start) {
         // Start of fragmented NAL
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
+
+        // If this is a fragmented I-frame, prepend SPS/PPS
+        if (fu_type == 5 && this->has_sps_ && this->has_pps_) {
+          if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
+            // Add SPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+            this->h264_data_len_ += this->sps_len_;
+            // Add PPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+            this->h264_data_len_ += this->pps_len_;
+            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame", this->sps_len_, this->pps_len_);
+          }
+        }
+
         if (this->h264_data_len_ + nal_len + 3 < this->h264_buffer_size_) {
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -882,7 +945,8 @@ bool NetworkCamera::fetch_rtp_frame_() {
     }
 
     // Marker bit indicates end of frame
-    if (marker) {
+    // Only set frame_complete for actual picture data (not SPS/PPS)
+    if (marker && nal_type != 7 && nal_type != 8) {
       frame_complete = true;
     }
   }
