@@ -66,7 +66,7 @@ if("${target}" STREQUAL "esp32p4")
     # Link prebuilt openh264 library (supports ALL H.264 profiles: Baseline, Main, High, etc.)
     add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
                         PRIV_REQUIRES ${COMPONENT_NAME})
-    target_link_libraries(${COMPONENT_LIB} INTERFACE openh264_lib)
+    target_link_libraries(${COMPONENT_LIB} PUBLIC openh264_lib)
 
     message(STATUS "ESP H.264: Linked optimized openh264 library for ${target} (supports Baseline/Main/High profiles)")
 
