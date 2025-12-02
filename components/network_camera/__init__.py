@@ -36,3 +36,15 @@ async def to_code(config):
 
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
+
+    # ESP32-P4 specific build flags for hardware decoders
+    cg.add_platformio_option("lib_deps", ["esp32-camera"])
+
+    # Add ESP-IDF component dependencies for ESP32-P4
+    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
+    # Enable JPEG hardware decoder (ESP32-P4)
+    cg.add_build_flag("-DCONFIG_JPEG_ENABLE_DEBUG_LOG=0")
+
+    # Enable H264 decoder support
+    cg.add_build_flag("-DCONFIG_ESP_H264_DECODER=1")
