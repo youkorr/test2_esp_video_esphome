@@ -90,9 +90,25 @@ void MultiCameraDisplay::setup_grid_layout_() {
 
     // Create canvas for camera stream inside button
     lv_obj_t *canvas = lv_canvas_create(btn);
-    lv_obj_set_size(canvas, cell_w - 4, cell_h - 4);
+    lv_coord_t canvas_w = cell_w - 4;
+    lv_coord_t canvas_h = cell_h - 4;
+
+    // Allocate buffer for canvas (RGB565 format)
+    size_t buf_size = canvas_w * canvas_h * sizeof(lv_color_t);
+    lv_color_t *buf = (lv_color_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buf != nullptr) {
+      // Initialize buffer to blue color
+      for (int p = 0; p < canvas_w * canvas_h; p++) {
+        buf[p] = lv_color_hex(0x4682B4);
+      }
+      lv_canvas_set_buffer(canvas, buf, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+      this->thumbnail_buffers_.push_back(buf);
+      ESP_LOGI(TAG, "  Allocated thumbnail canvas buffer: %dx%d (%d bytes)", canvas_w, canvas_h, buf_size);
+    } else {
+      ESP_LOGE(TAG, "  Failed to allocate thumbnail canvas buffer!");
+    }
+
     lv_obj_align(canvas, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_set_style_bg_color(canvas, lv_color_hex(0x4682B4), 0);
 
     this->thumbnail_canvases_.push_back(canvas);
 
@@ -120,11 +136,28 @@ void MultiCameraDisplay::setup_fullscreen_layout_() {
     return;
   }
 
+  // Get canvas dimensions for fullscreen
+  lv_coord_t canvas_w = lv_obj_get_width(this->canvas_obj_);
+  lv_coord_t canvas_h = lv_obj_get_height(this->canvas_obj_);
+
   // Create fullscreen canvas (hidden by default)
   this->fullscreen_canvas_ = lv_canvas_create(this->canvas_obj_);
-  lv_obj_set_size(this->fullscreen_canvas_, lv_pct(100), lv_pct(100));
+
+  // Allocate buffer for fullscreen canvas (RGB565 format)
+  size_t buf_size = canvas_w * canvas_h * sizeof(lv_color_t);
+  this->fullscreen_buffer_ = (lv_color_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (this->fullscreen_buffer_ != nullptr) {
+    // Initialize buffer to black color
+    for (int p = 0; p < canvas_w * canvas_h; p++) {
+      this->fullscreen_buffer_[p] = lv_color_hex(0x000000);
+    }
+    lv_canvas_set_buffer(this->fullscreen_canvas_, this->fullscreen_buffer_, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+    ESP_LOGI(TAG, "  Allocated fullscreen canvas buffer: %dx%d (%d bytes)", canvas_w, canvas_h, buf_size);
+  } else {
+    ESP_LOGE(TAG, "  Failed to allocate fullscreen canvas buffer!");
+  }
+
   lv_obj_set_pos(this->fullscreen_canvas_, 0, 0);
-  lv_obj_set_style_bg_color(this->fullscreen_canvas_, lv_color_hex(0x000000), 0);
   lv_obj_add_flag(this->fullscreen_canvas_, LV_OBJ_FLAG_HIDDEN);
 
   // Create back button

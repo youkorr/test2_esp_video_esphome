@@ -38,10 +38,12 @@ class MultiCameraDisplay : public Component {
   lv_obj_t *grid_container_{nullptr};
   std::vector<lv_obj_t *> thumbnail_canvases_;
   std::vector<lv_obj_t *> thumbnail_buttons_;
+  std::vector<lv_color_t *> thumbnail_buffers_;  // Buffers for thumbnail canvases
 
   // LVGL object for fullscreen display
   lv_obj_t *fullscreen_canvas_{nullptr};
   lv_obj_t *back_button_{nullptr};
+  lv_color_t *fullscreen_buffer_{nullptr};  // Buffer for fullscreen canvas
 
   void setup_grid_layout_();
   void setup_fullscreen_layout_();
