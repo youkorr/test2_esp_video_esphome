@@ -112,19 +112,10 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     tinyh264_cfg.dualTaskCore = CONFIG_ESP_H264_DUAL_TASK_CORE;
     tinyh264_cfg.dualTaskPriority = CONFIG_ESP_H264_DUAL_TASK_PRIORITY;
 #endif
-    /* Set profile_idc from configuration */
-    tinyh264_cfg.profileIdc = cfg->profile_idc;
-    const char *profile_name = "Auto";
-    switch (cfg->profile_idc) {
-        case 66:  profile_name = "Baseline"; break;
-        case 77:  profile_name = "Main"; break;
-        case 88:  profile_name = "Extended"; break;
-        case 100: profile_name = "High"; break;
-        case 110: profile_name = "High10"; break;
-        case 122: profile_name = "High422"; break;
-        case 244: profile_name = "High444"; break;
-    }
-    ESP_H264_LOGI(TAG, "H.264 Decoder Profile: %s (profile_idc=%u)", profile_name, cfg->profile_idc);
+    /* Note: tinyh264 library is precompiled and only supports Baseline profile (profile_idc=66)
+     * The profile_idc parameter in cfg is kept for API compatibility but not used by the decoder.
+     * The decoder will auto-detect the profile from the stream's SPS. */
+    ESP_H264_LOGI(TAG, "H.264 Decoder initialized (tinyh264 supports Baseline profile)");
     sw_hd->dec_hd = h264bsdAlloc(&tinyh264_cfg);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret, __dec_exit__, TAG, "No memory for decoder handle");
 
