@@ -25,12 +25,13 @@ MSR::MSR(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Adjust anchor sizes to detect faces at 20-30cm distance
-    // Original: {{16, 16}, {32, 32}} and {{64, 64}, {128, 128}}
-    // Added larger anchors for close-range detection: {{256, 256}, {512, 512}}
-    // Lower thresholds: score_thr=0.3, nms_thr=0.3 (was 0.5, 0.5) for better detection
+    // Use larger anchors for close-range face detection (20-30cm)
+    // Keep 2 anchors per feature map (same as original) but larger sizes
+    // Original: {{16,16}, {32,32}} and {{64,64}, {128,128}}
+    // Now: {{32,32}, {96,96}} and {{192,192}, {384,384}} for larger faces
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 for better detection
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, m_image_preprocessor, 0.3, 0.3, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}, {64, 64}}}, {16, 16, 9, 9, {{128, 128}, {256, 256}, {512, 512}}}});
+        m_model, m_image_preprocessor, 0.3, 0.3, 10, {{8, 8, 9, 9, {{32, 32}, {96, 96}}}, {16, 16, 9, 9, {{192, 192}, {384, 384}}}});
 }
 
 MNP::MNP(const char *model_name)
