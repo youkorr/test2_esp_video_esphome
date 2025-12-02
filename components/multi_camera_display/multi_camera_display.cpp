@@ -50,28 +50,34 @@ void MultiCameraDisplay::setup_grid_layout_() {
     return;
   }
 
+  // Get canvas dimensions
+  lv_coord_t canvas_w = lv_obj_get_width(this->canvas_obj_);
+  lv_coord_t canvas_h = lv_obj_get_height(this->canvas_obj_);
+
   // Create container for grid
   this->grid_container_ = lv_obj_create(this->canvas_obj_);
-  lv_obj_set_size(this->grid_container_, lv_pct(100), lv_pct(100));
+  lv_obj_set_size(this->grid_container_, canvas_w, canvas_h);
   lv_obj_set_pos(this->grid_container_, 0, 0);
   lv_obj_set_style_bg_opa(this->grid_container_, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(this->grid_container_, 0, 0);
   lv_obj_set_style_pad_all(this->grid_container_, 5, 0);
 
-  // Grid layout: 2x2
-  lv_obj_set_layout(this->grid_container_, LV_LAYOUT_GRID);
+  // Calculate grid cell size (2x2 grid with 5px spacing)
+  lv_coord_t cell_w = (canvas_w - 15) / 2;  // (total - 3*spacing) / 2
+  lv_coord_t cell_h = (canvas_h - 15) / 2;
 
-  static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
-  static lv_coord_t row_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
-  lv_obj_set_grid_dsc_array(this->grid_container_, col_dsc, row_dsc);
-
-  // Create thumbnail buttons for each camera
+  // Create thumbnail buttons for each camera (2x2 grid)
   int num_cameras = std::min((int)this->cameras_.size(), 4);
   for (int i = 0; i < num_cameras; i++) {
+    int col = i % 2;
+    int row = i / 2;
+    lv_coord_t x = 5 + col * (cell_w + 5);
+    lv_coord_t y = 5 + row * (cell_h + 5);
+
     // Create button container
     lv_obj_t *btn = lv_btn_create(this->grid_container_);
-    lv_obj_set_grid_cell(btn, LV_GRID_ALIGN_STRETCH, i % 2, 1,
-                         LV_GRID_ALIGN_STRETCH, i / 2, 1);
+    lv_obj_set_size(btn, cell_w, cell_h);
+    lv_obj_set_pos(btn, x, y);
     lv_obj_set_style_bg_color(btn, lv_color_hex(0x000000), 0);
     lv_obj_set_style_pad_all(btn, 2, 0);
     lv_obj_set_style_radius(btn, 8, 0);
@@ -84,7 +90,7 @@ void MultiCameraDisplay::setup_grid_layout_() {
 
     // Create canvas for camera stream inside button
     lv_obj_t *canvas = lv_canvas_create(btn);
-    lv_obj_set_size(canvas, lv_pct(100), lv_pct(100));
+    lv_obj_set_size(canvas, cell_w - 4, cell_h - 4);
     lv_obj_align(canvas, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_color(canvas, lv_color_hex(0x4682B4), 0);
 
