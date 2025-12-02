@@ -34,12 +34,14 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[h264_inc_bsd])
 
         # Link ONLY openh264 with --whole-archive (NOT tinyh264!)
+        # Use --allow-multiple-definition in case other components also link it
         env.Append(LINKFLAGS=[
+            "-Wl,--allow-multiple-definition",
             "-Wl,--whole-archive",
             openh264_lib,
             "-Wl,--no-whole-archive"
         ])
-        print(f"[Simple Video Player] ✓ Linked openh264 (Baseline/Main/High profiles, --whole-archive)")
+        print(f"[Simple Video Player] ✓ Linked openh264 (Baseline/Main/High profiles, --whole-archive, --allow-multiple-definition)")
     else:
         print(f"[Simple Video Player] ⚠️  openh264 not found at {openh264_lib}")
 else:
