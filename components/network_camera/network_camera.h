@@ -130,7 +130,7 @@ class NetworkCamera : public Component {
   bool connect_rtsp_stream_();
   void disconnect_rtsp_stream_();
   bool init_h264_decoder_();
-  bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "");
+  bool send_rtsp_request_(const std::string &method, const std::string &url, const std::string &extra_headers = "", std::string *response_body = nullptr);
   bool parse_rtsp_response_(std::string &response);
   bool fetch_rtp_frame_();
   bool decode_h264_to_yuv_();

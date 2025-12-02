@@ -533,14 +533,47 @@ bool NetworkCamera::connect_rtsp_stream_() {
   }
 
   // DESCRIBE
-  if (!this->send_rtsp_request_("DESCRIBE", full_url, "Accept: application/sdp\r\n")) {
+  std::string sdp_response;
+  if (!this->send_rtsp_request_("DESCRIBE", full_url, "Accept: application/sdp\r\n", &sdp_response)) {
     this->disconnect_rtsp_stream_();
     return false;
   }
 
+  // Parse SDP to get control URL for video track
+  std::string control_url = full_url;
+  size_t control_pos = sdp_response.find("a=control:");
+  if (control_pos != std::string::npos) {
+    size_t start = control_pos + 10; // Length of "a=control:"
+    size_t end = sdp_response.find('\r', start);
+    if (end == std::string::npos) {
+      end = sdp_response.find('\n', start);
+    }
+    if (end != std::string::npos) {
+      std::string control = sdp_response.substr(start, end - start);
+      // Trim whitespace
+      control.erase(0, control.find_first_not_of(" \t\r\n"));
+      control.erase(control.find_last_not_of(" \t\r\n") + 1);
+
+      // If control is a relative URL, append to base URL
+      if (control[0] == '/' || control.find("://") == std::string::npos) {
+        if (control[0] != '/') {
+          control_url = full_url + "/" + control;
+        } else {
+          control_url = full_url + control;
+        }
+      } else {
+        control_url = control;
+      }
+      ESP_LOGI(TAG, "Using control URL from SDP: %s", control_url.c_str());
+    }
+  } else {
+    // Try common fallbacks
+    ESP_LOGW(TAG, "No control URL in SDP, trying common patterns...");
+    control_url = full_url; // Some cameras use the base URL
+  }
+
   // SETUP with TCP interleaved transport
-  std::string setup_url = full_url + "/trackID=1";
-  if (!this->send_rtsp_request_("SETUP", setup_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
+  if (!this->send_rtsp_request_("SETUP", control_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
     this->disconnect_rtsp_stream_();
     return false;
   }
@@ -583,7 +616,7 @@ void NetworkCamera::disconnect_rtsp_stream_() {
 }
 
 bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
-                                       const std::string &extra_headers) {
+                                       const std::string &extra_headers, std::string *response_body) {
   char request[768];
 
   // Build Authorization header if credentials available
@@ -606,7 +639,7 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
   }
 
   // Receive response
-  char response[2048];
+  char response[4096];  // Increased size for SDP content
   int len = recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
   if (len <= 0) {
     ESP_LOGE(TAG, "Failed to receive RTSP response");
@@ -631,6 +664,11 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
         ESP_LOGI(TAG, "RTSP Session: %s", this->rtsp_session_.c_str());
       }
     }
+  }
+
+  // If caller wants the response body (for SDP parsing)
+  if (response_body != nullptr) {
+    *response_body = std::string(response);
   }
 
   ESP_LOGI(TAG, "RTSP %s OK", method.c_str());

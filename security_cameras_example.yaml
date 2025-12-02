@@ -1,0 +1,227 @@
+# Configuration pour affichage multi-caméras de sécurité
+# Style Eufy Smart Display E10 - Grille de 4 caméras avec vue plein écran
+
+# ========== CAMERAS RESEAU ==========
+network_camera:
+  - id: security_cam_1
+    url: "rtsp://admin:password@192.168.1.56:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas  # Requis mais sera remplacé par multi_camera_display
+
+  - id: security_cam_2
+    url: "rtsp://admin:password@192.168.1.57:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+  - id: security_cam_3
+    url: "rtsp://admin:password@192.168.1.58:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+  - id: security_cam_4
+    url: "rtsp://admin:password@192.168.1.59:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+# ========== AFFICHAGE MULTI-CAMERAS ==========
+multi_camera_display:
+  id: security_display
+  canvas_id: security_canvas
+  cameras:
+    - camera_id: security_cam_1
+    - camera_id: security_cam_2
+    - camera_id: security_cam_3
+    - camera_id: security_cam_4
+
+# ========== SWITCHES POUR ACTIVER/DESACTIVER LES CAMERAS ==========
+switch:
+  - platform: network_camera
+    name: "Security Camera 1"
+    camera_id: security_cam_1
+
+  - platform: network_camera
+    name: "Security Camera 2"
+    camera_id: security_cam_2
+
+  - platform: network_camera
+    name: "Security Camera 3"
+    camera_id: security_cam_3
+
+  - platform: network_camera
+    name: "Security Camera 4"
+    camera_id: security_cam_4
+
+# ========== LVGL CONFIGURATION ==========
+lvgl:
+  # ... (votre configuration LVGL existante)
+
+  pages:
+    # ... (vos pages existantes: page_home, camera_page, etc.)
+
+    # ========== PAGE SECURITE (NOUVELLE) ==========
+    - id: security_page
+      bg_color: 0x000000  # Fond noir comme Eufy
+      on_load:
+        - lambda: |-
+            ESP_LOGI("security", "🔒 Page sécurité chargée");
+            auto canvas = id(security_canvas);
+            if (canvas == nullptr) {
+              ESP_LOGE("security", "Canvas sécurité introuvable!");
+              return;
+            }
+            // Canvas plein écran pour les 4 caméras en grille
+            lv_obj_set_size(canvas, 800, 600);
+            lv_obj_set_pos(canvas, 112, 0);  // Centré sur écran 1024x600
+            id(security_display).configure_canvas(canvas);
+            ESP_LOGI("security", "Canvas sécurité configuré: 800x600");
+
+      widgets:
+        # ===== TITRE =====
+        - label:
+            id: security_title
+            text: "🔒 SECURITY CAMERAS"
+            x: 112
+            y: 10
+            text_color: 0xFFFFFF
+            text_font: roboto_24
+            text_align: LEFT
+
+        # ===== CANVAS PRINCIPAL (affichera la grille 2x2 ou plein écran) =====
+        - obj:
+            id: security_canvas
+            width: 800
+            height: 520
+            x: 112
+            y: 50
+            bg_color: 0x000000
+            border_width: 0
+            radius: 0
+            pad_all: 0
+
+        # ===== BOUTON RETOUR =====
+        - button:
+            id: btn_security_back
+            width: 80
+            height: 50
+            x: 930
+            y: 520
+            bg_color: 0xFF4444
+            bg_opa: COVER
+            radius: 10
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("security", "Retour accueil");
+                    // Arrêter toutes les caméras pour économiser bande passante
+                    id(security_cam_1).set_enabled(false);
+                    id(security_cam_2).set_enabled(false);
+                    id(security_cam_3).set_enabled(false);
+                    id(security_cam_4).set_enabled(false);
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+                  align: CENTER
+
+        # ===== BOUTON START ALL (démarrer toutes les caméras) =====
+        - button:
+            id: btn_start_all_cams
+            width: 80
+            height: 50
+            x: 930
+            y: 100
+            bg_color: 0x00CC44
+            bg_opa: COVER
+            radius: 10
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("security", "▶ Démarrage toutes caméras");
+                    id(security_cam_1).set_enabled(true);
+                    id(security_cam_2).set_enabled(true);
+                    id(security_cam_3).set_enabled(true);
+                    id(security_cam_4).set_enabled(true);
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+                  align: CENTER
+
+        # ===== BOUTON STOP ALL (arrêter toutes les caméras) =====
+        - button:
+            id: btn_stop_all_cams
+            width: 80
+            height: 50
+            x: 930
+            y: 170
+            bg_color: 0xFF4444
+            bg_opa: COVER
+            radius: 10
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("security", "■ Arrêt toutes caméras");
+                    id(security_cam_1).set_enabled(false);
+                    id(security_cam_2).set_enabled(false);
+                    id(security_cam_3).set_enabled(false);
+                    id(security_cam_4).set_enabled(false);
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+                  align: CENTER
+
+# ========== AJOUT BOUTON SECURITE SUR PAGE HOME ==========
+# Ajoutez ce bouton à votre page_home existante:
+#
+#   - button:
+#       id: btn_security
+#       width: 150
+#       height: 45
+#       x: 400  # Ajustez selon votre layout
+#       y: 510
+#       bg_color: 0xFF4444
+#       bg_opa: COVER
+#       radius: 15
+#       on_click:
+#         then:
+#           - lambda: |-
+#               ESP_LOGI("security", "Ouverture page sécurité");
+#               // Démarrer les caméras en entrant sur la page
+#               id(security_cam_1).set_enabled(true);
+#               id(security_cam_2).set_enabled(true);
+#               id(security_cam_3).set_enabled(true);
+#               id(security_cam_4).set_enabled(true);
+#           - lvgl.page.show: security_page
+#       widgets:
+#         - label:
+#             text: "SECURITY"
+#             x: 30
+#             y: 8
+#             text_color: 0xFFFFFF
+#             text_font: roboto_18
+#             text_align: left
+#         - label:
+#             text: "\U000F0766"  # MDI shield-lock
+#             text_align: left
+#             text_color: 0xFFFFFF
+#             text_font: mdi36
