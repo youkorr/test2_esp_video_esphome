@@ -156,19 +156,26 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link BOTH libraries - tinyh264 might provide h264bsd wrapper, openh264 provides decoder
-            # Use --allow-multiple-definition to handle any symbol conflicts
+            # Link BOTH libraries with proper order for symbol resolution
+            # With --allow-multiple-definition, we want openh264 symbols to take precedence
+            # Link tinyh264 FIRST, then openh264 LAST - last definition wins
             env.Append(LINKFLAGS=[
                 "-Wl,--allow-multiple-definition",
-                "-Wl,--whole-archive",
-                openh264_lib,
-                "-Wl,--no-whole-archive",
+            ])
+            # Link tinyh264 first (provides base h264bsd symbols)
+            env.Append(LINKFLAGS=[
                 "-Wl,--whole-archive",
                 tinyh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ✓ Linked openh264 + tinyh264 globally (--whole-archive, --allow-multiple-definition)")
-            print(f"[ESP-Video Build]   tinyh264: h264bsd API wrapper, openh264: full profile support")
+            # Link openh264 AFTER - its symbols will override tinyh264's
+            env.Append(LINKFLAGS=[
+                "-Wl,--whole-archive",
+                openh264_lib,
+                "-Wl,--no-whole-archive"
+            ])
+            print(f"[ESP-Video Build] ✓ Linked tinyh264 then openh264 (openh264 symbols take precedence)")
+            print(f"[ESP-Video Build]   Order: tinyh264 → openh264 (last definition wins with --allow-multiple-definition)")
         else:
             print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
 
