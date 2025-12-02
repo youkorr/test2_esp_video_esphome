@@ -126,6 +126,17 @@ void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
       }
       last_time = now;
     }
+  } else {
+    // Debug: Log when no frame is ready (only every 100 attempts)
+    static uint32_t no_frame_count = 0;
+    no_frame_count++;
+    if (no_frame_count == 100 || no_frame_count % 500 == 0) {
+      if (cam->protocol_ == Protocol::RTSP) {
+        ESP_LOGW(TAG, "No H264 frames decoded yet (%u attempts)", no_frame_count);
+      } else {
+        ESP_LOGW(TAG, "No JPEG frames decoded yet (%u attempts)", no_frame_count);
+      }
+    }
   }
 }
 
@@ -550,19 +561,39 @@ bool NetworkCamera::connect_rtsp_stream_() {
     }
     if (end != std::string::npos) {
       std::string control = sdp_response.substr(start, end - start);
-      // Trim whitespace
-      control.erase(0, control.find_first_not_of(" \t\r\n"));
-      control.erase(control.find_last_not_of(" \t\r\n") + 1);
+      // Trim ALL whitespace including spaces
+      size_t first = control.find_first_not_of(" \t\r\n");
+      size_t last = control.find_last_not_of(" \t\r\n");
+      if (first != std::string::npos && last != std::string::npos) {
+        control = control.substr(first, last - first + 1);
+      }
+
+      ESP_LOGI(TAG, "SDP control attribute: '%s'", control.c_str());
 
       // If control is a relative URL, append to base URL
-      if (control[0] == '/' || control.find("://") == std::string::npos) {
-        if (control[0] != '/') {
-          control_url = full_url + "/" + control;
-        } else {
-          control_url = full_url + control;
+      if (control.empty()) {
+        control_url = full_url;
+      } else if (control.find("://") != std::string::npos) {
+        // Absolute URL
+        control_url = control;
+      } else if (control[0] == '/') {
+        // Relative to server root
+        size_t scheme_end = full_url.find("://");
+        if (scheme_end != std::string::npos) {
+          size_t path_start = full_url.find('/', scheme_end + 3);
+          if (path_start != std::string::npos) {
+            control_url = full_url.substr(0, path_start) + control;
+          } else {
+            control_url = full_url + control;
+          }
         }
       } else {
-        control_url = control;
+        // Relative to current path - append to full_url
+        if (full_url.back() == '/') {
+          control_url = full_url + control;
+        } else {
+          control_url = full_url + "/" + control;
+        }
       }
       ESP_LOGI(TAG, "Using control URL from SDP: %s", control_url.c_str());
     }
