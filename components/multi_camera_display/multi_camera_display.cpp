@@ -102,6 +102,8 @@ void MultiCameraDisplay::setup_grid_layout_() {
         buf[p] = lv_color_hex(0x4682B4);
       }
       lv_canvas_set_buffer(canvas, buf, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+      // Explicitly set canvas object size (required for LVGL to report correct dimensions)
+      lv_obj_set_size(canvas, canvas_w, canvas_h);
       this->thumbnail_buffers_.push_back(buf);
       ESP_LOGI(TAG, "  Allocated thumbnail canvas buffer: %dx%d (%d bytes)", canvas_w, canvas_h, buf_size);
     } else {
@@ -152,6 +154,8 @@ void MultiCameraDisplay::setup_fullscreen_layout_() {
       this->fullscreen_buffer_[p] = lv_color_hex(0x000000);
     }
     lv_canvas_set_buffer(this->fullscreen_canvas_, this->fullscreen_buffer_, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+    // Explicitly set canvas object size (required for LVGL to report correct dimensions)
+    lv_obj_set_size(this->fullscreen_canvas_, canvas_w, canvas_h);
     ESP_LOGI(TAG, "  Allocated fullscreen canvas buffer: %dx%d (%d bytes)", canvas_w, canvas_h, buf_size);
   } else {
     ESP_LOGE(TAG, "  Failed to allocate fullscreen canvas buffer!");

@@ -146,14 +146,16 @@ bool NetworkCamera::init_buffers_() {
   // RGB565 buffer size: width * height * 2 bytes
   this->rgb565_buffer_size_ = this->width_ * this->height_ * 2;
 
-  // Allocate double buffers for RGB565
-  this->rgb565_buffer_a_ = (uint8_t *)heap_caps_malloc(this->rgb565_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  this->rgb565_buffer_b_ = (uint8_t *)heap_caps_malloc(this->rgb565_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  // Allocate double buffers for RGB565 using JPEG decoder aligned allocation
+  this->rgb565_buffer_a_ = (uint8_t *)jpeg_alloc_decoder_mem(this->rgb565_buffer_size_);
+  this->rgb565_buffer_b_ = (uint8_t *)jpeg_alloc_decoder_mem(this->rgb565_buffer_size_);
 
   if (this->rgb565_buffer_a_ == nullptr || this->rgb565_buffer_b_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB565 buffers (%u bytes each)", this->rgb565_buffer_size_);
     return false;
   }
+
+  ESP_LOGI(TAG, "Allocated aligned RGB565 buffers: %u bytes each", this->rgb565_buffer_size_);
 
   this->current_display_buffer_ = this->rgb565_buffer_a_;
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
