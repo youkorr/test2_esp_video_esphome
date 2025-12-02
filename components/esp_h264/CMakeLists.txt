@@ -63,12 +63,15 @@ if("${target}" STREQUAL "esp32p4")
         "sw/libs/openh264_inc"
     )
 
+    # NOTE: H.264 library linking is handled by PlatformIO build scripts
+    # (simple_video_player_build.py, network_camera_build.py, etc.)
+    # Do NOT link it here in CMakeLists.txt to avoid duplicate symbols!
+    #
     # Link prebuilt openh264 library (supports ALL H.264 profiles: Baseline, Main, High, etc.)
-    add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
-                        PRIV_REQUIRES ${COMPONENT_NAME})
-    target_link_libraries(${COMPONENT_LIB} PUBLIC openh264_lib)
-
-    message(STATUS "ESP H.264: Linked optimized openh264 library for ${target} (supports Baseline/Main/High profiles)")
+    # add_prebuilt_library(openh264_lib "${CMAKE_CURRENT_SOURCE_DIR}/sw/libs/${target}/libopenh264.a"
+    #                     PRIV_REQUIRES ${COMPONENT_NAME})
+    # target_link_libraries(${COMPONENT_LIB} PUBLIC openh264_lib)
+    # message(STATUS "ESP H.264: Linked optimized openh264 library for ${target} (supports Baseline/Main/High profiles)")
 
     # Alternative: Use tinyh264 (smaller but ONLY Baseline profile)
     # Uncomment the lines below and comment out openh264 above to use tinyh264:
