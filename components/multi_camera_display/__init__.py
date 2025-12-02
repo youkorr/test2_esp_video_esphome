@@ -1,7 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
-from esphome.components.network_camera import network_camera_ns, NetworkCamera
 
 DEPENDENCIES = ["lvgl", "network_camera"]
 CODEOWNERS = ["@esphome"]
@@ -12,6 +11,10 @@ CONF_CAMERA_ID = "camera_id"
 
 multi_camera_display_ns = cg.esphome_ns.namespace("multi_camera_display")
 MultiCameraDisplay = multi_camera_display_ns.class_("MultiCameraDisplay", cg.Component)
+
+# Import network_camera namespace directly
+network_camera_ns = cg.esphome_ns.namespace("network_camera")
+NetworkCamera = network_camera_ns.class_("NetworkCamera", cg.Component)
 
 CAMERA_SCHEMA = cv.Schema({
     cv.Required(CONF_CAMERA_ID): cv.use_id(NetworkCamera),
