@@ -143,8 +143,16 @@ void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
 }
 
 bool NetworkCamera::init_buffers_() {
-  // RGB565 buffer size: width * height * 2 bytes
-  this->rgb565_buffer_size_ = this->width_ * this->height_ * 2;
+  // ESP32-P4 JPEG decoder requires dimensions to be 16-byte aligned
+  // Round up to nearest multiple of 16
+  uint32_t aligned_width = (this->width_ + 15) & ~15;
+  uint32_t aligned_height = (this->height_ + 15) & ~15;
+
+  ESP_LOGI(TAG, "Image dimensions: %ux%u (configured) → %ux%u (16-byte aligned)",
+           this->width_, this->height_, aligned_width, aligned_height);
+
+  // RGB565 buffer size: aligned_width * aligned_height * 2 bytes
+  this->rgb565_buffer_size_ = aligned_width * aligned_height * 2;
 
   // Allocate double buffers for RGB565 with 64-byte alignment for JPEG decoder
   // Using heap_caps_aligned_alloc instead of jpeg_alloc_decoder_mem to avoid initialization issues
@@ -993,13 +1001,7 @@ void NetworkCamera::swap_buffers_() {
 
 void NetworkCamera::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
-  ESP_LOGI(TAG, "Canvas configured: %p", canvas);
-
-  if (canvas != nullptr) {
-    lv_coord_t w = lv_obj_get_width(canvas);
-    lv_coord_t h = lv_obj_get_height(canvas);
-    ESP_LOGI(TAG, "  Canvas size: %dx%d", w, h);
-  }
+  ESP_LOGD(TAG, "Canvas configured: %p (will render at %ux%u)", canvas, this->width_, this->height_);
 }
 
 void NetworkCamera::dump_config() {
