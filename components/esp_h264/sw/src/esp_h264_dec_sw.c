@@ -19,7 +19,7 @@ typedef struct esp_h264_dec_sw_handle {
     esp_h264_dec_param_t  param_hd;
     uint32_t              width;
     uint32_t              height;
-    ISVCDecoder           dec_hd;       // OpenH264 decoder handle (already a pointer type)
+    ISVCDecoder           *dec_hd;      // OpenH264 decoder handle (pointer to ISVCDecoder)
     uint32_t              out_len;
     unsigned char         *out_planes[3]; // Y, U, V plane pointers for OpenH264
 } esp_h264_dec_sw_handle_t;
@@ -44,7 +44,8 @@ static esp_h264_err_t dec_process(esp_h264_dec_handle_t dec, esp_h264_dec_in_fra
     memset(sw_hd->out_planes, 0, sizeof(sw_hd->out_planes));
 
     // Call OpenH264 DecodeFrameNoDelay (recommended API)
-    // In C, ISVCDecoder is a pointer to vtable, so we use (*decoder)->Method(decoder, ...) syntax
+    // ISVCDecoder = const ISVCDecoderVtbl *
+    // vtable->DecodeFrameNoDelay(ISVCDecoder *, buffer, len, planes, info)
     DECODING_STATE retCode = (*sw_hd->dec_hd)->DecodeFrameNoDelay(
         sw_hd->dec_hd,
         in_frame->raw_data.buffer,
@@ -124,10 +125,11 @@ static esp_h264_err_t dec_del(esp_h264_dec_handle_t dec)
         esp_h264_dec_sw_handle_t *sw_hd = __containerof(dec, esp_h264_dec_sw_handle_t, base);
         if (sw_hd->dec_hd) {
             // Uninitialize OpenH264 decoder
-            // In C, use (*decoder)->Method(decoder, ...) syntax
+            // vtable->Uninitialize(ISVCDecoder *)
             (*sw_hd->dec_hd)->Uninitialize(sw_hd->dec_hd);
 
             // Destroy OpenH264 decoder
+            // WelsDestroyDecoder(ISVCDecoder *) - takes pointer to decoder
             WelsDestroyDecoder(sw_hd->dec_hd);
             sw_hd->dec_hd = NULL;
         }
@@ -155,6 +157,7 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     esp_h264_err_t ret = ESP_H264_ERR_OK;
 
     // Create OpenH264 decoder
+    // WelsCreateDecoder(ISVCDecoder **) - takes pointer to pointer
     long createRet = WelsCreateDecoder(&sw_hd->dec_hd);
     ESP_H264_GOTO_ON_FALSE(createRet == 0, ret = ESP_H264_ERR_FAIL, __dec_exit__, TAG, "Failed to create OpenH264 decoder (err=%ld)", createRet);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret = ESP_H264_ERR_FAIL, __dec_exit__, TAG, "OpenH264 decoder is NULL");
@@ -166,7 +169,7 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     sDecParam.eEcActiveIdc = ERROR_CON_SLICE_COPY;  // Error concealment mode
 
     // Initialize OpenH264 decoder
-    // In C, use (*decoder)->Method(decoder, ...) syntax
+    // vtable->Initialize(ISVCDecoder *, params)
     long initRet = (*sw_hd->dec_hd)->Initialize(sw_hd->dec_hd, &sDecParam);
     ESP_H264_GOTO_ON_FALSE(initRet == 0, ret = ESP_H264_ERR_FAIL, __dec_exit__, TAG, "Failed to initialize OpenH264 decoder (err=%ld)", initRet);
 
