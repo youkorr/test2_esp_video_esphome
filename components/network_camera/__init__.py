@@ -1,6 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_URL
+import os
 
 DEPENDENCIES = ["wifi"]
 CODEOWNERS = ["@esphome"]
@@ -37,6 +38,10 @@ async def to_code(config):
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
     cg.add_build_flag("-DCONFIG_JPEG_ENABLE_DEBUG_LOG=0")
     cg.add_build_flag("-DCONFIG_ESP_H264_DECODER=1")
+
+    # Add PlatformIO build script for H.264 library linking
+    build_script = os.path.join(os.path.dirname(__file__), "network_camera_build.py")
+    cg.add_platformio_option("extra_scripts", ["post:" + build_script])
 
     # Process each camera in the list
     for cam_config in config:

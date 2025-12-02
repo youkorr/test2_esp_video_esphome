@@ -13,11 +13,37 @@ parent_components_dir = os.path.dirname(component_dir)
 print("[Simple Video Player] Build script running...")
 
 # ========================================================================
-# H.264 decoder library linking
+# H.264 decoder library linking - ONLY openh264
 # ========================================================================
-# NOTE: H.264 library (openh264) is now linked by esp_video_build.py
-# to avoid duplicate symbol errors. Do not link it again here.
-print("[Simple Video Player] H.264 library is linked by esp_video_build.py (openh264 with --whole-archive)")
+esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
+if os.path.exists(esp_h264_dir):
+    h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
+    openh264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+
+    if os.path.exists(openh264_lib):
+        print(f"[Simple Video Player] Found openh264 library: {openh264_lib}")
+
+        # Add include paths for openh264
+        h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc")
+        if os.path.exists(h264_inc):
+            env.Append(CPPPATH=[h264_inc])
+
+        # Also add tinyh264_inc for h264bsd API headers
+        h264_inc_bsd = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
+        if os.path.exists(h264_inc_bsd):
+            env.Append(CPPPATH=[h264_inc_bsd])
+
+        # Link ONLY openh264 with --whole-archive (NOT tinyh264!)
+        env.Append(LINKFLAGS=[
+            "-Wl,--whole-archive",
+            openh264_lib,
+            "-Wl,--no-whole-archive"
+        ])
+        print(f"[Simple Video Player] ✓ Linked openh264 (Baseline/Main/High profiles, --whole-archive)")
+    else:
+        print(f"[Simple Video Player] ⚠️  openh264 not found at {openh264_lib}")
+else:
+    print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
 # ========================================================================
 # Link audio codec library (esp_audio_codec)

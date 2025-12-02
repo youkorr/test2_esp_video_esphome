@@ -146,20 +146,10 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[inc_path])
             print(f"[ESP-Video Build] 📁 Include H.264 HW ajouté: {inc}")
 
-    # Ajouter la bibliothèque statique OpenH264 avec --whole-archive (supporte tous les profils H.264)
-    h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
-    if os.path.exists(h264_static_libs_dir):
-        openh264_lib = os.path.join(h264_static_libs_dir, "libopenh264.a")
-        if os.path.exists(openh264_lib):
-            # Utiliser --whole-archive pour forcer l'inclusion de tous les symboles openh264
-            env.Append(LINKFLAGS=[
-                "-Wl,--whole-archive",
-                openh264_lib,
-                "-Wl,--no-whole-archive"
-            ])
-            print(f"[ESP-Video Build] 📚 Bibliothèque H.264 ajoutée: libopenh264.a (Baseline/Main/High profiles, --whole-archive)")
-        else:
-            print(f"[ESP-Video Build] ⚠️  libopenh264.a not found at {openh264_lib}")
+    # NOTE: H.264 library (openh264) is linked by component build scripts
+    # (simple_video_player_build.py, etc.) to avoid double linking issues.
+    # Do not link it here in esp_video_build.py.
+    print(f"[ESP-Video Build] H.264 library will be linked by component build scripts")
 
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
