@@ -156,31 +156,17 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # TEST: Link ONLY openh264 to see if it has h264bsd symbols
-            # If this causes "undefined reference" errors, openh264 doesn't have h264bsd API
-            # If it compiles, we can check if profile check is bypassed
+            # CONFIRMED: openh264 does NOT have h264bsd API (test failed with undefined references)
+            # Must use tinyh264 which provides h264bsd API (Baseline profile only)
+            # User must configure stream to use Baseline profile (profile_idc=66)
             env.Append(LINKFLAGS=[
                 "-Wl,--whole-archive",
-                openh264_lib,
+                tinyh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ⚠️  TEST: Linking ONLY openh264 (no tinyh264)")
-            print(f"[ESP-Video Build]   If build fails with 'undefined reference', openh264 lacks h264bsd API")
-
-            # COMMENTED OUT: tinyh264 linking for testing
-            # env.Append(LINKFLAGS=[
-            #     "-Wl,--allow-multiple-definition",
-            # ])
-            # env.Append(LINKFLAGS=[
-            #     "-Wl,--whole-archive",
-            #     tinyh264_lib,
-            #     "-Wl,--no-whole-archive"
-            # ])
-            # env.Append(LINKFLAGS=[
-            #     "-Wl,--whole-archive",
-            #     openh264_lib,
-            #     "-Wl,--no-whole-archive"
-            # ])
+            print(f"[ESP-Video Build] ✓ Linked tinyh264 (H.264 Baseline profile 66 ONLY)")
+            print(f"[ESP-Video Build]   ⚠️  openh264 incompatible - lacks h264bsd API")
+            print(f"[ESP-Video Build]   ⚠️  Configure your stream to use H.264 Baseline profile!")
         else:
             print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
 
