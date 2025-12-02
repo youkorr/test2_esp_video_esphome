@@ -40,9 +40,9 @@ void LVGLCameraDisplay::setup() {
     this->face_detector_ = new HumanFaceDetect();
     if (this->face_detector_ != nullptr) {
       // Ultra-low thresholds for maximum sensitivity (default is 0.5)
-      this->face_detector_->set_score_thr(0.2);  // Very sensitive
-      this->face_detector_->set_nms_thr(0.2);    // Minimal overlap filtering
-      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.2, nms_thr=0.2 - ultra-sensitive)");
+      this->face_detector_->set_score_thr(0.8);  // Very sensitive
+      this->face_detector_->set_nms_thr(0.8);    // Minimal overlap filtering
+      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.8, nms_thr=0.8 - ultra-sensitive)");
     } else {
       ESP_LOGE(TAG, "❌ Failed to initialize face detector");
       this->face_detection_enabled_ = false;
@@ -251,12 +251,12 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
   detect_count++;
 
   // Détecter les visages (avec frame skipping pour améliorer les performances)
-  // Skip 4 frames, detect on the 5th (runs 1/5 of the time = very fast)
+  // Skip 1 frame, detect on the 2nd (runs 1/2 of the time = smooth detection)
   if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
     this->face_detection_frame_skip_++;
 
-    // Only run face detection every 5th frame (was 3rd - now even faster)
-    if (this->face_detection_frame_skip_ >= 5) {
+    // Only run face detection every 2nd frame (balanced performance)
+    if (this->face_detection_frame_skip_ >= 2) {
       this->face_detection_frame_skip_ = 0;
 
       uint32_t t1 = millis();
@@ -265,6 +265,14 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
 
       total_face_time += (t2 - t1);
       total_faces += face_results.size();
+
+      // Debug: Log detection results every 50 detections
+      static uint32_t debug_count = 0;
+      debug_count++;
+      if (debug_count % 50 == 0) {
+        ESP_LOGI(TAG, "🔍 DEBUG: Detection #%u - Found %u faces in %ums",
+                 debug_count, face_results.size(), (t2 - t1));
+      }
 
     // Dessiner les rectangles VERTS pour les visages
     std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian

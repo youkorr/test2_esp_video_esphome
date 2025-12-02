@@ -10,7 +10,8 @@
 #include <vector>
 #include <map>
 #include "esp_h264_enc_single.h"
-#include "esp_h264_enc_single_hw.h"  // Hardware encoder (ESP32-P4)
+#include "esp_h264_enc_single_hw.h" 
+#include "esp_h264_dec_sw.h"// Hardware encoder (ESP32-P4)
 #include "esp_h264_types.h"
 #endif
 
@@ -96,9 +97,9 @@ class RTSPServer : public Component {
   uint16_t rtp_port_{5004};
   uint16_t rtcp_port_{5005};
   uint32_t bitrate_{2000000};
-  uint8_t gop_{30};
-  uint8_t qp_min_{10};
-  uint8_t qp_max_{40};
+  uint8_t gop_{15};
+  uint8_t qp_min_{20};
+  uint8_t qp_max_{30};
   uint8_t max_clients_{3};
   std::string username_{""};
   std::string password_{""};

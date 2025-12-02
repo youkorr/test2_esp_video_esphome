@@ -14,8 +14,6 @@ extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
 #include "esp_h264_types.h"
-//#include "libtinyh264.a"
-//#include "libopenh264.a"
 #include "basetype.h"
 #include "h264bsd_decoder.h"
 
@@ -82,6 +80,7 @@ class SimpleVideoPlayer : public Component {
   void set_show_controls(bool b) { controls_enabled_ = b; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
   void set_speaker(speaker::Speaker *spk) { speaker_ = spk; }
+  void set_media_player_entity(const std::string &entity) { media_player_entity_ = entity; }
   void set_fps(float fps) {
     if (fps > 0 && fps <= 120) {
       frame_interval_ = (uint32_t)(1000.0f / fps);
@@ -230,6 +229,7 @@ class SimpleVideoPlayer : public Component {
   std::vector<uint8_t> audio_config_;
 
   speaker::Speaker *speaker_{nullptr};
+  std::string media_player_entity_;
 #if USE_ESP_AUDIO_CODEC
   esp_audio_dec_handle_t aac_decoder_{nullptr};
 #else
@@ -258,7 +258,7 @@ class SimpleVideoPlayer : public Component {
   lv_timer_t *hide_timer_{nullptr};
 
   uint32_t last_frame_time_{0};
-  uint32_t frame_interval_{20};
+  uint32_t frame_interval_{10};
   uint32_t current_time_ms_{0};
   uint32_t total_duration_ms_{0};
 

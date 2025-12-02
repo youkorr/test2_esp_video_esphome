@@ -18,13 +18,19 @@ Pico::Pico(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
+    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
+    // So we don't use DL_IMAGE_CAP_RGB565_BIG_ENDIAN flag
     m_image_preprocessor =
-        new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
 #endif
+    // Adjust anchor sizes for close-range pedestrian detection (50cm+)
+    // Reduced to 4 anchors for better performance (was 6 = 94.5ms, too slow!)
+    // Lower thresholds: score_thr=0.3, nms_thr=0.3 for better detection
     m_postprocessor =
-        new dl::detect::PicoPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+        new dl::detect::PicoPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10,
+            {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}, {64, 64, 32, 32}});
 }
 
 } // namespace pedestrian_detect

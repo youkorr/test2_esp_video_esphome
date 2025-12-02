@@ -27,7 +27,8 @@ env.Append(CPPDEFINES=[
 
 # Human face detection configuration
 env.Append(CPPDEFINES=[
-    ("CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1", "1"),         # Enable MSRMNP S8 V1 model
+    ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
+    ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),           # Model type = MSRMNP_S8_V1
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"), # Model in flash rodata
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),       # Location = flash rodata
@@ -234,14 +235,26 @@ if os.path.exists(esp_dl_dir):
     esp_dl_include_dirs = [
         "dl",
         "dl/tool/include",
+        "dl/tool/isa/esp32p4",
+        "dl/tool/isa/tie728",
+        "dl/tool/isa/xtensa",
+        "dl/tool/src",
         "dl/tensor/include",
+        "dl/tensor/src",
         "dl/base",
         "dl/base/isa",
         "dl/base/isa/esp32p4",
+        "dl/base/isa/tie728",
+        "dl/base/isa/xtensa",
         "dl/math/include",
+        "dl/math/src",
         "dl/model/include",
+        "dl/model/src",
         "dl/module/include",
+        "dl/module/src",
         "fbs_loader/include",
+        "fbs_loader/lib/esp32p4",
+        "fbs_loader/src",
         "vision/detect",
         "vision/image",
         "vision/image/isa",
@@ -261,20 +274,30 @@ if os.path.exists(esp_dl_dir):
     # This ensures all dependencies are resolved
     esp_dl_source_dirs = [
         # Core DL components
+        "dl",
+        "dl/tool/include",
+        "dl/tool/isa/esp32p4",
         "dl/tool/src",
-        "dl/tool/isa/esp32p4",       # ESP32-P4 optimized assembly
+        "dl/tensor/include",
         "dl/tensor/src",
-        "dl/base",                    # All base operations
-        "dl/base/isa/esp32p4",       # ESP32-P4 optimized base operations
+        "dl/base",
+        "dl/base/isa",
+        "dl/base/isa/esp32p4",
+        "dl/math/include",
         "dl/math/src",
+        "dl/model/include",
         "dl/model/src",
+        "dl/module/include",
         "dl/module/src",
+        "fbs_loader/include",
+        "fbs_loader/lib/esp32p4",
         "fbs_loader/src",
-
-        # Vision components (needed for detection)
-        "vision/detect",              # Detection algorithms
-        "vision/image",               # Image processing
-        "vision/image/isa/esp32p4",  # ESP32-P4 optimized image operations
+        "vision/detect",
+        "vision/image",
+        "vision/image/isa",
+        "vision/image/isa/esp32p4",
+        "vision/recognition",
+        "vision/classification",
     ]
 
     # Files to exclude (missing external dependencies)

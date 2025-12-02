@@ -3,6 +3,11 @@
 #include "dl_detect_base.hpp"
 #include "dl_detect_mnp_postprocessor.hpp"
 #include "dl_detect_msr_postprocessor.hpp"
+#include "dl_image_preprocessor.hpp"
+
+#include "dl_detect_pico_postprocessor.hpp"
+#include "dl_detect_postprocessor.hpp"
+
 namespace human_face_detect {
 class MSR : public dl::detect::DetectImpl {
 public:

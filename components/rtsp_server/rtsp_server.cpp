@@ -663,7 +663,7 @@ void RTSPServer::handle_play_(RTSPSession &session, const std::string &request) 
         "rtsp_stream",
         16384,        // 16 KB stack
         this,
-        5,
+        6,
         &this->streaming_task_handle_,
         1
     );

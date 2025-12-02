@@ -79,6 +79,7 @@ void SimpleVideoPlayer::setup() {
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
+    this->frame_interval_ = 20;  
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;
   }
@@ -130,7 +131,7 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
@@ -190,7 +191,7 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
@@ -1085,7 +1086,7 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
   }
 
   // Register AAC decoder
-  esp_audio_dec_register(ESP_AUDIO_TYPE_AAC, esp_aac_dec_init);
+  esp_aac_dec_register();
 
   // Configure AAC decoder
   esp_aac_dec_cfg_t aac_cfg = {
@@ -2413,6 +2414,9 @@ void SimpleVideoPlayer::resume() {}
 
 #endif  // USE_ESP_IDF
 
+
+
+	
 
 
 

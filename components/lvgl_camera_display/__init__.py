@@ -74,22 +74,32 @@ async def to_code(config):
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if os.path.exists(esp_dl_dir):
         esp_dl_includes = [
+
             "dl",
             "dl/tool/include",
+            "dl/tool/isa/esp32p4",
+            "dl/tool/src",
             "dl/tensor/include",
+            "dl/tensor/src",
             "dl/base",
             "dl/base/isa",
             "dl/base/isa/esp32p4",
             "dl/math/include",
+            "dl/math/src",
             "dl/model/include",
+            "dl/model/src",
             "dl/module/include",
+            "dl/module/src",
             "fbs_loader/include",
+            "fbs_loader/lib/esp32p4",
+            "fbs_loader/src",
             "vision/detect",
             "vision/image",
             "vision/image/isa",
             "vision/image/isa/esp32p4",
             "vision/recognition",
             "vision/classification",
+
         ]
         for inc in esp_dl_includes:
             inc_path = os.path.join(esp_dl_dir, inc)
