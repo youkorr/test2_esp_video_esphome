@@ -501,6 +501,13 @@ void SimpleVideoPlayer::loop() {
     this->initialization_complete_ = true;
 
     ESP_LOGI(TAG, "✓ HTTP video player fully initialized");
+
+    // Auto-play if this was a re-download triggered by play()
+    if (this->auto_play_after_download_) {
+      ESP_LOGI(TAG, "Auto-starting playback after re-download");
+      this->auto_play_after_download_ = false;
+      this->play();  // Now play() will work since buffer is available
+    }
   }
 
   // Main processing is done in LVGL timer callback
@@ -2506,6 +2513,15 @@ void SimpleVideoPlayer::play() {
     return;
   }
 
+  // Check if HTTP buffer was freed (e.g., after stop()) and needs re-download
+  if (this->is_http_source_ && this->http_buffer_ == nullptr) {
+    ESP_LOGI(TAG, "HTTP buffer was freed, will re-download video in loop()");
+    this->http_download_pending_ = true;
+    this->initialization_complete_ = false;
+    this->auto_play_after_download_ = true;  // Auto-play after re-download
+    return;  // Download will happen in loop(), then play will resume automatically
+  }
+
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       fseek(this->file_, 0, SEEK_SET);
@@ -2605,6 +2621,22 @@ void SimpleVideoPlayer::stop() {
   this->show_controls_();
   if (this->hide_timer_ != nullptr) {
     lv_timer_pause(this->hide_timer_);
+  }
+
+  // Free HTTP buffer to reclaim SPIRAM when stopping
+  if (this->is_http_source_ && this->http_buffer_ != nullptr) {
+    ESP_LOGI(TAG, "Freeing HTTP buffer (%zu bytes from SPIRAM)", this->http_buffer_size_);
+
+    // Close FILE* first since it points to the buffer
+    if (this->file_ != nullptr) {
+      fclose(this->file_);
+      this->file_ = nullptr;
+    }
+
+    // Free the buffer
+    heap_caps_free(this->http_buffer_);
+    this->http_buffer_ = nullptr;
+    this->http_buffer_size_ = 0;
   }
 
   ESP_LOGI(TAG, "Playback stopped");

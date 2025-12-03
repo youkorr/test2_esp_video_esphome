@@ -200,6 +200,7 @@ class SimpleVideoPlayer : public Component {
   bool is_http_source_{false};     // true if file_path_ is http:// or https://
   bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
   bool initialization_complete_{false};  // true if video player is fully initialized
+  bool auto_play_after_download_{false};  // true if should auto-play after re-downloading
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};
