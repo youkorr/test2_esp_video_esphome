@@ -9,6 +9,10 @@
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
 
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
+
 namespace esphome {
 namespace simple_video_player {
 
@@ -267,6 +271,20 @@ void SimpleVideoPlayer::dump_config() {
 // HTTP/HTTPS download helper
 bool SimpleVideoPlayer::download_http_file_(const char *url) {
   ESP_LOGI(TAG, "Downloading from HTTP/HTTPS: %s", url);
+
+#ifdef USE_WIFI
+  // Wait for WiFi to be connected (max 30 seconds)
+  ESP_LOGI(TAG, "Waiting for WiFi connection...");
+  uint32_t start_wait = millis();
+  while (!wifi::global_wifi_component->is_connected()) {
+    if (millis() - start_wait > 30000) {
+      ESP_LOGE(TAG, "WiFi connection timeout (30s). Cannot download HTTP file.");
+      return false;
+    }
+    delay(100);
+  }
+  ESP_LOGI(TAG, "✓ WiFi connected, starting download...");
+#endif
 
   // Configure HTTP client
   esp_http_client_config_t config = {};
