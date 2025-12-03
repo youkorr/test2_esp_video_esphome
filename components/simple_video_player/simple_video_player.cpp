@@ -2638,6 +2638,11 @@ void SimpleVideoPlayer::play() {
     lv_timer_resume(this->playback_timer_);
   }
 
+  // Show loading spinner when starting playback (it will be hidden on first successful frame)
+  if (this->loading_spinner_ != nullptr) {
+    lv_obj_clear_flag(this->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
+  }
+
   // Start auto-hide timer for controls
   if (this->hide_timer_ != nullptr && this->controls_visible_) {
     lv_timer_reset(this->hide_timer_);
@@ -2860,7 +2865,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   last_callback_time = current_time;
 
   bool got_frame = false;
-  static bool first_frame_received = false;
+  bool end_of_stream = false;  // True only when we've exhausted all samples
 
   if (player->format_ == MediaFormat::MJPEG) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
@@ -2888,11 +2893,16 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           ESP_LOGI(TAG, "MJPEG decode time: %lu ms", (unsigned long)decode_time);
         }
       }
+      // If decode fails, we just skip this frame and try next one
+    } else {
+      // read_next_mjpeg_frame_() returned false = reached end
+      end_of_stream = true;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
     if (player->read_next_mp4_sample_()) {
+      // Sample read successfully, try to decode
       if (player->decode_h264_frame_()) {
         // Update current time from video sample timestamp
         if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
@@ -2910,7 +2920,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
       } else {
-        // Track consecutive decode failures
+        // Decode failed, but we can continue to next frame
         static int consecutive_decode_errors = 0;
         consecutive_decode_errors++;
 
@@ -2922,7 +2932,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         } else if (consecutive_decode_errors % 30 == 0) {
           ESP_LOGE(TAG, "❌ Still failing: %d consecutive decode errors", consecutive_decode_errors);
         }
+        // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
       }
+    } else {
+      // read_next_mp4_sample_() returned false = reached end of video
+      end_of_stream = true;
     }
     // Process audio
     player->process_audio_();
@@ -2948,26 +2962,31 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
       } else {
-        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu", player->current_mkv_sample_ - 1);
+        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);
+        // Decode failed, but we can continue to next frame
       }
     } else {
-      ESP_LOGD(TAG, "MKV read_next_sample returned false");
+      // read_next_mkv_sample_() returned false = reached end of video
+      ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
+      end_of_stream = true;
     }
     // Process audio
     player->process_audio_();
   }
 
   // Hide loading spinner after first frame
-  if (got_frame && !first_frame_received) {
-    first_frame_received = true;
-    if (player->loading_spinner_ != nullptr) {
-      lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
-    }
+  // Use player member variable instead of static to properly reset on replay
+  if (got_frame && player->loading_spinner_ != nullptr) {
+    // Hide spinner on any successful frame display
+    lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
   }
 
-  if (!got_frame) {
+  // Only stop if we've reached the actual end of the video stream
+  // Not just because a single frame failed to decode!
+  if (end_of_stream) {
     // End of video
     if (!player->loop_) {
+      ESP_LOGI(TAG, "Reached end of video, stopping playback");
       player->stop();
 
       // NOTE: We do NOT free the HTTP buffer here to allow replay
