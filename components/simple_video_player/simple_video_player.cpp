@@ -2419,7 +2419,13 @@ void SimpleVideoPlayer::update_display_() {
     return;
   }
 
-  // Only invalidate canvas to trigger redraw (buffer is already set in create_ui_)
+  // CRITICAL: Reset canvas buffer pointer EVERY frame to force LVGL refresh
+  // This is the pattern from lvgl_camera_display that ensures proper PSRAM access
+  // Without this, LVGL may cache the buffer and not detect content changes
+  lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
+                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+
+  // Invalidate to trigger redraw
   lv_obj_invalidate(this->canvas_);
 
   // Update UI controls only every 15 frames (~0.5 second at 30fps) to reduce overhead
@@ -2832,11 +2838,25 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
   // Log timing for performance debugging (only every 30 frames to avoid spam)
   static int callback_count = 0;
+  static uint32_t fps_measure_start = 0;
+  static int fps_frame_count = 0;
+
   if (callback_count++ % 30 == 0) {
     uint32_t actual_interval = current_time - last_callback_time;
-    ESP_LOGI(TAG, "Timer callback: actual interval=%lu ms, configured=%lu ms",
-             (unsigned long)actual_interval, (unsigned long)player->frame_interval_);
+
+    // Calculate actual FPS over last 30 frames
+    if (fps_measure_start > 0) {
+      uint32_t time_elapsed = current_time - fps_measure_start;
+      float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
+      ESP_LOGI(TAG, "📊 Performance: %.2f FPS | decode time shown below | target: %.0f FPS",
+               actual_fps, 1000.0f / player->frame_interval_);
+    }
+
+    // Reset FPS measurement
+    fps_measure_start = current_time;
+    fps_frame_count = 0;
   }
+  fps_frame_count++;
   last_callback_time = current_time;
 
   bool got_frame = false;
@@ -2881,9 +2901,26 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         player->update_display_();
         got_frame = true;
 
+        // Reset error counter on success
+        static int consecutive_decode_errors = 0;
+        consecutive_decode_errors = 0;
+
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
         if (callback_count % 30 == 0) {
           ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
+        }
+      } else {
+        // Track consecutive decode failures
+        static int consecutive_decode_errors = 0;
+        consecutive_decode_errors++;
+
+        if (consecutive_decode_errors <= 5) {
+          ESP_LOGE(TAG, "❌ Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
+                   player->current_video_sample_ - 1, consecutive_decode_errors);
+        } else if (consecutive_decode_errors == 10) {
+          ESP_LOGE(TAG, "❌ 10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
+        } else if (consecutive_decode_errors % 30 == 0) {
+          ESP_LOGE(TAG, "❌ Still failing: %d consecutive decode errors", consecutive_decode_errors);
         }
       }
     }
