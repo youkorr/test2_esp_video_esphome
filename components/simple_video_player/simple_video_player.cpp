@@ -1197,6 +1197,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   std::vector<uint32_t> sample_durations;
   std::vector<uint32_t> keyframes;
 
+  // Sample-to-Chunk mapping (stsc)
+  struct SampleToChunk {
+    uint32_t first_chunk;
+    uint32_t samples_per_chunk;
+    uint32_t sample_description_index;
+  };
+  std::vector<SampleToChunk> sample_to_chunk;
+
   while (ftell(this->file_) < end_pos) {
     long current_pos = ftell(this->file_);
 
@@ -1279,6 +1287,20 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
         keyframes.push_back(read_be32(this->file_));
       }
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
+    } else if (box_type == make_fourcc('s', 't', 's', 'c')) {
+      // Sample-to-Chunk table
+      ESP_LOGD(TAG, "  Reading stsc...");
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t count = read_be32(this->file_);
+      sample_to_chunk.reserve(count);
+      for (uint32_t i = 0; i < count; i++) {
+        SampleToChunk entry;
+        entry.first_chunk = read_be32(this->file_);
+        entry.samples_per_chunk = read_be32(this->file_);
+        entry.sample_description_index = read_be32(this->file_);
+        sample_to_chunk.push_back(entry);
+      }
+      ESP_LOGD(TAG, "  stsc: %u entries", sample_to_chunk.size());
     }
 
     // Position to next box
@@ -1287,33 +1309,66 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGD(TAG, "  Positioned to next box at %ld", next_box_pos);
   }
 
-  // Build sample list (simplified - assumes 1 sample per chunk)
+  // Build sample list using stsc (Sample-to-Chunk) table
   if (is_video && !sample_sizes.empty()) {
-    ESP_LOGI(TAG, "Building video samples: sizes=%u, offsets=%u, durations=%u, keyframes=%u",
-             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size());
+    ESP_LOGI(TAG, "Building video samples: sizes=%u, chunks=%u, durations=%u, keyframes=%u, stsc_entries=%u",
+             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size(), sample_to_chunk.size());
 
-    // Diagnostic: Log first 10 sample sizes for debugging
-    ESP_LOGI(TAG, "First 10 sample sizes from MP4:");
-    for (size_t i = 0; i < sample_sizes.size() && i < 10; i++) {
-      ESP_LOGI(TAG, "  Sample %zu: size=%u bytes, offset=%u",
-               i, sample_sizes[i],
-               (i < chunk_offsets.size()) ? chunk_offsets[i] : 0);
+    // If no stsc, assume 1 sample per chunk (fallback)
+    if (sample_to_chunk.empty()) {
+      ESP_LOGW(TAG, "No stsc table found, assuming 1 sample per chunk");
+      sample_to_chunk.push_back({1, 1, 1});
     }
 
+    // Calculate sample offsets using stsc table
+    uint32_t sample_index = 0;
     uint32_t timestamp = 0;
-    for (size_t i = 0; i < sample_sizes.size() && i < chunk_offsets.size(); i++) {
-      Mp4Sample sample;
-      sample.offset = chunk_offsets[i];
-      sample.size = sample_sizes[i];
-      sample.duration = (i < sample_durations.size()) ? sample_durations[i] : 1000;
-      sample.timestamp_ms = (timestamp * 1000) / this->video_timescale_;
-      sample.is_keyframe = keyframes.empty() ||
-                          std::find(keyframes.begin(), keyframes.end(), i + 1) != keyframes.end();
 
-      this->video_samples_.push_back(sample);
-      timestamp += sample.duration;
+    for (size_t chunk_idx = 0; chunk_idx < chunk_offsets.size() && sample_index < sample_sizes.size(); chunk_idx++) {
+      uint32_t chunk_number = chunk_idx + 1;  // Chunks are 1-indexed in MP4
+      uint32_t chunk_offset = chunk_offsets[chunk_idx];
+
+      // Find how many samples are in this chunk
+      uint32_t samples_in_this_chunk = 1;  // Default
+      for (size_t stsc_idx = 0; stsc_idx < sample_to_chunk.size(); stsc_idx++) {
+        if (chunk_number >= sample_to_chunk[stsc_idx].first_chunk) {
+          // Check if this is the last entry or if next entry starts later
+          if (stsc_idx + 1 >= sample_to_chunk.size() ||
+              chunk_number < sample_to_chunk[stsc_idx + 1].first_chunk) {
+            samples_in_this_chunk = sample_to_chunk[stsc_idx].samples_per_chunk;
+            break;
+          }
+        }
+      }
+
+      // Create samples for this chunk
+      uint32_t sample_offset_in_chunk = chunk_offset;
+      for (uint32_t j = 0; j < samples_in_this_chunk && sample_index < sample_sizes.size(); j++) {
+        Mp4Sample sample;
+        sample.offset = sample_offset_in_chunk;
+        sample.size = sample_sizes[sample_index];
+        sample.duration = (sample_index < sample_durations.size()) ? sample_durations[sample_index] : 1000;
+        sample.timestamp_ms = (timestamp * 1000) / this->video_timescale_;
+        sample.is_keyframe = keyframes.empty() ||
+                            std::find(keyframes.begin(), keyframes.end(), sample_index + 1) != keyframes.end();
+
+        this->video_samples_.push_back(sample);
+
+        // Next sample in this chunk starts after current sample
+        sample_offset_in_chunk += sample.size;
+        timestamp += sample.duration;
+        sample_index++;
+      }
     }
     this->total_frames_ = this->video_samples_.size();
+
+    // Diagnostic: Log first 10 sample offsets
+    ESP_LOGI(TAG, "First 10 samples after stsc processing:");
+    for (size_t i = 0; i < this->video_samples_.size() && i < 10; i++) {
+      ESP_LOGI(TAG, "  Sample %zu: offset=%u, size=%u, keyframe=%d",
+               i, this->video_samples_[i].offset, this->video_samples_[i].size,
+               this->video_samples_[i].is_keyframe);
+    }
 
     // Calculate total duration
     if (!this->video_samples_.empty()) {
