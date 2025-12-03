@@ -273,17 +273,40 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
   ESP_LOGI(TAG, "Downloading from HTTP/HTTPS: %s", url);
 
 #ifdef USE_WIFI
-  // Wait for WiFi to be connected (max 30 seconds)
+  // Check if WiFi component exists
+  if (wifi::global_wifi_component == nullptr) {
+    ESP_LOGE(TAG, "WiFi component not available! Make sure WiFi is configured in your YAML.");
+    return false;
+  }
+
+  // Wait for WiFi to be connected (max 60 seconds with detailed logging)
   ESP_LOGI(TAG, "Waiting for WiFi connection...");
+  ESP_LOGI(TAG, "WiFi component found. Checking connection status...");
+
   uint32_t start_wait = millis();
+  uint32_t last_log = 0;
+
   while (!wifi::global_wifi_component->is_connected()) {
-    if (millis() - start_wait > 30000) {
-      ESP_LOGE(TAG, "WiFi connection timeout (30s). Cannot download HTTP file.");
+    uint32_t elapsed = millis() - start_wait;
+
+    // Log every 5 seconds
+    if (elapsed - last_log >= 5000) {
+      ESP_LOGW(TAG, "Still waiting for WiFi... (%u seconds elapsed)", elapsed / 1000);
+      ESP_LOGD(TAG, "WiFi state: is_connected=%d", wifi::global_wifi_component->is_connected());
+      last_log = elapsed;
+    }
+
+    if (elapsed > 60000) {
+      ESP_LOGE(TAG, "WiFi connection timeout (60s). Cannot download HTTP file.");
+      ESP_LOGE(TAG, "Please check your WiFi configuration in the YAML file.");
       return false;
     }
-    delay(100);
+
+    vTaskDelay(pdMS_TO_TICKS(100));  // Use FreeRTOS delay instead of blocking delay
   }
-  ESP_LOGI(TAG, "✓ WiFi connected, starting download...");
+  ESP_LOGI(TAG, "✓ WiFi connected! Starting download...");
+#else
+  ESP_LOGW(TAG, "WiFi support not enabled (USE_WIFI not defined). HTTP download may fail.");
 #endif
 
   // Configure HTTP client
