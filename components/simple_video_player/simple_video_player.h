@@ -94,7 +94,7 @@ class SimpleVideoPlayer : public Component {
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override { return setup_priority::LATE; }
+  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
   void play();
   void pause();
@@ -155,7 +155,9 @@ class SimpleVideoPlayer : public Component {
 
   void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
+  bool download_http_file_(const char *url);  // Download HTTP/HTTPS file to SPIRAM
   bool open_video_file_();
+  void complete_video_initialization_();  // Complete initialization after HTTP download
   void update_display_();
   void create_ui_();
   void create_controls_();
@@ -191,6 +193,13 @@ class SimpleVideoPlayer : public Component {
   long current_pos_{0};
   uint32_t frame_count_{0};
   uint32_t total_frames_{0};
+
+  // HTTP/HTTPS streaming support
+  uint8_t *http_buffer_{nullptr};  // Buffer for downloaded HTTP content
+  size_t http_buffer_size_{0};     // Size of HTTP buffer
+  bool is_http_source_{false};     // true if file_path_ is http:// or https://
+  bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
+  bool initialization_complete_{false};  // true if video player is fully initialized
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};
