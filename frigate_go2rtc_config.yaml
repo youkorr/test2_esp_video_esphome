@@ -1,0 +1,43 @@
+# Configuration go2rtc pour ESP32-P4
+# À ajouter dans votre config Frigate (config/config.yml)
+
+go2rtc:
+  streams:
+    # Stream original de votre caméra (peut rester High profile)
+    frigate1_original:
+      - rtsp://192.168.1.38:8554/camera_source  # Votre caméra source
+
+    # ⭐ Stream optimisé pour ESP32-P4 (Baseline profile)
+    frigate1_esp32:
+      - "ffmpeg:frigate1_original#video=h264#profile=baseline#level=31#width=640#height=480#bitrate=400k#fps=15#gop=15"
+
+# Alternative : Directement depuis votre caméra IP
+#   frigate1_esp32:
+#     - "ffmpeg:rtsp://user:pass@camera-ip/stream#video=h264#profile=baseline#level=31#width=640#height=480#bitrate=400k#fps=15"
+
+# go2rtc expose automatiquement les streams sur :
+# rtsp://frigate-ip:8554/frigate1_esp32
+
+cameras:
+  frigate1:
+    enabled: true
+    ffmpeg:
+      inputs:
+        # Pour détection Frigate (peut rester High profile)
+        - path: rtsp://127.0.0.1:8554/frigate1_original
+          roles:
+            - detect
+            - record
+
+# Configuration réseau
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+# Logs (pour debug)
+log:
+  default: info
+  logs:
+    ffmpeg: debug  # Activer si besoin de debug
