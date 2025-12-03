@@ -1,0 +1,163 @@
+# Configuration Frigate - CORRIGÉE pour ESP32-P4
+# Fichier: config/config.yml
+
+mqtt:
+  host: 192.168.1.38
+  port: 1883
+  user: frigate
+  password: Ncaseone132??
+  stats_interval: 60
+
+detectors:
+  coral:
+    type: edgetpu
+    device: pci
+
+birdseye:
+  enabled: false
+
+record:
+  enabled: false
+  expire_interval: 60
+  sync_recordings: true
+  retain:
+    days: 0
+    mode: all
+  export:
+    timelapse_args: -vf setpts=0.04*PTS -r 30
+  preview:
+    quality: medium
+  alerts:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 14
+      mode: motion
+  detections:
+    pre_capture: 5
+    post_capture: 5
+    retain:
+      days: 14
+      mode: motion
+
+snapshots:
+  enabled: true
+  clean_copy: true
+  timestamp: true
+  bounding_box: true
+  crop: false
+  height: 175
+  required_zones: []
+  retain:
+    default: 10
+    objects:
+      person: 15
+  quality: 70
+
+semantic_search:
+  enabled: true
+  reindex: true
+  model_size: small
+
+# ============================================
+# GO2RTC CONFIGURATION (CORRIGÉE)
+# ============================================
+go2rtc:
+  streams:
+    # Stream principal de la caméra Tapo C500
+    frigate1:
+      - rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream1
+      - ffmpeg:frigate1#audio=aac
+
+    # ⭐ CORRIGÉ: Stream optimisé pour ESP32-P4 (Baseline profile)
+    # Transcoding depuis la SOURCE (caméra Tapo), PAS depuis go2rtc lui-même !
+    frigate1_esp32:
+      - "ffmpeg:rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream2#video=h264#profile=baseline#level=31#width=640#height=480#bitrate=400k#fps=15#gop=15"
+      # OU si vous voulez transcoder depuis le stream principal:
+      # - "ffmpeg:frigate1#video=h264#profile=baseline#level=31#width=640#height=480#bitrate=400k#fps=15#gop=15"
+
+    # Stream ESP32-P4 OV5647 (H.264 Hardware)
+    frigate2:
+      - rtsp://youkorr:youkorr123@192.168.1.49:554/stream2
+
+  # WebRTC configuration
+  webrtc:
+    listen: :8555
+    candidates:
+      - 1.2.3.4:8555  # Remplacer par votre IP publique
+    ice_servers:
+      - urls: [turn:a.relay.metered.ca:443]
+        username: user
+        credential: apikey
+
+# ============================================
+# CAMERAS
+# ============================================
+cameras:
+  # Camera 1: Tapo C500
+  frigate1:
+    ffmpeg:
+      inputs:
+        - path: rtsp://127.0.0.1:8554/frigate1
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+    detect:
+      enabled: true
+      width: 1000
+      height: 700
+      fps: 5
+    objects:
+      track:
+        - person
+        - cat
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+    motion:
+      threshold: 30
+      contour_area: 83
+      improve_contrast: false
+
+  # Camera 2: ESP32-P4 OV5647 (H.264 Hardware)
+  frigate2:
+    ffmpeg:
+      inputs:
+        - path: rtsp://youkorr:youkorr123@192.168.1.49:554/stream
+          input_args: preset-rtsp-restream
+          roles:
+            - detect
+            - record
+    detect:
+      width: 640
+      height: 480
+      fps: 5
+    objects:
+      track:
+        - person
+        - cat
+      filters:
+        person:
+          min_score: 0.7
+          threshold: 0.8
+    motion:
+      threshold: 30
+      contour_area: 83
+      improve_contrast: false
+
+version: 0.16-0
+
+detect:
+  enabled: true
+
+face_recognition:
+  enabled: true
+  model_size: small
+
+lpr:
+  enabled: true
+
+classification:
+  bird:
+    enabled: true
