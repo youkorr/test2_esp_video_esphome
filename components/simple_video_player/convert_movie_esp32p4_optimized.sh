@@ -96,7 +96,7 @@ fi
 
 # Encodage avec paramètres optimisés ESP32-P4
 ffmpeg -i "$input_file" \
-    -vf "scale=$frame_size:force_original_aspect_ratio=increase,crop=$frame_size" \
+    -vf "scale=$frame_size:force_original_aspect_ratio=increase,crop=$frame_size,format=yuv420p" \
     -af "$audio_filter" \
     -c:v libx264 \
     -profile:v baseline \
@@ -110,6 +110,11 @@ ffmpeg -i "$input_file" \
     -bf 0 \
     -r 15 \
     -pix_fmt yuv420p \
+    -colorspace:v bt709 \
+    -color_primaries:v bt709 \
+    -color_trc:v bt709 \
+    -color_range:v tv \
+    -x264opts slices=1 \
     -movflags +faststart \
     -acodec pcm_u8 \
     -ar 16000 \
