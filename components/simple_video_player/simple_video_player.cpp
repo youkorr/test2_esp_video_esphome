@@ -2656,6 +2656,17 @@ void SimpleVideoPlayer::play() {
       ESP_LOGD(TAG, "Re-allocated rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
     }
 
+    // Re-initialize H.264 decoder if needed
+    if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MKV_H264) {
+      if (!this->h264_decoder_ready_) {
+        ESP_LOGI(TAG, "Re-initializing H.264 decoder...");
+        if (!this->init_h264_decoder_()) {
+          ESP_LOGE(TAG, "Failed to re-initialize H.264 decoder");
+          return;
+        }
+      }
+    }
+
     // Re-initialize audio decoder if needed
 #if USE_ESP_AUDIO_CODEC
     if (this->has_audio_ && !this->aac_decoder_ready_) {
@@ -2843,8 +2854,19 @@ void SimpleVideoPlayer::stop() {
   }
 #endif
 
+  // Close H.264 decoder (CRITICAL for SPIRAM release!)
+  if (this->h264_decoder_ != nullptr) {
+    ESP_LOGI(TAG, "Closing H.264 decoder to free internal SPIRAM buffers...");
+    esp_h264_dec_close(this->h264_decoder_);
+    esp_h264_dec_del(this->h264_decoder_);
+    this->h264_decoder_ = nullptr;
+    this->h264_decoder_ready_ = false;
+    ESP_LOGD(TAG, "  Closed and deleted H.264 decoder");
+  }
+
   ESP_LOGI(TAG, "Playback stopped - freed %zu bytes (%.2f MB) from SPIRAM",
            total_freed, total_freed / (1024.0 * 1024.0));
+  ESP_LOGI(TAG, "NOTE: H.264 decoder also freed internal SPIRAM (amount not tracked)");
 }
 
 // Static callbacks
