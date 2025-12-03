@@ -2761,6 +2761,21 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     // End of video
     if (!player->loop_) {
       player->stop();
+
+      // Free HTTP buffer to reclaim SPIRAM memory
+      if (player->is_http_source_ && player->http_buffer_ != nullptr) {
+        ESP_LOGI(TAG, "Video finished - freeing HTTP buffer (%zu bytes from SPIRAM)",
+                 player->http_buffer_size_);
+        heap_caps_free(player->http_buffer_);
+        player->http_buffer_ = nullptr;
+        player->http_buffer_size_ = 0;
+
+        // Close the FILE* since it was pointing to freed memory
+        if (player->file_ != nullptr) {
+          fclose(player->file_);
+          player->file_ = nullptr;
+        }
+      }
     }
   }
 }
