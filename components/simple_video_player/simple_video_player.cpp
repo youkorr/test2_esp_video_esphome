@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
+#include <vector>             // For dynamic buffer during HTTP download
 
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
@@ -562,10 +563,62 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
   }
 
   if (content_length <= 0) {
-    ESP_LOGE(TAG, "Invalid content length: %d", content_length);
+    ESP_LOGW(TAG, "Content-Length not provided by server (got %d). Will download with dynamic buffering.", content_length);
+
+    // Download without knowing size - use dynamic buffer
+    std::vector<uint8_t> temp_buffer;
+    temp_buffer.reserve(1024 * 1024);  // Reserve 1MB initially
+
+    uint8_t chunk[4096];
+    size_t total_downloaded = 0;
+
+    while (true) {
+      int read_len = esp_http_client_read(client, (char *)chunk, sizeof(chunk));
+      if (read_len < 0) {
+        ESP_LOGE(TAG, "HTTP read error");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return false;
+      }
+
+      if (read_len == 0) {
+        break;  // End of stream
+      }
+
+      // Append to buffer
+      temp_buffer.insert(temp_buffer.end(), chunk, chunk + read_len);
+      total_downloaded += read_len;
+
+      // Log progress every 100KB
+      if (total_downloaded % (100 * 1024) == 0 || total_downloaded < 4096) {
+        ESP_LOGI(TAG, "Downloaded: %zu KB", total_downloaded / 1024);
+      }
+    }
+
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    return false;
+
+    if (total_downloaded == 0) {
+      ESP_LOGE(TAG, "No data downloaded from server");
+      return false;
+    }
+
+    ESP_LOGI(TAG, "✓ Downloaded %zu bytes (%.2f MB) without Content-Length",
+             total_downloaded, total_downloaded / 1048576.0f);
+
+    // Allocate final buffer in SPIRAM
+    this->http_buffer_ = (uint8_t *)heap_caps_malloc(total_downloaded, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (this->http_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate %zu bytes in SPIRAM", total_downloaded);
+      return false;
+    }
+
+    // Copy data to SPIRAM
+    memcpy(this->http_buffer_, temp_buffer.data(), total_downloaded);
+    this->http_buffer_size_ = total_downloaded;
+
+    ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes", total_downloaded);
+    return true;
   }
 
   ESP_LOGI(TAG, "HTTP file size: %d bytes (%.2f MB)", content_length, content_length / 1048576.0f);
