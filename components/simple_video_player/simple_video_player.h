@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
 #include "esphome/components/speaker/speaker.h"
+#include "yuv_rgb_convert.h"
 
 extern "C" {
 #include "esp_h264_dec.h"
@@ -203,6 +204,7 @@ class SimpleVideoPlayer : public Component {
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
   bool h264_decoder_ready_{false};
+  YuvRgbConverter *yuv_converter_{nullptr};  // Optimized YUV→RGB with BT.709 support
 
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;
