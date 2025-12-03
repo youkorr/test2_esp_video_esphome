@@ -1731,6 +1731,17 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   ESP_LOGD(TAG, "decode_h264_frame_: input_size=%u, nal_length_size=%d, sps_pps_sent=%d, sps_size=%zu, pps_size=%zu",
            this->input_size_, this->nal_length_size_, this->sps_pps_sent_, this->sps_.size(), this->pps_.size());
 
+  // Debug: Show first 16 bytes of input buffer
+  ESP_LOGD(TAG, "First 16 bytes of input buffer:");
+  for (int i = 0; i < 16 && i < this->input_size_; i += 4) {
+    ESP_LOGD(TAG, "  [%02d-%02d]: 0x%02X 0x%02X 0x%02X 0x%02X",
+             i, i+3,
+             this->input_buffer_[i],
+             this->input_buffer_[i+1],
+             this->input_buffer_[i+2],
+             this->input_buffer_[i+3]);
+  }
+
   // Convert AVCC to Annex-B format
   std::vector<uint8_t> annexb_data;
 
