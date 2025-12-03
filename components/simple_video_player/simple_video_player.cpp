@@ -1767,25 +1767,10 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
     return false;
   }
 
-  // Diagnostic: Log sample details for debugging AVCC issues
-  ESP_LOGD(TAG, "read_next_mp4_sample_: sample_idx=%u, offset=%u, size=%u, is_keyframe=%d",
-           this->current_video_sample_ - 1, sample.offset, sample.size, sample.is_keyframe);
-
   size_t bytes_read = fread(this->input_buffer_, 1, sample.size, this->file_);
   if (bytes_read != sample.size) {
     ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
     return false;
-  }
-
-  // Diagnostic: Show first 16 bytes of sample data
-  ESP_LOGD(TAG, "Sample data first 16 bytes:");
-  for (int i = 0; i < 16 && i < bytes_read; i += 4) {
-    ESP_LOGD(TAG, "  [%02d-%02d]: 0x%02X 0x%02X 0x%02X 0x%02X",
-             i, i+3,
-             this->input_buffer_[i],
-             this->input_buffer_[i+1],
-             this->input_buffer_[i+2],
-             this->input_buffer_[i+3]);
   }
 
   this->input_size_ = sample.size;
@@ -1806,26 +1791,11 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     return false;
   }
 
-  ESP_LOGD(TAG, "decode_h264_frame_: input_size=%u, nal_length_size=%d, sps_pps_sent=%d, sps_size=%zu, pps_size=%zu",
-           this->input_size_, this->nal_length_size_, this->sps_pps_sent_, this->sps_.size(), this->pps_.size());
-
-  // Debug: Show first 16 bytes of input buffer
-  ESP_LOGD(TAG, "First 16 bytes of input buffer:");
-  for (int i = 0; i < 16 && i < this->input_size_; i += 4) {
-    ESP_LOGD(TAG, "  [%02d-%02d]: 0x%02X 0x%02X 0x%02X 0x%02X",
-             i, i+3,
-             this->input_buffer_[i],
-             this->input_buffer_[i+1],
-             this->input_buffer_[i+2],
-             this->input_buffer_[i+3]);
-  }
-
   // Convert AVCC to Annex-B format
   std::vector<uint8_t> annexb_data;
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
-    ESP_LOGD(TAG, "Prepending SPS (%zu bytes) and PPS (%zu bytes)", this->sps_.size(), this->pps_.size());
     // Start code
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
@@ -1852,13 +1822,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     }
     offset += this->nal_length_size_;
 
-    ESP_LOGD(TAG, "NALU #%d: offset=%zu, nalu_len=%u, input_size=%u, remaining=%u",
-             nalu_count, offset - this->nal_length_size_, nalu_len, this->input_size_,
-             this->input_size_ - offset);
-
     if (offset + nalu_len > this->input_size_) {
-      ESP_LOGW(TAG, "NALU #%d: nalu_len=%u exceeds remaining data (%u bytes), stopping conversion",
-               nalu_count, nalu_len, this->input_size_ - offset);
+      ESP_LOGW(TAG, "NALU length %u exceeds remaining data (%u bytes) at offset %zu",
+               nalu_len, this->input_size_ - offset, offset - this->nal_length_size_);
       break;
     }
 
@@ -1874,13 +1840,8 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     nalu_count++;
   }
 
-  ESP_LOGD(TAG, "AVCC conversion complete: processed %d NALUs", nalu_count);
-
-  ESP_LOGD(TAG, "AVCC to Annex-B conversion: %u input bytes → %zu annexb bytes",
-           this->input_size_, annexb_data.size());
-
   if (annexb_data.empty()) {
-    ESP_LOGW(TAG, "Annex-B data is empty after conversion!");
+    ESP_LOGW(TAG, "AVCC conversion failed: no NALUs found in %u bytes", this->input_size_);
     return false;
   }
 
@@ -2388,13 +2349,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
 
   MkvSample &sample = this->mkv_samples_[this->current_mkv_sample_];
 
-  ESP_LOGD(TAG, "Reading MKV sample %zu: offset=%llu, size=%u, track=%u, keyframe=%d",
-           this->current_mkv_sample_,
-           (unsigned long long)sample.offset,
-           sample.size,
-           sample.track_number,
-           sample.is_keyframe);
-
   // Mark if we need SPS/PPS before keyframe
   if (sample.is_keyframe) {
     this->sps_pps_sent_ = false;
@@ -2409,7 +2363,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   // Skip SimpleBlock header (track number, timecode, flags)
   // Track number is EBML variable-length integer (1-8 bytes)
   uint64_t track_num = this->read_ebml_vint_();
-  ESP_LOGD(TAG, "  Track number from block: %llu", (unsigned long long)track_num);
 
   // Skip relative timecode (2 bytes)
   fseek(this->file_, 2, SEEK_CUR);
@@ -2421,9 +2374,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   long frame_start = ftell(this->file_);
   uint32_t header_size = frame_start - header_start;
   uint32_t frame_size = sample.size - header_size;
-
-  ESP_LOGD(TAG, "  Header size: %u, Frame size: %u, Buffer size: %u",
-           header_size, frame_size, this->buffer_size_);
 
   if (frame_size > this->buffer_size_) {
     ESP_LOGW(TAG, "MKV sample too large: %u", frame_size);
@@ -2442,13 +2392,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
     ESP_LOGW(TAG, "Failed to read MKV sample: expected %u bytes, got %zu", frame_size, bytes_read);
     return false;
   }
-
-  ESP_LOGD(TAG, "  Successfully read %zu bytes. First 4 bytes: %02X %02X %02X %02X",
-           bytes_read,
-           this->input_buffer_[0],
-           this->input_buffer_[1],
-           this->input_buffer_[2],
-           this->input_buffer_[3]);
 
   this->input_size_ = frame_size;
   this->current_time_ms_ = sample.timestamp_ns / 1000000;
@@ -3020,12 +2963,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   } else if (player->format_ == MediaFormat::MKV_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
-    ESP_LOGD(TAG, "MKV timer callback: current_sample=%zu, total_samples=%zu",
-             player->current_mkv_sample_, player->mkv_samples_.size());
-
     if (player->read_next_mkv_sample_()) {
-      ESP_LOGD(TAG, "MKV sample read successfully, input_size=%u, decoding...", player->input_size_);
-
       if (player->decode_h264_frame_()) {
         // Update current time from MKV sample timestamp
         if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
