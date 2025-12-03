@@ -604,9 +604,10 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   size_t yuv_size = this->actual_width_ * this->actual_height_ * 3 / 2;  // I420
   this->yuv_buffer_.resize(yuv_size);
 
-  // Initialize optimized YUV→RGB converter (BT.709 for HD video)
+  // Initialize optimized YUV→RGB converter (BT.601 by default - most compatible)
+  // Use BT.709 only if you're sure your videos are HD with BT.709 colorspace
   if (this->yuv_converter_ == nullptr) {
-    this->yuv_converter_ = new YuvRgbConverter(YuvRgbConverter::Colorspace::BT709);
+    this->yuv_converter_ = new YuvRgbConverter(YuvRgbConverter::Colorspace::BT601);
   }
 
   this->h264_decoder_ready_ = true;
