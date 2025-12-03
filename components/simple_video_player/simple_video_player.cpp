@@ -1292,6 +1292,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGI(TAG, "Building video samples: sizes=%u, offsets=%u, durations=%u, keyframes=%u",
              sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size());
 
+    // Diagnostic: Log first 10 sample sizes for debugging
+    ESP_LOGI(TAG, "First 10 sample sizes from MP4:");
+    for (size_t i = 0; i < sample_sizes.size() && i < 10; i++) {
+      ESP_LOGI(TAG, "  Sample %zu: size=%u bytes, offset=%u",
+               i, sample_sizes[i],
+               (i < chunk_offsets.size()) ? chunk_offsets[i] : 0);
+    }
+
     uint32_t timestamp = 0;
     for (size_t i = 0; i < sample_sizes.size() && i < chunk_offsets.size(); i++) {
       Mp4Sample sample;
@@ -1704,10 +1712,25 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
     return false;
   }
 
+  // Diagnostic: Log sample details for debugging AVCC issues
+  ESP_LOGD(TAG, "read_next_mp4_sample_: sample_idx=%u, offset=%u, size=%u, is_keyframe=%d",
+           this->current_video_sample_ - 1, sample.offset, sample.size, sample.is_keyframe);
+
   size_t bytes_read = fread(this->input_buffer_, 1, sample.size, this->file_);
   if (bytes_read != sample.size) {
     ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
     return false;
+  }
+
+  // Diagnostic: Show first 16 bytes of sample data
+  ESP_LOGD(TAG, "Sample data first 16 bytes:");
+  for (int i = 0; i < 16 && i < bytes_read; i += 4) {
+    ESP_LOGD(TAG, "  [%02d-%02d]: 0x%02X 0x%02X 0x%02X 0x%02X",
+             i, i+3,
+             this->input_buffer_[i],
+             this->input_buffer_[i+1],
+             this->input_buffer_[i+2],
+             this->input_buffer_[i+3]);
   }
 
   this->input_size_ = sample.size;
