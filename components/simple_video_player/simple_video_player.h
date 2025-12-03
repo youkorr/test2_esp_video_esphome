@@ -155,6 +155,7 @@ class SimpleVideoPlayer : public Component {
 
   void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
+  bool download_http_file_(const char *url);  // Download HTTP/HTTPS file to SPIRAM
   bool open_video_file_();
   void update_display_();
   void create_ui_();
@@ -191,6 +192,11 @@ class SimpleVideoPlayer : public Component {
   long current_pos_{0};
   uint32_t frame_count_{0};
   uint32_t total_frames_{0};
+
+  // HTTP/HTTPS streaming support
+  uint8_t *http_buffer_{nullptr};  // Buffer for downloaded HTTP content
+  size_t http_buffer_size_{0};     // Size of HTTP buffer
+  bool is_http_source_{false};     // true if file_path_ is http:// or https://
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};

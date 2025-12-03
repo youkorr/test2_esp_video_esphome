@@ -6,6 +6,8 @@
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_http_client.h"  // For HTTP/HTTPS video streaming
+#include <cstring>            // For strncmp
 
 namespace esphome {
 namespace simple_video_player {
@@ -262,19 +264,153 @@ void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
 }
 
-bool SimpleVideoPlayer::open_video_file_() {
-  this->file_ = fopen(this->file_path_.c_str(), "rb");
-  if (this->file_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to open file: %s", this->file_path_.c_str());
+// HTTP/HTTPS download helper
+bool SimpleVideoPlayer::download_http_file_(const char *url) {
+  ESP_LOGI(TAG, "Downloading from HTTP/HTTPS: %s", url);
+
+  // Configure HTTP client
+  esp_http_client_config_t config = {};
+  config.url = url;
+  config.timeout_ms = 30000;  // 30 seconds timeout
+  config.buffer_size = 4096;  // Read buffer size
+
+  esp_http_client_handle_t client = esp_http_client_init(&config);
+  if (client == nullptr) {
+    ESP_LOGE(TAG, "Failed to initialize HTTP client");
     return false;
   }
 
-  // Get file size
-  fseek(this->file_, 0, SEEK_END);
-  this->file_size_ = ftell(this->file_);
-  fseek(this->file_, 0, SEEK_SET);
+  // Open connection and get content length
+  esp_err_t err = esp_http_client_open(client, 0);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "HTTP connection failed: %s", esp_err_to_name(err));
+    esp_http_client_cleanup(client);
+    return false;
+  }
 
-  ESP_LOGI(TAG, "Video file opened: %ld bytes", this->file_size_);
+  int content_length = esp_http_client_fetch_headers(client);
+  int status_code = esp_http_client_get_status_code(client);
+
+  if (status_code != 200) {
+    ESP_LOGE(TAG, "HTTP request failed with status %d", status_code);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  if (content_length <= 0) {
+    ESP_LOGE(TAG, "Invalid content length: %d", content_length);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "HTTP file size: %d bytes (%.2f MB)", content_length, content_length / 1048576.0f);
+
+  // Allocate buffer in SPIRAM for the entire file
+  this->http_buffer_ = (uint8_t *)heap_caps_malloc(content_length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (this->http_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate %d bytes in SPIRAM for HTTP download", content_length);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+    return false;
+  }
+
+  this->http_buffer_size_ = content_length;
+
+  // Download file in chunks
+  size_t downloaded = 0;
+  uint8_t *write_ptr = this->http_buffer_;
+  int last_progress = 0;
+
+  while (downloaded < (size_t)content_length) {
+    int read_len = esp_http_client_read(client, (char *)write_ptr, 4096);
+    if (read_len < 0) {
+      ESP_LOGE(TAG, "HTTP read error");
+      heap_caps_free(this->http_buffer_);
+      this->http_buffer_ = nullptr;
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return false;
+    }
+
+    if (read_len == 0) {
+      break;  // End of stream
+    }
+
+    downloaded += read_len;
+    write_ptr += read_len;
+
+    // Progress logging (every 10%)
+    int progress = (downloaded * 100) / content_length;
+    if (progress >= last_progress + 10) {
+      ESP_LOGI(TAG, "Download progress: %d%% (%zu / %d bytes)", progress, downloaded, content_length);
+      last_progress = progress;
+    }
+  }
+
+  esp_http_client_close(client);
+  esp_http_client_cleanup(client);
+
+  if (downloaded != (size_t)content_length) {
+    ESP_LOGW(TAG, "Downloaded %zu bytes, expected %d bytes", downloaded, content_length);
+  }
+
+  ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes", downloaded);
+  return true;
+}
+
+bool SimpleVideoPlayer::open_video_file_() {
+  // Cleanup previous HTTP buffer if any
+  if (this->http_buffer_ != nullptr) {
+    heap_caps_free(this->http_buffer_);
+    this->http_buffer_ = nullptr;
+    this->http_buffer_size_ = 0;
+  }
+
+  // Check if file_path is HTTP/HTTPS URL
+  const char *path = this->file_path_.c_str();
+  this->is_http_source_ = (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0);
+
+  if (this->is_http_source_) {
+    // HTTP/HTTPS: Download file to SPIRAM
+    ESP_LOGI(TAG, "Opening HTTP/HTTPS source: %s", path);
+
+    if (!this->download_http_file_(path)) {
+      ESP_LOGE(TAG, "Failed to download HTTP file");
+      return false;
+    }
+
+    // Create FILE* from memory buffer using fmemopen
+    this->file_ = fmemopen(this->http_buffer_, this->http_buffer_size_, "rb");
+    if (this->file_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to create FILE* from HTTP buffer");
+      heap_caps_free(this->http_buffer_);
+      this->http_buffer_ = nullptr;
+      return false;
+    }
+
+    this->file_size_ = this->http_buffer_size_;
+    ESP_LOGI(TAG, "✓ HTTP video opened from memory: %ld bytes", this->file_size_);
+
+  } else {
+    // Local file: Use fopen
+    ESP_LOGI(TAG, "Opening local file: %s", path);
+
+    this->file_ = fopen(path, "rb");
+    if (this->file_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to open file: %s", path);
+      return false;
+    }
+
+    // Get file size
+    fseek(this->file_, 0, SEEK_END);
+    this->file_size_ = ftell(this->file_);
+    fseek(this->file_, 0, SEEK_SET);
+
+    ESP_LOGI(TAG, "✓ Local video file opened: %ld bytes", this->file_size_);
+  }
+
   return true;
 }
 
