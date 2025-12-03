@@ -90,8 +90,8 @@ if os.path.exists(esp_cam_sensor_dir):
 # ========================================================================
 # Sources esp_h264
 # ========================================================================
-# NOTE: Les sources software (sw/src/*_sw*.c) nécessitent OpenH264 library
-# fournie dans sw/libs/openh264_inc - le décodeur utilise maintenant l'API OpenH264!
+# NOTE: Le décodeur utilise edge264 (lightweight H.264 decoder) pour supporter
+# TOUS les profils H.264 (Baseline, Main, High, High10, High422, High444)
 # NOTE: esp_h264_alloc_less_than_5_3.c est exclu car nous utilisons ESP-IDF >= 5.3
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 esp_h264_sources = [
@@ -99,10 +99,10 @@ esp_h264_sources = [
     # "port/src/esp_h264_alloc_less_than_5_3.c",  # Exclu: pour ESP-IDF < 5.3 seulement
     "port/src/esp_h264_cache.c",
     "sw/src/h264_color_convert.c",
-    # Sources logicielles (nécessitent OpenH264 dans sw/libs/)
-    "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264)
-    "sw/src/esp_h264_dec_sw.c",            # Nécessite codec_api.h (OpenH264 - rewritten!)
-    "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264)
+    # Sources logicielles
+    "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264 encoder)
+    "sw/src/esp_h264_dec_sw_edge264.c",    # Décodeur edge264 (ALL profiles!)
+    "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264 encoder)
     # Sources matérielles (encodeur H.264 hardware ESP32-P4)
     "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
     "hw/src/esp_h264_enc_dual_hw.c",       # Encodeur hardware dual-stream
@@ -121,10 +121,10 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
-    # Ajouter les chemins d'include pour les bibliothèques H.264 (OpenH264)
+    # Ajouter les chemins d'include pour les bibliothèques H.264
     h264_lib_includes = [
-        "sw/libs/openh264_inc",   # codec_api.h, codec_app_def.h, codec_def.h (decoder uses OpenH264 API!)
-        "sw/libs/tinyh264_inc",   # basetype.h (still needed for some type definitions)
+        "sw/libs/openh264_inc",   # codec_api.h (OpenH264 encoder)
+        "sw/libs/edge264_src",    # edge264.h (edge264 decoder - multi-profile!)
     ]
 
     # Ajouter les chemins d'include pour le hardware encoder
@@ -146,29 +146,61 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[inc_path])
             print(f"[ESP-Video Build] 📁 Include H.264 HW ajouté: {inc}")
 
-    # Link BOTH H.264 libraries globally (tinyh264 for API, openh264 for decoder)
+    # Compile edge264 decoder sources (if present)
+    edge264_src_dir = os.path.join(esp_h264_dir, "sw/libs/edge264_src")
+    if os.path.exists(edge264_src_dir):
+        # Check if edge264 sources are present
+        edge264_sources = [
+            "edge264.c",
+            "edge264_bitstream.c",
+            "edge264_deblock.c",
+            "edge264_headers.c",
+            "edge264_inter.c",
+            "edge264_intra.c",
+            "edge264_mvpred.c",
+            "edge264_residual.c",
+            "edge264_sei.c",
+            "edge264_slice.c",
+        ]
+
+        edge264_found = all(os.path.exists(os.path.join(edge264_src_dir, src)) for src in edge264_sources)
+
+        if edge264_found:
+            # Add edge264 sources to compilation
+            for src in edge264_sources:
+                src_path = os.path.join(edge264_src_dir, src)
+                sources_to_add.append(src_path)
+                print(f"[ESP-Video Build] + edge264/{src}")
+
+            print(f"[ESP-Video Build] ✓ edge264 decoder enabled (supports ALL H.264 profiles!)")
+            print(f"[ESP-Video Build]   ✓ Baseline, Main, High, High10, High422, High444")
+            print(f"[ESP-Video Build]   ✓ Up to 8K UHD, 8-bit 4:2:0 planar YUV")
+        else:
+            print(f"[ESP-Video Build] ⚠️  edge264 sources NOT found in {edge264_src_dir}")
+            print(f"[ESP-Video Build]   ℹ️  Please download edge264 sources - see README.md")
+            print(f"[ESP-Video Build]   ℹ️  wget -qO- https://github.com/tvlabs/edge264/archive/refs/tags/v0.6.0.tar.gz | tar xz -C {edge264_src_dir} --strip-components=1 '*.c' '*.h'")
+    else:
+        print(f"[ESP-Video Build] ⚠️  edge264 directory not found: {edge264_src_dir}")
+
+    # Link OpenH264 encoder library only (decoder is compiled from edge264 sources)
     h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
     if os.path.exists(h264_static_libs_dir):
         openh264_lib = os.path.join(h264_static_libs_dir, "libopenh264.a")
-        tinyh264_lib = os.path.join(h264_static_libs_dir, "libtinyh264.a")
 
-        if os.path.exists(openh264_lib) and os.path.exists(tinyh264_lib):
+        if os.path.exists(openh264_lib):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link OpenH264 decoder library (supports ALL H.264 profiles!)
-            # Code has been rewritten to use Cisco OpenH264 API directly
+            # Link OpenH264 encoder library
             env.Append(LINKFLAGS=[
                 "-Wl,--allow-multiple-definition",
                 "-Wl,--whole-archive",
                 openh264_lib,
                 "-Wl,--no-whole-archive"
             ])
-            print(f"[ESP-Video Build] ✓ Linked openh264 (supports ALL H.264 profiles: Baseline/Main/High/High10/High422/High444)")
-            print(f"[ESP-Video Build]   ✓ Decoder rewritten to use OpenH264 API")
-            print(f"[ESP-Video Build]   ✓ Your streams can now use ANY H.264 profile!")
+            print(f"[ESP-Video Build] ✓ Linked libopenh264.a (H.264 encoder)")
         else:
-            print(f"[ESP-Video Build] ⚠️  H.264 libraries not found in {h264_static_libs_dir}")
+            print(f"[ESP-Video Build] ⚠️  libopenh264.a not found in {h264_static_libs_dir}")
 
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
