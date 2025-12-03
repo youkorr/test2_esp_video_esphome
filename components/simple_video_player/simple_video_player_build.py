@@ -13,37 +13,49 @@ parent_components_dir = os.path.dirname(component_dir)
 print("[Simple Video Player] Build script running...")
 
 # ========================================================================
-# H.264 decoder library linking - ONLY openh264
+# Link optimized H.264 decoder library (tinyh264)
 # ========================================================================
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
+    # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
-    openh264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    # Try openh264 first (more optimized but larger)
+    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    h264_lib_name = "openh264"
 
-    if os.path.exists(openh264_lib):
-        print(f"[Simple Video Player] Found openh264 library: {openh264_lib}")
+    if not os.path.exists(h264_lib):
+        # Fallback to tinyh264
+        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+        h264_lib_name = "tinyh264"
 
-        # Add include paths for openh264
-        h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc")
+    if os.path.exists(h264_lib):
+        print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")
+
+        # Add library path
+        env.Append(LIBPATH=[h264_lib_dir])
+
+        # Add include paths for decoder
+        if h264_lib_name == "tinyh264":
+            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
+        else:  # openh264
+            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc")
+
         if os.path.exists(h264_inc):
             env.Append(CPPPATH=[h264_inc])
+            print(f"[Simple Video Player] Added {h264_lib_name} include path")
 
-        # Also add tinyh264_inc for h264bsd API headers
-        h264_inc_bsd = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
-        if os.path.exists(h264_inc_bsd):
-            env.Append(CPPPATH=[h264_inc_bsd])
-
-        # Link ONLY openh264 with --whole-archive (NOT tinyh264!)
-        # Use --allow-multiple-definition in case other components also link it
+        # Force linking with --whole-archive to override compiled esp_h264_dec_sw.o
+        # This ensures library symbols take precedence over any duplicate symbols
         env.Append(LINKFLAGS=[
-            "-Wl,--allow-multiple-definition",
             "-Wl,--whole-archive",
-            openh264_lib,
+            h264_lib,
             "-Wl,--no-whole-archive"
         ])
-        print(f"[Simple Video Player] ✓ Linked openh264 (Baseline/Main/High profiles, --whole-archive, --allow-multiple-definition)")
+
+        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library (with --whole-archive)")
+        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~10-20ms")
     else:
-        print(f"[Simple Video Player] ⚠️  openh264 not found at {openh264_lib}")
+        print(f"[Simple Video Player] ⚠️  H.264 decoder library not found in {h264_lib_dir}")
 else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
