@@ -2545,6 +2545,43 @@ void SimpleVideoPlayer::play() {
     return;  // Download will happen in loop(), then play will resume automatically
   }
 
+  // Check if decoder buffers were freed (after stop()) and need re-initialization
+  if (this->input_buffer_ == nullptr || this->rgb_buffer_ == nullptr) {
+    ESP_LOGI(TAG, "Decoder buffers were freed, re-initializing...");
+
+    // Re-allocate input buffer
+    if (this->input_buffer_ == nullptr) {
+      this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->input_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to re-allocate input buffer");
+        return;
+      }
+      ESP_LOGD(TAG, "Re-allocated input_buffer_: %zu bytes", this->buffer_size_);
+    }
+
+    // Re-allocate RGB buffer
+    if (this->rgb_buffer_ == nullptr) {
+      this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->rgb_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to re-allocate RGB buffer");
+        return;
+      }
+      ESP_LOGD(TAG, "Re-allocated rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+    }
+
+    // Re-initialize audio decoder if needed
+#if USE_ESP_AUDIO_CODEC
+    if (this->has_audio_ && !this->aac_decoder_ready_) {
+      if (!this->initialize_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to re-initialize AAC decoder");
+      }
+    }
+#endif
+  }
+
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       fseek(this->file_, 0, SEEK_SET);
@@ -2662,7 +2699,63 @@ void SimpleVideoPlayer::stop() {
     this->http_buffer_size_ = 0;
   }
 
-  ESP_LOGI(TAG, "Playback stopped");
+  // Free decoder buffers to reclaim SPIRAM
+  ESP_LOGI(TAG, "Freeing decoder buffers from SPIRAM...");
+  size_t total_freed = 0;
+
+  // Free H.264 input buffer
+  if (this->input_buffer_ != nullptr) {
+    total_freed += this->buffer_size_;
+    heap_caps_free(this->input_buffer_);
+    this->input_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed input_buffer_: %zu bytes", this->buffer_size_);
+  }
+
+  // Free RGB output buffer
+  if (this->rgb_buffer_ != nullptr) {
+    total_freed += this->rgb_buffer_size_;
+    heap_caps_free(this->rgb_buffer_);
+    this->rgb_buffer_ = nullptr;
+    this->rgb_buffer_size_ = 0;
+    ESP_LOGD(TAG, "  Freed rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+  }
+
+  // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
+  if (!this->yuv_buffer_.empty()) {
+    size_t yuv_size = this->yuv_buffer_.size();
+    total_freed += yuv_size;
+    this->yuv_buffer_.clear();
+    this->yuv_buffer_.shrink_to_fit();  // Force memory release
+    ESP_LOGD(TAG, "  Freed yuv_buffer_: %zu bytes", yuv_size);
+  }
+
+  // Free audio buffers
+  if (this->audio_input_buffer_ != nullptr) {
+    total_freed += 8192;
+    heap_caps_free(this->audio_input_buffer_);
+    this->audio_input_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
+  }
+
+  if (this->audio_output_buffer_ != nullptr) {
+    total_freed += 16384;
+    heap_caps_free(this->audio_output_buffer_);
+    this->audio_output_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
+  }
+
+  // Close AAC decoder
+#if USE_ESP_AUDIO_CODEC
+  if (this->aac_decoder_ != nullptr) {
+    esp_audio_dec_close(this->aac_decoder_);
+    this->aac_decoder_ = nullptr;
+    this->aac_decoder_ready_ = false;
+    ESP_LOGD(TAG, "  Closed AAC decoder");
+  }
+#endif
+
+  ESP_LOGI(TAG, "Playback stopped - freed %zu bytes (%.2f MB) from SPIRAM",
+           total_freed, total_freed / (1024.0 * 1024.0));
 }
 
 // Static callbacks
