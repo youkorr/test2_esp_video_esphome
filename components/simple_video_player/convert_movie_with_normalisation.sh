@@ -23,9 +23,9 @@ input_thresh=$(echo "$loudness_data" | jq -r '.input_thresh')
 
 # Second pass: Normalize audio and encode in H.264 Baseline (ESP32-P4 compatible)
 echo "Performing second pass to normalize audio and encode..."
-echo "Using H.264 Baseline profile (compatible with ESP32-P4 tinyh264 decoder)"
+echo "Using H.264 Baseline profile with ESP32-P4 optimized parameters (from espressif/esp-h264-component#5)"
 ffmpeg -i "$input_file" \
-  -vf "scale=$frame_size:force_original_aspect_ratio=increase,crop=$frame_size" \
+  -vf "scale=$frame_size:force_original_aspect_ratio=increase,crop=$frame_size,format=yuv420p" \
   -af "loudnorm=measured_i=$input_i:measured_tp=$input_tp:measured_lra=$input_lra:measured_thresh=$input_thresh:offset=0.0:linear=true:print_format=summary" \
   -r 15 \
   -c:v libx264 \
@@ -39,6 +39,11 @@ ffmpeg -i "$input_file" \
   -g 15 \
   -bf 0 \
   -pix_fmt yuv420p \
+  -colorspace:v bt709 \
+  -color_primaries:v bt709 \
+  -color_trc:v bt709 \
+  -color_range:v tv \
+  -x264opts slices=1 \
   -movflags +faststart \
   -acodec pcm_u8 \
   -ar 16000 \
