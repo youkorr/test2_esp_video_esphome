@@ -94,7 +94,7 @@ class SimpleVideoPlayer : public Component {
   void loop() override;
   void dump_config() override;
 
-  float get_setup_priority() const override { return setup_priority::LATE; }
+  float get_setup_priority() const override { return setup_priority::AFTER_WIFI; }
 
   void play();
   void pause();
