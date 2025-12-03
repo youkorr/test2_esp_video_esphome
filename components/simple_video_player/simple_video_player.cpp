@@ -55,6 +55,12 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
+  // If HTTP download is pending, defer initialization to loop()
+  if (this->http_download_pending_) {
+    ESP_LOGI(TAG, "HTTP source detected - initialization will complete in loop() after download");
+    return;  // Exit setup early, complete initialization in loop()
+  }
+
   // Detect format
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
@@ -245,7 +251,257 @@ void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Simple Video Player initialized");
 }
 
+// Complete initialization after HTTP download (called from loop())
+void SimpleVideoPlayer::complete_video_initialization_() {
+  // Detect format
+  this->format_ = this->detect_format_();
+  const char *format_str = "UNKNOWN";
+  if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
+  else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
+  ESP_LOGI(TAG, "Detected format: %s", format_str);
+
+  // Auto-detect resolution from video file
+  if (this->format_ == MediaFormat::MJPEG) {
+    if (this->detect_jpeg_resolution_(this->actual_width_, this->actual_height_)) {
+      ESP_LOGI(TAG, "Auto-detected JPEG resolution: %dx%d", this->actual_width_, this->actual_height_);
+    } else {
+      ESP_LOGW(TAG, "Failed to auto-detect resolution, using configured: %dx%d", this->width_, this->height_);
+      this->actual_width_ = this->width_;
+      this->actual_height_ = this->height_;
+    }
+
+    // Auto-detect framerate from AVI header (if present and not overridden by user)
+    if (!this->fps_override_) {
+      if (!this->detect_avi_framerate_()) {
+        ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+        // Keep default frame_interval_ = 20ms (50fps)
+      }
+    } else {
+      ESP_LOGI(TAG, "Using user-configured framerate: %.2f fps (interval: %lu ms)",
+               1000.0f / this->frame_interval_, (unsigned long)this->frame_interval_);
+    }
+  } else {
+    // For MP4, use configured dimensions initially (will be updated during parsing)
+    this->frame_interval_ = 20;
+    this->actual_width_ = this->width_;
+    this->actual_height_ = this->height_;
+  }
+
+  // Calculate 16-byte aligned dimensions for decoder
+  this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+  this->aligned_height_ = (this->actual_height_ + 15) & ~15;
+
+  ESP_LOGI(TAG, "Video resolution: %dx%d (actual) -> %dx%d (aligned)",
+           this->actual_width_, this->actual_height_,
+           this->aligned_width_, this->aligned_height_);
+
+  // Allocate RGB buffer with aligned dimensions
+  this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
+  this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (this->rgb_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+    this->mark_failed();
+    return;
+  }
+  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+
+  // Initialize appropriate decoder
+  if (this->format_ == MediaFormat::MP4_H264) {
+    // Parse MP4 file (this will extract resolution)
+    if (!this->parse_mp4_()) {
+      ESP_LOGE(TAG, "Failed to parse MP4 file");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
+             this->video_samples_.size(), this->audio_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
+
+    // Initialize H.264 decoder
+    if (!this->init_h264_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+      this->mark_failed();
+      return;
+    }
+
+    // Initialize audio decoder if speaker is configured
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
+      }
+    }
+  } else if (this->format_ == MediaFormat::MKV_H264) {
+    // Parse MKV file (this will extract resolution)
+    if (!this->parse_mkv_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV file");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV header parsed, video track: %u, audio track: %u",
+             this->mkv_video_track_, this->mkv_audio_track_);
+
+    // Parse clusters to build sample index
+    if (!this->parse_mkv_clusters_()) {
+      ESP_LOGE(TAG, "Failed to parse MKV clusters");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "MKV clusters parsed: %u samples", this->mkv_samples_.size());
+
+    // Re-calculate dimensions if they were updated during parsing
+    if (this->actual_width_ != this->aligned_width_ ||
+        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
+      int new_aligned_width = (this->actual_width_ + 15) & ~15;
+      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+
+      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
+        this->aligned_width_ = new_aligned_width;
+        this->aligned_height_ = new_aligned_height;
+
+        ESP_LOGI(TAG, "Updated resolution after MKV parsing: %dx%d (actual) -> %dx%d (aligned)",
+                 this->actual_width_, this->actual_height_,
+                 this->aligned_width_, this->aligned_height_);
+
+        // Re-allocate RGB buffer with correct size
+        heap_caps_free(this->rgb_buffer_);
+        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rgb_buffer_ == nullptr) {
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          this->mark_failed();
+          return;
+        }
+        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+      }
+    }
+
+    // Initialize H.264 decoder
+    if (!this->init_h264_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+      this->mark_failed();
+      return;
+    }
+
+    // Initialize audio decoder if speaker is configured
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        // Continue without audio
+      }
+    }
+  } else {
+    // Initialize JPEG decoder
+    if (!this->init_jpeg_decoder_()) {
+      ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
+      this->mark_failed();
+      return;
+    }
+  }
+
+  // Create UI
+  this->create_ui_();
+
+  // Create playback timer
+  this->playback_timer_ = lv_timer_create(timer_cb_, this->frame_interval_, this);
+  lv_timer_pause(this->playback_timer_);
+
+  if (this->auto_play_) {
+    this->play();
+  }
+
+  ESP_LOGI(TAG, "Video player fully initialized");
+}
+
 void SimpleVideoPlayer::loop() {
+  // Handle HTTP download and delayed initialization
+  if (this->http_download_pending_ && !this->initialization_complete_) {
+#ifdef USE_WIFI
+    // Check if WiFi is connected (non-blocking)
+    if (wifi::global_wifi_component == nullptr) {
+      ESP_LOGE(TAG, "WiFi component not available!");
+      this->mark_failed();
+      this->http_download_pending_ = false;
+      return;
+    }
+
+    if (!wifi::global_wifi_component->is_connected()) {
+      // WiFi not ready yet, just return and try again next loop
+      static uint32_t last_log_time = 0;
+      if (millis() - last_log_time > 5000) {
+        ESP_LOGI(TAG, "Waiting for WiFi to connect before downloading video...");
+        last_log_time = millis();
+      }
+      return;
+    }
+
+    // WiFi is connected, proceed with download
+    ESP_LOGI(TAG, "WiFi connected! Starting HTTP download...");
+#endif
+
+    const char *url = this->file_path_.c_str();
+
+    // Download file (this will still take time but won't wait for WiFi)
+    if (!this->download_http_file_(url)) {
+      ESP_LOGE(TAG, "Failed to download HTTP file");
+      this->mark_failed();
+      this->http_download_pending_ = false;
+      return;
+    }
+
+    // Create FILE* from memory buffer
+    this->file_ = fmemopen(this->http_buffer_, this->http_buffer_size_, "rb");
+    if (this->file_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to create FILE* from HTTP buffer");
+      heap_caps_free(this->http_buffer_);
+      this->http_buffer_ = nullptr;
+      this->mark_failed();
+      this->http_download_pending_ = false;
+      return;
+    }
+
+    this->file_size_ = this->http_buffer_size_;
+    ESP_LOGI(TAG, "✓ HTTP video loaded into memory: %ld bytes", this->file_size_);
+
+    // Now complete initialization (same code as setup() after open_video_file_())
+    this->complete_video_initialization_();
+
+    this->http_download_pending_ = false;
+    this->initialization_complete_ = true;
+
+    ESP_LOGI(TAG, "✓ HTTP video player fully initialized");
+  }
+
   // Main processing is done in LVGL timer callback
 }
 
@@ -272,42 +528,8 @@ void SimpleVideoPlayer::dump_config() {
 bool SimpleVideoPlayer::download_http_file_(const char *url) {
   ESP_LOGI(TAG, "Downloading from HTTP/HTTPS: %s", url);
 
-#ifdef USE_WIFI
-  // Check if WiFi component exists
-  if (wifi::global_wifi_component == nullptr) {
-    ESP_LOGE(TAG, "WiFi component not available! Make sure WiFi is configured in your YAML.");
-    return false;
-  }
-
-  // Wait for WiFi to be connected (max 60 seconds with detailed logging)
-  ESP_LOGI(TAG, "Waiting for WiFi connection...");
-  ESP_LOGI(TAG, "WiFi component found. Checking connection status...");
-
-  uint32_t start_wait = millis();
-  uint32_t last_log = 0;
-
-  while (!wifi::global_wifi_component->is_connected()) {
-    uint32_t elapsed = millis() - start_wait;
-
-    // Log every 5 seconds
-    if (elapsed - last_log >= 5000) {
-      ESP_LOGW(TAG, "Still waiting for WiFi... (%u seconds elapsed)", elapsed / 1000);
-      ESP_LOGD(TAG, "WiFi state: is_connected=%d", wifi::global_wifi_component->is_connected());
-      last_log = elapsed;
-    }
-
-    if (elapsed > 60000) {
-      ESP_LOGE(TAG, "WiFi connection timeout (60s). Cannot download HTTP file.");
-      ESP_LOGE(TAG, "Please check your WiFi configuration in the YAML file.");
-      return false;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(100));  // Use FreeRTOS delay instead of blocking delay
-  }
-  ESP_LOGI(TAG, "✓ WiFi connected! Starting download...");
-#else
-  ESP_LOGW(TAG, "WiFi support not enabled (USE_WIFI not defined). HTTP download may fail.");
-#endif
+  // Note: WiFi connection check is now done in loop() before calling this function
+  // This function assumes WiFi is already connected
 
   // Configure HTTP client
   esp_http_client_config_t config = {};
@@ -414,25 +636,11 @@ bool SimpleVideoPlayer::open_video_file_() {
   this->is_http_source_ = (strncmp(path, "http://", 7) == 0 || strncmp(path, "https://", 8) == 0);
 
   if (this->is_http_source_) {
-    // HTTP/HTTPS: Download file to SPIRAM
-    ESP_LOGI(TAG, "Opening HTTP/HTTPS source: %s", path);
-
-    if (!this->download_http_file_(path)) {
-      ESP_LOGE(TAG, "Failed to download HTTP file");
-      return false;
-    }
-
-    // Create FILE* from memory buffer using fmemopen
-    this->file_ = fmemopen(this->http_buffer_, this->http_buffer_size_, "rb");
-    if (this->file_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to create FILE* from HTTP buffer");
-      heap_caps_free(this->http_buffer_);
-      this->http_buffer_ = nullptr;
-      return false;
-    }
-
-    this->file_size_ = this->http_buffer_size_;
-    ESP_LOGI(TAG, "✓ HTTP video opened from memory: %ld bytes", this->file_size_);
+    // HTTP/HTTPS: Mark for download in loop() (don't block setup())
+    ESP_LOGI(TAG, "HTTP/HTTPS source detected: %s", path);
+    ESP_LOGI(TAG, "Will download in loop() when WiFi is ready (non-blocking)");
+    this->http_download_pending_ = true;
+    return true;  // Return success, actual download will happen in loop()
 
   } else {
     // Local file: Use fopen
