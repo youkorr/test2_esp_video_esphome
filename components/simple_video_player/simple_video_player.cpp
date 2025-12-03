@@ -1755,6 +1755,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Convert NALUs
   size_t offset = 0;
+  int nalu_count = 0;
   while (offset + this->nal_length_size_ <= this->input_size_) {
     uint32_t nalu_len = 0;
     for (int i = 0; i < this->nal_length_size_; i++) {
@@ -1762,7 +1763,15 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     }
     offset += this->nal_length_size_;
 
-    if (offset + nalu_len > this->input_size_) break;
+    ESP_LOGD(TAG, "NALU #%d: offset=%zu, nalu_len=%u, input_size=%u, remaining=%u",
+             nalu_count, offset - this->nal_length_size_, nalu_len, this->input_size_,
+             this->input_size_ - offset);
+
+    if (offset + nalu_len > this->input_size_) {
+      ESP_LOGW(TAG, "NALU #%d: nalu_len=%u exceeds remaining data (%u bytes), stopping conversion",
+               nalu_count, nalu_len, this->input_size_ - offset);
+      break;
+    }
 
     // Add start code
     annexb_data.push_back(0x00);
@@ -1773,7 +1782,10 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
                        this->input_buffer_ + offset,
                        this->input_buffer_ + offset + nalu_len);
     offset += nalu_len;
+    nalu_count++;
   }
+
+  ESP_LOGD(TAG, "AVCC conversion complete: processed %d NALUs", nalu_count);
 
   ESP_LOGD(TAG, "AVCC to Annex-B conversion: %u input bytes → %zu annexb bytes",
            this->input_size_, annexb_data.size());
