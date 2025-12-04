@@ -501,6 +501,13 @@ void SimpleVideoPlayer::loop() {
     this->initialization_complete_ = true;
 
     ESP_LOGI(TAG, "✓ HTTP video player fully initialized");
+
+    // Auto-play if this was a re-download triggered by play()
+    if (this->auto_play_after_download_) {
+      ESP_LOGI(TAG, "Auto-starting playback after re-download");
+      this->auto_play_after_download_ = false;
+      this->play();  // Now play() will work since buffer is available
+    }
   }
 
   // Main processing is done in LVGL timer callback
@@ -1190,6 +1197,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   std::vector<uint32_t> sample_durations;
   std::vector<uint32_t> keyframes;
 
+  // Sample-to-Chunk mapping (stsc)
+  struct SampleToChunk {
+    uint32_t first_chunk;
+    uint32_t samples_per_chunk;
+    uint32_t sample_description_index;
+  };
+  std::vector<SampleToChunk> sample_to_chunk;
+
   while (ftell(this->file_) < end_pos) {
     long current_pos = ftell(this->file_);
 
@@ -1272,6 +1287,20 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
         keyframes.push_back(read_be32(this->file_));
       }
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
+    } else if (box_type == make_fourcc('s', 't', 's', 'c')) {
+      // Sample-to-Chunk table
+      ESP_LOGD(TAG, "  Reading stsc...");
+      fseek(this->file_, 4, SEEK_CUR);  // version/flags
+      uint32_t count = read_be32(this->file_);
+      sample_to_chunk.reserve(count);
+      for (uint32_t i = 0; i < count; i++) {
+        SampleToChunk entry;
+        entry.first_chunk = read_be32(this->file_);
+        entry.samples_per_chunk = read_be32(this->file_);
+        entry.sample_description_index = read_be32(this->file_);
+        sample_to_chunk.push_back(entry);
+      }
+      ESP_LOGD(TAG, "  stsc: %u entries", sample_to_chunk.size());
     }
 
     // Position to next box
@@ -1280,25 +1309,66 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGD(TAG, "  Positioned to next box at %ld", next_box_pos);
   }
 
-  // Build sample list (simplified - assumes 1 sample per chunk)
+  // Build sample list using stsc (Sample-to-Chunk) table
   if (is_video && !sample_sizes.empty()) {
-    ESP_LOGI(TAG, "Building video samples: sizes=%u, offsets=%u, durations=%u, keyframes=%u",
-             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size());
+    ESP_LOGI(TAG, "Building video samples: sizes=%u, chunks=%u, durations=%u, keyframes=%u, stsc_entries=%u",
+             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size(), sample_to_chunk.size());
 
+    // If no stsc, assume 1 sample per chunk (fallback)
+    if (sample_to_chunk.empty()) {
+      ESP_LOGW(TAG, "No stsc table found, assuming 1 sample per chunk");
+      sample_to_chunk.push_back({1, 1, 1});
+    }
+
+    // Calculate sample offsets using stsc table
+    uint32_t sample_index = 0;
     uint32_t timestamp = 0;
-    for (size_t i = 0; i < sample_sizes.size() && i < chunk_offsets.size(); i++) {
-      Mp4Sample sample;
-      sample.offset = chunk_offsets[i];
-      sample.size = sample_sizes[i];
-      sample.duration = (i < sample_durations.size()) ? sample_durations[i] : 1000;
-      sample.timestamp_ms = (timestamp * 1000) / this->video_timescale_;
-      sample.is_keyframe = keyframes.empty() ||
-                          std::find(keyframes.begin(), keyframes.end(), i + 1) != keyframes.end();
 
-      this->video_samples_.push_back(sample);
-      timestamp += sample.duration;
+    for (size_t chunk_idx = 0; chunk_idx < chunk_offsets.size() && sample_index < sample_sizes.size(); chunk_idx++) {
+      uint32_t chunk_number = chunk_idx + 1;  // Chunks are 1-indexed in MP4
+      uint32_t chunk_offset = chunk_offsets[chunk_idx];
+
+      // Find how many samples are in this chunk
+      uint32_t samples_in_this_chunk = 1;  // Default
+      for (size_t stsc_idx = 0; stsc_idx < sample_to_chunk.size(); stsc_idx++) {
+        if (chunk_number >= sample_to_chunk[stsc_idx].first_chunk) {
+          // Check if this is the last entry or if next entry starts later
+          if (stsc_idx + 1 >= sample_to_chunk.size() ||
+              chunk_number < sample_to_chunk[stsc_idx + 1].first_chunk) {
+            samples_in_this_chunk = sample_to_chunk[stsc_idx].samples_per_chunk;
+            break;
+          }
+        }
+      }
+
+      // Create samples for this chunk
+      uint32_t sample_offset_in_chunk = chunk_offset;
+      for (uint32_t j = 0; j < samples_in_this_chunk && sample_index < sample_sizes.size(); j++) {
+        Mp4Sample sample;
+        sample.offset = sample_offset_in_chunk;
+        sample.size = sample_sizes[sample_index];
+        sample.duration = (sample_index < sample_durations.size()) ? sample_durations[sample_index] : 1000;
+        sample.timestamp_ms = (timestamp * 1000) / this->video_timescale_;
+        sample.is_keyframe = keyframes.empty() ||
+                            std::find(keyframes.begin(), keyframes.end(), sample_index + 1) != keyframes.end();
+
+        this->video_samples_.push_back(sample);
+
+        // Next sample in this chunk starts after current sample
+        sample_offset_in_chunk += sample.size;
+        timestamp += sample.duration;
+        sample_index++;
+      }
     }
     this->total_frames_ = this->video_samples_.size();
+
+    // Diagnostic: Log first 10 sample offsets
+    ESP_LOGI(TAG, "First 10 samples after stsc processing:");
+    for (size_t i = 0; i < this->video_samples_.size() && i < 10; i++) {
+      ESP_LOGI(TAG, "  Sample %zu: offset=%u, size=%u, keyframe=%d",
+               i, this->video_samples_[i].offset, this->video_samples_[i].size,
+               this->video_samples_[i].is_keyframe);
+    }
 
     // Calculate total duration
     if (!this->video_samples_.empty()) {
@@ -1721,15 +1791,11 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     return false;
   }
 
-  ESP_LOGD(TAG, "decode_h264_frame_: input_size=%u, nal_length_size=%d, sps_pps_sent=%d, sps_size=%zu, pps_size=%zu",
-           this->input_size_, this->nal_length_size_, this->sps_pps_sent_, this->sps_.size(), this->pps_.size());
-
   // Convert AVCC to Annex-B format
   std::vector<uint8_t> annexb_data;
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
-    ESP_LOGD(TAG, "Prepending SPS (%zu bytes) and PPS (%zu bytes)", this->sps_.size(), this->pps_.size());
     // Start code
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
@@ -1748,6 +1814,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Convert NALUs
   size_t offset = 0;
+  int nalu_count = 0;
   while (offset + this->nal_length_size_ <= this->input_size_) {
     uint32_t nalu_len = 0;
     for (int i = 0; i < this->nal_length_size_; i++) {
@@ -1755,7 +1822,11 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     }
     offset += this->nal_length_size_;
 
-    if (offset + nalu_len > this->input_size_) break;
+    if (offset + nalu_len > this->input_size_) {
+      ESP_LOGW(TAG, "NALU length %u exceeds remaining data (%u bytes) at offset %zu",
+               nalu_len, this->input_size_ - offset, offset - this->nal_length_size_);
+      break;
+    }
 
     // Add start code
     annexb_data.push_back(0x00);
@@ -1766,13 +1837,11 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
                        this->input_buffer_ + offset,
                        this->input_buffer_ + offset + nalu_len);
     offset += nalu_len;
+    nalu_count++;
   }
 
-  ESP_LOGD(TAG, "AVCC to Annex-B conversion: %u input bytes → %zu annexb bytes",
-           this->input_size_, annexb_data.size());
-
   if (annexb_data.empty()) {
-    ESP_LOGW(TAG, "Annex-B data is empty after conversion!");
+    ESP_LOGW(TAG, "AVCC conversion failed: no NALUs found in %u bytes", this->input_size_);
     return false;
   }
 
@@ -2280,13 +2349,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
 
   MkvSample &sample = this->mkv_samples_[this->current_mkv_sample_];
 
-  ESP_LOGD(TAG, "Reading MKV sample %zu: offset=%llu, size=%u, track=%u, keyframe=%d",
-           this->current_mkv_sample_,
-           (unsigned long long)sample.offset,
-           sample.size,
-           sample.track_number,
-           sample.is_keyframe);
-
   // Mark if we need SPS/PPS before keyframe
   if (sample.is_keyframe) {
     this->sps_pps_sent_ = false;
@@ -2301,7 +2363,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   // Skip SimpleBlock header (track number, timecode, flags)
   // Track number is EBML variable-length integer (1-8 bytes)
   uint64_t track_num = this->read_ebml_vint_();
-  ESP_LOGD(TAG, "  Track number from block: %llu", (unsigned long long)track_num);
 
   // Skip relative timecode (2 bytes)
   fseek(this->file_, 2, SEEK_CUR);
@@ -2313,9 +2374,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   long frame_start = ftell(this->file_);
   uint32_t header_size = frame_start - header_start;
   uint32_t frame_size = sample.size - header_size;
-
-  ESP_LOGD(TAG, "  Header size: %u, Frame size: %u, Buffer size: %u",
-           header_size, frame_size, this->buffer_size_);
 
   if (frame_size > this->buffer_size_) {
     ESP_LOGW(TAG, "MKV sample too large: %u", frame_size);
@@ -2334,13 +2392,6 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
     ESP_LOGW(TAG, "Failed to read MKV sample: expected %u bytes, got %zu", frame_size, bytes_read);
     return false;
   }
-
-  ESP_LOGD(TAG, "  Successfully read %zu bytes. First 4 bytes: %02X %02X %02X %02X",
-           bytes_read,
-           this->input_buffer_[0],
-           this->input_buffer_[1],
-           this->input_buffer_[2],
-           this->input_buffer_[3]);
 
   this->input_size_ = frame_size;
   this->current_time_ms_ = sample.timestamp_ns / 1000000;
@@ -2366,7 +2417,13 @@ void SimpleVideoPlayer::update_display_() {
     return;
   }
 
-  // Only invalidate canvas to trigger redraw (buffer is already set in create_ui_)
+  // CRITICAL: Reset canvas buffer pointer EVERY frame to force LVGL refresh
+  // This is the pattern from lvgl_camera_display that ensures proper PSRAM access
+  // Without this, LVGL may cache the buffer and not detect content changes
+  lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
+                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+
+  // Invalidate to trigger redraw
   lv_obj_invalidate(this->canvas_);
 
   // Update UI controls only every 15 frames (~0.5 second at 30fps) to reduce overhead
@@ -2506,6 +2563,63 @@ void SimpleVideoPlayer::play() {
     return;
   }
 
+  // Check if HTTP buffer was freed (e.g., after stop()) and needs re-download
+  if (this->is_http_source_ && this->http_buffer_ == nullptr) {
+    ESP_LOGI(TAG, "HTTP buffer was freed, will re-download video in loop()");
+    this->http_download_pending_ = true;
+    this->initialization_complete_ = false;
+    this->auto_play_after_download_ = true;  // Auto-play after re-download
+    return;  // Download will happen in loop(), then play will resume automatically
+  }
+
+  // Check if decoder buffers were freed (after stop()) and need re-initialization
+  if (this->input_buffer_ == nullptr || this->rgb_buffer_ == nullptr) {
+    ESP_LOGI(TAG, "Decoder buffers were freed, re-initializing...");
+
+    // Re-allocate input buffer
+    if (this->input_buffer_ == nullptr) {
+      this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->input_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to re-allocate input buffer");
+        return;
+      }
+      ESP_LOGD(TAG, "Re-allocated input_buffer_: %zu bytes", this->buffer_size_);
+    }
+
+    // Re-allocate RGB buffer
+    if (this->rgb_buffer_ == nullptr) {
+      this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->rgb_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to re-allocate RGB buffer");
+        return;
+      }
+      ESP_LOGD(TAG, "Re-allocated rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+    }
+
+    // Re-initialize H.264 decoder if needed
+    if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MKV_H264) {
+      if (!this->h264_decoder_ready_) {
+        ESP_LOGI(TAG, "Re-initializing H.264 decoder...");
+        if (!this->init_h264_decoder_()) {
+          ESP_LOGE(TAG, "Failed to re-initialize H.264 decoder");
+          return;
+        }
+      }
+    }
+
+    // Re-initialize audio decoder if needed
+#if USE_ESP_AUDIO_CODEC
+    if (this->has_audio_ && !this->aac_decoder_ready_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to re-initialize AAC decoder");
+      }
+    }
+#endif
+  }
+
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       fseek(this->file_, 0, SEEK_SET);
@@ -2531,6 +2645,11 @@ void SimpleVideoPlayer::play() {
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
     lv_timer_resume(this->playback_timer_);
+  }
+
+  // Show loading spinner when starting playback (it will be hidden on first successful frame)
+  if (this->loading_spinner_ != nullptr) {
+    lv_obj_clear_flag(this->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
   }
 
   // Start auto-hide timer for controls
@@ -2607,7 +2726,90 @@ void SimpleVideoPlayer::stop() {
     lv_timer_pause(this->hide_timer_);
   }
 
-  ESP_LOGI(TAG, "Playback stopped");
+  // Free HTTP buffer to reclaim SPIRAM when stopping
+  if (this->is_http_source_ && this->http_buffer_ != nullptr) {
+    ESP_LOGI(TAG, "Freeing HTTP buffer (%zu bytes from SPIRAM)", this->http_buffer_size_);
+
+    // Close FILE* first since it points to the buffer
+    if (this->file_ != nullptr) {
+      fclose(this->file_);
+      this->file_ = nullptr;
+    }
+
+    // Free the buffer
+    heap_caps_free(this->http_buffer_);
+    this->http_buffer_ = nullptr;
+    this->http_buffer_size_ = 0;
+  }
+
+  // Free decoder buffers to reclaim SPIRAM
+  ESP_LOGI(TAG, "Freeing decoder buffers from SPIRAM...");
+  size_t total_freed = 0;
+
+  // Free H.264 input buffer
+  if (this->input_buffer_ != nullptr) {
+    total_freed += this->buffer_size_;
+    heap_caps_free(this->input_buffer_);
+    this->input_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed input_buffer_: %zu bytes", this->buffer_size_);
+  }
+
+  // Free RGB output buffer
+  if (this->rgb_buffer_ != nullptr) {
+    total_freed += this->rgb_buffer_size_;
+    heap_caps_free(this->rgb_buffer_);
+    this->rgb_buffer_ = nullptr;
+    this->rgb_buffer_size_ = 0;
+    ESP_LOGD(TAG, "  Freed rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+  }
+
+  // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
+  if (!this->yuv_buffer_.empty()) {
+    size_t yuv_size = this->yuv_buffer_.size();
+    total_freed += yuv_size;
+    this->yuv_buffer_.clear();
+    this->yuv_buffer_.shrink_to_fit();  // Force memory release
+    ESP_LOGD(TAG, "  Freed yuv_buffer_: %zu bytes", yuv_size);
+  }
+
+  // Free audio buffers
+  if (this->audio_input_buffer_ != nullptr) {
+    total_freed += 8192;
+    heap_caps_free(this->audio_input_buffer_);
+    this->audio_input_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
+  }
+
+  if (this->audio_output_buffer_ != nullptr) {
+    total_freed += 16384;
+    heap_caps_free(this->audio_output_buffer_);
+    this->audio_output_buffer_ = nullptr;
+    ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
+  }
+
+  // Close AAC decoder
+#if USE_ESP_AUDIO_CODEC
+  if (this->aac_decoder_ != nullptr) {
+    esp_audio_dec_close(this->aac_decoder_);
+    this->aac_decoder_ = nullptr;
+    this->aac_decoder_ready_ = false;
+    ESP_LOGD(TAG, "  Closed AAC decoder");
+  }
+#endif
+
+  // Close H.264 decoder (CRITICAL for SPIRAM release!)
+  if (this->h264_decoder_ != nullptr) {
+    ESP_LOGI(TAG, "Closing H.264 decoder to free internal SPIRAM buffers...");
+    esp_h264_dec_close(this->h264_decoder_);
+    esp_h264_dec_del(this->h264_decoder_);
+    this->h264_decoder_ = nullptr;
+    this->h264_decoder_ready_ = false;
+    ESP_LOGD(TAG, "  Closed and deleted H.264 decoder");
+  }
+
+  ESP_LOGI(TAG, "Playback stopped - freed %zu bytes (%.2f MB) from SPIRAM",
+           total_freed, total_freed / (1024.0 * 1024.0));
+  ESP_LOGI(TAG, "NOTE: H.264 decoder also freed internal SPIRAM (amount not tracked)");
 }
 
 // Static callbacks
@@ -2661,15 +2863,29 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
   // Log timing for performance debugging (only every 30 frames to avoid spam)
   static int callback_count = 0;
+  static uint32_t fps_measure_start = 0;
+  static int fps_frame_count = 0;
+
   if (callback_count++ % 30 == 0) {
     uint32_t actual_interval = current_time - last_callback_time;
-    ESP_LOGI(TAG, "Timer callback: actual interval=%lu ms, configured=%lu ms",
-             (unsigned long)actual_interval, (unsigned long)player->frame_interval_);
+
+    // Calculate actual FPS over last 30 frames
+    if (fps_measure_start > 0) {
+      uint32_t time_elapsed = current_time - fps_measure_start;
+      float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
+      ESP_LOGI(TAG, "📊 Performance: %.2f FPS | decode time shown below | target: %.0f FPS",
+               actual_fps, 1000.0f / player->frame_interval_);
+    }
+
+    // Reset FPS measurement
+    fps_measure_start = current_time;
+    fps_frame_count = 0;
   }
+  fps_frame_count++;
   last_callback_time = current_time;
 
   bool got_frame = false;
-  static bool first_frame_received = false;
+  bool end_of_stream = false;  // True only when we've exhausted all samples
 
   if (player->format_ == MediaFormat::MJPEG) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
@@ -2697,11 +2913,16 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           ESP_LOGI(TAG, "MJPEG decode time: %lu ms", (unsigned long)decode_time);
         }
       }
+      // If decode fails, we just skip this frame and try next one
+    } else {
+      // read_next_mjpeg_frame_() returned false = reached end
+      end_of_stream = true;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
     if (player->read_next_mp4_sample_()) {
+      // Sample read successfully, try to decode
       if (player->decode_h264_frame_()) {
         // Update current time from video sample timestamp
         if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
@@ -2710,23 +2931,39 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         player->update_display_();
         got_frame = true;
 
+        // Reset error counter on success
+        static int consecutive_decode_errors = 0;
+        consecutive_decode_errors = 0;
+
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
         if (callback_count % 30 == 0) {
           ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
+      } else {
+        // Decode failed, but we can continue to next frame
+        static int consecutive_decode_errors = 0;
+        consecutive_decode_errors++;
+
+        if (consecutive_decode_errors <= 5) {
+          ESP_LOGE(TAG, "❌ Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
+                   player->current_video_sample_ - 1, consecutive_decode_errors);
+        } else if (consecutive_decode_errors == 10) {
+          ESP_LOGE(TAG, "❌ 10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
+        } else if (consecutive_decode_errors % 30 == 0) {
+          ESP_LOGE(TAG, "❌ Still failing: %d consecutive decode errors", consecutive_decode_errors);
+        }
+        // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
       }
+    } else {
+      // read_next_mp4_sample_() returned false = reached end of video
+      end_of_stream = true;
     }
     // Process audio
     player->process_audio_();
   } else if (player->format_ == MediaFormat::MKV_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
-    ESP_LOGD(TAG, "MKV timer callback: current_sample=%zu, total_samples=%zu",
-             player->current_mkv_sample_, player->mkv_samples_.size());
-
     if (player->read_next_mkv_sample_()) {
-      ESP_LOGD(TAG, "MKV sample read successfully, input_size=%u, decoding...", player->input_size_);
-
       if (player->decode_h264_frame_()) {
         // Update current time from MKV sample timestamp
         if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
@@ -2740,42 +2977,36 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
         }
       } else {
-        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu", player->current_mkv_sample_ - 1);
+        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);
+        // Decode failed, but we can continue to next frame
       }
     } else {
-      ESP_LOGD(TAG, "MKV read_next_sample returned false");
+      // read_next_mkv_sample_() returned false = reached end of video
+      ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
+      end_of_stream = true;
     }
     // Process audio
     player->process_audio_();
   }
 
   // Hide loading spinner after first frame
-  if (got_frame && !first_frame_received) {
-    first_frame_received = true;
-    if (player->loading_spinner_ != nullptr) {
-      lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
-    }
+  // Use player member variable instead of static to properly reset on replay
+  if (got_frame && player->loading_spinner_ != nullptr) {
+    // Hide spinner on any successful frame display
+    lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
   }
 
-  if (!got_frame) {
+  // Only stop if we've reached the actual end of the video stream
+  // Not just because a single frame failed to decode!
+  if (end_of_stream) {
     // End of video
     if (!player->loop_) {
+      ESP_LOGI(TAG, "Reached end of video, stopping playback");
       player->stop();
 
-      // Free HTTP buffer to reclaim SPIRAM memory
-      if (player->is_http_source_ && player->http_buffer_ != nullptr) {
-        ESP_LOGI(TAG, "Video finished - freeing HTTP buffer (%zu bytes from SPIRAM)",
-                 player->http_buffer_size_);
-        heap_caps_free(player->http_buffer_);
-        player->http_buffer_ = nullptr;
-        player->http_buffer_size_ = 0;
-
-        // Close the FILE* since it was pointing to freed memory
-        if (player->file_ != nullptr) {
-          fclose(player->file_);
-          player->file_ = nullptr;
-        }
-      }
+      // NOTE: We do NOT free the HTTP buffer here to allow replay
+      // Buffer will be freed when opening a new video or when component is destroyed
+      // If you want to free memory immediately after playback, call stop() manually
     }
   }
 }
