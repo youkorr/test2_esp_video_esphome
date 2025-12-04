@@ -8,6 +8,7 @@
 
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
+#include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUV→RGB
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"
 
@@ -167,6 +168,11 @@ class SimpleVideoPlayer : public Component {
   bool decode_audio_frame_();
   void process_audio_();
 
+  // PPA hardware YUV→RGB conversion (replaces software converter)
+  bool init_ppa_color_converter_();
+  void cleanup_ppa_color_converter_();
+  bool apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
+
   void convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
 
   bool download_http_file_(const char *url);  // Download HTTP/HTTPS file to SPIRAM
@@ -251,7 +257,11 @@ class SimpleVideoPlayer : public Component {
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
   bool h264_decoder_ready_{false};
-  YuvRgbConverter *yuv_converter_{nullptr};  // Optimized YUV→RGB with BT.709 support
+  YuvRgbConverter *yuv_converter_{nullptr};  // Software fallback (kept for compatibility)
+
+  // PPA hardware acceleration for YUV→RGB conversion
+  ppa_client_handle_t ppa_client_handle_{nullptr};
+  bool ppa_color_convert_enabled_{false};
 
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;
