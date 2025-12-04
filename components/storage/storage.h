@@ -141,13 +141,28 @@ class SdImageComponent : public Component, public image::Image {
   std::vector<uint8_t> image_buffer_;
   bool image_loaded_{false};
   bool auto_load_{true};
-  
+
   // Image properties - locales
   int image_width_{0};
   int image_height_{0};
   int resize_width_{0};
   int resize_height_{0};
   ImageFormat format_{ImageFormat::RGB565};
+
+  // GIF animation support
+  struct GifFrame {
+    std::vector<uint8_t> pixels;  // RGB565 pixel data for this frame
+    uint16_t delay_ms;             // Delay before next frame in milliseconds
+    uint16_t left, top;            // Frame position
+    uint16_t width, height;        // Frame dimensions
+    uint8_t disposal_method;       // How to dispose of frame (0-3)
+  };
+  std::vector<GifFrame> gif_frames_;
+  size_t current_gif_frame_{0};
+  bool is_gif_animated_{false};
+  uint32_t last_frame_time_{0};
+
+  static const size_t MAX_GIF_FRAMES = 30;  // Limit to prevent memory exhaustion
 
  private:
   // Retry logic for image loading
