@@ -1060,21 +1060,6 @@ bool SimpleVideoPlayer::extract_mp4_resolution_() {
 // JPEG/MJPEG DECODER
 // ==============================================
 
-bool SimpleVideoPlayer::init_jpeg_decoder_() {
-  jpeg_decode_engine_cfg_t cfg = {
-    .intr_priority = 0,
-    .timeout_ms = 20,
-  };
-
-  esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to create JPEG decoder: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  return true;
-}
-
 bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   if (this->file_ == nullptr) {
     return false;
