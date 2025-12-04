@@ -907,12 +907,16 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
       // Read local color table if present
       if (has_local_palette) {
         size_t local_palette_bytes = local_palette_size * 3;
+        ESP_LOGI(TAG_IMAGE, "Reading local palette: %zu colors (%zu bytes)", local_palette_size, local_palette_bytes);
         if (pos + local_palette_bytes > gif_data.size()) {
-          ESP_LOGE(TAG_IMAGE, "GIF data truncated (local palette)");
+          ESP_LOGE(TAG_IMAGE, "GIF data truncated (local palette): need %zu bytes, have %zu remaining",
+                   local_palette_bytes, gif_data.size() - pos);
           return false;
         }
         local_palette.assign(gif_data.begin() + pos, gif_data.begin() + pos + local_palette_bytes);
         pos += local_palette_bytes;
+        ESP_LOGI(TAG_IMAGE, "Local palette read successfully, first color: R=%d G=%d B=%d",
+                 local_palette[0], local_palette[1], local_palette[2]);
       }
 
       // Read LZW minimum code size
@@ -964,6 +968,13 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
   if (palette.empty()) {
     ESP_LOGE(TAG_IMAGE, "No color palette available");
     return false;
+  }
+
+  ESP_LOGI(TAG_IMAGE, "Using %s palette with %zu colors",
+           local_palette.empty() ? "global" : "local", palette.size() / 3);
+  if (palette.size() >= 6) {
+    ESP_LOGD(TAG_IMAGE, "Palette first 2 colors: [0]R=%d G=%d B=%d, [1]R=%d G=%d B=%d",
+             palette[0], palette[1], palette[2], palette[3], palette[4], palette[5]);
   }
 
   // Set image dimensions (use resize if specified, otherwise use GIF dimensions)
@@ -1086,6 +1097,14 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 
   // Convert palette indices to RGB565
   ESP_LOGI(TAG_IMAGE, "Converting palette indices to RGB565...");
+
+  // Debug: Show first 10 decoded indices
+  if (decoded_indices.size() >= 10) {
+    ESP_LOGD(TAG_IMAGE, "First 10 palette indices: %d %d %d %d %d %d %d %d %d %d",
+             decoded_indices[0], decoded_indices[1], decoded_indices[2], decoded_indices[3],
+             decoded_indices[4], decoded_indices[5], decoded_indices[6], decoded_indices[7],
+             decoded_indices[8], decoded_indices[9]);
+  }
 
   for (int y = 0; y < this->image_height_; y++) {
     for (int x = 0; x < this->image_width_; x++) {
