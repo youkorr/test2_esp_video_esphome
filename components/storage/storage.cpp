@@ -963,15 +963,29 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     return false;
   }
 
-  // Choose palette (local overrides global)
-  const std::vector<uint8_t> &palette = local_palette.empty() ? global_palette : local_palette;
-  if (palette.empty()) {
+  // Choose palette (local overrides global, but prefer global if local is too small/monochrome)
+  const std::vector<uint8_t> *palette_ptr = nullptr;
+
+  // If local palette is very small (< 16 colors), it's probably just a background frame
+  // Better to use the global palette which has more colors
+  if (!local_palette.empty() && local_palette.size() / 3 >= 16) {
+    palette_ptr = &local_palette;
+    ESP_LOGI(TAG_IMAGE, "Using local palette with %zu colors", local_palette.size() / 3);
+  } else if (!global_palette.empty()) {
+    palette_ptr = &global_palette;
+    if (!local_palette.empty()) {
+      ESP_LOGW(TAG_IMAGE, "Local palette too small (%zu colors), using global palette (%zu colors) instead",
+               local_palette.size() / 3, global_palette.size() / 3);
+    } else {
+      ESP_LOGI(TAG_IMAGE, "Using global palette with %zu colors", global_palette.size() / 3);
+    }
+  } else {
     ESP_LOGE(TAG_IMAGE, "No color palette available");
     return false;
   }
 
-  ESP_LOGI(TAG_IMAGE, "Using %s palette with %zu colors",
-           local_palette.empty() ? "global" : "local", palette.size() / 3);
+  const std::vector<uint8_t> &palette = *palette_ptr;
+
   if (palette.size() >= 6) {
     ESP_LOGD(TAG_IMAGE, "Palette first 2 colors: [0]R=%d G=%d B=%d, [1]R=%d G=%d B=%d",
              palette[0], palette[1], palette[2], palette[3], palette[4], palette[5]);
