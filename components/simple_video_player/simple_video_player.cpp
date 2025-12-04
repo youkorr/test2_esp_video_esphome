@@ -590,17 +590,27 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
   if (content_length <= 0) {
     ESP_LOGW(TAG, "Content-Length not provided by server (got %d). Will download with dynamic buffering.", content_length);
 
-    // Download without knowing size - use dynamic buffer
-    std::vector<uint8_t> temp_buffer;
-    temp_buffer.reserve(1024 * 1024);  // Reserve 1MB initially
+    // CRITICAL FIX: Allocate directly in SPIRAM to avoid double-allocation
+    // Start with 1MB, will grow with realloc as needed
+    size_t buffer_capacity = 1024 * 1024;  // Start with 1MB
+    size_t total_downloaded = 0;
+
+    this->http_buffer_ = (uint8_t *)heap_caps_malloc(buffer_capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (this->http_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate initial %zu KB in SPIRAM", buffer_capacity / 1024);
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return false;
+    }
 
     uint8_t chunk[4096];
-    size_t total_downloaded = 0;
 
     while (true) {
       int read_len = esp_http_client_read(client, (char *)chunk, sizeof(chunk));
       if (read_len < 0) {
         ESP_LOGE(TAG, "HTTP read error");
+        heap_caps_free(this->http_buffer_);
+        this->http_buffer_ = nullptr;
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return false;
@@ -610,20 +620,43 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
         break;  // End of stream
       }
 
-      // Append to buffer
-      temp_buffer.insert(temp_buffer.end(), chunk, chunk + read_len);
-      total_downloaded += read_len;
+      // Check if we need to grow the buffer
+      if (total_downloaded + read_len > buffer_capacity) {
+        // Grow buffer by 1MB at a time
+        size_t new_capacity = buffer_capacity + (1024 * 1024);
 
-      // Check size limit during download
-      if (total_downloaded > this->max_http_file_size_) {
-        ESP_LOGE(TAG, "❌ Download exceeded maximum size: %zu bytes (%.2f MB)",
-                 total_downloaded, total_downloaded / 1048576.0f);
-        ESP_LOGE(TAG, "   Maximum allowed: %zu MB", this->max_http_file_size_ / 1048576);
-        ESP_LOGE(TAG, "   Aborting download to prevent memory exhaustion!");
-        esp_http_client_close(client);
-        esp_http_client_cleanup(client);
-        return false;
+        // Check size limit BEFORE reallocating
+        if (new_capacity > this->max_http_file_size_) {
+          ESP_LOGE(TAG, "❌ Download would exceed maximum size: %zu MB",
+                   new_capacity / 1048576);
+          ESP_LOGE(TAG, "   Maximum allowed: %zu MB", this->max_http_file_size_ / 1048576);
+          ESP_LOGE(TAG, "   Aborting download to prevent memory exhaustion!");
+          heap_caps_free(this->http_buffer_);
+          this->http_buffer_ = nullptr;
+          esp_http_client_close(client);
+          esp_http_client_cleanup(client);
+          return false;
+        }
+
+        uint8_t *new_buffer = (uint8_t *)heap_caps_realloc(this->http_buffer_, new_capacity,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (new_buffer == nullptr) {
+          ESP_LOGE(TAG, "Failed to grow buffer to %zu MB in SPIRAM", new_capacity / 1048576);
+          heap_caps_free(this->http_buffer_);
+          this->http_buffer_ = nullptr;
+          esp_http_client_close(client);
+          esp_http_client_cleanup(client);
+          return false;
+        }
+
+        this->http_buffer_ = new_buffer;
+        buffer_capacity = new_capacity;
+        ESP_LOGD(TAG, "Grew SPIRAM buffer to %zu MB", buffer_capacity / 1048576);
       }
+
+      // Copy chunk directly to SPIRAM buffer
+      memcpy(this->http_buffer_ + total_downloaded, chunk, read_len);
+      total_downloaded += read_len;
 
       // Log progress every 100KB
       if (total_downloaded % (100 * 1024) == 0 || total_downloaded < 4096) {
@@ -636,24 +669,26 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
 
     if (total_downloaded == 0) {
       ESP_LOGE(TAG, "No data downloaded from server");
+      heap_caps_free(this->http_buffer_);
+      this->http_buffer_ = nullptr;
       return false;
     }
 
-    ESP_LOGI(TAG, "✓ Downloaded %zu bytes (%.2f MB) without Content-Length",
-             total_downloaded, total_downloaded / 1048576.0f);
-
-    // Allocate final buffer in SPIRAM
-    this->http_buffer_ = (uint8_t *)heap_caps_malloc(total_downloaded, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (this->http_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to allocate %zu bytes in SPIRAM", total_downloaded);
-      return false;
+    // Shrink buffer to actual size to free unused SPIRAM
+    if (total_downloaded < buffer_capacity) {
+      uint8_t *final_buffer = (uint8_t *)heap_caps_realloc(this->http_buffer_, total_downloaded,
+                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (final_buffer != nullptr) {
+        this->http_buffer_ = final_buffer;
+        ESP_LOGD(TAG, "Shrunk buffer to actual size: %zu bytes", total_downloaded);
+      }
+      // If realloc fails, keep the larger buffer - not critical
     }
 
-    // Copy data to SPIRAM
-    memcpy(this->http_buffer_, temp_buffer.data(), total_downloaded);
     this->http_buffer_size_ = total_downloaded;
 
-    ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes", total_downloaded);
+    ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes (%.2f MB) in SPIRAM",
+             total_downloaded, total_downloaded / 1048576.0f);
     return true;
   }
 
