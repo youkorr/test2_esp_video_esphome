@@ -1289,18 +1289,20 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
     } else if (box_type == make_fourcc('s', 't', 's', 'c')) {
       // Sample-to-Chunk table
-      ESP_LOGD(TAG, "  Reading stsc...");
+      ESP_LOGI(TAG, "  Reading stsc (Sample-to-Chunk)...");
       fseek(this->file_, 4, SEEK_CUR);  // version/flags
       uint32_t count = read_be32(this->file_);
       sample_to_chunk.reserve(count);
+      ESP_LOGI(TAG, "  stsc has %u entries:", count);
       for (uint32_t i = 0; i < count; i++) {
         SampleToChunk entry;
         entry.first_chunk = read_be32(this->file_);
         entry.samples_per_chunk = read_be32(this->file_);
         entry.sample_description_index = read_be32(this->file_);
         sample_to_chunk.push_back(entry);
+        ESP_LOGI(TAG, "    Entry %u: first_chunk=%u, samples_per_chunk=%u",
+                 i, entry.first_chunk, entry.samples_per_chunk);
       }
-      ESP_LOGD(TAG, "  stsc: %u entries", sample_to_chunk.size());
     }
 
     // Position to next box
@@ -1324,6 +1326,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     uint32_t sample_index = 0;
     uint32_t timestamp = 0;
 
+    // Log chunk-to-sample mapping for first few chunks (diagnostic)
+    bool log_chunks = chunk_offsets.size() <= 10;
+
     for (size_t chunk_idx = 0; chunk_idx < chunk_offsets.size() && sample_index < sample_sizes.size(); chunk_idx++) {
       uint32_t chunk_number = chunk_idx + 1;  // Chunks are 1-indexed in MP4
       uint32_t chunk_offset = chunk_offsets[chunk_idx];
@@ -1341,8 +1346,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
         }
       }
 
+      if (log_chunks) {
+        ESP_LOGI(TAG, "Chunk %u: offset=%u, samples_in_chunk=%u, starting_sample_idx=%u",
+                 chunk_number, chunk_offset, samples_in_this_chunk, sample_index);
+      }
+
       // Create samples for this chunk
       uint32_t sample_offset_in_chunk = chunk_offset;
+      uint32_t samples_created_in_chunk = 0;
       for (uint32_t j = 0; j < samples_in_this_chunk && sample_index < sample_sizes.size(); j++) {
         Mp4Sample sample;
         sample.offset = sample_offset_in_chunk;
@@ -1358,9 +1369,25 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
         sample_offset_in_chunk += sample.size;
         timestamp += sample.duration;
         sample_index++;
+        samples_created_in_chunk++;
+      }
+
+      if (log_chunks && samples_created_in_chunk != samples_in_this_chunk) {
+        ESP_LOGW(TAG, "  Warning: Created %u samples but expected %u (hit end of sample_sizes)",
+                 samples_created_in_chunk, samples_in_this_chunk);
       }
     }
     this->total_frames_ = this->video_samples_.size();
+
+    // Verify all samples were created
+    if (sample_index < sample_sizes.size()) {
+      ESP_LOGW(TAG, "⚠️  WARNING: Only created %u samples out of %u total!",
+               sample_index, sample_sizes.size());
+      ESP_LOGW(TAG, "   This means some samples are missing (chunks exhausted before samples)");
+    } else {
+      ESP_LOGI(TAG, "✅ Successfully created all %u samples from %zu chunks",
+               sample_index, chunk_offsets.size());
+    }
 
     // Diagnostic: Log first 10 sample offsets
     ESP_LOGI(TAG, "First 10 samples after stsc processing:");
@@ -1823,8 +1850,24 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     offset += this->nal_length_size_;
 
     if (offset + nalu_len > this->input_size_) {
-      ESP_LOGW(TAG, "NALU length %u exceeds remaining data (%u bytes) at offset %zu",
-               nalu_len, this->input_size_ - offset, offset - this->nal_length_size_);
+      ESP_LOGE(TAG, "❌ CORRUPT SAMPLE DETECTED!");
+      ESP_LOGE(TAG, "   NALU length %u exceeds remaining data (%u bytes)",
+               nalu_len, this->input_size_ - offset);
+      ESP_LOGE(TAG, "   This usually means MP4 sample offset is WRONG!");
+      ESP_LOGE(TAG, "   Sample #%u: offset=%u, size=%u",
+               this->current_video_sample_ - 1,
+               this->video_samples_[this->current_video_sample_ - 1].offset,
+               this->video_samples_[this->current_video_sample_ - 1].size);
+
+      // Check if we're reading from a valid position
+      if (nalu_len > 100000000) {  // > 100MB is definitely corrupt
+        ESP_LOGE(TAG, "   NALU length is impossibly large (%u bytes = %.1f MB)",
+                 nalu_len, nalu_len / 1048576.0f);
+        ESP_LOGE(TAG, "   First 16 bytes of sample data:");
+        for (int i = 0; i < 16 && i < this->input_size_; i++) {
+          ESP_LOGE(TAG, "     [%d] = 0x%02X", i, this->input_buffer_[i]);
+        }
+      }
       break;
     }
 
