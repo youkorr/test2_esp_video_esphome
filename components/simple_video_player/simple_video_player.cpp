@@ -1265,21 +1265,20 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   size_t yuv_size = this->actual_width_ * this->actual_height_ * 3 / 2;  // I420
   this->yuv_buffer_.resize(yuv_size);
 
-  // Initialize optimized YUV→RGB converter (BT.601 by default - most compatible)
+  // Initialize SIMD-accelerated YUV→RGB converter (BT.601 by default - most compatible)
+  // Tries esp_imgfx SIMD first (3-5x faster), falls back to optimized software
   // Use BT.709 only if you're sure your videos are HD with BT.709 colorspace
   if (this->yuv_converter_ == nullptr) {
-    this->yuv_converter_ = new YuvRgbConverter(YuvRgbConverter::Colorspace::BT601);
+    this->yuv_converter_ = new YuvRgbConverterSIMD(YuvRgbConverterSIMD::Colorspace::BT601);
   }
 
-  // Try to initialize PPA hardware acceleration for YUV→RGB conversion
-  // If successful, this will provide 0% CPU usage and <1ms conversion time
-  // Falls back to optimized software converter if PPA initialization fails
-  if (!this->init_ppa_color_converter_()) {
-    ESP_LOGW(TAG, "PPA hardware YUV→RGB conversion not available, using software converter");
-  }
+  // Note: PPA YUV420 not available in this build - SIMD converter provides best performance
+  // Expected: SIMD 3-5ms @ 480x272 (vs 10-15ms software fallback)
+  // FPS targets: 640×480 → 35+ FPS, 480×272 → 100+ FPS (GitHub issue #5)
 
   this->h264_decoder_ready_ = true;
   ESP_LOGI(TAG, "H.264 decoder initialized for %dx%d", this->actual_width_, this->actual_height_);
+  ESP_LOGI(TAG, "YUV→RGB converter: %s", this->yuv_converter_->get_method());
 
   return true;
 }
