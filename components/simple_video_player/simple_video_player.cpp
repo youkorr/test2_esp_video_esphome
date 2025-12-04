@@ -790,12 +790,22 @@ bool SimpleVideoPlayer::open_video_file_() {
 MediaFormat SimpleVideoPlayer::detect_format_() {
   if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
 
-  uint8_t header[8];
-  if (fread(header, 1, 8, this->file_) != 8) {
+  uint8_t header[12];
+  size_t read_size = fread(header, 1, 12, this->file_);
+  if (read_size < 8) {
     fseek(this->file_, 0, SEEK_SET);
     return MediaFormat::UNKNOWN;
   }
   fseek(this->file_, 0, SEEK_SET);
+
+  // Check for AVI/RIFF header (RIFF....AVI )
+  // AVI format: "RIFF" [4 bytes size] "AVI " [rest of file]
+  if (read_size >= 12 &&
+      header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F' &&
+      header[8] == 'A' && header[9] == 'V' && header[10] == 'I' && header[11] == ' ') {
+    ESP_LOGI(TAG, "Detected AVI container (RIFF format)");
+    return MediaFormat::MJPEG;  // AVI typically contains MJPEG
+  }
 
   // Check for Matroska/MKV EBML header (0x1A45DFA3)
   if (header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3) {
