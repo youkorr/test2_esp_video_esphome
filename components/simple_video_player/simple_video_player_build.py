@@ -67,82 +67,28 @@ else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
 
-# Link esp_image_effects SIMD library (Hardware-accelerated YUV→RGB)
-
+# Link esp_image_effects SIMD library
 # ========================================================================
-
 esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
-
 if os.path.exists(esp_imgfx_dir):
-
     # Enable SIMD YUV→RGB conversion
-
     env.Append(CPPDEFINES=[("USE_ESP_IMAGE_EFFECTS", "1")])
-
-    print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
-
- 
-
+    
     # Add include paths
-
     imgfx_inc = os.path.join(esp_imgfx_dir, "include")
-
     if os.path.exists(imgfx_inc):
-
         env.Append(CPPPATH=[imgfx_inc])
-
-        print("[Simple Video Player] Added esp_imgfx include path")
-
- 
-
-    # Add library path and link library for ESP32-P4
-
-    imgfx_lib_dir = os.path.join(esp_imgfx_dir, "lib", "esp32p4")
-
-    imgfx_lib = os.path.join(imgfx_lib_dir, "libesp_image_effects.a")
-
- 
-
+    
+    # Add library if needed
+    imgfx_lib = os.path.join(esp_imgfx_dir, "lib", "esp32p4", "libesp_image_effects.a")
     if os.path.exists(imgfx_lib):
-
-        print(f"[Simple Video Player] Found esp_image_effects library: {imgfx_lib}")
-
- 
-
-        # Add library path
-
-        env.Append(LIBPATH=[imgfx_lib_dir])
-
- 
-
-        # Force linking with --whole-archive
-
-        env.Append(LINKFLAGS=[
-
-            "-Wl,--whole-archive",
-
-            imgfx_lib,
-
-            "-Wl,--no-whole-archive"
-
-        ])
-
- 
-
-        print("[Simple Video Player] ✓ Linked esp_image_effects library (with --whole-archive)")
-
-        print("[Simple Video Player]   Expected: 3-5x faster YUV→RGB conversion (3-5ms vs 10-15ms)")
-
-        print("[Simple Video Player]   FPS boost: 640×480 → 35+ FPS, 480×272 → 100+ FPS")
-
-    else:
-
-        print(f"[Simple Video Player] ⚠️  esp_image_effects library not found: {imgfx_lib}")
-
+        env.Append(LIBPATH=[os.path.dirname(imgfx_lib)])
+        env.Append(LIBS=["esp_image_effects"])
+    
+    print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
+    print("[Simple Video Player]   Expected: 3-5x faster conversion (3-5ms vs 10-15ms)")
 else:
-
-    print(f"[Simple Video Player] ⚠️  esp_image_effects component not found")
-
+    print("[Simple Video Player] ⚠️  esp_image_effects component not found")
 
 # ========================================================================
 # Link audio codec library (esp_audio_codec)
