@@ -45,7 +45,8 @@ enum class MediaFormat {
   UNKNOWN,
   MJPEG,
   MP4_H264,
-  MKV_H264
+  MKV_H264,
+  GIF_ANIMATED
 };
 
 struct Mp4Sample {
@@ -114,6 +115,11 @@ class SimpleVideoPlayer : public Component {
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
+
+  bool init_gif_decoder_();
+  bool parse_gif_header_();
+  bool read_next_gif_frame_();
+  bool decode_gif_frame_();
 
   bool init_h264_decoder_();
   bool parse_mp4_();
@@ -213,6 +219,27 @@ class SimpleVideoPlayer : public Component {
   lv_img_dsc_t frame_img_dsc_{};
 
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+
+  // GIF decoder data
+  struct GifFrame {
+    uint32_t offset;         // File offset of frame data
+    uint32_t size;           // Size of compressed data
+    uint16_t delay_ms;       // Delay in milliseconds
+    uint16_t left, top;      // Frame position
+    uint16_t width, height;  // Frame dimensions
+    bool has_transparency;   // Has transparent color
+    uint8_t transparent_idx; // Transparent color index
+    uint8_t disposal_method; // Frame disposal method
+  };
+  std::vector<GifFrame> gif_frames_;
+  size_t current_gif_frame_{0};
+  uint16_t gif_width_{0};
+  uint16_t gif_height_{0};
+  std::vector<uint8_t> gif_global_palette_;  // 256 colors × 3 bytes (RGB)
+  std::vector<uint8_t> gif_frame_buffer_;    // Decoded frame data (indexes)
+  uint16_t gif_background_color_{0};
+  bool gif_has_global_palette_{false};
+  bool gif_decoder_ready_{false};
 
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
