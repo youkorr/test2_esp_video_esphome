@@ -11,6 +11,12 @@
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"
 
+// TODO: ESP-GMF will be added later
+// #include "esp_gmf_element.h"
+// #include "esp_gmf_pipeline.h"
+// #include "esp_gmf_pool.h"
+// #include "gmf_vid_dec.h"
+
 extern "C" {
 #include "esp_h264_dec.h"
 #include "esp_h264_dec_sw.h"
@@ -218,6 +224,7 @@ class SimpleVideoPlayer : public Component {
 
   lv_img_dsc_t frame_img_dsc_{};
 
+  // JPEG decoder (hardware)
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
   // GIF decoder data

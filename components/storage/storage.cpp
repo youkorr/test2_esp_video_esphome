@@ -6,6 +6,11 @@
 #include <errno.h>
 #include <algorithm>
 
+// LVGL integration for triggering display updates
+#ifdef USE_LVGL
+#include "esphome/components/lvgl/lvgl_esphome.h"
+#endif
+
 // Include yield function for ESP32/ESP8266
 #ifdef ESP32
 #include <freertos/FreeRTOS.h>
@@ -162,7 +167,51 @@ void SdImageComponent::setup() {
 }
 
 void SdImageComponent::loop() {
-  // Nothing to do in loop
+  // Handle GIF animation
+  if (!this->is_gif_animated_ || this->gif_frames_.empty()) {
+    return;  // Not an animated GIF or no frames
+  }
+
+  // Check if it's time to advance to next frame
+  uint32_t now = millis();
+
+  // Initialize last_frame_time_ on first call
+  if (this->last_frame_time_ == 0) {
+    this->last_frame_time_ = now;
+    return;
+  }
+
+  const GifFrame &current_frame = this->gif_frames_[this->current_gif_frame_];
+  uint32_t elapsed = now - this->last_frame_time_;
+
+  if (elapsed >= current_frame.delay_ms) {
+    // Advance to next frame
+    this->current_gif_frame_++;
+    if (this->current_gif_frame_ >= this->gif_frames_.size()) {
+      this->current_gif_frame_ = 0;  // Loop back to first frame
+    }
+
+    // Copy new frame to image_buffer_
+    const GifFrame &next_frame = this->gif_frames_[this->current_gif_frame_];
+    memcpy(this->image_buffer_.data(), next_frame.pixels.data(), this->image_buffer_.size());
+
+    // Update base Image class pointer
+    this->data_start_ = this->image_buffer_.data();
+
+    // Update timestamp
+    this->last_frame_time_ = now;
+
+    // Trigger LVGL display update so the new frame is rendered
+    #ifdef USE_LVGL
+    // Schedule a display refresh to show the new frame
+    lv_refr_now(NULL);
+    #endif
+
+    // Log frame change (only occasionally to avoid spam)
+    if (this->current_gif_frame_ == 0) {
+      ESP_LOGD(TAG_IMAGE, "GIF animation looped back to frame 0");
+    }
+  }
 }
 
 void SdImageComponent::dump_config() {
@@ -845,15 +894,31 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     ESP_LOGD(TAG_IMAGE, "Read global palette: %zu colors (%zu bytes)", palette_size, palette_bytes);
   }
 
-  // Parse blocks to find first image
-  bool found_image = false;
-  std::vector<uint8_t> compressed_data;
-  std::vector<uint8_t> local_palette;
-  uint16_t img_left = 0, img_top = 0, img_width = 0, img_height = 0;
-  uint8_t lzw_min_code_size = 0;
-  bool has_transparency = false;
-  uint8_t transparent_index = 0;
+  // Clear any existing animation frames
+  this->gif_frames_.clear();
+  this->current_gif_frame_ = 0;
+  this->is_gif_animated_ = false;
 
+  // Frame parsing state
+  struct FrameData {
+    std::vector<uint8_t> compressed_data;
+    std::vector<uint8_t> local_palette;
+    uint16_t left, top, width, height;
+    uint8_t lzw_min_code_size;
+    bool has_transparency;
+    uint8_t transparent_index;
+    uint16_t delay_ms;
+    uint8_t disposal_method;
+  };
+
+  std::vector<FrameData> frames;
+  FrameData current_frame;
+  current_frame.delay_ms = 100;  // Default 100ms delay
+  current_frame.disposal_method = 0;
+  current_frame.has_transparency = false;
+  current_frame.transparent_index = 0;
+
+  // Parse all blocks and collect all frames
   while (pos < gif_data.size()) {
     uint8_t separator = gif_data[pos++];
 
@@ -863,16 +928,19 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 
       if (label == 0xF9) {  // Graphic Control Extension
         if (pos + 6 > gif_data.size()) break;
-        // uint8_t block_size = gif_data[pos++]; // Should be 4
-        pos++; // skip block size
+        pos++; // skip block size (should be 4)
         uint8_t packed_gce = gif_data[pos++];
-        // uint16_t delay = gif_data[pos] | (gif_data[pos + 1] << 8);
-        pos += 2; // skip delay
-        transparent_index = gif_data[pos++];
-        has_transparency = (packed_gce & 0x01) != 0;
+        uint16_t delay = gif_data[pos] | (gif_data[pos + 1] << 8);
+        pos += 2;
+        current_frame.transparent_index = gif_data[pos++];
+        current_frame.has_transparency = (packed_gce & 0x01) != 0;
+        current_frame.disposal_method = (packed_gce >> 2) & 0x07;
+        current_frame.delay_ms = delay * 10;  // Convert to milliseconds
+        if (current_frame.delay_ms == 0) current_frame.delay_ms = 100;  // Minimum delay
         pos++; // Block terminator
-        ESP_LOGD(TAG_IMAGE, "GCE: transparency=%s, index=%d",
-                 has_transparency ? "yes" : "no", transparent_index);
+        ESP_LOGD(TAG_IMAGE, "GCE: delay=%dms, transparency=%s, index=%d, disposal=%d",
+                 current_frame.delay_ms, current_frame.has_transparency ? "yes" : "no",
+                 current_frame.transparent_index, current_frame.disposal_method);
       } else {
         // Skip other extension blocks
         while (pos < gif_data.size()) {
@@ -888,10 +956,10 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     } else if (separator == 0x2C) {  // Image descriptor
       if (pos + 9 > gif_data.size()) break;
 
-      img_left = gif_data[pos] | (gif_data[pos + 1] << 8);
-      img_top = gif_data[pos + 2] | (gif_data[pos + 3] << 8);
-      img_width = gif_data[pos + 4] | (gif_data[pos + 5] << 8);
-      img_height = gif_data[pos + 6] | (gif_data[pos + 7] << 8);
+      current_frame.left = gif_data[pos] | (gif_data[pos + 1] << 8);
+      current_frame.top = gif_data[pos + 2] | (gif_data[pos + 3] << 8);
+      current_frame.width = gif_data[pos + 4] | (gif_data[pos + 5] << 8);
+      current_frame.height = gif_data[pos + 6] | (gif_data[pos + 7] << 8);
       uint8_t packed_img = gif_data[pos + 8];
       pos += 9;
 
@@ -900,38 +968,34 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
       uint8_t local_palette_bits = (packed_img & 0x07) + 1;
       size_t local_palette_size = 1 << local_palette_bits;
 
-      ESP_LOGI(TAG_IMAGE, "Image descriptor: %dx%d at (%d,%d), local palette: %s, interlaced: %s",
-               img_width, img_height, img_left, img_top,
-               has_local_palette ? "yes" : "no", interlaced ? "yes" : "no");
+      ESP_LOGI(TAG_IMAGE, "Frame %zu: %dx%d at (%d,%d), local palette: %s, delay: %dms",
+               frames.size(), current_frame.width, current_frame.height,
+               current_frame.left, current_frame.top,
+               has_local_palette ? "yes" : "no", current_frame.delay_ms);
 
       // Read local color table if present
+      current_frame.local_palette.clear();
       if (has_local_palette) {
         size_t local_palette_bytes = local_palette_size * 3;
-        ESP_LOGI(TAG_IMAGE, "Reading local palette: %zu colors (%zu bytes)", local_palette_size, local_palette_bytes);
         if (pos + local_palette_bytes > gif_data.size()) {
-          ESP_LOGE(TAG_IMAGE, "GIF data truncated (local palette): need %zu bytes, have %zu remaining",
-                   local_palette_bytes, gif_data.size() - pos);
+          ESP_LOGE(TAG_IMAGE, "GIF data truncated (local palette)");
           return false;
         }
-        local_palette.assign(gif_data.begin() + pos, gif_data.begin() + pos + local_palette_bytes);
+        current_frame.local_palette.assign(gif_data.begin() + pos, gif_data.begin() + pos + local_palette_bytes);
         pos += local_palette_bytes;
-        ESP_LOGI(TAG_IMAGE, "Local palette read successfully, first color: R=%d G=%d B=%d",
-                 local_palette[0], local_palette[1], local_palette[2]);
       }
 
       // Read LZW minimum code size
       if (pos >= gif_data.size()) break;
-      lzw_min_code_size = gif_data[pos++];
+      current_frame.lzw_min_code_size = gif_data[pos++];
 
-      if (lzw_min_code_size < 2 || lzw_min_code_size > 11) {
-        ESP_LOGE(TAG_IMAGE, "Invalid LZW code size: %d", lzw_min_code_size);
+      if (current_frame.lzw_min_code_size < 2 || current_frame.lzw_min_code_size > 11) {
+        ESP_LOGE(TAG_IMAGE, "Invalid LZW code size: %d", current_frame.lzw_min_code_size);
         return false;
       }
 
-      ESP_LOGD(TAG_IMAGE, "LZW min code size: %d", lzw_min_code_size);
-
       // Read compressed data blocks
-      compressed_data.clear();
+      current_frame.compressed_data.clear();
       while (pos < gif_data.size()) {
         uint8_t block_size = gif_data[pos++];
         if (block_size == 0) break;  // End of data blocks
@@ -939,15 +1003,27 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
           ESP_LOGE(TAG_IMAGE, "Compressed data block overflow");
           return false;
         }
-        compressed_data.insert(compressed_data.end(),
-                               gif_data.begin() + pos,
-                               gif_data.begin() + pos + block_size);
+        current_frame.compressed_data.insert(current_frame.compressed_data.end(),
+                                              gif_data.begin() + pos,
+                                              gif_data.begin() + pos + block_size);
         pos += block_size;
       }
 
-      ESP_LOGI(TAG_IMAGE, "Read %zu bytes of compressed image data", compressed_data.size());
-      found_image = true;
-      break;  // Process only first image
+      // Save this frame and prepare for next
+      frames.push_back(current_frame);
+
+      // Check frame limit
+      if (frames.size() >= MAX_GIF_FRAMES) {
+        ESP_LOGW(TAG_IMAGE, "Reached max frame limit (%zu), stopping frame collection", MAX_GIF_FRAMES);
+        break;
+      }
+
+      // Reset frame data for next frame
+      current_frame = FrameData();
+      current_frame.delay_ms = 100;
+      current_frame.disposal_method = 0;
+      current_frame.has_transparency = false;
+      current_frame.transparent_index = 0;
 
     } else if (separator == 0x3B) {  // Trailer
       ESP_LOGD(TAG_IMAGE, "GIF trailer found");
@@ -958,38 +1034,13 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     }
   }
 
-  if (!found_image || compressed_data.empty()) {
+  if (frames.empty()) {
     ESP_LOGE(TAG_IMAGE, "No image data found in GIF");
     return false;
   }
 
-  // Choose palette (local overrides global, but prefer global if local is too small/monochrome)
-  const std::vector<uint8_t> *palette_ptr = nullptr;
-
-  // If local palette is very small (< 16 colors), it's probably just a background frame
-  // Better to use the global palette which has more colors
-  if (!local_palette.empty() && local_palette.size() / 3 >= 16) {
-    palette_ptr = &local_palette;
-    ESP_LOGI(TAG_IMAGE, "Using local palette with %zu colors", local_palette.size() / 3);
-  } else if (!global_palette.empty()) {
-    palette_ptr = &global_palette;
-    if (!local_palette.empty()) {
-      ESP_LOGW(TAG_IMAGE, "Local palette too small (%zu colors), using global palette (%zu colors) instead",
-               local_palette.size() / 3, global_palette.size() / 3);
-    } else {
-      ESP_LOGI(TAG_IMAGE, "Using global palette with %zu colors", global_palette.size() / 3);
-    }
-  } else {
-    ESP_LOGE(TAG_IMAGE, "No color palette available");
-    return false;
-  }
-
-  const std::vector<uint8_t> &palette = *palette_ptr;
-
-  if (palette.size() >= 6) {
-    ESP_LOGD(TAG_IMAGE, "Palette first 2 colors: [0]R=%d G=%d B=%d, [1]R=%d G=%d B=%d",
-             palette[0], palette[1], palette[2], palette[3], palette[4], palette[5]);
-  }
+  ESP_LOGI(TAG_IMAGE, "Found %zu frame(s) in GIF", frames.size());
+  this->is_gif_animated_ = (frames.size() > 1);
 
   // Set image dimensions (use resize if specified, otherwise use GIF dimensions)
   if (this->resize_width_ > 0 && this->resize_height_ > 0) {
@@ -1001,169 +1052,184 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     this->image_height_ = gif_height;
   }
 
-  // Allocate output buffer
+  // Allocate output buffer for current frame
   if (!this->allocate_image_buffer()) {
     ESP_LOGE(TAG_IMAGE, "Failed to allocate image buffer");
     return false;
   }
 
-  // LZW Decompression
-  ESP_LOGI(TAG_IMAGE, "Starting LZW decompression...");
+  // Process all frames
+  for (size_t frame_idx = 0; frame_idx < frames.size(); frame_idx++) {
+    const FrameData &frame = frames[frame_idx];
 
-  const uint16_t clear_code = 1 << lzw_min_code_size;
-  const uint16_t end_code = clear_code + 1;
-  uint16_t next_code = end_code + 1;
-  uint16_t code_size = lzw_min_code_size + 1;
-  uint16_t code_mask = (1 << code_size) - 1;
+    ESP_LOGI(TAG_IMAGE, "Decoding frame %zu/%zu...", frame_idx + 1, frames.size());
 
-  // LZW dictionary (code -> sequence of palette indices)
-  std::vector<std::vector<uint8_t>> table(4096);
-  for (uint16_t i = 0; i < clear_code; i++) {
-    table[i] = {static_cast<uint8_t>(i)};
-  }
-
-  std::vector<uint8_t> decoded_indices;
-  decoded_indices.reserve(img_width * img_height);
-
-  size_t bit_pos = 0;
-  std::vector<uint8_t> prev_sequence;
-
-  // Lambda to read variable-length code from bit stream
-  auto read_code = [&]() -> uint16_t {
-    uint32_t code = 0;
-    for (int i = 0; i < code_size; i++) {
-      size_t byte_pos = bit_pos / 8;
-      size_t bit_offset = bit_pos % 8;
-      if (byte_pos >= compressed_data.size()) return end_code;
-      code |= ((compressed_data[byte_pos] >> bit_offset) & 1) << i;
-      bit_pos++;
-    }
-    return static_cast<uint16_t>(code);
-  };
-
-  while (bit_pos < compressed_data.size() * 8) {
-    uint16_t code = read_code();
-
-    if (code == end_code) {
-      ESP_LOGD(TAG_IMAGE, "LZW end code found");
-      break;
-    }
-
-    if (code == clear_code) {
-      // Reset dictionary
-      next_code = end_code + 1;
-      code_size = lzw_min_code_size + 1;
-      code_mask = (1 << code_size) - 1;
-      prev_sequence.clear();
-      for (size_t i = end_code + 1; i < table.size(); i++) {
-        table[i].clear();
-      }
-      continue;
-    }
-
-    std::vector<uint8_t> sequence;
-
-    if (code < next_code) {
-      // Code is in table
-      sequence = table[code];
-    } else if (code == next_code) {
-      // Special case: code not yet in table
-      sequence = prev_sequence;
-      sequence.push_back(prev_sequence[0]);
+    // Choose palette for this frame
+    const std::vector<uint8_t> *palette_ptr = nullptr;
+    if (!frame.local_palette.empty() && frame.local_palette.size() / 3 >= 16) {
+      palette_ptr = &frame.local_palette;
+    } else if (!global_palette.empty()) {
+      palette_ptr = &global_palette;
     } else {
-      ESP_LOGE(TAG_IMAGE, "Invalid LZW code: %d (next: %d)", code, next_code);
+      ESP_LOGE(TAG_IMAGE, "No color palette available for frame %zu", frame_idx);
       return false;
     }
+    const std::vector<uint8_t> &palette = *palette_ptr;
 
-    // Output sequence
-    decoded_indices.insert(decoded_indices.end(), sequence.begin(), sequence.end());
+    // LZW Decompression
+    const uint16_t clear_code = 1 << frame.lzw_min_code_size;
+    const uint16_t end_code = clear_code + 1;
+    uint16_t next_code = end_code + 1;
+    uint16_t code_size = frame.lzw_min_code_size + 1;
+    uint16_t code_mask = (1 << code_size) - 1;
 
-    // Add new entry to dictionary
-    if (!prev_sequence.empty() && next_code < 4096) {
-      std::vector<uint8_t> new_entry = prev_sequence;
-      new_entry.push_back(sequence[0]);
-      table[next_code] = new_entry;
-      next_code++;
+    // LZW dictionary (code -> sequence of palette indices)
+    std::vector<std::vector<uint8_t>> table(4096);
+    for (uint16_t i = 0; i < clear_code; i++) {
+      table[i] = {static_cast<uint8_t>(i)};
+    }
 
-      // Increase code size when needed
-      if (next_code > code_mask && code_size < 12) {
-        code_size++;
+    std::vector<uint8_t> decoded_indices;
+    decoded_indices.reserve(frame.width * frame.height);
+
+    size_t bit_pos = 0;
+    std::vector<uint8_t> prev_sequence;
+
+    // Lambda to read variable-length code from bit stream
+    auto read_code = [&]() -> uint16_t {
+      uint32_t code = 0;
+      for (int i = 0; i < code_size; i++) {
+        size_t byte_pos = bit_pos / 8;
+        size_t bit_offset = bit_pos % 8;
+        if (byte_pos >= frame.compressed_data.size()) return end_code;
+        code |= ((frame.compressed_data[byte_pos] >> bit_offset) & 1) << i;
+        bit_pos++;
+      }
+      return static_cast<uint16_t>(code);
+    };
+
+    while (bit_pos < frame.compressed_data.size() * 8) {
+      uint16_t code = read_code();
+
+      if (code == end_code) {
+        break;
+      }
+
+      if (code == clear_code) {
+        // Reset dictionary
+        next_code = end_code + 1;
+        code_size = frame.lzw_min_code_size + 1;
         code_mask = (1 << code_size) - 1;
-      }
-    }
-
-    prev_sequence = sequence;
-
-    // Feed watchdog periodically
-    if (decoded_indices.size() % 1024 == 0) {
-      App.feed_wdt();
-      yield();
-    }
-  }
-
-  ESP_LOGI(TAG_IMAGE, "LZW decompression complete: %zu indices decoded (expected %zu)",
-           decoded_indices.size(), (size_t)(img_width * img_height));
-
-  if (decoded_indices.size() < img_width * img_height) {
-    ESP_LOGW(TAG_IMAGE, "Decoded data is smaller than expected, padding with background");
-    decoded_indices.resize(img_width * img_height, bg_color_index);
-  }
-
-  // Convert palette indices to RGB565
-  ESP_LOGI(TAG_IMAGE, "Converting palette indices to RGB565...");
-
-  // Debug: Show first 10 decoded indices
-  if (decoded_indices.size() >= 10) {
-    ESP_LOGD(TAG_IMAGE, "First 10 palette indices: %d %d %d %d %d %d %d %d %d %d",
-             decoded_indices[0], decoded_indices[1], decoded_indices[2], decoded_indices[3],
-             decoded_indices[4], decoded_indices[5], decoded_indices[6], decoded_indices[7],
-             decoded_indices[8], decoded_indices[9]);
-  }
-
-  for (int y = 0; y < this->image_height_; y++) {
-    for (int x = 0; x < this->image_width_; x++) {
-      // Map output coordinates to source image coordinates
-      int src_x = (x * img_width) / this->image_width_;
-      int src_y = (y * img_height) / this->image_height_;
-
-      size_t src_idx = src_y * img_width + src_x;
-      if (src_idx >= decoded_indices.size()) {
-        // Out of bounds, use background color
-        this->set_pixel(x, y, 0, 0, 0);
+        prev_sequence.clear();
+        for (size_t i = end_code + 1; i < table.size(); i++) {
+          table[i].clear();
+        }
         continue;
       }
 
-      uint8_t palette_idx = decoded_indices[src_idx];
+      std::vector<uint8_t> sequence;
 
-      // Check transparency
-      if (has_transparency && palette_idx == transparent_index) {
-        // Transparent pixel - use background color or black
-        this->set_pixel(x, y, 0, 0, 0);
-        continue;
+      if (code < next_code) {
+        // Code is in table
+        sequence = table[code];
+      } else if (code == next_code) {
+        // Special case: code not yet in table
+        sequence = prev_sequence;
+        sequence.push_back(prev_sequence[0]);
+      } else {
+        ESP_LOGE(TAG_IMAGE, "Invalid LZW code: %d (next: %d)", code, next_code);
+        return false;
       }
 
-      // Get RGB from palette
-      if (palette_idx * 3 + 2 >= palette.size()) {
-        ESP_LOGW(TAG_IMAGE, "Palette index %d out of range", palette_idx);
-        this->set_pixel(x, y, 0, 0, 0);
-        continue;
+      // Output sequence
+      decoded_indices.insert(decoded_indices.end(), sequence.begin(), sequence.end());
+
+      // Add new entry to dictionary
+      if (!prev_sequence.empty() && next_code < 4096) {
+        std::vector<uint8_t> new_entry = prev_sequence;
+        new_entry.push_back(sequence[0]);
+        table[next_code] = new_entry;
+        next_code++;
+
+        // Increase code size when needed
+        if (next_code > code_mask && code_size < 12) {
+          code_size++;
+          code_mask = (1 << code_size) - 1;
+        }
       }
 
-      uint8_t r = palette[palette_idx * 3];
-      uint8_t g = palette[palette_idx * 3 + 1];
-      uint8_t b = palette[palette_idx * 3 + 2];
+      prev_sequence = sequence;
 
-      this->set_pixel(x, y, r, g, b);
+      // Feed watchdog periodically
+      if (decoded_indices.size() % 1024 == 0) {
+        App.feed_wdt();
+        yield();
+      }
     }
 
-    // Feed watchdog every few rows
-    if (y % 16 == 0) {
-      App.feed_wdt();
-      yield();
+    if (decoded_indices.size() < frame.width * frame.height) {
+      decoded_indices.resize(frame.width * frame.height, bg_color_index);
     }
+
+    // Create GifFrame and convert palette indices to RGB565
+    GifFrame gif_frame;
+    gif_frame.pixels.resize(this->image_width_ * this->image_height_ * 2);  // RGB565 = 2 bytes per pixel
+    gif_frame.delay_ms = frame.delay_ms;
+    gif_frame.left = frame.left;
+    gif_frame.top = frame.top;
+    gif_frame.width = frame.width;
+    gif_frame.height = frame.height;
+    gif_frame.disposal_method = frame.disposal_method;
+
+    // Convert palette indices to RGB565
+    for (int y = 0; y < this->image_height_; y++) {
+      for (int x = 0; x < this->image_width_; x++) {
+        // Map output coordinates to source frame coordinates
+        int src_x = (x * frame.width) / this->image_width_;
+        int src_y = (y * frame.height) / this->image_height_;
+
+        size_t src_idx = src_y * frame.width + src_x;
+        uint8_t r = 0, g = 0, b = 0;
+
+        if (src_idx < decoded_indices.size()) {
+          uint8_t palette_idx = decoded_indices[src_idx];
+
+          // Check transparency
+          if (!frame.has_transparency || palette_idx != frame.transparent_index) {
+            // Get RGB from palette
+            if (palette_idx * 3 + 2 < palette.size()) {
+              r = palette[palette_idx * 3];
+              g = palette[palette_idx * 3 + 1];
+              b = palette[palette_idx * 3 + 2];
+            }
+          }
+        }
+
+        // Convert RGB888 to RGB565
+        uint16_t rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        size_t pixel_pos = (y * this->image_width_ + x) * 2;
+        gif_frame.pixels[pixel_pos] = rgb565 & 0xFF;
+        gif_frame.pixels[pixel_pos + 1] = (rgb565 >> 8) & 0xFF;
+      }
+
+      // Feed watchdog every few rows
+      if (y % 16 == 0) {
+        App.feed_wdt();
+        yield();
+      }
+    }
+
+    // Store this frame
+    this->gif_frames_.push_back(std::move(gif_frame));
   }
 
-  ESP_LOGI(TAG_IMAGE, "GIF decoded successfully to RGB565 format");
+  // Copy first frame to image_buffer_ for initial display
+  if (!this->gif_frames_.empty()) {
+    memcpy(this->image_buffer_.data(), this->gif_frames_[0].pixels.data(), this->image_buffer_.size());
+    ESP_LOGI(TAG_IMAGE, "GIF decoded successfully: %zu frame(s), animated: %s",
+             this->gif_frames_.size(), this->is_gif_animated_ ? "yes" : "no");
+  }
+
   return true;
 }
 

@@ -790,12 +790,22 @@ bool SimpleVideoPlayer::open_video_file_() {
 MediaFormat SimpleVideoPlayer::detect_format_() {
   if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
 
-  uint8_t header[8];
-  if (fread(header, 1, 8, this->file_) != 8) {
+  uint8_t header[12];
+  size_t read_size = fread(header, 1, 12, this->file_);
+  if (read_size < 8) {
     fseek(this->file_, 0, SEEK_SET);
     return MediaFormat::UNKNOWN;
   }
   fseek(this->file_, 0, SEEK_SET);
+
+  // Check for AVI/RIFF header (RIFF....AVI )
+  // AVI format: "RIFF" [4 bytes size] "AVI " [rest of file]
+  if (read_size >= 12 &&
+      header[0] == 'R' && header[1] == 'I' && header[2] == 'F' && header[3] == 'F' &&
+      header[8] == 'A' && header[9] == 'V' && header[10] == 'I' && header[11] == ' ') {
+    ESP_LOGI(TAG, "Detected AVI container (RIFF format)");
+    return MediaFormat::MJPEG;  // AVI typically contains MJPEG
+  }
 
   // Check for Matroska/MKV EBML header (0x1A45DFA3)
   if (header[0] == 0x1A && header[1] == 0x45 && header[2] == 0xDF && header[3] == 0xA3) {
@@ -1050,21 +1060,6 @@ bool SimpleVideoPlayer::extract_mp4_resolution_() {
 // JPEG/MJPEG DECODER
 // ==============================================
 
-bool SimpleVideoPlayer::init_jpeg_decoder_() {
-  jpeg_decode_engine_cfg_t cfg = {
-    .intr_priority = 0,
-    .timeout_ms = 20,
-  };
-
-  esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to create JPEG decoder: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  return true;
-}
-
 bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   if (this->file_ == nullptr) {
     return false;
@@ -1184,8 +1179,32 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   }
 }
 
+bool SimpleVideoPlayer::init_jpeg_decoder_() {
+  jpeg_decode_engine_cfg_t cfg = {
+    .intr_priority = 0,
+    .timeout_ms = 40,  // Increased timeout for compatibility
+  };
+
+  esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create JPEG decoder: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  return true;
+}
+
 bool SimpleVideoPlayer::decode_mjpeg_frame_() {
   if (this->input_size_ == 0 || this->jpeg_decoder_ == nullptr) {
+    ESP_LOGW(TAG, "Cannot decode: input_size=%zu, decoder=%p", this->input_size_, this->jpeg_decoder_);
+    return false;
+  }
+
+  // Validate JPEG markers
+  if (this->input_size_ < 4 ||
+      this->input_buffer_[0] != 0xFF || this->input_buffer_[1] != 0xD8) {
+    ESP_LOGW(TAG, "Invalid JPEG header: size=%zu, markers=%02X %02X",
+             this->input_size_, this->input_buffer_[0], this->input_buffer_[1]);
     return false;
   }
 
@@ -1201,10 +1220,19 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
                                         &out_size);
 
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    ESP_LOGW(TAG, "JPEG decode failed: %s (input_size=%zu, output_size=%u, buffer_size=%u)",
+             esp_err_to_name(ret), this->input_size_, out_size, this->rgb_buffer_size_);
+
+    // Log first 16 bytes of JPEG data for debugging
+    ESP_LOGD(TAG, "JPEG header: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             this->input_buffer_[0], this->input_buffer_[1], this->input_buffer_[2], this->input_buffer_[3],
+             this->input_buffer_[4], this->input_buffer_[5], this->input_buffer_[6], this->input_buffer_[7],
+             this->input_buffer_[8], this->input_buffer_[9], this->input_buffer_[10], this->input_buffer_[11],
+             this->input_buffer_[12], this->input_buffer_[13], this->input_buffer_[14], this->input_buffer_[15]);
     return false;
   }
 
+  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
   return true;
 }
 
