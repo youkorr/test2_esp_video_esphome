@@ -2199,6 +2199,13 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
     return false;  // PPA not available
   }
 
+#ifndef PPA_SRM_COLOR_MODE_YUV420
+  // PPA YUV420 color mode not available in this build
+  // Fall back to software converter
+  ESP_LOGW(TAG, "PPA_SRM_COLOR_MODE_YUV420 not defined - using software YUV converter");
+  return false;
+#else
+
   // Configure PPA SRM operation for YUV420→RGB565 conversion
   // Input: I420 planar YUV (Y plane + U plane + V plane)
   // Output: RGB565 (2 bytes per pixel)
@@ -2248,6 +2255,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   }
 
   return true;
+#endif  // PPA_SRM_COLOR_MODE_YUV420
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
