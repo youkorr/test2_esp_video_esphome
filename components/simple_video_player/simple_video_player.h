@@ -107,6 +107,7 @@ class SimpleVideoPlayer : public Component {
   MediaFormat detect_format_();
   bool detect_jpeg_resolution_(int &width, int &height);
   bool detect_avi_framerate_();
+  bool parse_avi_header_();  // Parse AVI header and find movi offset
   bool extract_mp4_resolution_();
 
   bool init_jpeg_decoder_();
@@ -182,7 +183,7 @@ class SimpleVideoPlayer : public Component {
   int aligned_height_{0}; // 16-byte aligned height for decoder
   size_t buffer_size_{300000};
   bool auto_play_{true};
-  bool loop_{true};
+  bool loop_{false};
   bool controls_enabled_{true};
   bool fps_override_{false};
 
@@ -235,6 +236,11 @@ class SimpleVideoPlayer : public Component {
   uint16_t mkv_audio_track_{0};
   uint64_t mkv_segment_start_{0};
   uint64_t mkv_cluster_start_{0};
+
+  // AVI/MJPEG data
+  bool is_avi_format_{false};  // true if AVI container, false if raw MJPEG
+  long avi_movi_offset_{0};    // File offset where movi list starts
+  uint32_t avi_total_frames_{0};
 
   uint32_t audio_sample_rate_{44100};
   uint8_t audio_channels_{2};

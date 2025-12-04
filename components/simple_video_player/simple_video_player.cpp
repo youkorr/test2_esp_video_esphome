@@ -829,31 +829,43 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
 }
 
 bool SimpleVideoPlayer::detect_avi_framerate_() {
+  // This is now just a wrapper that calls parse_avi_header_()
+  return this->parse_avi_header_();
+}
+
+bool SimpleVideoPlayer::parse_avi_header_() {
   if (this->file_ == nullptr) return false;
 
   // Save current file position
   long original_pos = ftell(this->file_);
   fseek(this->file_, 0, SEEK_SET);
 
-  // Read AVI header to detect framerate
+  // Read AVI header
   uint8_t header[12];
   if (fread(header, 1, 12, this->file_) != 12) {
     fseek(this->file_, original_pos, SEEK_SET);
+    this->is_avi_format_ = false;
     return false;
   }
 
   // Check for RIFF header
   if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') {
-    // Not an AVI file, might be raw MJPEG stream - use default framerate
+    // Not an AVI file, might be raw MJPEG stream
     fseek(this->file_, original_pos, SEEK_SET);
+    this->is_avi_format_ = false;
+    ESP_LOGI(TAG, "Not an AVI file, treating as raw MJPEG stream");
     return false;
   }
 
   // Check for AVI marker
   if (header[8] != 'A' || header[9] != 'V' || header[10] != 'I' || header[11] != ' ') {
     fseek(this->file_, original_pos, SEEK_SET);
+    this->is_avi_format_ = false;
     return false;
   }
+
+  this->is_avi_format_ = true;
+  ESP_LOGI(TAG, "AVI container detected, parsing header...");
 
   // Parse LIST hdrl to find avih (AVI main header)
   uint8_t list_header[12];
@@ -873,6 +885,10 @@ bool SimpleVideoPlayer::detect_avi_framerate_() {
     return false;
   }
 
+  // Get hdrl list size (bytes 4-7, little-endian)
+  uint32_t hdrl_size = list_header[4] | (list_header[5] << 8) |
+                       (list_header[6] << 16) | (list_header[7] << 24);
+
   // Read avih chunk header
   uint8_t avih_header[8];
   if (fread(avih_header, 1, 8, this->file_) != 8) {
@@ -886,26 +902,73 @@ bool SimpleVideoPlayer::detect_avi_framerate_() {
     return false;
   }
 
-  // Read microseconds per frame (first field in avih data)
-  uint32_t us_per_frame;
-  if (fread(&us_per_frame, 4, 1, this->file_) != 1) {
+  // Read avih data (56 bytes total)
+  uint8_t avih_data[56];
+  if (fread(avih_data, 1, 56, this->file_) != 56) {
     fseek(this->file_, original_pos, SEEK_SET);
     return false;
   }
 
-  // AVI uses little-endian format, ESP32 is also little-endian, so no conversion needed
+  // Extract microseconds per frame (bytes 0-3, little-endian)
+  uint32_t us_per_frame = avih_data[0] | (avih_data[1] << 8) |
+                          (avih_data[2] << 16) | (avih_data[3] << 24);
+
+  // Extract total frames (bytes 16-19, little-endian)
+  this->avi_total_frames_ = avih_data[16] | (avih_data[17] << 8) |
+                            (avih_data[18] << 16) | (avih_data[19] << 24);
+
+  // AVI uses little-endian format, ESP32 is also little-endian
   if (us_per_frame > 0 && us_per_frame < 1000000) {  // Sanity check (1-1000 fps)
     // Calculate framerate and frame interval
     float fps = 1000000.0f / us_per_frame;
     this->frame_interval_ = us_per_frame / 1000;  // Convert microseconds to milliseconds
 
-    ESP_LOGI(TAG, "AVI framerate detected: %.2f fps (interval: %lu ms)",
-             fps, (unsigned long)this->frame_interval_);
-
-    fseek(this->file_, original_pos, SEEK_SET);
-    return true;
+    ESP_LOGI(TAG, "AVI: framerate=%.2f fps, total_frames=%u",
+             fps, this->avi_total_frames_);
   }
 
+  // Now find the movi list offset
+  // Skip to end of hdrl list (we're currently past avih, need to skip rest of hdrl)
+  // Current position: 12 (RIFF+AVI) + 12 (LIST hdrl) + 8 (avih header) + 56 (avih data) = 88
+  // hdrl ends at: 12 (RIFF+AVI) + 8 (LIST header) + hdrl_size
+  long hdrl_end = 12 + 8 + hdrl_size;
+  fseek(this->file_, hdrl_end, SEEK_SET);
+
+  // Search for LIST movi
+  while (!feof(this->file_)) {
+    uint8_t chunk_header[8];
+    if (fread(chunk_header, 1, 8, this->file_) != 8) break;
+
+    // Check for LIST
+    if (chunk_header[0] == 'L' && chunk_header[1] == 'I' &&
+        chunk_header[2] == 'S' && chunk_header[3] == 'T') {
+
+      // Read list type (4 bytes after size)
+      uint8_t list_type[4];
+      if (fread(list_type, 1, 4, this->file_) != 4) break;
+
+      // Check for movi
+      if (list_type[0] == 'm' && list_type[1] == 'o' &&
+          list_type[2] == 'v' && list_type[3] == 'i') {
+        this->avi_movi_offset_ = ftell(this->file_);
+        ESP_LOGI(TAG, "AVI: movi list found at offset %ld", this->avi_movi_offset_);
+        fseek(this->file_, original_pos, SEEK_SET);
+        return true;
+      }
+
+      // Not movi, skip this list
+      uint32_t list_size = chunk_header[4] | (chunk_header[5] << 8) |
+                           (chunk_header[6] << 16) | (chunk_header[7] << 24);
+      fseek(this->file_, list_size - 4, SEEK_CUR);  // -4 because we already read list type
+    } else {
+      // Not a LIST chunk, skip it
+      uint32_t chunk_size = chunk_header[4] | (chunk_header[5] << 8) |
+                            (chunk_header[6] << 16) | (chunk_header[7] << 24);
+      fseek(this->file_, chunk_size, SEEK_CUR);
+    }
+  }
+
+  ESP_LOGW(TAG, "AVI: movi list not found!");
   fseek(this->file_, original_pos, SEEK_SET);
   return false;
 }
@@ -943,57 +1006,118 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     return false;
   }
 
-  // Search for JPEG start marker (FFD8)
-  int c1 = 0, c2 = 0;
-  while ((c1 = fgetc(this->file_)) != EOF) {
-    if (c1 == 0xFF) {
-      c2 = fgetc(this->file_);
-      if (c2 == 0xD8) {
-        break;
+  if (this->is_avi_format_) {
+    // AVI format: Read chunks with FourCC headers
+    // First frame: seek to movi offset
+    if (this->frame_count_ == 0 && this->avi_movi_offset_ > 0) {
+      fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
+    }
+
+    // Read chunk header (8 bytes: 4-byte FourCC + 4-byte size)
+    while (!feof(this->file_)) {
+      uint8_t chunk_header[8];
+      if (fread(chunk_header, 1, 8, this->file_) != 8) {
+        // End of file
+        if (this->loop_) {
+          fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
+          this->frame_count_ = 0;
+          return this->read_next_mjpeg_frame_();
+        }
+        return false;
+      }
+
+      // Get chunk size (little-endian)
+      uint32_t chunk_size = chunk_header[4] | (chunk_header[5] << 8) |
+                            (chunk_header[6] << 16) | (chunk_header[7] << 24);
+
+      // Check if this is a video chunk (00dc, 01dc, etc.)
+      // FourCC format: stream_id (2 digits) + 'dc' for video
+      bool is_video_chunk = (chunk_header[2] == 'd' && chunk_header[3] == 'c');
+
+      if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
+        // Read JPEG data
+        size_t bytes_read = fread(this->input_buffer_, 1, chunk_size, this->file_);
+        if (bytes_read != chunk_size) {
+          ESP_LOGW(TAG, "AVI: Failed to read video chunk: got %u, expected %u", bytes_read, chunk_size);
+          return false;
+        }
+
+        this->input_size_ = chunk_size;
+        this->frame_count_++;
+
+        // AVI chunks are word-aligned (2 bytes), skip padding byte if needed
+        if (chunk_size % 2 != 0) {
+          fgetc(this->file_);
+        }
+
+        return true;
+      } else {
+        // Skip this chunk (audio, index, or too large)
+        fseek(this->file_, chunk_size + (chunk_size % 2), SEEK_CUR);
       }
     }
-  }
 
-  if (c1 == EOF) {
-    // End of file
+    // EOF reached
     if (this->loop_) {
-      fseek(this->file_, 0, SEEK_SET);
+      fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
       this->frame_count_ = 0;
       return this->read_next_mjpeg_frame_();
     }
     return false;
-  }
 
-  // Start of JPEG found
-  this->input_buffer_[0] = 0xFF;
-  this->input_buffer_[1] = 0xD8;
-  this->input_size_ = 2;
+  } else {
+    // Raw MJPEG stream: Search for JPEG markers byte-by-byte
+    int c1 = 0, c2 = 0;
+    while ((c1 = fgetc(this->file_)) != EOF) {
+      if (c1 == 0xFF) {
+        c2 = fgetc(this->file_);
+        if (c2 == 0xD8) {
+          break;
+        }
+      }
+    }
 
-  // Read until end marker (FFD9)
-  while (this->input_size_ < this->buffer_size_ - 1) {
-    c1 = fgetc(this->file_);
     if (c1 == EOF) {
-      break;
+      // End of file
+      if (this->loop_) {
+        fseek(this->file_, 0, SEEK_SET);
+        this->frame_count_ = 0;
+        return this->read_next_mjpeg_frame_();
+      }
+      return false;
     }
-    this->input_buffer_[this->input_size_++] = c1;
 
-    if (c1 == 0xFF) {
-      c2 = fgetc(this->file_);
-      if (c2 == EOF) {
+    // Start of JPEG found
+    this->input_buffer_[0] = 0xFF;
+    this->input_buffer_[1] = 0xD8;
+    this->input_size_ = 2;
+
+    // Read until end marker (FFD9)
+    while (this->input_size_ < this->buffer_size_ - 1) {
+      c1 = fgetc(this->file_);
+      if (c1 == EOF) {
         break;
       }
-      this->input_buffer_[this->input_size_++] = c2;
-      if (c2 == 0xD9) {
-        // End of JPEG
-        break;
+      this->input_buffer_[this->input_size_++] = c1;
+
+      if (c1 == 0xFF) {
+        c2 = fgetc(this->file_);
+        if (c2 == EOF) {
+          break;
+        }
+        this->input_buffer_[this->input_size_++] = c2;
+        if (c2 == 0xD9) {
+          // End of JPEG
+          break;
+        }
       }
     }
+
+    this->current_pos_ = ftell(this->file_);
+    this->frame_count_++;
+
+    return this->input_size_ > 2;
   }
-
-  this->current_pos_ = ftell(this->file_);
-  this->frame_count_++;
-
-  return this->input_size_ > 2;
 }
 
 bool SimpleVideoPlayer::decode_mjpeg_frame_() {

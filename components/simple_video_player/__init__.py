@@ -35,7 +35,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_HEIGHT, default=480): cv.positive_int,
     cv.Optional(CONF_BUFFER_SIZE, default=200000): cv.positive_int,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
-    cv.Optional(CONF_LOOP, default=True): cv.boolean,
+    cv.Optional(CONF_LOOP, default=False): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
