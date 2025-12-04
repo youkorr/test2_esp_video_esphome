@@ -1196,6 +1196,15 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
 bool SimpleVideoPlayer::decode_mjpeg_frame_() {
   if (this->input_size_ == 0 || this->jpeg_decoder_ == nullptr) {
+    ESP_LOGW(TAG, "Cannot decode: input_size=%zu, decoder=%p", this->input_size_, this->jpeg_decoder_);
+    return false;
+  }
+
+  // Validate JPEG markers
+  if (this->input_size_ < 4 ||
+      this->input_buffer_[0] != 0xFF || this->input_buffer_[1] != 0xD8) {
+    ESP_LOGW(TAG, "Invalid JPEG header: size=%zu, markers=%02X %02X",
+             this->input_size_, this->input_buffer_[0], this->input_buffer_[1]);
     return false;
   }
 
@@ -1211,10 +1220,19 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
                                         &out_size);
 
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    ESP_LOGW(TAG, "JPEG decode failed: %s (input_size=%zu, output_size=%u, buffer_size=%u)",
+             esp_err_to_name(ret), this->input_size_, out_size, this->rgb_buffer_size_);
+
+    // Log first 16 bytes of JPEG data for debugging
+    ESP_LOGD(TAG, "JPEG header: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+             this->input_buffer_[0], this->input_buffer_[1], this->input_buffer_[2], this->input_buffer_[3],
+             this->input_buffer_[4], this->input_buffer_[5], this->input_buffer_[6], this->input_buffer_[7],
+             this->input_buffer_[8], this->input_buffer_[9], this->input_buffer_[10], this->input_buffer_[11],
+             this->input_buffer_[12], this->input_buffer_[13], this->input_buffer_[14], this->input_buffer_[15]);
     return false;
   }
 
+  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
   return true;
 }
 
