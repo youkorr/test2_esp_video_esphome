@@ -8,6 +8,7 @@
 
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
+#include "tjpgd.h"  // Software JPEG decoder for fallback
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"
 
@@ -115,6 +116,11 @@ class SimpleVideoPlayer : public Component {
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
+  bool decode_mjpeg_frame_software_();  // Software JPEG decoder fallback
+
+  // TJpgDec callback functions
+  static uint32_t tjpgd_input_func_(JDEC *jd, uint8_t *buff, uint32_t ndata);
+  static uint32_t tjpgd_output_func_(JDEC *jd, void *bitmap, JRECT *rect);
 
   bool init_gif_decoder_();
   bool parse_gif_header_();
@@ -219,6 +225,19 @@ class SimpleVideoPlayer : public Component {
   lv_img_dsc_t frame_img_dsc_{};
 
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+  bool use_software_jpeg_{false};  // Use software decoder instead of hardware
+
+  // TJpgDec software decoder state
+  struct TjpgdContext {
+    uint8_t *input_buffer;
+    size_t input_size;
+    size_t input_pos;
+    uint8_t *output_buffer;
+    size_t output_size;
+    int output_width;
+    int output_height;
+  };
+  TjpgdContext tjpgd_ctx_{};
 
   // GIF decoder data
   struct GifFrame {
