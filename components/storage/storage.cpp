@@ -6,6 +6,11 @@
 #include <errno.h>
 #include <algorithm>
 
+// LVGL integration for triggering display updates
+#ifdef USE_LVGL
+#include "esphome/components/lvgl/lvgl_esphome.h"
+#endif
+
 // Include yield function for ESP32/ESP8266
 #ifdef ESP32
 #include <freertos/FreeRTOS.h>
@@ -195,6 +200,12 @@ void SdImageComponent::loop() {
 
     // Update timestamp
     this->last_frame_time_ = now;
+
+    // Trigger LVGL display update so the new frame is rendered
+    #ifdef USE_LVGL
+    // Schedule a display refresh to show the new frame
+    lv_refr_now(NULL);
+    #endif
 
     // Log frame change (only occasionally to avoid spam)
     if (this->current_gif_frame_ == 0) {
