@@ -530,6 +530,9 @@ void SimpleVideoPlayer::dump_config() {
   ESP_LOGCONFIG(TAG, "  Buffer size: %u bytes (RGB: %u bytes)", this->buffer_size_, this->rgb_buffer_size_);
   ESP_LOGCONFIG(TAG, "  Auto play: %s", this->auto_play_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
+  if (this->is_http_source_) {
+    ESP_LOGCONFIG(TAG, "  Max HTTP file size: %zu MB", this->max_http_file_size_ / 1048576);
+  }
 }
 
 // HTTP/HTTPS download helper
@@ -569,6 +572,21 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
     return false;
   }
 
+  // Check maximum file size limit if Content-Length is provided
+  if (content_length > 0) {
+    if ((size_t)content_length > this->max_http_file_size_) {
+      ESP_LOGE(TAG, "❌ HTTP file too large: %d bytes (%.2f MB)",
+               content_length, content_length / 1048576.0f);
+      ESP_LOGE(TAG, "   Maximum allowed: %zu bytes (%.2f MB)",
+               this->max_http_file_size_, this->max_http_file_size_ / 1048576.0f);
+      ESP_LOGE(TAG, "   Pour les grandes vidéos, utilisez un fichier local sur SD card!");
+      ESP_LOGE(TAG, "   Ou augmentez 'max_http_file_size' dans votre YAML (risque de reboot!)");
+      esp_http_client_close(client);
+      esp_http_client_cleanup(client);
+      return false;
+    }
+  }
+
   if (content_length <= 0) {
     ESP_LOGW(TAG, "Content-Length not provided by server (got %d). Will download with dynamic buffering.", content_length);
 
@@ -595,6 +613,17 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
       // Append to buffer
       temp_buffer.insert(temp_buffer.end(), chunk, chunk + read_len);
       total_downloaded += read_len;
+
+      // Check size limit during download
+      if (total_downloaded > this->max_http_file_size_) {
+        ESP_LOGE(TAG, "❌ Download exceeded maximum size: %zu bytes (%.2f MB)",
+                 total_downloaded, total_downloaded / 1048576.0f);
+        ESP_LOGE(TAG, "   Maximum allowed: %zu MB", this->max_http_file_size_ / 1048576);
+        ESP_LOGE(TAG, "   Aborting download to prevent memory exhaustion!");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return false;
+      }
 
       // Log progress every 100KB
       if (total_downloaded % (100 * 1024) == 0 || total_downloaded < 4096) {

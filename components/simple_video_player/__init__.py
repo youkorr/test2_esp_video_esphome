@@ -27,6 +27,7 @@ CONF_PARENT_ID = "parent_id"
 CONF_SPEAKER = "speaker"
 CONF_MEDIA_PLAYER_ENTITY = "media_player_entity"
 CONF_FPS = "fps"
+CONF_MAX_HTTP_FILE_SIZE = "max_http_file_size"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -41,6 +42,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
     cv.Optional(CONF_MEDIA_PLAYER_ENTITY): cv.string,
     cv.Optional(CONF_FPS): cv.positive_float,
+    cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=200 * 1024 * 1024): cv.positive_int,  # 200MB default
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -58,6 +60,8 @@ async def to_code(config):
 
     if CONF_FPS in config:
         cg.add(var.set_fps(config[CONF_FPS]))
+
+    cg.add(var.set_max_http_file_size(config[CONF_MAX_HTTP_FILE_SIZE]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

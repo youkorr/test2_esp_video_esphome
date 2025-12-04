@@ -89,6 +89,7 @@ class SimpleVideoPlayer : public Component {
       ESP_LOGI("simple_video_player", "FPS configured: %.2f (interval: %u ms)", fps, frame_interval_);
     }
   }
+  void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
 
   void setup() override;
   void loop() override;
@@ -198,6 +199,7 @@ class SimpleVideoPlayer : public Component {
   // HTTP/HTTPS streaming support
   uint8_t *http_buffer_{nullptr};  // Buffer for downloaded HTTP content
   size_t http_buffer_size_{0};     // Size of HTTP buffer
+  size_t max_http_file_size_{200 * 1024 * 1024};  // Maximum HTTP file size (200MB default)
   bool is_http_source_{false};     // true if file_path_ is http:// or https://
   bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
   bool initialization_complete_{false};  // true if video player is fully initialized
