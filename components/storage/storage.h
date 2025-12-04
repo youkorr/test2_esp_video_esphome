@@ -158,15 +158,18 @@ class SdImageComponent : public Component, public image::Image {
   // File type detection
   enum class FileType {
     UNKNOWN,
-    JPEG
+    JPEG,
+    GIF
   };
   
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
   bool is_jpeg_data(const std::vector<uint8_t> &data) const;
-  
-  // Image decoding - JPEG only for now
+  bool is_gif_data(const std::vector<uint8_t> &data) const;
+
+  // Image decoding - JPEG and GIF
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
+  bool decode_gif_image(const std::vector<uint8_t> &gif_data);
   
   // JPEG decoder callbacks
 #ifdef USE_JPEGDEC

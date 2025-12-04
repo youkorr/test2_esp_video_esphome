@@ -45,7 +45,8 @@ enum class MediaFormat {
   UNKNOWN,
   MJPEG,
   MP4_H264,
-  MKV_H264
+  MKV_H264,
+  GIF_ANIMATED
 };
 
 struct Mp4Sample {
@@ -89,6 +90,7 @@ class SimpleVideoPlayer : public Component {
       ESP_LOGI("simple_video_player", "FPS configured: %.2f (interval: %u ms)", fps, frame_interval_);
     }
   }
+  void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
 
   void setup() override;
   void loop() override;
@@ -107,11 +109,17 @@ class SimpleVideoPlayer : public Component {
   MediaFormat detect_format_();
   bool detect_jpeg_resolution_(int &width, int &height);
   bool detect_avi_framerate_();
+  bool parse_avi_header_();  // Parse AVI header and find movi offset
   bool extract_mp4_resolution_();
 
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
+
+  bool init_gif_decoder_();
+  bool parse_gif_header_();
+  bool read_next_gif_frame_();
+  bool decode_gif_frame_();
 
   bool init_h264_decoder_();
   bool parse_mp4_();
@@ -182,7 +190,7 @@ class SimpleVideoPlayer : public Component {
   int aligned_height_{0}; // 16-byte aligned height for decoder
   size_t buffer_size_{300000};
   bool auto_play_{true};
-  bool loop_{true};
+  bool loop_{false};
   bool controls_enabled_{true};
   bool fps_override_{false};
 
@@ -197,6 +205,7 @@ class SimpleVideoPlayer : public Component {
   // HTTP/HTTPS streaming support
   uint8_t *http_buffer_{nullptr};  // Buffer for downloaded HTTP content
   size_t http_buffer_size_{0};     // Size of HTTP buffer
+  size_t max_http_file_size_{40 * 1024 * 1024};  // Maximum HTTP file size (40MB default)
   bool is_http_source_{false};     // true if file_path_ is http:// or https://
   bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
   bool initialization_complete_{false};  // true if video player is fully initialized
@@ -210,6 +219,27 @@ class SimpleVideoPlayer : public Component {
   lv_img_dsc_t frame_img_dsc_{};
 
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+
+  // GIF decoder data
+  struct GifFrame {
+    uint32_t offset;         // File offset of frame data
+    uint32_t size;           // Size of compressed data
+    uint16_t delay_ms;       // Delay in milliseconds
+    uint16_t left, top;      // Frame position
+    uint16_t width, height;  // Frame dimensions
+    bool has_transparency;   // Has transparent color
+    uint8_t transparent_idx; // Transparent color index
+    uint8_t disposal_method; // Frame disposal method
+  };
+  std::vector<GifFrame> gif_frames_;
+  size_t current_gif_frame_{0};
+  uint16_t gif_width_{0};
+  uint16_t gif_height_{0};
+  std::vector<uint8_t> gif_global_palette_;  // 256 colors × 3 bytes (RGB)
+  std::vector<uint8_t> gif_frame_buffer_;    // Decoded frame data (indexes)
+  uint16_t gif_background_color_{0};
+  bool gif_has_global_palette_{false};
+  bool gif_decoder_ready_{false};
 
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
@@ -235,6 +265,11 @@ class SimpleVideoPlayer : public Component {
   uint16_t mkv_audio_track_{0};
   uint64_t mkv_segment_start_{0};
   uint64_t mkv_cluster_start_{0};
+
+  // AVI/MJPEG data
+  bool is_avi_format_{false};  // true if AVI container, false if raw MJPEG
+  long avi_movi_offset_{0};    // File offset where movi list starts
+  uint32_t avi_total_frames_{0};
 
   uint32_t audio_sample_rate_{44100};
   uint8_t audio_channels_{2};
