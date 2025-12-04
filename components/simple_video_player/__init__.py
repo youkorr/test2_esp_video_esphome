@@ -42,7 +42,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
     cv.Optional(CONF_MEDIA_PLAYER_ENTITY): cv.string,
     cv.Optional(CONF_FPS): cv.positive_float,
-    cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=20 * 1024 * 1024): cv.positive_int,  # 20MB default (safe for ESP32-P4 SPIRAM)
+    cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=40 * 1024 * 1024): cv.positive_int,  # 40MB default
 }).extend(cv.COMPONENT_SCHEMA)
 
 

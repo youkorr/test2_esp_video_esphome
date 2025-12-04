@@ -205,7 +205,7 @@ class SimpleVideoPlayer : public Component {
   // HTTP/HTTPS streaming support
   uint8_t *http_buffer_{nullptr};  // Buffer for downloaded HTTP content
   size_t http_buffer_size_{0};     // Size of HTTP buffer
-  size_t max_http_file_size_{20 * 1024 * 1024};  // Maximum HTTP file size (20MB default, safe for ESP32-P4)
+  size_t max_http_file_size_{40 * 1024 * 1024};  // Maximum HTTP file size (40MB default)
   bool is_http_source_{false};     // true if file_path_ is http:// or https://
   bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
   bool initialization_complete_{false};  // true if video player is fully initialized
