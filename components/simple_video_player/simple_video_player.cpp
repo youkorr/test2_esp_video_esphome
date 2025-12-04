@@ -1194,98 +1194,18 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   }
 }
 
-// TJpgDec input callback - reads JPEG data
-uint32_t SimpleVideoPlayer::tjpgd_input_func_(JDEC *jd, uint8_t *buff, uint32_t ndata) {
-  TjpgdContext *ctx = (TjpgdContext *)jd->device;
+bool SimpleVideoPlayer::init_jpeg_decoder_() {
+  jpeg_decode_engine_cfg_t cfg = {
+    .intr_priority = 0,
+    .timeout_ms = 40,  // Increased timeout for compatibility
+  };
 
-  if (ctx == nullptr) return 0;
-
-  // If buff is NULL, skip the data
-  if (buff == nullptr) {
-    ctx->input_pos += ndata;
-  } else {
-    // Copy data from input buffer
-    uint32_t bytes_available = ctx->input_size - ctx->input_pos;
-    uint32_t bytes_to_copy = (ndata < bytes_available) ? ndata : bytes_available;
-
-    if (bytes_to_copy > 0) {
-      memcpy(buff, ctx->input_buffer + ctx->input_pos, bytes_to_copy);
-      ctx->input_pos += bytes_to_copy;
-    }
-    return bytes_to_copy;
-  }
-
-  return ndata;
-}
-
-// TJpgDec output callback - writes RGB565 data
-uint32_t SimpleVideoPlayer::tjpgd_output_func_(JDEC *jd, void *bitmap, JRECT *rect) {
-  TjpgdContext *ctx = (TjpgdContext *)jd->device;
-
-  if (ctx == nullptr || bitmap == nullptr) return 0;
-
-  uint16_t *src = (uint16_t *)bitmap;
-  uint16_t *dst = (uint16_t *)ctx->output_buffer;
-
-  int width = rect->right - rect->left + 1;
-  int height = rect->bottom - rect->top + 1;
-
-  // Copy rectangle to output buffer
-  for (int y = 0; y < height; y++) {
-    int dst_y = rect->top + y;
-    if (dst_y >= ctx->output_height) break;
-
-    uint16_t *dst_row = dst + (dst_y * ctx->output_width) + rect->left;
-    uint16_t *src_row = src + (y * width);
-
-    memcpy(dst_row, src_row, width * sizeof(uint16_t));
-  }
-
-  return 1;  // Continue
-}
-
-bool SimpleVideoPlayer::decode_mjpeg_frame_software_() {
-  ESP_LOGI(TAG, "Using software JPEG decoder (TJpgDec)");
-
-  // Allocate work buffer for TJpgDec (3100 bytes minimum)
-  void *work_buffer = heap_caps_malloc(3100, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (work_buffer == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate TJpgDec work buffer");
+  esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create JPEG decoder: %s", esp_err_to_name(ret));
     return false;
   }
 
-  // Setup context
-  this->tjpgd_ctx_.input_buffer = this->input_buffer_;
-  this->tjpgd_ctx_.input_size = this->input_size_;
-  this->tjpgd_ctx_.input_pos = 0;
-  this->tjpgd_ctx_.output_buffer = this->rgb_buffer_;
-  this->tjpgd_ctx_.output_size = this->rgb_buffer_size_;
-  this->tjpgd_ctx_.output_width = this->aligned_width_;
-  this->tjpgd_ctx_.output_height = this->aligned_height_;
-
-  // Initialize TJpgDec
-  JDEC jdec;
-  JRESULT res = jd_prepare(&jdec, tjpgd_input_func_, work_buffer, 3100, &this->tjpgd_ctx_);
-
-  if (res != JDR_OK) {
-    ESP_LOGE(TAG, "TJpgDec prepare failed: %d", res);
-    heap_caps_free(work_buffer);
-    return false;
-  }
-
-  ESP_LOGD(TAG, "TJpgDec image info: %dx%d", jdec.width, jdec.height);
-
-  // Decode JPEG to RGB565
-  res = jd_decomp(&jdec, tjpgd_output_func_, 0);  // 0 = 1/1 scale (no downscaling)
-
-  heap_caps_free(work_buffer);
-
-  if (res != JDR_OK) {
-    ESP_LOGE(TAG, "TJpgDec decompress failed: %d", res);
-    return false;
-  }
-
-  ESP_LOGI(TAG, "Software JPEG decode successful");
   return true;
 }
 
@@ -1303,12 +1223,6 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
     return false;
   }
 
-  // If we've been flagged to use software decoder, skip hardware attempt
-  if (this->use_software_jpeg_) {
-    return this->decode_mjpeg_frame_software_();
-  }
-
-  // Try hardware decoder first
   jpeg_decode_cfg_t decode_cfg = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
@@ -1321,7 +1235,7 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
                                         &out_size);
 
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "Hardware JPEG decode failed: %s (input_size=%zu, output_size=%u, buffer_size=%u)",
+    ESP_LOGW(TAG, "JPEG decode failed: %s (input_size=%zu, output_size=%u, buffer_size=%u)",
              esp_err_to_name(ret), this->input_size_, out_size, this->rgb_buffer_size_);
 
     // Log first 16 bytes of JPEG data for debugging
@@ -1330,14 +1244,10 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
              this->input_buffer_[4], this->input_buffer_[5], this->input_buffer_[6], this->input_buffer_[7],
              this->input_buffer_[8], this->input_buffer_[9], this->input_buffer_[10], this->input_buffer_[11],
              this->input_buffer_[12], this->input_buffer_[13], this->input_buffer_[14], this->input_buffer_[15]);
-
-    // Fall back to software decoder
-    ESP_LOGI(TAG, "Falling back to software JPEG decoder");
-    this->use_software_jpeg_ = true;  // Use software for all future frames
-    return this->decode_mjpeg_frame_software_();
+    return false;
   }
 
-  ESP_LOGD(TAG, "Hardware JPEG decoded successfully: %u bytes output", out_size);
+  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
   return true;
 }
 
