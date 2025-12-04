@@ -1393,6 +1393,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   };
   std::vector<SampleToChunk> sample_to_chunk;
 
+  // CRITICAL FIX: Track if this is actually a video track (not audio)
+  bool is_actual_video_track = true;  // Will be set to false if audio track detected
+
   while (ftell(this->file_) < end_pos) {
     long current_pos = ftell(this->file_);
 
@@ -1425,7 +1428,11 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGD(TAG, "  stbl box: '%s' size=%u at pos=%ld", fourcc, box_size, current_pos);
 
     if (box_type == make_fourcc('s', 't', 's', 'd')) {
-      this->parse_stsd_(box_size - 8, is_video);
+      // CRITICAL FIX: Check if this is actually a video track
+      bool stsd_result = this->parse_stsd_(box_size - 8, is_video);
+      if (!stsd_result) {
+        is_actual_video_track = false;  // Audio track detected, don't create video samples
+      }
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
       ESP_LOGD(TAG, "  Reading stsz...");
@@ -1500,7 +1507,8 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   }
 
   // Build sample list using stsc (Sample-to-Chunk) table
-  if (is_video && !sample_sizes.empty()) {
+  // CRITICAL FIX: Only create video samples if this is actually a video track (not audio)
+  if (is_video && is_actual_video_track && !sample_sizes.empty()) {
     ESP_LOGI(TAG, "Building video samples: sizes=%u, chunks=%u, durations=%u, keyframes=%u, stsc_entries=%u",
              sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), keyframes.size(), sample_to_chunk.size());
 
@@ -1619,19 +1627,32 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
   fseek(this->file_, 4, SEEK_CUR);  // version/flags
   uint32_t entry_count = read_be32(this->file_);
 
+  // CRITICAL FIX: Track whether this is actually a video or audio track
+  bool found_video_codec = false;
+  bool found_audio_codec = false;
+
   for (uint32_t i = 0; i < entry_count; i++) {
     uint32_t entry_size = read_be32(this->file_);
     uint32_t format = read_be32(this->file_);
 
     if (format == make_fourcc('a', 'v', 'c', '1')) {
       this->parse_avc1_(entry_size - 8);
+      found_video_codec = true;
     } else if (format == make_fourcc('m', 'p', '4', 'a')) {
       this->parse_mp4a_(entry_size - 8);
+      found_audio_codec = true;
     } else {
       if (entry_size > 8) {
         fseek(this->file_, entry_size - 8, SEEK_CUR);
       }
     }
+  }
+
+  // Return true ONLY if this matches the expected track type
+  // This prevents audio tracks from being added to video_samples_
+  if (is_video && found_audio_codec && !found_video_codec) {
+    ESP_LOGI(TAG, "Skipping audio track (mp4a) - not adding to video_samples_");
+    return false;  // Signal to skip this track
   }
 
   return true;
