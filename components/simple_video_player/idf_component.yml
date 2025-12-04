@@ -1,0 +1,8 @@
+## IDF Component Manager Dependencies
+## This file manages ESP-IDF components for simple_video_player
+
+dependencies:
+  espressif/esp_image_effects:
+    version: "*"  # Use latest version
+    rules:
+      - if: "idf_version >=5.0"
