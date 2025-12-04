@@ -42,7 +42,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
     cv.Optional(CONF_MEDIA_PLAYER_ENTITY): cv.string,
     cv.Optional(CONF_FPS): cv.positive_float,
-    cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=200 * 1024 * 1024): cv.positive_int,  # 200MB default
+    cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=100 * 1024 * 1024): cv.positive_int,  # 100MB default
 }).extend(cv.COMPONENT_SCHEMA)
 
 
