@@ -2230,25 +2230,16 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   srm_config.mirror_x = false;
   srm_config.mirror_y = false;
 
-  // Color space configuration
-  srm_config.rgb_swap = PPA_SRM_COLOR_RGB_SWAP_NONE;
-  srm_config.byte_swap = false;
-
-  // YUV color space standard (BT.601 for SD, BT.709 for HD)
-  // Use BT.601 by default for compatibility (matches software converter)
-  srm_config.yuv_std = PPA_COLOR_CONV_STD_RGB_YUV_BT601;
+  // Color space configuration (M5Stack PPA API)
+  srm_config.rgb_swap = false;   // false = no RGB swap
+  srm_config.byte_swap = false;  // false = no byte swap
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
   // Execute hardware color conversion (DMA-based, 0% CPU)
-  ppa_trans_data_t trans_data = {};
-  trans_data.srm = srm_config;
-
-  ppa_event_data_t event_data = {};
-
+  // M5Stack PPA API: only 2 parameters (handle + config)
   esp_err_t ret = ppa_do_scale_rotate_mirror(
-      this->ppa_client_handle_,
-      &trans_data,
-      &event_data,
-      portMAX_DELAY  // Wait for conversion to complete
+      (ppa_client_handle_t)this->ppa_client_handle_,
+      &srm_config
   );
 
   if (ret != ESP_OK) {
