@@ -17,6 +17,13 @@ print("[Simple Video Player] Build script running...")
 # ========================================================================
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
+    # Configure H.264 decoder for dual-core ESP32-P4 processing
+    # Use core 1 for decoding (core 0 for main app)
+    env.Append(CPPDEFINES=[
+        ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
+        ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
+    ])
+    print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1)")
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
     # Try openh264 first (more optimized but larger)
