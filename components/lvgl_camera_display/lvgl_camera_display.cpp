@@ -37,17 +37,25 @@ void LVGLCameraDisplay::setup() {
   // Initialize face detector if enabled
   if (this->face_detection_enabled_) {
     ESP_LOGI(TAG, "🔍 Initializing face detection...");
-    this->face_detector_ = new HumanFaceDetect();
-    if (this->face_detector_ != nullptr) {
-      // Low thresholds for maximum sensitivity
-      // score_thr: lower = more sensitive (0.3 detects faces with 30%+ confidence)
-      // nms_thr: higher = less aggressive overlap filtering
-      this->face_detector_->set_score_thr(0.3);  // Low threshold = more sensitive
-      this->face_detector_->set_nms_thr(0.5);    // Moderate overlap filtering
-      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.3, nms_thr=0.5 - sensitive)");
-    } else {
-      ESP_LOGE(TAG, "❌ Failed to initialize face detector");
+
+    // Create mutex for thread-safe access to cached results
+    this->face_results_mutex_ = xSemaphoreCreateMutex();
+    if (this->face_results_mutex_ == nullptr) {
+      ESP_LOGE(TAG, "❌ Failed to create face results mutex");
       this->face_detection_enabled_ = false;
+    } else {
+      this->face_detector_ = new HumanFaceDetect();
+      if (this->face_detector_ != nullptr) {
+        // Low thresholds for maximum sensitivity
+        // score_thr: lower = more sensitive (0.3 detects faces with 30%+ confidence)
+        // nms_thr: higher = less aggressive overlap filtering
+        this->face_detector_->set_score_thr(0.3);  // Low threshold = more sensitive
+        this->face_detector_->set_nms_thr(0.5);    // Moderate overlap filtering
+        ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.3, nms_thr=0.5 - sensitive)");
+      } else {
+        ESP_LOGE(TAG, "❌ Failed to initialize face detector");
+        this->face_detection_enabled_ = false;
+      }
     }
   }
 
@@ -253,12 +261,12 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
   detect_count++;
 
   // Détecter les visages (avec frame skipping pour améliorer les performances)
-  // Detection runs every 3rd frame, but we draw cached results every frame to avoid flickering
-  if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
+  // Detection runs every 8th frame (~2 detections/sec at 15FPS), but we draw cached results every frame
+  if (this->face_detection_enabled_ && this->face_detector_ != nullptr && this->face_results_mutex_ != nullptr) {
     this->face_detection_frame_skip_++;
 
-    // Only run face detection every 3rd frame (balanced performance)
-    if (this->face_detection_frame_skip_ >= 3) {
+    // Only run face detection every 8th frame (reduces jitter significantly)
+    if (this->face_detection_frame_skip_ >= 8) {
       this->face_detection_frame_skip_ = 0;
 
       uint32_t t1 = millis();
@@ -268,45 +276,51 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
       total_face_time += (t2 - t1);
       total_faces += face_results.size();
 
-      // Cache the results for drawing on every frame
-      this->cached_face_results_.clear();
-      for (auto &result : face_results) {
-        DetectionBox box;
-        box.x1 = result.box[0];
-        box.y1 = result.box[1];
-        box.x2 = result.box[2];
-        box.y2 = result.box[3];
-        box.score = result.score;
-        this->cached_face_results_.push_back(box);
+      // Cache the results for drawing on every frame (mutex protected)
+      if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+        this->cached_face_results_.clear();
+        for (auto &result : face_results) {
+          DetectionBox box;
+          box.x1 = result.box[0];
+          box.y1 = result.box[1];
+          box.x2 = result.box[2];
+          box.y2 = result.box[3];
+          box.score = result.score;
+          this->cached_face_results_.push_back(box);
+        }
+        xSemaphoreGive(this->face_results_mutex_);
       }
 
-      // Debug: Log detection results every 50 detections
+      // Debug: Log detection results every 20 detections
       static uint32_t debug_count = 0;
       debug_count++;
-      if (debug_count % 50 == 0) {
+      if (debug_count % 20 == 0) {
         ESP_LOGI(TAG, "🔍 DEBUG: Detection #%u - Found %u faces in %ums",
                  debug_count, face_results.size(), (t2 - t1));
       }
 
       // Log la première détection
       static bool first_face = true;
-      if (first_face && !this->cached_face_results_.empty()) {
-        auto &box = this->cached_face_results_[0];
+      if (first_face && face_results.size() > 0) {
+        auto &result = face_results.front();
         ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
-                 box.x1, box.y1, box.x2, box.y2, box.score);
+                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
         first_face = false;
       }
     }
 
-    // Draw cached face results on EVERY frame (no flickering)
-    std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
-    for (auto &box : this->cached_face_results_) {
-      dl::image::draw_hollow_rectangle(
-        img,
-        box.x1, box.y1,
-        box.x2, box.y2,
-        green, 3
-      );
+    // Draw cached face results on EVERY frame (no flickering, mutex protected)
+    if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(1)) == pdTRUE) {
+      std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
+      for (auto &box : this->cached_face_results_) {
+        dl::image::draw_hollow_rectangle(
+          img,
+          box.x1, box.y1,
+          box.x2, box.y2,
+          green, 3
+        );
+      }
+      xSemaphoreGive(this->face_results_mutex_);
     }
   }
 

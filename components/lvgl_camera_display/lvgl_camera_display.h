@@ -4,6 +4,8 @@
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
 #include <vector>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 // Forward declarations pour les composants ESP-IDF
 class HumanFaceDetect;
@@ -69,6 +71,9 @@ class LVGLCameraDisplay : public Component {
 
   // Cached detection results (to avoid flickering when skipping frames)
   std::vector<DetectionBox> cached_face_results_;
+
+  // Mutex for thread-safe access to cached results
+  SemaphoreHandle_t face_results_mutex_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();
