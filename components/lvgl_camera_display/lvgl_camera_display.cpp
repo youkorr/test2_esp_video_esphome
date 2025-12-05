@@ -253,12 +253,12 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
   detect_count++;
 
   // Détecter les visages (avec frame skipping pour améliorer les performances)
-  // Skip 1 frame, detect on the 2nd (runs 1/2 of the time = smooth detection)
+  // Detection runs every 3rd frame, but we draw cached results every frame to avoid flickering
   if (this->face_detection_enabled_ && this->face_detector_ != nullptr) {
     this->face_detection_frame_skip_++;
 
-    // Only run face detection every 2nd frame (balanced performance)
-    if (this->face_detection_frame_skip_ >= 2) {
+    // Only run face detection every 3rd frame (balanced performance)
+    if (this->face_detection_frame_skip_ >= 3) {
       this->face_detection_frame_skip_ = 0;
 
       uint32_t t1 = millis();
@@ -268,6 +268,18 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
       total_face_time += (t2 - t1);
       total_faces += face_results.size();
 
+      // Cache the results for drawing on every frame
+      this->cached_face_results_.clear();
+      for (auto &result : face_results) {
+        DetectionBox box;
+        box.x1 = result.box[0];
+        box.y1 = result.box[1];
+        box.x2 = result.box[2];
+        box.y2 = result.box[3];
+        box.score = result.score;
+        this->cached_face_results_.push_back(box);
+      }
+
       // Debug: Log detection results every 50 detections
       static uint32_t debug_count = 0;
       debug_count++;
@@ -276,25 +288,26 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
                  debug_count, face_results.size(), (t2 - t1));
       }
 
-    // Dessiner les rectangles VERTS pour les visages
-    std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
-    for (auto &result : face_results) {
-      dl::image::draw_hollow_rectangle(
-        img,
-        result.box[0], result.box[1],
-        result.box[2], result.box[3],
-        green, 3
-      );
-
       // Log la première détection
       static bool first_face = true;
-      if (first_face) {
+      if (first_face && !this->cached_face_results_.empty()) {
+        auto &box = this->cached_face_results_[0];
         ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
-                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
+                 box.x1, box.y1, box.x2, box.y2, box.score);
         first_face = false;
       }
     }
-    } // End of frame skip check
+
+    // Draw cached face results on EVERY frame (no flickering)
+    std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
+    for (auto &box : this->cached_face_results_) {
+      dl::image::draw_hollow_rectangle(
+        img,
+        box.x1, box.y1,
+        box.x2, box.y2,
+        green, 3
+      );
+    }
   }
 
   // Détecter les piétons

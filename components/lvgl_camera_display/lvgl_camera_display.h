@@ -3,10 +3,17 @@
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include <vector>
 
 // Forward declarations pour les composants ESP-IDF
 class HumanFaceDetect;
 class PedestrianDetect;
+
+// Simple bounding box structure for caching detection results
+struct DetectionBox {
+  int x1, y1, x2, y2;
+  float score;
+};
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -59,6 +66,9 @@ class LVGLCameraDisplay : public Component {
 
   // Frame skipping for face detection (to improve performance)
   uint32_t face_detection_frame_skip_{0};
+
+  // Cached detection results (to avoid flickering when skipping frames)
+  std::vector<DetectionBox> cached_face_results_;
 
   void update_camera_frame_();
   void update_canvas_();
