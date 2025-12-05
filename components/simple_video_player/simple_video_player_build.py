@@ -57,7 +57,7 @@ if os.path.exists(esp_h264_dir):
     # Create static library from wrapper sources
     if h264_wrapper_sources:
         # CRITICAL: Explicitly compile objects with DUAL_TASK flags
-        # env.StaticLibrary() may not inherit CPPDEFINES correctly
+        # Use UNIQUE target name to force recompilation (avoid SCons cache)
         print("[Simple Video Player] ⚠️  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
         wrapper_objects = []
         for src in h264_wrapper_sources:
@@ -69,12 +69,22 @@ if os.path.exists(esp_h264_dir):
                 ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
             ]
 
+            # Use UNIQUE target name to force recompilation (avoid SCons cached version)
+            src_basename = os.path.basename(src).replace('.c', '_dual_task.o')
+            target_path = os.path.join(env['PROJECT_BUILD_DIR'], src_basename)
+
             obj = env.Object(
-                src,
+                target=target_path,
+                source=src,
                 CPPDEFINES=dual_task_defines
             )
+
+            # Force SCons to ALWAYS rebuild this file (never use cache)
+            env.AlwaysBuild(obj)
+            env.NoCache(obj)
+
             wrapper_objects.extend(obj)
-            print(f"[Simple Video Player] ✓ Compiled {os.path.basename(src)} with DUAL_TASK flags")
+            print(f"[Simple Video Player] ✓ Compiling {os.path.basename(src)} → {src_basename} (ALWAYS BUILD, NO CACHE)")
 
         # Create library from explicitly compiled objects
         h264_wrapper_lib = env.StaticLibrary(
