@@ -98,20 +98,21 @@ if os.path.exists(esp_h264_dir):
             source=wrapper_objects
         )
 
-        # AGGRESSIVE APPROACH: Force our symbols to override ALL duplicate symbols
-        # Use --allow-multiple-definition to allow duplicates, with ours taking precedence
+        # ULTRA AGGRESSIVE: Force linker to use OUR symbols by making them undefined first
+        # Then link our library FIRST so it resolves them
         wrapper_lib_path = os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual.a")
 
-        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
-        env.Prepend(LIBS=[h264_wrapper_lib])
-
-        # Force linker to accept multiple definitions and use the FIRST one (ours)
-        env.Append(LINKFLAGS=[
-            "-Wl,--allow-multiple-definition",  # Allow duplicate symbols
-            "-Wl,--whole-archive",              # Force all symbols from our lib
+        # Force these symbols to be undefined, then link our library FIRST
+        env.Prepend(LINKFLAGS=[
+            "-Wl,--undefined=esp_h264_dec_sw_new",  # Force this symbol to be resolved
+            "-Wl,--whole-archive",                   # Include ALL symbols from our lib
             wrapper_lib_path,
             "-Wl,--no-whole-archive"
         ])
+
+        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
+
+        print("[Simple Video Player] ✓ ULTRA AGGRESSIVE linking: --undefined + --whole-archive")
 
         print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
         print("[Simple Video Player] ✓ AGGRESSIVE linking: --allow-multiple-definition + --whole-archive")
