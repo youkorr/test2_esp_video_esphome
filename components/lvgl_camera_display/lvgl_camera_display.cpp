@@ -311,7 +311,8 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
 
     // Draw cached face results on EVERY frame (no flickering, mutex protected)
     if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(1)) == pdTRUE) {
-      std::vector<uint8_t> green = {0x00, 0xF8};  // Vert en RGB565 big-endian
+      // RGB565 little-endian: Green = 0x07E0 -> {0xE0, 0x07}
+      std::vector<uint8_t> green = {0xE0, 0x07};
       for (auto &box : this->cached_face_results_) {
         dl::image::draw_hollow_rectangle(
           img,
