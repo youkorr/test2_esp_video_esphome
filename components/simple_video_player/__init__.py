@@ -94,6 +94,17 @@ async def to_code(config):
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
 
+    # Register additional C++ source files for compilation
+    # ESPHome only auto-compiles the main .cpp file, others must be explicitly added
+    cg.add_library(
+        name="simple_video_player_extras",
+        repository=None,
+        sources=[
+            os.path.join(component_dir, "yuv_rgb_convert.cpp"),
+            os.path.join(component_dir, "yuv_rgb_convert_simd.cpp"),
+        ]
+    )
+
 
 # Action schemas
 SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA = cv.Schema({
