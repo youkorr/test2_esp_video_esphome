@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: Human face recognition component for ESP32-P4
+url: https://github.com/espressif/esp-dl/tree/master/models/human_face_recognition
+dependencies:
+  espressif/esp-dl: "^3.1.0"
