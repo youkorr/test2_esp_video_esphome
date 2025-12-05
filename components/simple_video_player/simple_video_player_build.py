@@ -72,7 +72,10 @@ else:
 esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
 if os.path.exists(esp_imgfx_dir):
     # Enable SIMD YUV→RGB conversion
-    env.Append(CPPDEFINES=[("USE_ESP_IMAGE_EFFECTS", "1")])
+    env.Append(CPPDEFINES=[
+        ("USE_ESP_IMAGE_EFFECTS", "1"),
+        ("HAVE_ESP_IMGFX_H", "1")  # Tell code that headers are available
+    ])
     print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
 
     # Add include paths
