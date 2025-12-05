@@ -56,13 +56,68 @@ if os.path.exists(esp_h264_dir):
 
     # Create static library from wrapper sources
     if h264_wrapper_sources:
+        # CRITICAL: Explicitly compile objects with DUAL_TASK flags
+        # Use UNIQUE target name to force recompilation (avoid SCons cache)
+        print("[Simple Video Player] ⚠️  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
+        wrapper_objects = []
+        for src in h264_wrapper_sources:
+            # Convert deque to list, then add our DUAL_TASK flags
+            existing_defines = list(env.get('CPPDEFINES', []))
+            dual_task_defines = existing_defines + [
+                ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+                ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+                ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
+            ]
+
+            # Use UNIQUE target name to force recompilation (avoid SCons cached version)
+            src_basename = os.path.basename(src).replace('.c', '_dual_task.o')
+            target_path = os.path.join(env['PROJECT_BUILD_DIR'], src_basename)
+
+            # CRITICAL: Pass flags as BOTH CPPDEFINES AND CCFLAGS to ensure they reach GCC
+            obj = env.Object(
+                target=target_path,
+                source=src,
+                CPPDEFINES=dual_task_defines,
+                CCFLAGS=env.get('CCFLAGS', []) + [
+                    "-DCONFIG_ESP_H264_DUAL_TASK=1",
+                    "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5"
+                ]
+            )
+
+            # Force SCons to ALWAYS rebuild this file (never use cache)
+            env.AlwaysBuild(obj)
+            env.NoCache(obj)
+
+            wrapper_objects.extend(obj)
+            print(f"[Simple Video Player] ✓ Compiling {os.path.basename(src)} → {src_basename} (CCFLAGS + CPPDEFINES)")
+
+        # Create library from explicitly compiled objects
         h264_wrapper_lib = env.StaticLibrary(
             target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
-            source=h264_wrapper_sources
+            source=wrapper_objects
         )
-        # Link this library FIRST (before pre-compiled libraries) so our symbols take precedence
-        env.Prepend(LIBS=[h264_wrapper_lib])
+
+        # ULTRA AGGRESSIVE: Force linker to use OUR symbols by making them undefined first
+        # Then link our library FIRST so it resolves them
+        wrapper_lib_path = os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual.a")
+
+        # Force these symbols to be undefined, then link our library FIRST
+        env.Prepend(LINKFLAGS=[
+            "-Wl,--undefined=esp_h264_dec_sw_new",  # Force this symbol to be resolved
+            "-Wl,--whole-archive",                   # Include ALL symbols from our lib
+            wrapper_lib_path,
+            "-Wl,--no-whole-archive"
+        ])
+
+        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
+
+        print("[Simple Video Player] ✓ ULTRA AGGRESSIVE linking: --undefined + --whole-archive")
+
         print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
+        print("[Simple Video Player] ✓ AGGRESSIVE linking: --allow-multiple-definition + --whole-archive")
+        print(f"[Simple Video Player]   Library: {wrapper_lib_path}")
+        print("[Simple Video Player]   Our DUAL_TASK symbols MUST override ESP-Video!")
 
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
