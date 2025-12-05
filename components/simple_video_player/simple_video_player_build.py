@@ -26,8 +26,29 @@ if os.path.exists(esp_h264_dir):
     env.Append(CPPDEFINES=[
         ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
         ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
+        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority
     ])
     print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1)")
+
+    # Add esp_h264 include paths for compiling wrapper code
+    esp_h264_includes = [
+        os.path.join(esp_h264_dir, "interface", "include"),
+        os.path.join(esp_h264_dir, "port", "include"),
+        os.path.join(esp_h264_dir, "port", "inc"),
+        os.path.join(esp_h264_dir, "sw", "include"),
+        os.path.join(esp_h264_dir, "sw", "src"),
+        os.path.join(esp_h264_dir, "hw", "include"),
+    ]
+    for inc_path in esp_h264_includes:
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+
+    # Compile esp_h264_dec_sw.c with dual-task flags
+    # This wrapper code configures the tinyh264 decoder
+    esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
+    if os.path.exists(esp_h264_dec_sw_c):
+        print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
+        env.Object(esp_h264_dec_sw_c)
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
     # Try openh264 first (more optimized but larger)
