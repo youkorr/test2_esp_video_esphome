@@ -95,6 +95,22 @@ async def to_code(config):
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
 
+    # Enable optimized H.264 decoder if esp_h264 component is available
+    esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
+    if os.path.exists(esp_h264_dir):
+        # Enable dual-core H.264 decoding on ESP32-P4
+        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
+        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
+
+        # Add H.264 include paths for decoder headers
+        h264_inc_paths = [
+            os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),
+            os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc"),
+        ]
+        for inc_path in h264_inc_paths:
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
     # Enable SIMD YUV→RGB conversion if esp_image_effects is available
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
     if os.path.exists(esp_imgfx_dir):
