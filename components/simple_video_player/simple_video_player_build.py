@@ -56,9 +56,26 @@ if os.path.exists(esp_h264_dir):
 
     # Create static library from wrapper sources
     if h264_wrapper_sources:
+        # CRITICAL: Explicitly compile objects with DUAL_TASK flags
+        # env.StaticLibrary() may not inherit CPPDEFINES correctly
+        print("[Simple Video Player] ⚠️  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
+        wrapper_objects = []
+        for src in h264_wrapper_sources:
+            obj = env.Object(
+                src,
+                CPPDEFINES=env['CPPDEFINES'] + [
+                    ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+                    ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+                    ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
+                ]
+            )
+            wrapper_objects.extend(obj)
+            print(f"[Simple Video Player] ✓ Compiled {os.path.basename(src)} with DUAL_TASK flags")
+
+        # Create library from explicitly compiled objects
         h264_wrapper_lib = env.StaticLibrary(
             target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
-            source=h264_wrapper_sources
+            source=wrapper_objects
         )
 
         # AGGRESSIVE APPROACH: Force our symbols to override ALL duplicate symbols
