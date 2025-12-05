@@ -19,13 +19,18 @@ print("[Simple Video Player] Build script running...")
 yuv_convert_cpp = os.path.join(component_dir, "yuv_rgb_convert.cpp")
 yuv_convert_simd_cpp = os.path.join(component_dir, "yuv_rgb_convert_simd.cpp")
 
+sources_to_compile = []
 if os.path.exists(yuv_convert_cpp):
-    env.Object(yuv_convert_cpp)
+    sources_to_compile.append(yuv_convert_cpp)
     print("[Simple Video Player] + yuv_rgb_convert.cpp")
 
 if os.path.exists(yuv_convert_simd_cpp):
-    env.Object(yuv_convert_simd_cpp)
+    sources_to_compile.append(yuv_convert_simd_cpp)
     print("[Simple Video Player] + yuv_rgb_convert_simd.cpp")
+
+# Actually compile and link the source files
+if sources_to_compile:
+    env.BuildSources(env['PROJECT_BUILD_DIR'], ".", sources_to_compile)
 
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
