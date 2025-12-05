@@ -39,10 +39,12 @@ void LVGLCameraDisplay::setup() {
     ESP_LOGI(TAG, "🔍 Initializing face detection...");
     this->face_detector_ = new HumanFaceDetect();
     if (this->face_detector_ != nullptr) {
-      // Ultra-low thresholds for maximum sensitivity (default is 0.5)
-      this->face_detector_->set_score_thr(0.8);  // Very sensitive
-      this->face_detector_->set_nms_thr(0.8);    // Minimal overlap filtering
-      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.8, nms_thr=0.8 - ultra-sensitive)");
+      // Low thresholds for maximum sensitivity
+      // score_thr: lower = more sensitive (0.3 detects faces with 30%+ confidence)
+      // nms_thr: higher = less aggressive overlap filtering
+      this->face_detector_->set_score_thr(0.3);  // Low threshold = more sensitive
+      this->face_detector_->set_nms_thr(0.5);    // Moderate overlap filtering
+      ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.3, nms_thr=0.5 - sensitive)");
     } else {
       ESP_LOGE(TAG, "❌ Failed to initialize face detector");
       this->face_detection_enabled_ = false;
