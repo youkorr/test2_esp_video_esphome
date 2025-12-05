@@ -12,31 +12,9 @@ parent_components_dir = os.path.dirname(component_dir)
 
 print("[Simple Video Player] Build script running...")
 
-# ========================================================================
-# Compile additional source files into a static library
-# ESPHome only auto-compiles the main component .cpp file
-# ========================================================================
-yuv_convert_cpp = os.path.join(component_dir, "yuv_rgb_convert.cpp")
-yuv_convert_simd_cpp = os.path.join(component_dir, "yuv_rgb_convert_simd.cpp")
-
-sources_to_compile = []
-if os.path.exists(yuv_convert_cpp):
-    sources_to_compile.append(yuv_convert_cpp)
-    print("[Simple Video Player] + yuv_rgb_convert.cpp")
-
-if os.path.exists(yuv_convert_simd_cpp):
-    sources_to_compile.append(yuv_convert_simd_cpp)
-    print("[Simple Video Player] + yuv_rgb_convert_simd.cpp")
-
-# Compile into a static library and link it
-if sources_to_compile:
-    # Use main environment which already has all ESPHome include paths (including LVGL)
-    lib = env.StaticLibrary(
-        target=os.path.join(env['PROJECT_BUILD_DIR'], "libyuv_convert"),
-        source=sources_to_compile
-    )
-    env.Prepend(LIBS=[lib])
-    print("[Simple Video Player] ✓ Created libyuv_convert.a")
+# ESPHome auto-discovers and compiles .cpp files in component directory
+# No need for manual StaticLibrary compilation
+print("[Simple Video Player] Note: yuv_rgb_convert*.cpp files auto-compiled by ESPHome")
 
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
