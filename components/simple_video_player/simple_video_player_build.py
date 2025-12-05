@@ -98,19 +98,22 @@ if os.path.exists(esp_h264_dir):
             source=wrapper_objects
         )
 
+        # CRITICAL: Get the actual file path from the library node
+        wrapper_lib_file = h264_wrapper_lib[0]  # StaticLibrary returns a list with one element
+        wrapper_lib_path = str(wrapper_lib_file.get_abspath())
+
+        # Add library to build dependencies
+        env.Prepend(LIBS=[h264_wrapper_lib])
+        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
+
         # ULTRA AGGRESSIVE: Force linker to use OUR symbols by making them undefined first
         # Then link our library FIRST so it resolves them
-        wrapper_lib_path = os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual.a")
-
-        # Force these symbols to be undefined, then link our library FIRST
         env.Prepend(LINKFLAGS=[
             "-Wl,--undefined=esp_h264_dec_sw_new",  # Force this symbol to be resolved
             "-Wl,--whole-archive",                   # Include ALL symbols from our lib
             wrapper_lib_path,
             "-Wl,--no-whole-archive"
         ])
-
-        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
 
         print("[Simple Video Player] ✓ ULTRA AGGRESSIVE linking: --undefined + --whole-archive")
 
