@@ -18,18 +18,16 @@ MSR::MSR(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // Do NOT use DL_IMAGE_CAP_RGB_SWAP - pedestrian detection works without it
+    // ESP32-P4: Use RGB_SWAP and RGB565_BIG_ENDIAN as per Waveshare example
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1});
+        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Anchors optimized for 800x600 resolution with faces at various distances
-    // Small anchors (16-48px): far faces, Medium (64-128px): normal distance, Large (192px): close faces
-    // Lower thresholds: score_thr=0.3, nms_thr=0.3 for better detection
+    // Original anchor configuration from Waveshare ESP32-P4 example
+    // score_thr=0.5, nms_thr=0.5, top_k=10
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, m_image_preprocessor, 0.3, 0.3, 10, {{8, 8, 9, 9, {{16, 16}, {48, 48}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -42,17 +40,15 @@ MNP::MNP(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // Do NOT use DL_IMAGE_CAP_RGB_SWAP - pedestrian detection works without it
+    // ESP32-P4: Use RGB_SWAP and RGB565_BIG_ENDIAN as per Waveshare example
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1});
+        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Anchors optimized for 800x600 resolution with faces at various distances
-    // Smaller anchors for better detection at normal viewing distances
-    // Lower thresholds: score_thr=0.3, nms_thr=0.3 for better detection
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.3, 10, {{1, 1, 0, 0, {{24, 24}, {48, 48}, {96, 96}, {160, 160}}}});
+    // Original anchor configuration from Waveshare ESP32-P4 example
+    // score_thr=0.5, nms_thr=0.5, top_k=10
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
 }
 
 MNP::~MNP()
