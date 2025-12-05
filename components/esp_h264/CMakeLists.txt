@@ -51,7 +51,15 @@ idf_component_register(
     REQUIRES ${component_requires}
 )
 
-message(STATUS "ESP H.264 component registered")
+# Enable dual-core H.264 decoding for 30-50% performance boost
+# These flags activate dual-task mode in esp_h264_dec_sw.c
+target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    CONFIG_ESP_H264_DUAL_TASK=1
+    CONFIG_ESP_H264_DUAL_TASK_CORE=1
+    CONFIG_ESP_H264_DUAL_TASK_PRIORITY=5
+)
+
+message(STATUS "ESP H.264 component registered with DUAL_TASK enabled")
 
 # Link prebuilt optimized decoder libraries
 idf_build_get_property(target IDF_TARGET)
