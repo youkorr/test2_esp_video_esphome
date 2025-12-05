@@ -42,6 +42,14 @@ env.Append(CPPDEFINES=[
     ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),       # Location = flash rodata
 ])
 
+# Human face recognition (feature extraction) configuration
+env.Append(CPPDEFINES=[
+    ("CONFIG_HUMAN_FACE_FEAT_MFN_S8_V1", "1"),              # Enable MFN S8 V1 model
+    ("CONFIG_HUMAN_FACE_FEAT_MODEL_TYPE", "0"),             # Model type = MFN_S8_V1
+    ("CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA", "1"),  # Model in flash rodata
+    ("CONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION", "0"),         # Location = flash rodata
+])
+
 print("[LVGL Camera Display] ✓ CONFIG defines added for detection models")
 
 # Liste des sources à compiler
@@ -129,12 +137,19 @@ const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
 # ========================================================================
 human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
 if os.path.exists(human_face_detect_dir):
+    # Add include path for human_face_detect
+    env.Append(CPPPATH=[human_face_detect_dir])
     human_face_sources = ["human_face_detect.cpp"]
     for src in human_face_sources:
         src_path = os.path.join(human_face_detect_dir, src)
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[LVGL Camera Display] + {src}")
+
+# Add include path for human_face_recognition
+human_face_recognition_inc_dir = os.path.join(parent_components_dir, "human_face_recognition")
+if os.path.exists(human_face_recognition_inc_dir):
+    env.Append(CPPPATH=[human_face_recognition_inc_dir])
 
 # ========================================================================
 # Pack and Embed Pedestrian Detection Model
@@ -213,6 +228,87 @@ const size_t _binary_pedestrian_detect_espdl_size = {len(model_data)};
     pedestrian_sources = ["pedestrian_detect.cpp"]
     for src in pedestrian_sources:
         src_path = os.path.join(pedestrian_detect_dir, src)
+        if os.path.exists(src_path):
+            sources_to_add.append(src_path)
+            print(f"[LVGL Camera Display] + {src}")
+
+# ========================================================================
+# Pack and Embed Human Face Recognition Model
+# ========================================================================
+human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
+if os.path.exists(human_face_recognition_dir):
+    print("[LVGL Camera Display] 📦 Packing human_face_recognition model...")
+
+    models_dir = os.path.join(human_face_recognition_dir, "models", "p4")
+    pack_script = os.path.join(human_face_recognition_dir, "pack_model.py")
+
+    if os.path.exists(models_dir) and os.path.exists(pack_script):
+        # Model file to pack
+        mfn_model = os.path.join(models_dir, "human_face_feat_mfn_s8_v1.espdl")
+
+        if os.path.exists(mfn_model):
+            # Output packed model
+            packed_model = os.path.join(component_dir, "human_face_feat.espdl")
+
+            # Run pack_model.py
+            try:
+                cmd = [
+                    "python3", pack_script,
+                    "--model_path", mfn_model,
+                    "--out_file", packed_model
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                if result.returncode == 0 and os.path.exists(packed_model):
+                    print(f"[LVGL Camera Display] ✅ Model packed: {os.path.basename(packed_model)}")
+
+                    # Create C file with embedded binary data
+                    embed_c_file = os.path.join(component_dir, "human_face_feat_espdl_embed.c")
+
+                    # Read binary data
+                    with open(packed_model, 'rb') as f:
+                        model_data = f.read()
+
+                    # Generate C array
+                    c_content = f'''// Auto-generated file - embedded human_face_feat model
+#include <stddef.h>
+#include <stdint.h>
+
+__attribute__((aligned(16)))
+const uint8_t _binary_human_face_feat_mfn_s8_v1_espdl_start[] = {{
+'''
+                    # Write bytes in rows of 16
+                    for i in range(0, len(model_data), 16):
+                        chunk = model_data[i:i+16]
+                        hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                        c_content += f'    {hex_bytes},\n'
+
+                    c_content += f'''}};
+
+const uint8_t *_binary_human_face_feat_mfn_s8_v1_espdl_end = _binary_human_face_feat_mfn_s8_v1_espdl_start + {len(model_data)};
+const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
+'''
+
+                    # Write C file
+                    with open(embed_c_file, 'w') as f:
+                        f.write(c_content)
+
+                    # Add to sources
+                    sources_to_add.append(embed_c_file)
+                    print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
+                else:
+                    error_msg = result.stderr if result.stderr else "Unknown error"
+                    print(f"[LVGL Camera Display] ⚠️  Failed to pack face recognition model: {error_msg}")
+            except Exception as e:
+                print(f"[LVGL Camera Display] ⚠️  Error packing face recognition model: {e}")
+        else:
+            print(f"[LVGL Camera Display] ⚠️  Face recognition model file not found in {models_dir}")
+    else:
+        print(f"[LVGL Camera Display] ⚠️  pack_model.py or models dir not found for human_face_recognition")
+
+    # Add human_face_recognition source
+    recognition_sources = ["human_face_recognition.cpp"]
+    for src in recognition_sources:
+        src_path = os.path.join(human_face_recognition_dir, src)
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[LVGL Camera Display] + {src}")
