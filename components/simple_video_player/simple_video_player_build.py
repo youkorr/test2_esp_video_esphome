@@ -13,7 +13,7 @@ parent_components_dir = os.path.dirname(component_dir)
 print("[Simple Video Player] Build script running...")
 
 # ========================================================================
-# Compile additional source files
+# Compile additional source files into a static library
 # ESPHome only auto-compiles the main component .cpp file
 # ========================================================================
 yuv_convert_cpp = os.path.join(component_dir, "yuv_rgb_convert.cpp")
@@ -28,9 +28,14 @@ if os.path.exists(yuv_convert_simd_cpp):
     sources_to_compile.append(yuv_convert_simd_cpp)
     print("[Simple Video Player] + yuv_rgb_convert_simd.cpp")
 
-# Actually compile and link the source files
+# Compile into a static library and link it
 if sources_to_compile:
-    env.BuildSources(env['PROJECT_BUILD_DIR'], ".", sources_to_compile)
+    lib = env.StaticLibrary(
+        target=os.path.join(env['PROJECT_BUILD_DIR'], "libyuv_convert"),
+        source=sources_to_compile
+    )
+    env.Prepend(LIBS=[lib])
+    print("[Simple Video Player] ✓ Created libyuv_convert.a")
 
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
