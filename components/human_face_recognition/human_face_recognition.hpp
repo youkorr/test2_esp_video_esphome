@@ -24,7 +24,7 @@ class HumanFaceFeat : public dl::feat::FeatWrapper {
 public:
     typedef enum { MFN_S8_V1, MBF_S8_V1 } model_type_t;
     HumanFaceFeat(const char *sdcard_model_dir = nullptr,
-                  model_type_t model_type = static_cast<model_type_t>(CONFIG_HUMAN_FACE_RECOGNITION_MODEL_TYPE));
+                  model_type_t model_type = MFN_S8_V1);
 protected:
     void load_model() override {} // Model loaded in constructor
 };
@@ -33,7 +33,7 @@ protected:
 class HumanFaceRecognizer {
 private:
     HumanFaceFeat *m_feat_model;
-    dl::recognition::DB *m_db;
+    dl::recognition::DataBase *m_db;
     bool m_lazy_load;
 
 public:
