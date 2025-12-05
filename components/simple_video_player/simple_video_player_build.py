@@ -73,10 +73,16 @@ if os.path.exists(esp_h264_dir):
             src_basename = os.path.basename(src).replace('.c', '_dual_task.o')
             target_path = os.path.join(env['PROJECT_BUILD_DIR'], src_basename)
 
+            # CRITICAL: Pass flags as BOTH CPPDEFINES AND CCFLAGS to ensure they reach GCC
             obj = env.Object(
                 target=target_path,
                 source=src,
-                CPPDEFINES=dual_task_defines
+                CPPDEFINES=dual_task_defines,
+                CCFLAGS=env.get('CCFLAGS', []) + [
+                    "-DCONFIG_ESP_H264_DUAL_TASK=1",
+                    "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5"
+                ]
             )
 
             # Force SCons to ALWAYS rebuild this file (never use cache)
@@ -84,7 +90,7 @@ if os.path.exists(esp_h264_dir):
             env.NoCache(obj)
 
             wrapper_objects.extend(obj)
-            print(f"[Simple Video Player] ✓ Compiling {os.path.basename(src)} → {src_basename} (ALWAYS BUILD, NO CACHE)")
+            print(f"[Simple Video Player] ✓ Compiling {os.path.basename(src)} → {src_basename} (CCFLAGS + CPPDEFINES)")
 
         # Create library from explicitly compiled objects
         h264_wrapper_lib = env.StaticLibrary(
