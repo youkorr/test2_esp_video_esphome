@@ -90,9 +90,38 @@ async def to_code(config):
         cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder/impl")
 
     # Add build script for linking H264 and audio codec libraries
+    # AND compiling additional source files
     build_script_path = os.path.join(component_dir, "simple_video_player_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+
+    # Enable optimized H.264 decoder if esp_h264 component is available
+    esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
+    if os.path.exists(esp_h264_dir):
+        # Enable dual-core H.264 decoding on ESP32-P4
+        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
+        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
+
+        # Add H.264 include paths for decoder headers
+        h264_inc_paths = [
+            os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),
+            os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc"),
+        ]
+        for inc_path in h264_inc_paths:
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
+    # Enable SIMD YUV→RGB conversion if esp_image_effects is available
+    esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
+    if os.path.exists(esp_imgfx_dir):
+        # Add preprocessor defines to enable SIMD code
+        cg.add_build_flag("-DUSE_ESP_IMAGE_EFFECTS=1")
+        cg.add_build_flag("-DHAVE_ESP_IMGFX_H=1")
+
+        # Add include paths for esp_imgfx headers
+        imgfx_inc = os.path.join(esp_imgfx_dir, "include")
+        if os.path.exists(imgfx_inc):
+            cg.add_build_flag(f"-I{imgfx_inc}")
 
 
 # Action schemas

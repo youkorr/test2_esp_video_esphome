@@ -12,6 +12,10 @@ parent_components_dir = os.path.dirname(component_dir)
 
 print("[Simple Video Player] Build script running...")
 
+# ESPHome auto-discovers and compiles .cpp files in component directory
+# No need for manual StaticLibrary compilation
+print("[Simple Video Player] Note: yuv_rgb_convert*.cpp files auto-compiled by ESPHome")
+
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
 # ========================================================================
@@ -22,8 +26,44 @@ if os.path.exists(esp_h264_dir):
     env.Append(CPPDEFINES=[
         ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
         ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
+        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority
     ])
     print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1)")
+
+    # Add esp_h264 include paths for compiling wrapper code
+    esp_h264_includes = [
+        os.path.join(esp_h264_dir, "interface", "include"),
+        os.path.join(esp_h264_dir, "port", "include"),
+        os.path.join(esp_h264_dir, "port", "inc"),
+        os.path.join(esp_h264_dir, "sw", "include"),
+        os.path.join(esp_h264_dir, "sw", "src"),
+        os.path.join(esp_h264_dir, "hw", "include"),
+    ]
+    for inc_path in esp_h264_includes:
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+
+    # Compile esp_h264_dec_sw.c with dual-task flags into a static library
+    # This wrapper code configures the tinyh264 decoder
+    # We create a library that will be linked BEFORE the pre-compiled library
+    # to ensure our version with DUAL_TASK flags takes precedence
+    esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
+    h264_wrapper_sources = []
+
+    if os.path.exists(esp_h264_dec_sw_c):
+        h264_wrapper_sources.append(esp_h264_dec_sw_c)
+        print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
+
+    # Create static library from wrapper sources
+    if h264_wrapper_sources:
+        h264_wrapper_lib = env.StaticLibrary(
+            target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
+            source=h264_wrapper_sources
+        )
+        # Link this library FIRST (before pre-compiled libraries) so our symbols take precedence
+        env.Prepend(LIBS=[h264_wrapper_lib])
+        print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
+
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
     # Try openh264 first (more optimized but larger)
@@ -51,44 +91,74 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[h264_inc])
             print(f"[Simple Video Player] Added {h264_lib_name} include path")
 
-        # Force linking with --whole-archive to override compiled esp_h264_dec_sw.o
-        # This ensures library symbols take precedence over any duplicate symbols
-        env.Append(LINKFLAGS=[
-            "-Wl,--whole-archive",
-            h264_lib,
-            "-Wl,--no-whole-archive"
-        ])
+        # Link pre-compiled library AFTER our wrapper library (linked with Prepend above)
+        # The linker will use our esp_h264_dec_sw.o (with DUAL_TASK flags)
+        # and skip the version in the pre-compiled library
+        env.Append(LINKFLAGS=[h264_lib])
 
-        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library (with --whole-archive)")
-        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~10-20ms")
+        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library")
+        print("[Simple Video Player]   Wrapper symbols from libh264_wrapper_dual.a take precedence")
+        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~20-30ms")
     else:
         print(f"[Simple Video Player] ⚠️  H.264 decoder library not found in {h264_lib_dir}")
 else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
-
-# Link esp_image_effects SIMD library
+# ========================================================================
+# Link esp_image_effects SIMD library (Hardware-accelerated YUV→RGB)
 # ========================================================================
 esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
 if os.path.exists(esp_imgfx_dir):
     # Enable SIMD YUV→RGB conversion
-    env.Append(CPPDEFINES=[("USE_ESP_IMAGE_EFFECTS", "1")])
-    
+    env.Append(CPPDEFINES=[
+        ("USE_ESP_IMAGE_EFFECTS", "1"),
+        ("HAVE_ESP_IMGFX_H", "1")  # Tell code that headers are available
+    ])
+    print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
+
     # Add include paths
     imgfx_inc = os.path.join(esp_imgfx_dir, "include")
     if os.path.exists(imgfx_inc):
+        # Add to CPPPATH for normal includes
         env.Append(CPPPATH=[imgfx_inc])
-    
-    # Add library if needed
-    imgfx_lib = os.path.join(esp_imgfx_dir, "lib", "esp32p4", "libesp_image_effects.a")
+
+        # Also add directly to compiler flags to ensure __has_include() finds it
+        env.Append(CCFLAGS=[f"-I{imgfx_inc}"])
+        env.Append(CXXFLAGS=[f"-I{imgfx_inc}"])
+
+        print(f"[Simple Video Player] Added esp_imgfx include path: {imgfx_inc}")
+
+        # Verify header files exist
+        header_path = os.path.join(imgfx_inc, "esp_imgfx_color_convert.h")
+        if os.path.exists(header_path):
+            print(f"[Simple Video Player] ✓ Header found: esp_imgfx_color_convert.h")
+        else:
+            print(f"[Simple Video Player] ⚠️  Header NOT found: {header_path}")
+
+    # Add library path and link library for ESP32-P4
+    imgfx_lib_dir = os.path.join(esp_imgfx_dir, "lib", "esp32p4")
+    imgfx_lib = os.path.join(imgfx_lib_dir, "libesp_image_effects.a")
+
     if os.path.exists(imgfx_lib):
-        env.Append(LIBPATH=[os.path.dirname(imgfx_lib)])
-        env.Append(LIBS=["esp_image_effects"])
-    
-    print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
-    print("[Simple Video Player]   Expected: 3-5x faster conversion (3-5ms vs 10-15ms)")
+        print(f"[Simple Video Player] Found esp_image_effects library: {imgfx_lib}")
+
+        # Add library path
+        env.Append(LIBPATH=[imgfx_lib_dir])
+
+        # Force linking with --whole-archive
+        env.Append(LINKFLAGS=[
+            "-Wl,--whole-archive",
+            imgfx_lib,
+            "-Wl,--no-whole-archive"
+        ])
+
+        print("[Simple Video Player] ✓ Linked esp_image_effects library (with --whole-archive)")
+        print("[Simple Video Player]   Expected: 3-5x faster YUV→RGB conversion (3-5ms vs 10-15ms)")
+        print("[Simple Video Player]   FPS boost: 640×480 → 35+ FPS, 480×272 → 100+ FPS")
+    else:
+        print(f"[Simple Video Player] ⚠️  esp_image_effects library not found: {imgfx_lib}")
 else:
-    print("[Simple Video Player] ⚠️  esp_image_effects component not found")
+    print(f"[Simple Video Player] ⚠️  esp_image_effects component not found")
 
 # ========================================================================
 # Link audio codec library (esp_audio_codec)

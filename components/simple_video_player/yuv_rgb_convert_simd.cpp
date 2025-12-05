@@ -3,16 +3,39 @@
 #include <cstring>
 
 // Try to include esp_image_effects headers
-#if USE_ESP_IMAGE_EFFECTS
-  #if __has_include("esp_imgfx_color_convert.h")
-    #include "esp_imgfx_color_convert.h"
-    #include "esp_imgfx_types.h"
-    #define HAVE_ESP_IMGFX_H 1
+// Note: HAVE_ESP_IMGFX_H may be defined by build script
+#ifndef HAVE_ESP_IMGFX_H
+  #if USE_ESP_IMAGE_EFFECTS
+    #if __has_include("esp_imgfx_color_convert.h")
+      #define HAVE_ESP_IMGFX_H 1
+    #else
+      #define HAVE_ESP_IMGFX_H 0
+    #endif
   #else
     #define HAVE_ESP_IMGFX_H 0
   #endif
+#endif
+
+// Debug: Show preprocessor values at compile time
+#ifdef USE_ESP_IMAGE_EFFECTS
+  #pragma message "YUV_SIMD: USE_ESP_IMAGE_EFFECTS is defined"
 #else
-  #define HAVE_ESP_IMGFX_H 0
+  #pragma message "YUV_SIMD: USE_ESP_IMAGE_EFFECTS is NOT defined"
+#endif
+
+#if HAVE_ESP_IMGFX_H
+  #pragma message "YUV_SIMD: HAVE_ESP_IMGFX_H=1 (SIMD enabled)"
+#else
+  #pragma message "YUV_SIMD: HAVE_ESP_IMGFX_H=0 (SIMD disabled)"
+#endif
+
+// Include headers if available
+#if USE_ESP_IMAGE_EFFECTS && HAVE_ESP_IMGFX_H
+  #include "esp_imgfx_color_convert.h"
+  #include "esp_imgfx_types.h"
+  #pragma message "YUV_SIMD: ✓ Headers included - SIMD ACTIVE"
+#else
+  #pragma message "YUV_SIMD: ✗ Headers NOT included - Software fallback"
 #endif
 
 namespace esphome {

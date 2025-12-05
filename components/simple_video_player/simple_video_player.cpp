@@ -3327,7 +3327,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
+#ifdef CONFIG_ESP_H264_DUAL_TASK
+          ESP_LOGI(TAG, "H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
+#else
+          ESP_LOGI(TAG, "H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
+#endif
         }
       } else {
         // Decode failed, but we can continue to next frame
@@ -3364,7 +3368,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software decoder)", (unsigned long)decode_time);
+#ifdef CONFIG_ESP_H264_DUAL_TASK
+          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
+#else
+          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
+#endif
         }
       } else {
         ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);

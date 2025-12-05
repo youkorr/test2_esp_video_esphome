@@ -4,11 +4,14 @@
 #include <cstdint>
 
 // Check if esp_image_effects is available
-#if __has_include("esp_image_effects.h")
-#define USE_ESP_IMAGE_EFFECTS 1
-#include "esp_image_effects.h"
-#else
-#define USE_ESP_IMAGE_EFFECTS 0
+// Note: USE_ESP_IMAGE_EFFECTS may already be defined by build script
+#ifndef USE_ESP_IMAGE_EFFECTS
+  #if __has_include("esp_image_effects.h")
+    #define USE_ESP_IMAGE_EFFECTS 1
+    #include "esp_image_effects.h"
+  #else
+    #define USE_ESP_IMAGE_EFFECTS 0
+  #endif
 #endif
 
 namespace esphome {
