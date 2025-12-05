@@ -95,6 +95,18 @@ async def to_code(config):
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
 
+    # Enable SIMD YUV→RGB conversion if esp_image_effects is available
+    esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
+    if os.path.exists(esp_imgfx_dir):
+        # Add preprocessor defines to enable SIMD code
+        cg.add_build_flag("-DUSE_ESP_IMAGE_EFFECTS=1")
+        cg.add_build_flag("-DHAVE_ESP_IMGFX_H=1")
+
+        # Add include paths for esp_imgfx headers
+        imgfx_inc = os.path.join(esp_imgfx_dir, "include")
+        if os.path.exists(imgfx_inc):
+            cg.add_build_flag(f"-I{imgfx_inc}")
+
 
 # Action schemas
 SIMPLE_VIDEO_PLAYER_ACTION_SCHEMA = cv.Schema({
