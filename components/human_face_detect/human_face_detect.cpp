@@ -20,9 +20,9 @@ MSR::MSR(const char *model_name)
 #if CONFIG_IDF_TARGET_ESP32P4
     // ESP32-P4: Use RGB_SWAP and RGB565_BIG_ENDIAN as per Waveshare example
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
     // Original anchor configuration from Waveshare ESP32-P4 example
     // score_thr=0.5, nms_thr=0.5, top_k=10
@@ -42,9 +42,9 @@ MNP::MNP(const char *model_name)
 #if CONFIG_IDF_TARGET_ESP32P4
     // ESP32-P4: Use RGB_SWAP and RGB565_BIG_ENDIAN as per Waveshare example
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, DL_IMAGE_CAP_RGB_SWAP);
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
     // Original anchor configuration from Waveshare ESP32-P4 example
     // score_thr=0.5, nms_thr=0.5, top_k=10

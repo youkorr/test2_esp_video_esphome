@@ -5,6 +5,7 @@
 // ESP-IDF detection components - now enabled with proper Kconfig options
 #include "human_face_detect.hpp"
 #include "pedestrian_detect.hpp"
+#include "human_face_recognition.hpp"
 #include "dl_image.hpp"
 
 // Detection is now enabled
@@ -71,9 +72,35 @@ void LVGLCameraDisplay::setup() {
     }
   }
 
+  // Initialize face recognizer if enabled (requires face detection)
+  if (this->face_recognition_enabled_ && this->face_detection_enabled_) {
+    ESP_LOGI(TAG, "🔓 Initializing face recognition...");
+    ESP_LOGI(TAG, "   Database path: %s", this->face_db_path_.c_str());
+    ESP_LOGI(TAG, "   Recognition threshold: %.2f", this->recognition_threshold_);
+
+    this->face_recognizer_ = new HumanFaceRecognizer(
+      this->face_db_path_.c_str(),  // Database path on SD card
+      nullptr,                       // Model from flash
+      HumanFaceFeat::MFN_S8_V1,     // Model type
+      false                          // Not lazy load
+    );
+
+    if (this->face_recognizer_ != nullptr) {
+      int enrolled = this->face_recognizer_->get_num_feats();
+      ESP_LOGI(TAG, "✅ Face recognizer initialized (%d faces enrolled)", enrolled);
+    } else {
+      ESP_LOGE(TAG, "❌ Failed to initialize face recognizer");
+      this->face_recognition_enabled_ = false;
+    }
+  } else if (this->face_recognition_enabled_ && !this->face_detection_enabled_) {
+    ESP_LOGW(TAG, "⚠️ Face recognition requires face detection - enabling face detection");
+    this->face_detection_enabled_ = true;
+  }
+
   ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
   ESP_LOGI(TAG, "   Camera: Opérationnelle");
   ESP_LOGI(TAG, "   Face detection: %s", this->face_detection_enabled_ ? "ENABLED" : "DISABLED");
+  ESP_LOGI(TAG, "   Face recognition: %s", this->face_recognition_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "   Pedestrian detection: %s", this->pedestrian_detection_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
@@ -286,9 +313,47 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
           box.x2 = result.box[2];
           box.y2 = result.box[3];
           box.score = result.score;
+          // Store keypoints for recognition
+          for (int i = 0; i < 10; i++) {
+            box.keypoints[i] = result.keypoint[i];
+          }
           this->cached_face_results_.push_back(box);
         }
         xSemaphoreGive(this->face_results_mutex_);
+      }
+
+      // Face recognition (if enabled and faces detected)
+      if (this->face_recognition_enabled_ && this->face_recognizer_ != nullptr && face_results.size() > 0) {
+        auto &first_face_result = face_results.front();
+
+        // Check if enrollment is pending
+        if (this->enroll_pending_) {
+          int new_id = this->face_recognizer_->enroll(img, first_face_result);
+          if (new_id >= 0) {
+            ESP_LOGI(TAG, "✅ Face enrolled with ID: %d", new_id);
+          } else {
+            ESP_LOGE(TAG, "❌ Failed to enroll face");
+          }
+          this->enroll_pending_ = false;
+        } else {
+          // Try to recognize
+          dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+          if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
+            this->last_recognition_.id = rec_result->id;
+            this->last_recognition_.similarity = rec_result->similarity;
+            this->last_recognition_.recognized = true;
+
+            ESP_LOGI(TAG, "🔓 Face RECOGNIZED! ID=%d, similarity=%.2f",
+                     rec_result->id, rec_result->similarity);
+
+            // Trigger callback
+            if (this->on_face_recognized_ != nullptr) {
+              this->on_face_recognized_(rec_result->id, rec_result->similarity);
+            }
+          } else {
+            this->last_recognition_.recognized = false;
+          }
+        }
       }
 
       // Debug: Log detection results every 20 detections
@@ -377,6 +442,52 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
   (void)width;
   (void)height;
 #endif
+}
+
+// Face recognition API functions
+int LVGLCameraDisplay::enroll_face() {
+  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
+    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
+    return -1;
+  }
+
+  ESP_LOGI(TAG, "📸 Enrollment requested - will capture on next face detection");
+  this->enroll_pending_ = true;
+  return 0;  // Will return actual ID after enrollment completes
+}
+
+bool LVGLCameraDisplay::delete_face(int id) {
+  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
+    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
+    return false;
+  }
+
+  bool success = this->face_recognizer_->delete_feat(id);
+  if (success) {
+    ESP_LOGI(TAG, "🗑️ Face ID %d deleted", id);
+  }
+  return success;
+}
+
+void LVGLCameraDisplay::clear_all_faces() {
+  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
+    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
+    return;
+  }
+
+  this->face_recognizer_->clear_all_feats();
+  ESP_LOGI(TAG, "🗑️ All faces cleared from database");
+}
+
+int LVGLCameraDisplay::get_enrolled_count() {
+  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
+    return 0;
+  }
+  return this->face_recognizer_->get_num_feats();
+}
+
+RecognitionResult LVGLCameraDisplay::get_last_recognition() {
+  return this->last_recognition_;
 }
 
 }  // namespace lvgl_camera_display

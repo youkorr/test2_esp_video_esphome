@@ -26,10 +26,10 @@ MFN::MFN(const char *model_name)
     // ESP32-P4: Use RGB_SWAP and RGB565_BIG_ENDIAN as per Waveshare example
     m_image_preprocessor = new dl::image::FeatImagePreprocessor(
         m_model, {127.5, 127.5, 127.5}, {0.0078125, 0.0078125, 0.0078125},
-        DL_IMAGE_CAP_RGB_SWAP | DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
     m_image_preprocessor = new dl::image::FeatImagePreprocessor(
-        m_model, {127.5, 127.5, 127.5}, {0.0078125, 0.0078125, 0.0078125}, DL_IMAGE_CAP_RGB_SWAP);
+        m_model, {127.5, 127.5, 127.5}, {0.0078125, 0.0078125, 0.0078125}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
     m_postprocessor = new dl::feat::FeatPostprocessor(m_model);
 
