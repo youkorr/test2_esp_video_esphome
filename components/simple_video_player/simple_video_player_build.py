@@ -30,6 +30,7 @@ if os.path.exists(yuv_convert_simd_cpp):
 
 # Compile into a static library and link it
 if sources_to_compile:
+    # Use main environment which already has all ESPHome include paths (including LVGL)
     lib = env.StaticLibrary(
         target=os.path.join(env['PROJECT_BUILD_DIR'], "libyuv_convert"),
         source=sources_to_compile
