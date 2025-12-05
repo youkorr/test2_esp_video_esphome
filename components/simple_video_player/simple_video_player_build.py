@@ -78,8 +78,21 @@ if os.path.exists(esp_imgfx_dir):
     # Add include paths
     imgfx_inc = os.path.join(esp_imgfx_dir, "include")
     if os.path.exists(imgfx_inc):
+        # Add to CPPPATH for normal includes
         env.Append(CPPPATH=[imgfx_inc])
-        print("[Simple Video Player] Added esp_imgfx include path")
+
+        # Also add directly to compiler flags to ensure __has_include() finds it
+        env.Append(CCFLAGS=[f"-I{imgfx_inc}"])
+        env.Append(CXXFLAGS=[f"-I{imgfx_inc}"])
+
+        print(f"[Simple Video Player] Added esp_imgfx include path: {imgfx_inc}")
+
+        # Verify header files exist
+        header_path = os.path.join(imgfx_inc, "esp_imgfx_color_convert.h")
+        if os.path.exists(header_path):
+            print(f"[Simple Video Player] ✓ Header found: esp_imgfx_color_convert.h")
+        else:
+            print(f"[Simple Video Player] ⚠️  Header NOT found: {header_path}")
 
     # Add library path and link library for ESP32-P4
     imgfx_lib_dir = os.path.join(esp_imgfx_dir, "lib", "esp32p4")
