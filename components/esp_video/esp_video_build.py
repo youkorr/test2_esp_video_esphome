@@ -101,7 +101,7 @@ esp_h264_sources = [
     "sw/src/h264_color_convert.c",
     # Sources logicielles
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264 encoder)
-    "sw/src/esp_h264_dec_sw.c",            # Décodeur tinyh264/h264bsd (Baseline profile)
+    # "sw/src/esp_h264_dec_sw.c",          # EXCLUDED: Compiled by simple_video_player_build.py with CONFIG_ESP_H264_DUAL_TASK flags
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264 encoder)
     # Sources matérielles (encodeur H.264 hardware ESP32-P4)
     "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
