@@ -43,12 +43,27 @@ if os.path.exists(esp_h264_dir):
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
 
-    # Compile esp_h264_dec_sw.c with dual-task flags
+    # Compile esp_h264_dec_sw.c with dual-task flags into a static library
     # This wrapper code configures the tinyh264 decoder
+    # We create a library that will be linked BEFORE the pre-compiled library
+    # to ensure our version with DUAL_TASK flags takes precedence
     esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
+    h264_wrapper_sources = []
+
     if os.path.exists(esp_h264_dec_sw_c):
+        h264_wrapper_sources.append(esp_h264_dec_sw_c)
         print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
-        env.Object(esp_h264_dec_sw_c)
+
+    # Create static library from wrapper sources
+    if h264_wrapper_sources:
+        h264_wrapper_lib = env.StaticLibrary(
+            target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
+            source=h264_wrapper_sources
+        )
+        # Link this library FIRST (before pre-compiled libraries) so our symbols take precedence
+        env.Prepend(LIBS=[h264_wrapper_lib])
+        print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
+
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
     # Try openh264 first (more optimized but larger)
@@ -76,16 +91,14 @@ if os.path.exists(esp_h264_dir):
             env.Append(CPPPATH=[h264_inc])
             print(f"[Simple Video Player] Added {h264_lib_name} include path")
 
-        # Force linking with --whole-archive to override compiled esp_h264_dec_sw.o
-        # This ensures library symbols take precedence over any duplicate symbols
-        env.Append(LINKFLAGS=[
-            "-Wl,--whole-archive",
-            h264_lib,
-            "-Wl,--no-whole-archive"
-        ])
+        # Link pre-compiled library AFTER our wrapper library (linked with Prepend above)
+        # The linker will use our esp_h264_dec_sw.o (with DUAL_TASK flags)
+        # and skip the version in the pre-compiled library
+        env.Append(LINKFLAGS=[h264_lib])
 
-        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library (with --whole-archive)")
-        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~10-20ms")
+        print(f"[Simple Video Player] ✓ Linked optimized {h264_lib_name} decoder library")
+        print("[Simple Video Player]   Wrapper symbols from libh264_wrapper_dual.a take precedence")
+        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~20-30ms")
     else:
         print(f"[Simple Video Player] ⚠️  H.264 decoder library not found in {h264_lib_dir}")
 else:
