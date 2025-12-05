@@ -60,9 +60,15 @@ if os.path.exists(esp_h264_dir):
             target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
             source=h264_wrapper_sources
         )
-        # Link this library FIRST (before pre-compiled libraries) so our symbols take precedence
-        env.Prepend(LIBS=[h264_wrapper_lib])
+        # FORCE our wrapper symbols to override libesp_video_full.a using --whole-archive
+        # This ensures our DUAL_TASK version takes precedence over ESP-Video's version
+        env.Prepend(LINKFLAGS=[
+            "-Wl,--whole-archive",
+            h264_wrapper_lib[0].get_abspath(),  # Get absolute path to .a file
+            "-Wl,--no-whole-archive"
+        ])
         print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
+        print("[Simple Video Player] ✓ Forcing wrapper symbols with --whole-archive (overrides ESP-Video)")
 
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
