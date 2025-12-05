@@ -56,21 +56,23 @@ if os.path.exists(esp_h264_dir):
 
     # Create static library from wrapper sources
     if h264_wrapper_sources:
-        wrapper_lib_path = os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual.a")
         h264_wrapper_lib = env.StaticLibrary(
             target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
             source=h264_wrapper_sources
         )
-        # FORCE our wrapper symbols to override libesp_video_full.a using --whole-archive
-        # This ensures our DUAL_TASK version takes precedence over ESP-Video's version
+        # Link wrapper library FIRST so symbols override ESP-Video's version
+        # Use Prepend to ensure it's linked before libesp_video_full.a
+        env.Prepend(LIBS=[h264_wrapper_lib])
+
+        # Also add to link flags with --whole-archive to FORCE symbol override
         env.Prepend(LINKFLAGS=[
-            "-Wl,--whole-archive",
-            wrapper_lib_path,
-            "-Wl,--no-whole-archive"
+            "-Wl,--whole-archive,-l:libh264_wrapper_dual.a,--no-whole-archive"
         ])
+        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
+
         print("[Simple Video Player] ✓ Created libh264_wrapper_dual.a with DUAL_TASK enabled")
-        print(f"[Simple Video Player] ✓ Forcing wrapper symbols with --whole-archive: {wrapper_lib_path}")
-        print("[Simple Video Player]   (overrides ESP-Video's esp_h264_dec_sw.o)")
+        print("[Simple Video Player] ✓ Wrapper library linked FIRST with --whole-archive")
+        print("[Simple Video Player]   (should override ESP-Video's esp_h264_dec_sw.o)")
 
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
