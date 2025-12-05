@@ -61,13 +61,17 @@ if os.path.exists(esp_h264_dir):
         print("[Simple Video Player] ⚠️  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
         wrapper_objects = []
         for src in h264_wrapper_sources:
+            # Convert deque to list, then add our DUAL_TASK flags
+            existing_defines = list(env.get('CPPDEFINES', []))
+            dual_task_defines = existing_defines + [
+                ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+                ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+                ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
+            ]
+
             obj = env.Object(
                 src,
-                CPPDEFINES=env['CPPDEFINES'] + [
-                    ("CONFIG_ESP_H264_DUAL_TASK", "1"),
-                    ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
-                    ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
-                ]
+                CPPDEFINES=dual_task_defines
             )
             wrapper_objects.extend(obj)
             print(f"[Simple Video Player] ✓ Compiled {os.path.basename(src)} with DUAL_TASK flags")
