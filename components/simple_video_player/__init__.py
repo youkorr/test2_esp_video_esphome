@@ -90,20 +90,10 @@ async def to_code(config):
         cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder/impl")
 
     # Add build script for linking H264 and audio codec libraries
+    # AND compiling additional source files
     build_script_path = os.path.join(component_dir, "simple_video_player_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-
-    # Register additional C++ source files for compilation
-    # ESPHome only auto-compiles the main .cpp file, others must be explicitly added
-    cg.add_library(
-        name="simple_video_player_extras",
-        repository=None,
-        sources=[
-            os.path.join(component_dir, "yuv_rgb_convert.cpp"),
-            os.path.join(component_dir, "yuv_rgb_convert_simd.cpp"),
-        ]
-    )
 
 
 # Action schemas

@@ -13,6 +13,21 @@ parent_components_dir = os.path.dirname(component_dir)
 print("[Simple Video Player] Build script running...")
 
 # ========================================================================
+# Compile additional source files
+# ESPHome only auto-compiles the main component .cpp file
+# ========================================================================
+yuv_convert_cpp = os.path.join(component_dir, "yuv_rgb_convert.cpp")
+yuv_convert_simd_cpp = os.path.join(component_dir, "yuv_rgb_convert_simd.cpp")
+
+if os.path.exists(yuv_convert_cpp):
+    env.Object(yuv_convert_cpp)
+    print("[Simple Video Player] + yuv_rgb_convert.cpp")
+
+if os.path.exists(yuv_convert_simd_cpp):
+    env.Object(yuv_convert_simd_cpp)
+    print("[Simple Video Player] + yuv_rgb_convert_simd.cpp")
+
+# ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
 # ========================================================================
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
