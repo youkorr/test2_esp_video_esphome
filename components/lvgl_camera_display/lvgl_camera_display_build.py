@@ -56,15 +56,28 @@ print("[LVGL Camera Display] ✓ CONFIG defines added for detection models")
 sources_to_add = []
 
 # ========================================================================
-# Pack and Embed Detection Models
+# Helper function for caching - skip if output is newer than inputs
 # ========================================================================
 import subprocess
+
+def needs_rebuild(output_file, input_files):
+    """Check if output_file needs to be rebuilt based on input file timestamps."""
+    if not os.path.exists(output_file):
+        return True
+    output_mtime = os.path.getmtime(output_file)
+    for input_file in input_files:
+        if os.path.exists(input_file):
+            if os.path.getmtime(input_file) > output_mtime:
+                return True
+    return False
+
+# ========================================================================
+# Pack and Embed Detection Models (with caching)
+# ========================================================================
 
 # Pack human_face_detect models
 human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
 if os.path.exists(human_face_detect_dir):
-    print("[LVGL Camera Display] 📦 Packing human_face_detect models...")
-
     models_dir = os.path.join(human_face_detect_dir, "models", "p4")
     pack_script = os.path.join(human_face_detect_dir, "pack_model.py")
 
@@ -74,70 +87,72 @@ if os.path.exists(human_face_detect_dir):
         mnp_model = os.path.join(models_dir, "human_face_detect_mnp_s8_v1.espdl")
 
         if os.path.exists(msr_model) and os.path.exists(mnp_model):
-            # Output packed model
+            # Output files
             packed_model = os.path.join(component_dir, "human_face_detect.espdl")
+            embed_c_file = os.path.join(component_dir, "human_face_detect_espdl_embed.c")
 
-            # Run pack_model.py
-            try:
-                cmd = [
-                    "python3", pack_script,
-                    "--model_path", msr_model, mnp_model,
-                    "--out_file", packed_model
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0 and os.path.exists(packed_model):
-                    print(f"[LVGL Camera Display] ✅ Models packed: {os.path.basename(packed_model)}")
+            # Check if rebuild is needed (CACHING)
+            if needs_rebuild(embed_c_file, [msr_model, mnp_model, pack_script]):
+                print("[LVGL Camera Display] 📦 Packing human_face_detect models...")
 
-                    # Create C file with embedded binary data
-                    embed_c_file = os.path.join(component_dir, "human_face_detect_espdl_embed.c")
+                # Run pack_model.py
+                try:
+                    cmd = [
+                        "python3", pack_script,
+                        "--model_path", msr_model, mnp_model,
+                        "--out_file", packed_model
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0 and os.path.exists(packed_model):
+                        print(f"[LVGL Camera Display] ✅ Models packed: {os.path.basename(packed_model)}")
 
-                    # Read binary data
-                    with open(packed_model, 'rb') as f:
-                        model_data = f.read()
+                        # Read binary data
+                        with open(packed_model, 'rb') as f:
+                            model_data = f.read()
 
-                    # Generate C array
-                    c_content = f'''// Auto-generated file - embedded human_face_detect model
+                        # Generate C array
+                        c_content = f'''// Auto-generated file - embedded human_face_detect model
 #include <stddef.h>
 #include <stdint.h>
 
 __attribute__((aligned(16)))
 const uint8_t _binary_human_face_detect_espdl_start[] = {{
 '''
-                    # Write bytes in rows of 16
-                    for i in range(0, len(model_data), 16):
-                        chunk = model_data[i:i+16]
-                        hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                        c_content += f'    {hex_bytes},\n'
+                        # Write bytes in rows of 16
+                        for i in range(0, len(model_data), 16):
+                            chunk = model_data[i:i+16]
+                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                            c_content += f'    {hex_bytes},\n'
 
-                    c_content += f'''}};
+                        c_content += f'''}};
 
 const uint8_t *_binary_human_face_detect_espdl_end = _binary_human_face_detect_espdl_start + {len(model_data)};
 const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
 '''
 
-                    # Write C file
-                    with open(embed_c_file, 'w') as f:
-                        f.write(c_content)
+                        # Write C file
+                        with open(embed_c_file, 'w') as f:
+                            f.write(c_content)
 
-                    # Add to sources
-                    sources_to_add.append(embed_c_file)
-                    print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
-                else:
-                    error_msg = result.stderr if result.stderr else "Unknown error"
-                    print(f"[LVGL Camera Display] ⚠️  Failed to pack models: {error_msg}")
-            except Exception as e:
-                print(f"[LVGL Camera Display] ⚠️  Error packing models: {e}")
+                        print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
+                    else:
+                        error_msg = result.stderr if result.stderr else "Unknown error"
+                        print(f"[LVGL Camera Display] ⚠️  Failed to pack models: {error_msg}")
+                except Exception as e:
+                    print(f"[LVGL Camera Display] ⚠️  Error packing models: {e}")
+            else:
+                # CACHE HIT - no rebuild needed
+                print("[LVGL Camera Display] ⚡ human_face_detect models cached (skip)")
+
+            # Always add embed file to sources if it exists
+            if os.path.exists(embed_c_file):
+                sources_to_add.append(embed_c_file)
         else:
             print(f"[LVGL Camera Display] ⚠️  Model files not found in {models_dir}")
     else:
         print(f"[LVGL Camera Display] ⚠️  pack_model.py or models dir not found")
 
-# ========================================================================
-# Human Face Detect Component
-# ========================================================================
-human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
-if os.path.exists(human_face_detect_dir):
-    # Add include path for human_face_detect
+    # Add include path and source for human_face_detect
     env.Append(CPPPATH=[human_face_detect_dir])
     human_face_sources = ["human_face_detect.cpp"]
     for src in human_face_sources:
@@ -152,12 +167,10 @@ if os.path.exists(human_face_recognition_inc_dir):
     env.Append(CPPPATH=[human_face_recognition_inc_dir])
 
 # ========================================================================
-# Pack and Embed Pedestrian Detection Model
+# Pack and Embed Pedestrian Detection Model (with caching)
 # ========================================================================
 pedestrian_detect_dir = os.path.join(parent_components_dir, "pedestrian_detect")
 if os.path.exists(pedestrian_detect_dir):
-    print("[LVGL Camera Display] 📦 Packing pedestrian_detect model...")
-
     models_dir = os.path.join(pedestrian_detect_dir, "models", "p4")
     pack_script = os.path.join(pedestrian_detect_dir, "pack_model.py")
 
@@ -166,59 +179,66 @@ if os.path.exists(pedestrian_detect_dir):
         pico_model = os.path.join(models_dir, "pedestrian_detect_pico_s8_v1.espdl")
 
         if os.path.exists(pico_model):
-            # Output packed model
+            # Output files
             packed_model = os.path.join(component_dir, "pedestrian_detect.espdl")
+            embed_c_file = os.path.join(component_dir, "pedestrian_detect_espdl_embed.c")
 
-            # Run pack_model.py
-            try:
-                cmd = [
-                    "python3", pack_script,
-                    "--model_path", pico_model,
-                    "--out_file", packed_model
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0 and os.path.exists(packed_model):
-                    print(f"[LVGL Camera Display] ✅ Model packed: {os.path.basename(packed_model)}")
+            # Check if rebuild is needed (CACHING)
+            if needs_rebuild(embed_c_file, [pico_model, pack_script]):
+                print("[LVGL Camera Display] 📦 Packing pedestrian_detect model...")
 
-                    # Create C file with embedded binary data
-                    embed_c_file = os.path.join(component_dir, "pedestrian_detect_espdl_embed.c")
+                # Run pack_model.py
+                try:
+                    cmd = [
+                        "python3", pack_script,
+                        "--model_path", pico_model,
+                        "--out_file", packed_model
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0 and os.path.exists(packed_model):
+                        print(f"[LVGL Camera Display] ✅ Model packed: {os.path.basename(packed_model)}")
 
-                    # Read binary data
-                    with open(packed_model, 'rb') as f:
-                        model_data = f.read()
+                        # Read binary data
+                        with open(packed_model, 'rb') as f:
+                            model_data = f.read()
 
-                    # Generate C array
-                    c_content = f'''// Auto-generated file - embedded pedestrian_detect model
+                        # Generate C array
+                        c_content = f'''// Auto-generated file - embedded pedestrian_detect model
 #include <stddef.h>
 #include <stdint.h>
 
 __attribute__((aligned(16)))
 const uint8_t _binary_pedestrian_detect_espdl_start[] = {{
 '''
-                    # Write bytes in rows of 16
-                    for i in range(0, len(model_data), 16):
-                        chunk = model_data[i:i+16]
-                        hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                        c_content += f'    {hex_bytes},\n'
+                        # Write bytes in rows of 16
+                        for i in range(0, len(model_data), 16):
+                            chunk = model_data[i:i+16]
+                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                            c_content += f'    {hex_bytes},\n'
 
-                    c_content += f'''}};
+                        c_content += f'''}};
 
 const uint8_t *_binary_pedestrian_detect_espdl_end = _binary_pedestrian_detect_espdl_start + {len(model_data)};
 const size_t _binary_pedestrian_detect_espdl_size = {len(model_data)};
 '''
 
-                    # Write C file
-                    with open(embed_c_file, 'w') as f:
-                        f.write(c_content)
+                        # Write C file
+                        with open(embed_c_file, 'w') as f:
+                            f.write(c_content)
 
-                    # Add to sources
-                    sources_to_add.append(embed_c_file)
-                    print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
-                else:
-                    error_msg = result.stderr if result.stderr else "Unknown error"
-                    print(f"[LVGL Camera Display] ⚠️  Failed to pack pedestrian model: {error_msg}")
-            except Exception as e:
-                print(f"[LVGL Camera Display] ⚠️  Error packing pedestrian model: {e}")
+                        print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
+                    else:
+                        error_msg = result.stderr if result.stderr else "Unknown error"
+                        print(f"[LVGL Camera Display] ⚠️  Failed to pack pedestrian model: {error_msg}")
+                except Exception as e:
+                    print(f"[LVGL Camera Display] ⚠️  Error packing pedestrian model: {e}")
+            else:
+                # CACHE HIT - no rebuild needed
+                print("[LVGL Camera Display] ⚡ pedestrian_detect model cached (skip)")
+
+            # Always add embed file to sources if it exists
+            if os.path.exists(embed_c_file):
+                sources_to_add.append(embed_c_file)
         else:
             print(f"[LVGL Camera Display] ⚠️  Pedestrian model file not found in {models_dir}")
     else:
@@ -233,12 +253,10 @@ const size_t _binary_pedestrian_detect_espdl_size = {len(model_data)};
             print(f"[LVGL Camera Display] + {src}")
 
 # ========================================================================
-# Pack and Embed Human Face Recognition Model
+# Pack and Embed Human Face Recognition Model (with caching)
 # ========================================================================
 human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
 if os.path.exists(human_face_recognition_dir):
-    print("[LVGL Camera Display] 📦 Packing human_face_recognition model...")
-
     models_dir = os.path.join(human_face_recognition_dir, "models", "p4")
     pack_script = os.path.join(human_face_recognition_dir, "pack_model.py")
 
@@ -247,59 +265,66 @@ if os.path.exists(human_face_recognition_dir):
         mfn_model = os.path.join(models_dir, "human_face_feat_mfn_s8_v1.espdl")
 
         if os.path.exists(mfn_model):
-            # Output packed model
+            # Output files
             packed_model = os.path.join(component_dir, "human_face_feat.espdl")
+            embed_c_file = os.path.join(component_dir, "human_face_feat_espdl_embed.c")
 
-            # Run pack_model.py
-            try:
-                cmd = [
-                    "python3", pack_script,
-                    "--model_path", mfn_model,
-                    "--out_file", packed_model
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                if result.returncode == 0 and os.path.exists(packed_model):
-                    print(f"[LVGL Camera Display] ✅ Model packed: {os.path.basename(packed_model)}")
+            # Check if rebuild is needed (CACHING)
+            if needs_rebuild(embed_c_file, [mfn_model, pack_script]):
+                print("[LVGL Camera Display] 📦 Packing human_face_recognition model...")
 
-                    # Create C file with embedded binary data
-                    embed_c_file = os.path.join(component_dir, "human_face_feat_espdl_embed.c")
+                # Run pack_model.py
+                try:
+                    cmd = [
+                        "python3", pack_script,
+                        "--model_path", mfn_model,
+                        "--out_file", packed_model
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                    if result.returncode == 0 and os.path.exists(packed_model):
+                        print(f"[LVGL Camera Display] ✅ Model packed: {os.path.basename(packed_model)}")
 
-                    # Read binary data
-                    with open(packed_model, 'rb') as f:
-                        model_data = f.read()
+                        # Read binary data
+                        with open(packed_model, 'rb') as f:
+                            model_data = f.read()
 
-                    # Generate C array
-                    c_content = f'''// Auto-generated file - embedded human_face_feat model
+                        # Generate C array
+                        c_content = f'''// Auto-generated file - embedded human_face_feat model
 #include <stddef.h>
 #include <stdint.h>
 
 __attribute__((aligned(16)))
 const uint8_t _binary_human_face_feat_mfn_s8_v1_espdl_start[] = {{
 '''
-                    # Write bytes in rows of 16
-                    for i in range(0, len(model_data), 16):
-                        chunk = model_data[i:i+16]
-                        hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                        c_content += f'    {hex_bytes},\n'
+                        # Write bytes in rows of 16
+                        for i in range(0, len(model_data), 16):
+                            chunk = model_data[i:i+16]
+                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                            c_content += f'    {hex_bytes},\n'
 
-                    c_content += f'''}};
+                        c_content += f'''}};
 
 const uint8_t *_binary_human_face_feat_mfn_s8_v1_espdl_end = _binary_human_face_feat_mfn_s8_v1_espdl_start + {len(model_data)};
 const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
 '''
 
-                    # Write C file
-                    with open(embed_c_file, 'w') as f:
-                        f.write(c_content)
+                        # Write C file
+                        with open(embed_c_file, 'w') as f:
+                            f.write(c_content)
 
-                    # Add to sources
-                    sources_to_add.append(embed_c_file)
-                    print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
-                else:
-                    error_msg = result.stderr if result.stderr else "Unknown error"
-                    print(f"[LVGL Camera Display] ⚠️  Failed to pack face recognition model: {error_msg}")
-            except Exception as e:
-                print(f"[LVGL Camera Display] ⚠️  Error packing face recognition model: {e}")
+                        print(f"[LVGL Camera Display] ✅ Model embedded: {len(model_data)} bytes")
+                    else:
+                        error_msg = result.stderr if result.stderr else "Unknown error"
+                        print(f"[LVGL Camera Display] ⚠️  Failed to pack face recognition model: {error_msg}")
+                except Exception as e:
+                    print(f"[LVGL Camera Display] ⚠️  Error packing face recognition model: {e}")
+            else:
+                # CACHE HIT - no rebuild needed
+                print("[LVGL Camera Display] ⚡ human_face_recognition model cached (skip)")
+
+            # Always add embed file to sources if it exists
+            if os.path.exists(embed_c_file):
+                sources_to_add.append(embed_c_file)
         else:
             print(f"[LVGL Camera Display] ⚠️  Face recognition model file not found in {models_dir}")
     else:

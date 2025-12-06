@@ -9,15 +9,15 @@ page_home (ecran actif)
      |
      | Inactivite (auto_off secondes)
      v
-page_sleep (ecran noir, display_lock=true)
+page_sleep (ecran noir, display_lock=true, switch=ON)
      |
      | Touch
      v
 face_unlock_page (camera + clavier PIN)
      |
-     +--- Face reconnue --> page_home
+     +--- Face reconnue --> switch=OFF --> page_home
      |
-     +--- PIN correct ----> page_home
+     +--- PIN correct ----> switch=OFF --> page_home
      |
      +--- Timeout --------> page_sleep
 ```
@@ -56,7 +56,48 @@ globals:
 
 ---
 
-## 3. Number
+## 3. Switch (controle camera)
+
+```yaml
+switch:
+  - platform: template
+    name: "LVGL Camera Display"
+    id: lvgl_display_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }
+```
+
+---
+
+## 4. LVGL Camera Display
+
+```yaml
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  pedestrian_detection: false
+  face_detection: true
+  face_recognition: true
+  face_db_path: "/sdcard/faces.db"
+  recognition_threshold: 0.7
+```
+
+---
+
+## 5. Number
 
 ```yaml
 number:
@@ -119,7 +160,7 @@ Ce label doit exister dans votre page settings pour afficher la valeur actuelle 
 
 ---
 
-## 4. LVGL on_idle
+## 6. LVGL on_idle
 
 ```yaml
 lvgl:
@@ -134,17 +175,6 @@ lvgl:
         int timeout = id(auto_off).state;
         return (timeout == -1) ? 86400000 : (timeout * 1000);
       then:
-        - lambda: |-
-            static bool canvas_configured = false;
-            if (!canvas_configured) {
-              auto canvas = id(camera_canvas);
-              if (canvas != nullptr) {
-                id(camera_display).configure_canvas(canvas);
-                canvas_configured = true;
-                ESP_LOGI("lvgl", "Canvas configure pour camera 640x480");
-              }
-            }
-
         - if:
             condition:
               lambda: 'return id(auto_off).state > 0;'
@@ -158,273 +188,207 @@ lvgl:
 
 ---
 
-## 5. LVGL Pages
+## 7. LVGL Pages
 
-### 5.1 Page Sleep (ecran noir)
+### 7.1 Page Sleep (ecran noir)
 
 ```yaml
-    - id: page_sleep
-      bg_color: 0x000000
-      on_load:
-        - lambda: |-
-            ESP_LOGI("lock", "Page veille - ecran verrouille");
-            id(display_lock) = true;
-      widgets:
-        - obj:
-            width: 1024
-            height: 600
-            x: 0
-            y: 0
-            bg_color: 0x000000
-            bg_opa: COVER
-            border_opa: TRANSP
-        - label:
-            id: sleep_time_label
-            text: "12:34"
-            align: CENTER
-            y: -50
-            text_color: 0x333333
-            text_font: roboto_48
-        - label:
-            text: "Touchez l ecran pour deverrouiller"
-            align: CENTER
-            y: 50
-            text_color: 0x222222
-            text_font: roboto_24
-        - obj:
-            id: sleep_touch_zone
-            width: 1024
-            height: 600
-            x: 0
-            y: 0
-            bg_opa: 0%
-            border_opa: TRANSP
-            on_click:
-              then:
-                - lambda: ESP_LOGI("lock", "Touch detecte");
-                - light.turn_on: backlight
-                - lvgl.page.show: face_unlock_page
+      - id: page_sleep
+        bg_color: 0x000000
+        on_load:
+          - lambda: |-
+              ESP_LOGI("lock", "🔒 Page veille - écran verrouillé");
+              id(display_lock) = true;
+          # AUTO-ACTIVER le switch pour la reconnaissance faciale
+          - switch.turn_on: lvgl_display_enable_switch
+          - lambda: |-
+              // Pre-configurer le canvas pour face_unlock_page
+              auto canvas = id(face_unlock_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+              }
+        widgets:
+          - obj:
+              width: 1024
+              height: 600
+              x: 0
+              y: 0
+              bg_color: 0x000000
+              bg_opa: COVER
+              border_opa: TRANSP
+          - label:
+              id: sleep_time_label
+              text: "12:34"
+              align: CENTER
+              y: -50
+              text_color: 0x333333
+              text_font: roboto_48
+          - label:
+              text: "Touch the screen to unlock"
+              align: CENTER
+              y: 50
+              text_color: 0x222222
+              text_font: roboto_24
+          - obj:
+              id: sleep_touch_zone
+              width: 1024
+              height: 600
+              x: 0
+              y: 0
+              bg_opa: 0%
+              border_opa: TRANSP
+              on_click:
+                then:
+                  - lambda: ESP_LOGI("lock", "👆 Touch détecté");
+                  - light.turn_on: backlight
+                  - lvgl.page.show: face_unlock_page
 ```
 
-### 5.2 Face Unlock Page (camera + clavier)
+### 7.2 Face Unlock Page (camera + clavier)
 
 ```yaml
-    - id: face_unlock_page
-      bg_color: 0x0d1117
+      # ============ PAGE DÉVERROUILLAGE ============
+      - id: face_unlock_page
+        bg_color: 0x0d1117
 
-      on_load:
-        - lambda: |-
-            ESP_LOGI("lock", "Page deverrouillage chargee");
-            // Toujours verrouiller quand on entre sur cette page
-            id(display_lock) = true;
-            // Reset le resultat precedent
-            id(camera_display).reset_last_recognition();
-            // Demarrer la camera
-            id(tab5_cam).start_streaming();
-            // Configurer le canvas
-            auto canvas = id(face_unlock_canvas);
-            if (canvas != nullptr) {
-              id(camera_display).configure_canvas(canvas);
-            }
-            // Reset timeout
-            id(unlock_timeout_start) = millis();
+        on_load:
+          - lambda: |-
+              ESP_LOGI("lock", "Page deverrouillage chargee");
+              id(display_lock) = true;
+              id(camera_display).reset_last_recognition();
+              id(tab5_cam).start_streaming();
+              auto canvas = id(face_unlock_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+              }
+              id(unlock_timeout_start) = millis();
 
-      widgets:
-        # ===== HEADER =====
-        - obj:
-            x: 0
-            y: 0
-            width: 1024
-            height: 50
-            bg_color: 0x161b22
-            bg_opa: COVER
-            border_opa: TRANSP
-            radius: 0
-            widgets:
-              - label:
-                  text: "DEVERROUILLAGE"
-                  x: 20
-                  y: 10
-                  text_color: 0xFFFFFF
-                  text_font: roboto_32
+        widgets:
+          # ===== CANVAS CAMERA (gauche) =====
+          - canvas:
+              id: face_unlock_canvas
+              width: 640
+              height: 480
+              x: 10
+              y: 70
+              bg_color: 0x000000
+              radius: 8
 
-        # ===== SECTION GAUCHE: CAMERA =====
-        - obj:
-            id: camera_section
-            x: 10
-            y: 55
-            width: 660
-            height: 535
-            bg_color: 0x161b22
-            bg_opa: COVER
-            radius: 15
-            border_width: 1
-            border_color: 0x30363d
-            widgets:
-              - obj:
-                  x: 0
-                  y: 0
-                  width: 660
-                  height: 45
-                  bg_color: 0x21262d
-                  bg_opa: COVER
-                  radius: 15
-                  border_opa: TRANSP
-                  widgets:
-                    - label:
-                        text: "Reconnaissance Faciale"
-                        x: 15
-                        y: 10
-                        text_color: 0x58a6ff
-                        text_font: roboto_24
+          # ===== LABEL STATUS (sous le canvas) =====
+          - label:
+              id: face_status_label
+              text: "Aucun visage detecte"
+              x: 10
+              y: 560
+              width: 640
+              text_align: CENTER
+              text_color: 0x58a6ff
+              text_font: roboto_18
 
-              - canvas:
-                  id: face_unlock_canvas
-                  width: 640
-                  height: 480
-                  x: 10
-                  y: 50
-                  bg_color: 0x000000
-                  radius: 8
+          # ===== SECTION CLAVIER PIN (droite) =====
+          - obj:
+              x: 660
+              y: 10
+              width: 354
+              height: 60
+              border_width: 1
+              border_color: color_steel_blue
+              pad_all: 0
+              bg_opa: TRANSP
+              shadow_opa: TRANSP
+              radius: 15
+              widgets:
+                - label:
+                    id: unlock_code_display
+                    align: CENTER
+                    text_font: nunito_36
+                    text: "enter code"
+                    text_color: color_misty_blue
+                    text_align: CENTER
 
-              - label:
-                  id: face_status_label
-                  text: "Regardez la camera..."
-                  x: 0
-                  y: 505
-                  width: 660
-                  text_align: CENTER
-                  text_color: 0x58a6ff
-                  text_font: roboto_18
+          # ===== CLAVIER NUMÉRIQUE =====
+          - buttonmatrix:
+              id: unlock_keypad
+              x: 660
+              y: 80
+              width: 354
+              height: 490
+              pad_all: 0
+              bg_opa: TRANSP
+              border_opa: TRANSP
+              items:
+                bg_opa: TRANSP
+                border_color: color_steel_blue
+                border_width: 1
+                shadow_opa: TRANSP
+                text_font: montserrat_40
+                text_color: color_misty_blue
+                pressed:
+                  bg_color: color_blue
+                  text_color: color_white
+                  border_color: color_blue
+              rows:
+                - buttons:
+                    - text: 1
+                      control:
+                        no_repeat: true
+                    - text: 2
+                      control:
+                        no_repeat: true
+                    - text: 3
+                      control:
+                        no_repeat: true
+                - buttons:
+                    - text: 4
+                      control:
+                        no_repeat: true
+                    - text: 5
+                      control:
+                        no_repeat: true
+                    - text: 6
+                      control:
+                        no_repeat: true
+                - buttons:
+                    - text: 7
+                      control:
+                        no_repeat: true
+                    - text: 8
+                      control:
+                        no_repeat: true
+                    - text: 9
+                      control:
+                        no_repeat: true
+                - buttons:
+                    - text: "\uF55A"
+                      key_code: "*"
+                      control:
+                        no_repeat: true
+                    - text: 0
+                      control:
+                        no_repeat: true
+                    - text: "\uF00C"
+                      key_code: "#"
+                      control:
+                        no_repeat: true
 
-        # ===== SECTION DROITE: CLAVIER PIN =====
-        - obj:
-            id: keypad_section
-            x: 680
-            y: 55
-            width: 334
-            height: 535
-            bg_color: 0x161b22
-            bg_opa: COVER
-            radius: 15
-            border_width: 1
-            border_color: 0x30363d
-            widgets:
-              - obj:
-                  x: 0
-                  y: 0
-                  width: 334
-                  height: 45
-                  bg_color: 0x21262d
-                  bg_opa: COVER
-                  radius: 15
-                  border_opa: TRANSP
-                  widgets:
-                    - label:
-                        text: "Code PIN"
-                        x: 15
-                        y: 10
-                        text_color: 0x58a6ff
-                        text_font: roboto_24
-
-              - obj:
-                  x: 17
-                  y: 55
-                  width: 300
-                  height: 60
-                  bg_color: 0x0d1117
-                  radius: 10
-                  border_width: 2
-                  border_color: 0x30363d
-                  widgets:
-                    - label:
-                        id: unlock_code_display
-                        text: "_ _ _ _"
-                        align: CENTER
-                        text_color: 0xFFFFFF
-                        text_font: roboto_32
-
-              - buttonmatrix:
-                  id: unlock_keypad
-                  x: 17
-                  y: 125
-                  width: 300
-                  height: 400
-                  pad_all: 5
-                  bg_opa: TRANSP
-                  border_opa: TRANSP
-                  items:
-                    bg_color: 0x21262d
-                    border_color: 0x30363d
-                    border_width: 1
-                    radius: 12
-                    text_font: roboto_32
-                    text_color: 0xFFFFFF
-                    pressed:
-                      bg_color: 0x58a6ff
-                      text_color: 0x0d1117
-                  rows:
-                    - buttons:
-                        - text: "1"
-                          control:
-                            no_repeat: true
-                        - text: "2"
-                          control:
-                            no_repeat: true
-                        - text: "3"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "4"
-                          control:
-                            no_repeat: true
-                        - text: "5"
-                          control:
-                            no_repeat: true
-                        - text: "6"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "7"
-                          control:
-                            no_repeat: true
-                        - text: "8"
-                          control:
-                            no_repeat: true
-                        - text: "9"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "<"
-                          key_code: "*"
-                          control:
-                            no_repeat: true
-                        - text: "0"
-                          control:
-                            no_repeat: true
-                        - text: "OK"
-                          key_code: "#"
-                          control:
-                            no_repeat: true
-
-        # ===== BARRE TIMEOUT =====
-        - bar:
-            id: unlock_timeout_bar
-            x: 10
-            y: 595
-            width: 1004
-            height: 5
-            value: 100
-            bg_color: 0x21262d
-            radius: 3
-            indicator:
-              bg_color: 0x3fb950
-              radius: 3
+          # ===== BARRE TIMEOUT =====
+          - bar:
+              id: unlock_timeout_bar
+              x: 10
+              y: 580
+              width: 1004
+              height: 12
+              value: 100
+              bg_color: 0x21262d
+              radius: 6
+              indicator:
+                bg_color: 0x3fb950
+                radius: 6
 ```
 
 ---
 
-## 6. Key Collector
+## 8. Key Collector
 
 ```yaml
 key_collector:
@@ -471,13 +435,14 @@ key_collector:
             - lambda: |-
                 ESP_LOGI("unlock", "Code ecran correct - deverrouillage!");
                 id(display_lock) = false;
-            - delay: 500ms
-            - lambda: |-
                 id(tab5_cam).stop_streaming();
                 auto canvas = id(camera_canvas);
                 if (canvas != nullptr) {
                   id(camera_display).configure_canvas(canvas);
                 }
+            # DESACTIVER le switch apres PIN correct
+            - switch.turn_off: lvgl_display_enable_switch
+            - delay: 500ms
             - lvgl.page.show: page_home
           else:
             # Code incorrect
@@ -495,7 +460,7 @@ key_collector:
 
 ---
 
-## 7. Interval (reconnaissance faciale + timeout)
+## 9. Interval (reconnaissance faciale + timeout)
 
 ```yaml
 interval:
@@ -553,8 +518,12 @@ interval:
       # Transition apres reconnaissance
       - if:
           condition:
-            lambda: 'return !id(display_lock);'
+            lambda: |-
+              lv_obj_t *current = lv_scr_act();
+              return (current == id(face_unlock_page)->obj) && !id(display_lock);
           then:
+            # DESACTIVER le switch apres reconnaissance faciale
+            - switch.turn_off: lvgl_display_enable_switch
             - delay: 500ms
             - lvgl.page.show: page_home
 
@@ -573,7 +542,37 @@ interval:
 
 ---
 
-## 8. Resume des valeurs
+## 10. Camera Page (utilisation manuelle)
+
+Pour votre page camera, le switch peut etre active manuellement ou automatiquement :
+
+```yaml
+      - id: camera_page
+        bg_color: 0x000000
+        on_load:
+          - lambda: |-
+              ESP_LOGI("camera", "Page camera chargee");
+              // Configurer canvas pour cette page
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+              }
+          # Optionnel: activer automatiquement
+          # - switch.turn_on: lvgl_display_enable_switch
+          # - lambda: id(tab5_cam).start_streaming();
+
+        on_unload:
+          - lambda: |-
+              ESP_LOGI("camera", "Quitte page camera");
+              id(tab5_cam).stop_streaming();
+          - switch.turn_off: lvgl_display_enable_switch
+```
+
+**Note:** Sur camera_page, l'utilisateur peut controler le switch manuellement via les boutons START/STOP.
+
+---
+
+## 11. Resume des valeurs
 
 | Parametre | Valeur par defaut | Description |
 |-----------|-------------------|-------------|
@@ -584,7 +583,7 @@ interval:
 
 ---
 
-## 9. Fonctions C++ disponibles
+## 12. Fonctions C++ disponibles
 
 | Fonction | Description |
 |----------|-------------|
@@ -594,3 +593,34 @@ interval:
 | `enroll_face()` | Enregistrer un nouveau visage |
 | `get_enrolled_count()` | Nombre de visages enregistres |
 | `clear_all_faces()` | Supprimer tous les visages |
+
+---
+
+## 13. Flux du switch camera
+
+```
+page_home
+     |
+     | [idle timeout]
+     v
+page_sleep -----> switch.turn_on (auto)
+     |            configure_canvas(face_unlock_canvas)
+     | [touch]
+     v
+face_unlock_page
+     |
+     +--- [face reconnu] ---> switch.turn_off --> page_home
+     |
+     +--- [PIN correct] ----> switch.turn_off --> page_home
+     |
+     +--- [timeout] --------> page_sleep (switch reste ON)
+
+
+camera_page (manuel)
+     |
+     | [btn START] --> switch.turn_on + start_streaming
+     |
+     | [btn STOP]  --> switch.turn_off + stop_streaming
+     |
+     | [on_unload] --> switch.turn_off + stop_streaming
+```
