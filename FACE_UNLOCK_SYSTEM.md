@@ -56,11 +56,11 @@ globals:
 
 ---
 
-## 3. Number (optionnel)
+## 3. Number
 
 ```yaml
 number:
-  # Timeout avant mise en veille (existant)
+  # Timeout avant mise en veille
   - platform: template
     name: "Screen Off"
     id: auto_off
@@ -80,6 +80,23 @@ number:
               int timeout = id(auto_off).state;
               if (timeout == -1) return "OFF";
               return (std::to_string(timeout) + "s").c_str();
+```
+
+### Label requis dans votre page settings (current_timeout_value)
+
+Ce label doit exister dans votre page settings pour afficher la valeur actuelle :
+
+```yaml
+# Dans votre page settings
+- label:
+    id: current_timeout_value
+    text: "30s"
+    x: 285
+    align: LEFT_MID
+    width: 80
+    text_font: roboto_32
+    text_color: color_white
+    text_align: CENTER
 ```
 
 ---
