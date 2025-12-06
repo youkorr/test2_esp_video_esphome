@@ -490,6 +490,25 @@ RecognitionResult LVGLCameraDisplay::get_last_recognition() {
   return this->last_recognition_;
 }
 
+void LVGLCameraDisplay::reset_last_recognition() {
+  this->last_recognition_.id = -1;
+  this->last_recognition_.similarity = 0.0f;
+  this->last_recognition_.recognized = false;
+  ESP_LOGI("lvgl_camera_display", "🔄 Recognition result reset");
+}
+
+int LVGLCameraDisplay::get_detected_face_count() {
+  if (this->face_results_mutex_ == nullptr) {
+    return 0;
+  }
+  int count = 0;
+  if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    count = this->cached_face_results_.size();
+    xSemaphoreGive(this->face_results_mutex_);
+  }
+  return count;
+}
+
 }  // namespace lvgl_camera_display
 }  // namespace esphome
 

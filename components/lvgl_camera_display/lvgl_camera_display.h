@@ -54,6 +54,8 @@ class LVGLCameraDisplay : public Component {
   void clear_all_faces();  // Clear all enrolled faces
   int get_enrolled_count();  // Get number of enrolled faces
   RecognitionResult get_last_recognition();  // Get last recognition result
+  void reset_last_recognition();  // Reset recognition result (call when entering unlock page)
+  int get_detected_face_count();  // Get number of currently detected faces
 
   // Callback for face recognized event
   void set_on_face_recognized(std::function<void(int, float)> callback) {

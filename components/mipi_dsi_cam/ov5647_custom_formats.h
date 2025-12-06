@@ -35,7 +35,8 @@ typedef struct {
 #endif
 
 // Clock rates for custom formats
-#define OV5647_IDI_CLOCK_RATE_640x480_30FPS        (48000000ULL)
+// 640x480: Use same clock as 800x640 for stability, adjust VTS for 30fps
+#define OV5647_IDI_CLOCK_RATE_640x480_30FPS        (100000000ULL)
 #define OV5647_MIPI_CSI_LINE_RATE_640x480_30FPS    (OV5647_IDI_CLOCK_RATE_640x480_30FPS * 4)
 #define OV5647_IDI_CLOCK_RATE_800x600_50FPS        (100000000ULL)  // Same as 800x640 for smooth motion
 #define OV5647_MIPI_CSI_LINE_RATE_800x600_50FPS    (OV5647_IDI_CLOCK_RATE_800x600_50FPS * 4)
@@ -56,8 +57,8 @@ typedef struct {
 static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] = {
     // RAW8 mode configuration (based on 800x640 working config)
     {0x3034, OV5647_8BIT_MODE},  // 8-bit RAW8 format
-    {0x3035, 0x21},  // System clock divider (30 fps)
-    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
+    {0x3035, 0x41},  // System clock divider (same as 800x640 @ 50fps)
+    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier for 100MHz
     {0x303c, 0x11},  // PLLS control
     {0x3106, 0xf5},
     {0x3821, 0x03},  // Horizontal binning + mirror
@@ -89,13 +90,13 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3c00, 0x40},
     {0x3b07, 0x0c},
 
-    // Timing configuration for VGA @ 30fps
+    // Timing configuration for VGA @ 30fps with 100MHz clock
     // HTS (Horizontal Total Size) = 1896 pixels (same as 800x640)
     {0x380c, (1896 >> 8) & 0x1F},
     {0x380d, 1896 & 0xFF},
-    // VTS (Vertical Total Size) = 738 lines (984 * 480/640 = 737.1 ≈ 738)
-    {0x380e, (738 >> 8) & 0xFF},
-    {0x380f, 738 & 0xFF},
+    // VTS (Vertical Total Size) = 1758 lines for 30fps (100MHz / (1896 * 30) = 1758)
+    {0x380e, (1758 >> 8) & 0xFF},
+    {0x380f, 1758 & 0xFF},
 
     // Binning configuration (same as 800x640)
     {0x3814, 0x31},  // Horizontal subsample (4x)
@@ -103,18 +104,18 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window for VGA: use FULL sensor area for proper scaling
-    // For VGA 640×480 with 4x binning, we need AT LEAST 2560×1920 pixels
-    // Use sensor full width: 0-2591 (2592 pixels)
-    // Use sensor full height centered for 4:3: crop 1944 pixels
-    {0x3800, (0 >> 8) & 0x0F},     // X address start high - FULL WIDTH
-    {0x3801, 0 & 0xFF},            // X address start low
-    {0x3802, (0 >> 8) & 0x07},     // Y address start high - START at 0
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1954 pixels
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y: full height
+    {0x3800, (234 >> 8) & 0x0F},   // X address start high
+    {0x3801, 234 & 0xFF},          // X address start low
+    {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2592 - 1) >> 8) & 0x0F},  // X address end high - FULL WIDTH
-    {0x3805, (2592 - 1) & 0xFF},         // X address end low
-    {0x3806, ((1944 - 1) >> 8) & 0x07},  // Y address end high - FULL HEIGHT
-    {0x3807, (1944 - 1) & 0xFF},         // Y address end low
+    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
+    {0x3805, (2357) & 0xFF},         // X address end low
+    {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
+    {0x3807, (1954 - 1) & 0xFF},         // Y address end low
 
     // Output size: 640x480
     {0x3808, (640 >> 8) & 0x0F},  // Output horizontal width high
@@ -122,11 +123,11 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x380a, (480 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 480 & 0xFF},         // Output vertical height low
 
-    // Timing offset (same as 800x640)
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
-    {0x3813, 0 & 0xFF},          // Timing vertical offset low
+    // Timing offset - set to 0 for proper centering
+    {0x3810, 0x00},   // Timing horizontal offset high
+    {0x3811, 0x00},   // Timing horizontal offset low
+    {0x3812, 0x00},   // Timing vertical offset high
+    {0x3813, 0x00},   // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
@@ -166,7 +167,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x4001, 0x02},
     {0x4004, 0x02},
     {0x4000, 0x09},
-    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_640x480_30FPS / 4))},  // MIPI pclk period (calculated)
+    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_640x480_30FPS / 4))},  // MIPI pclk period (100MHz)
     {0x4050, 0x6e},
     {0x4051, 0x8f},
 
@@ -177,9 +178,9 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
 static const esp_cam_sensor_isp_info_t ov5647_640x480_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
-        .pclk = 41962800,     // HTS × VTS × FPS = 1896 × 738 × 30
+        .pclk = 100004880,    // HTS × VTS × FPS = 1896 × 1758 × 30
         .hts = 1896,          // Horizontal Total Size (same as 800x640)
-        .vts = 738,           // Vertical Total Size (adapted for 480 lines)
+        .vts = 1758,          // Vertical Total Size for 30fps with 100MHz clock
         .exp_def = 0x300,     // Default exposure (same as 800x640)
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
@@ -266,19 +267,19 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (center crop)
-    // X start: (2592 - 1024*2) / 2 = 272
-    {0x3800, (272 >> 8) & 0x0F},
-    {0x3801, 272 & 0xFF},
-    // Y start: (1944 - 600*2) / 2 = 372
-    {0x3802, (372 >> 8) & 0x07},
-    {0x3803, 372 & 0xFF},
-    // X end: 272 + 1024*2 - 1 = 2319
-    {0x3804, ((2319) >> 8) & 0x0F},
-    {0x3805, (2319) & 0xFF},
-    // Y end: 372 + 600*2 - 1 = 1571
-    {0x3806, ((1571) >> 8) & 0x07},
-    {0x3807, (1571) & 0xFF},
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Output: 1024x600 with 2x binning
+    // Need: 1024*2 = 2048 width, 600*2 = 1200 height
+    // X centered: (2592 - 2048) / 2 = 272
+    // Y centered: (1944 - 1200) / 2 = 372
+    {0x3800, (272 >> 8) & 0x0F},   // X start high
+    {0x3801, 272 & 0xFF},          // X start low
+    {0x3802, (372 >> 8) & 0x07},   // Y start high
+    {0x3803, 372 & 0xFF},          // Y start low
+    {0x3804, ((2319) >> 8) & 0x0F},  // X end high (272 + 2048 - 1)
+    {0x3805, (2319) & 0xFF},         // X end low
+    {0x3806, ((1571) >> 8) & 0x07},  // Y end high (372 + 1200 - 1)
+    {0x3807, (1571) & 0xFF},         // Y end low
 
     // Output size: 1024x600
     {0x3808, (1024 >> 8) & 0x0F},
@@ -286,12 +287,11 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x380a, (600 >> 8) & 0x7F},
     {0x380b, 600 & 0xFF},
 
-    // Timing offset (center the image properly)
-    // After 2x binning: 2048/2=1024 pixels (already correct)
-    {0x3810, (0 >> 8) & 0x0F},   // Timing horizontal offset high (centered)
-    {0x3811, 0 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high (centered)
-    {0x3813, 0 & 0xFF},          // Timing vertical offset low
+    // Timing offset - set to 0 for proper centering
+    {0x3810, 0x00},   // Timing horizontal offset high
+    {0x3811, 0x00},   // Timing horizontal offset low
+    {0x3812, 0x00},   // Timing vertical offset high
+    {0x3813, 0x00},   // Timing vertical offset low
 
     // Analog settings
     {0x3630, 0x2e},
@@ -464,21 +464,18 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (adapted from 800x640: keep X same, adjust Y for 4:3 ratio)
-    // X: same as 800x640 (500 to 2623 = 2124 pixels width)
-    // ----- X centered -----
-    {0x3800, (250 >> 8) & 0x0F},   // X start high
-    {0x3801, 250 & 0xFF},          // X start low
-    
-    {0x3804, (2373 >> 8) & 0x0F},  // X end high
-    {0x3805, 2373 & 0xFF},         // X end low
-    
-    // ----- Y centered -----
-    {0x3802, (180 >> 8) & 0x07},   // Y start high
-    {0x3803, 180 & 0xFF},          // Y start low
-    
-    {0x3806, (1772 >> 8) & 0x07},  // Y end high
-    {0x3807, 1772 & 0xFF},         // Y end low
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1593 pixels (4:3 ratio for 800x600)
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y centered: (1944 - 1593) / 2 = 176
+    {0x3800, (234 >> 8) & 0x0F},   // X start high
+    {0x3801, 234 & 0xFF},          // X start low
+    {0x3802, (176 >> 8) & 0x07},   // Y start high
+    {0x3803, 176 & 0xFF},          // Y start low
+    {0x3804, (2357 >> 8) & 0x0F},  // X end high (234 + 2124 - 1)
+    {0x3805, 2357 & 0xFF},         // X end low
+    {0x3806, (1768 >> 8) & 0x07},  // Y end high (176 + 1593 - 1)
+    {0x3807, 1768 & 0xFF},         // Y end low
 
 
     // Output size: 800x600
@@ -487,11 +484,11 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps[] =
     {0x380a, (600 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 600 & 0xFF},         // Output vertical height low
 
-    // Timing offset (same as 800x640)
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
-    {0x3813, 0 & 0xFF},          // Timing vertical offset low
+    // Timing offset - set to 0 for proper centering
+    {0x3810, 0x00},   // Timing horizontal offset high
+    {0x3811, 0x00},   // Timing horizontal offset low
+    {0x3812, 0x00},   // Timing vertical offset high
+    {0x3813, 0x00},   // Timing vertical offset low
 
     // Analog settings (same as 800x640)
     {0x3630, 0x2e},
@@ -627,13 +624,16 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (from testov5647: X start 500, Y start 0, size 2124x1954)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1954 pixels
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y: full height
+    {0x3800, (234 >> 8) & 0x0F},   // X address start high
+    {0x3801, 234 & 0xFF},          // X address start low
     {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
+    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
+    {0x3805, (2357) & 0xFF},         // X address end low
     {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
     {0x3807, (1954 - 1) & 0xFF},         // Y address end low
 
@@ -643,9 +643,9 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x380a, (640 >> 8) & 0x7F},  // Output vertical height high
     {0x380b, 640 & 0xFF},         // Output vertical height low
 
-    // Timing offset
-    {0x3810, (8 >> 8) & 0x0F},   // Timing horizontal offset high
-    {0x3811, 8 & 0xFF},          // Timing horizontal offset low
+    // Timing offset - set to 0 for proper centering
+    {0x3810, 0x00},   // Timing horizontal offset high
+    {0x3811, 0x00},   // Timing horizontal offset low
     {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
     {0x3813, 0 & 0xFF},          // Timing vertical offset low
 
