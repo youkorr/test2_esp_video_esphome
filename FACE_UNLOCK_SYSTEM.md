@@ -553,7 +553,9 @@ interval:
       # Transition apres reconnaissance
       - if:
           condition:
-            lambda: 'return !id(display_lock);'
+            lambda: |-
+              lv_obj_t *current = lv_scr_act();
+              return (current == id(face_unlock_page)->obj) && !id(display_lock);
           then:
             - delay: 500ms
             - lvgl.page.show: page_home
