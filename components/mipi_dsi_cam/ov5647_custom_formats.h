@@ -104,15 +104,16 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window: same as 800x640 for consistent behavior
-    // X: 500 to 2623 (2124 pixels width)
-    // Y: 0 to 1953 (1954 pixels height)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1954 pixels
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y: full height
+    {0x3800, (234 >> 8) & 0x0F},   // X address start high
+    {0x3801, 234 & 0xFF},          // X address start low
     {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
+    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
+    {0x3805, (2357) & 0xFF},         // X address end low
     {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
     {0x3807, (1954 - 1) & 0xFF},         // Y address end low
 
@@ -266,19 +267,19 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_1024x600_30fps[] 
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (center crop)
-    // X start: (2592 - 1024*2) / 2 = 272
-    {0x3800, (272 >> 8) & 0x0F},
-    {0x3801, 272 & 0xFF},
-    // Y start: (1944 - 600*2) / 2 = 372
-    {0x3802, (372 >> 8) & 0x07},
-    {0x3803, 372 & 0xFF},
-    // X end: 272 + 1024*2 - 1 = 2319
-    {0x3804, ((2319) >> 8) & 0x0F},
-    {0x3805, (2319) & 0xFF},
-    // Y end: 372 + 600*2 - 1 = 1571
-    {0x3806, ((1571) >> 8) & 0x07},
-    {0x3807, (1571) & 0xFF},
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Output: 1024x600 with 2x binning
+    // Need: 1024*2 = 2048 width, 600*2 = 1200 height
+    // X centered: (2592 - 2048) / 2 = 272
+    // Y centered: (1944 - 1200) / 2 = 372
+    {0x3800, (272 >> 8) & 0x0F},   // X start high
+    {0x3801, 272 & 0xFF},          // X start low
+    {0x3802, (372 >> 8) & 0x07},   // Y start high
+    {0x3803, 372 & 0xFF},          // Y start low
+    {0x3804, ((2319) >> 8) & 0x0F},  // X end high (272 + 2048 - 1)
+    {0x3805, (2319) & 0xFF},         // X end low
+    {0x3806, ((1571) >> 8) & 0x07},  // Y end high (372 + 1200 - 1)
+    {0x3807, (1571) & 0xFF},         // Y end low
 
     // Output size: 1024x600
     {0x3808, (1024 >> 8) & 0x0F},
@@ -464,21 +465,18 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x600_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (adapted from 800x640: keep X same, adjust Y for 4:3 ratio)
-    // X: same as 800x640 (500 to 2623 = 2124 pixels width)
-    // ----- X centered -----
-    {0x3800, (250 >> 8) & 0x0F},   // X start high
-    {0x3801, 250 & 0xFF},          // X start low
-    
-    {0x3804, (2373 >> 8) & 0x0F},  // X end high
-    {0x3805, 2373 & 0xFF},         // X end low
-    
-    // ----- Y centered -----
-    {0x3802, (180 >> 8) & 0x07},   // Y start high
-    {0x3803, 180 & 0xFF},          // Y start low
-    
-    {0x3806, (1772 >> 8) & 0x07},  // Y end high
-    {0x3807, 1772 & 0xFF},         // Y end low
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1593 pixels (4:3 ratio for 800x600)
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y centered: (1944 - 1593) / 2 = 176
+    {0x3800, (234 >> 8) & 0x0F},   // X start high
+    {0x3801, 234 & 0xFF},          // X start low
+    {0x3802, (176 >> 8) & 0x07},   // Y start high
+    {0x3803, 176 & 0xFF},          // Y start low
+    {0x3804, (2357 >> 8) & 0x0F},  // X end high (234 + 2124 - 1)
+    {0x3805, 2357 & 0xFF},         // X end low
+    {0x3806, (1768 >> 8) & 0x07},  // Y end high (176 + 1593 - 1)
+    {0x3807, 1768 & 0xFF},         // Y end low
 
 
     // Output size: 800x600
@@ -627,13 +625,16 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window (from testov5647: X start 500, Y start 0, size 2124x1954)
-    {0x3800, (500 >> 8) & 0x0F},   // X address start high
-    {0x3801, 500 & 0xFF},          // X address start low
+    // Crop window: CENTERED on sensor for proper framing
+    // Sensor: 2592x1944, Crop: 2124x1954 pixels
+    // X centered: (2592 - 2124) / 2 = 234
+    // Y: full height
+    {0x3800, (234 >> 8) & 0x0F},   // X address start high
+    {0x3801, 234 & 0xFF},          // X address start low
     {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
-    {0x3805, (2624 - 1) & 0xFF},         // X address end low
+    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
+    {0x3805, (2357) & 0xFF},         // X address end low
     {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
     {0x3807, (1954 - 1) & 0xFF},         // Y address end low
 
