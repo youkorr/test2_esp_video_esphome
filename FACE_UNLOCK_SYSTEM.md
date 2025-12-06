@@ -197,7 +197,7 @@ lvgl:
       bg_color: 0x000000
       on_load:
         - lambda: |-
-            ESP_LOGI("lock", "Page veille - ecran verrouille");
+            ESP_LOGI("lock", "🔒 Page veille - écran verrouillé");
             id(display_lock) = true;
         # AUTO-ACTIVER le switch pour la reconnaissance faciale
         - switch.turn_on: lvgl_display_enable_switch
@@ -224,7 +224,7 @@ lvgl:
             text_color: 0x333333
             text_font: roboto_48
         - label:
-            text: "Touchez l ecran pour deverrouiller"
+            text: "Touch the screen to unlock"
             align: CENTER
             y: 50
             text_color: 0x222222
@@ -239,7 +239,7 @@ lvgl:
             border_opa: TRANSP
             on_click:
               then:
-                - lambda: ESP_LOGI("lock", "Touch detecte");
+                - lambda: ESP_LOGI("lock", "👆 Touch détecté");
                 - light.turn_on: backlight
                 - lvgl.page.show: face_unlock_page
 ```
@@ -253,211 +253,136 @@ lvgl:
       on_load:
         - lambda: |-
             ESP_LOGI("lock", "Page deverrouillage chargee");
-            // Toujours verrouiller quand on entre sur cette page
             id(display_lock) = true;
-            // Reset le resultat precedent
             id(camera_display).reset_last_recognition();
-            // Demarrer la camera
             id(tab5_cam).start_streaming();
-            // Configurer le canvas
             auto canvas = id(face_unlock_canvas);
             if (canvas != nullptr) {
               id(camera_display).configure_canvas(canvas);
             }
-            // Reset timeout
             id(unlock_timeout_start) = millis();
 
       widgets:
-        # ===== HEADER =====
-        - obj:
-            x: 0
-            y: 0
-            width: 1024
-            height: 50
-            bg_color: 0x161b22
-            bg_opa: COVER
-            border_opa: TRANSP
-            radius: 0
-            widgets:
-              - label:
-                  text: "DEVERROUILLAGE"
-                  x: 20
-                  y: 10
-                  text_color: 0xFFFFFF
-                  text_font: roboto_32
-
-        # ===== SECTION GAUCHE: CAMERA =====
-        - obj:
-            id: camera_section
+        # ===== CANVAS CAMERA (gauche) =====
+        - canvas:
+            id: face_unlock_canvas
+            width: 640
+            height: 480
             x: 10
-            y: 55
-            width: 660
-            height: 535
-            bg_color: 0x161b22
-            bg_opa: COVER
-            radius: 15
-            border_width: 1
-            border_color: 0x30363d
-            widgets:
-              - obj:
-                  x: 0
-                  y: 0
-                  width: 660
-                  height: 45
-                  bg_color: 0x21262d
-                  bg_opa: COVER
-                  radius: 15
-                  border_opa: TRANSP
-                  widgets:
-                    - label:
-                        text: "Reconnaissance Faciale"
-                        x: 15
-                        y: 10
-                        text_color: 0x58a6ff
-                        text_font: roboto_24
+            y: 70
+            bg_color: 0x000000
+            radius: 8
 
-              - canvas:
-                  id: face_unlock_canvas
-                  width: 640
-                  height: 480
-                  x: 10
-                  y: 50
-                  bg_color: 0x000000
-                  radius: 8
+        # ===== LABEL STATUS (sous le canvas) =====
+        - label:
+            id: face_status_label
+            text: "Aucun visage detecte"
+            x: 10
+            y: 560
+            width: 640
+            text_align: CENTER
+            text_color: 0x58a6ff
+            text_font: roboto_18
 
-              - label:
-                  id: face_status_label
-                  text: "Regardez la camera..."
-                  x: 0
-                  y: 505
-                  width: 660
-                  text_align: CENTER
-                  text_color: 0x58a6ff
-                  text_font: roboto_18
-
-        # ===== SECTION DROITE: CLAVIER PIN =====
+        # ===== SECTION CLAVIER PIN (droite) =====
         - obj:
-            id: keypad_section
-            x: 680
-            y: 55
-            width: 334
-            height: 535
-            bg_color: 0x161b22
-            bg_opa: COVER
-            radius: 15
+            x: 660
+            y: 10
+            width: 354
+            height: 60
             border_width: 1
-            border_color: 0x30363d
+            border_color: color_steel_blue
+            pad_all: 0
+            bg_opa: TRANSP
+            shadow_opa: TRANSP
+            radius: 15
             widgets:
-              - obj:
-                  x: 0
-                  y: 0
-                  width: 334
-                  height: 45
-                  bg_color: 0x21262d
-                  bg_opa: COVER
-                  radius: 15
-                  border_opa: TRANSP
-                  widgets:
-                    - label:
-                        text: "Code PIN"
-                        x: 15
-                        y: 10
-                        text_color: 0x58a6ff
-                        text_font: roboto_24
+              - label:
+                  id: unlock_code_display
+                  align: CENTER
+                  text_font: nunito_36
+                  text: "enter code"
+                  text_color: color_misty_blue
+                  text_align: CENTER
 
-              - obj:
-                  x: 17
-                  y: 55
-                  width: 300
-                  height: 60
-                  bg_color: 0x0d1117
-                  radius: 10
-                  border_width: 2
-                  border_color: 0x30363d
-                  widgets:
-                    - label:
-                        id: unlock_code_display
-                        text: "_ _ _ _"
-                        align: CENTER
-                        text_color: 0xFFFFFF
-                        text_font: roboto_32
-
-              - buttonmatrix:
-                  id: unlock_keypad
-                  x: 17
-                  y: 125
-                  width: 300
-                  height: 400
-                  pad_all: 5
-                  bg_opa: TRANSP
-                  border_opa: TRANSP
-                  items:
-                    bg_color: 0x21262d
-                    border_color: 0x30363d
-                    border_width: 1
-                    radius: 12
-                    text_font: roboto_32
-                    text_color: 0xFFFFFF
-                    pressed:
-                      bg_color: 0x58a6ff
-                      text_color: 0x0d1117
-                  rows:
-                    - buttons:
-                        - text: "1"
-                          control:
-                            no_repeat: true
-                        - text: "2"
-                          control:
-                            no_repeat: true
-                        - text: "3"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "4"
-                          control:
-                            no_repeat: true
-                        - text: "5"
-                          control:
-                            no_repeat: true
-                        - text: "6"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "7"
-                          control:
-                            no_repeat: true
-                        - text: "8"
-                          control:
-                            no_repeat: true
-                        - text: "9"
-                          control:
-                            no_repeat: true
-                    - buttons:
-                        - text: "<"
-                          key_code: "*"
-                          control:
-                            no_repeat: true
-                        - text: "0"
-                          control:
-                            no_repeat: true
-                        - text: "OK"
-                          key_code: "#"
-                          control:
-                            no_repeat: true
+        # ===== CLAVIER NUMERIQUE =====
+        - buttonmatrix:
+            id: unlock_keypad
+            x: 660
+            y: 80
+            width: 354
+            height: 490
+            pad_all: 0
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            items:
+              bg_opa: TRANSP
+              border_color: color_steel_blue
+              border_width: 1
+              shadow_opa: TRANSP
+              text_font: montserrat_40
+              text_color: color_misty_blue
+              pressed:
+                bg_color: color_blue
+                text_color: color_white
+                border_color: color_blue
+            rows:
+              - buttons:
+                  - text: 1
+                    control:
+                      no_repeat: true
+                  - text: 2
+                    control:
+                      no_repeat: true
+                  - text: 3
+                    control:
+                      no_repeat: true
+              - buttons:
+                  - text: 4
+                    control:
+                      no_repeat: true
+                  - text: 5
+                    control:
+                      no_repeat: true
+                  - text: 6
+                    control:
+                      no_repeat: true
+              - buttons:
+                  - text: 7
+                    control:
+                      no_repeat: true
+                  - text: 8
+                    control:
+                      no_repeat: true
+                  - text: 9
+                    control:
+                      no_repeat: true
+              - buttons:
+                  - text: "<"
+                    key_code: "*"
+                    control:
+                      no_repeat: true
+                  - text: 0
+                    control:
+                      no_repeat: true
+                  - text: "OK"
+                    key_code: "#"
+                    control:
+                      no_repeat: true
 
         # ===== BARRE TIMEOUT =====
         - bar:
             id: unlock_timeout_bar
             x: 10
-            y: 595
+            y: 580
             width: 1004
-            height: 5
+            height: 12
             value: 100
             bg_color: 0x21262d
-            radius: 3
+            radius: 6
             indicator:
               bg_color: 0x3fb950
-              radius: 3
+              radius: 6
 ```
 
 ---
