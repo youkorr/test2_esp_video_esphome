@@ -24,10 +24,10 @@ MSR::MSR(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Original anchor configuration from Waveshare ESP32-P4 example
-    // score_thr=0.5, nms_thr=0.5, top_k=10
+    // Lower score threshold (0.3) for better detection at various distances
+    // Anchor sizes optimized for 800x600 resolution
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, m_image_preprocessor, 0.5, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.3, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -46,9 +46,8 @@ MNP::MNP(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
-    // Original anchor configuration from Waveshare ESP32-P4 example
-    // score_thr=0.5, nms_thr=0.5, top_k=10
-    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.5, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
+    // Lower score threshold (0.3) for second stage refinement
+    m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.3, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
 }
 
 MNP::~MNP()
