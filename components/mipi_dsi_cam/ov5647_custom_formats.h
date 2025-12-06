@@ -35,7 +35,8 @@ typedef struct {
 #endif
 
 // Clock rates for custom formats
-#define OV5647_IDI_CLOCK_RATE_640x480_30FPS        (48000000ULL)
+// 640x480: Use same clock as 800x640 for stability, adjust VTS for 30fps
+#define OV5647_IDI_CLOCK_RATE_640x480_30FPS        (100000000ULL)
 #define OV5647_MIPI_CSI_LINE_RATE_640x480_30FPS    (OV5647_IDI_CLOCK_RATE_640x480_30FPS * 4)
 #define OV5647_IDI_CLOCK_RATE_800x600_50FPS        (100000000ULL)  // Same as 800x640 for smooth motion
 #define OV5647_MIPI_CSI_LINE_RATE_800x600_50FPS    (OV5647_IDI_CLOCK_RATE_800x600_50FPS * 4)
@@ -56,8 +57,8 @@ typedef struct {
 static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] = {
     // RAW8 mode configuration (based on 800x640 working config)
     {0x3034, OV5647_8BIT_MODE},  // 8-bit RAW8 format
-    {0x3035, 0x21},  // System clock divider (30 fps)
-    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier
+    {0x3035, 0x41},  // System clock divider (same as 800x640 @ 50fps)
+    {0x3036, ((OV5647_IDI_CLOCK_RATE_640x480_30FPS * 8 * 4) / 25000000)},  // PLL multiplier for 100MHz
     {0x303c, 0x11},  // PLLS control
     {0x3106, 0xf5},
     {0x3821, 0x03},  // Horizontal binning + mirror
@@ -89,13 +90,13 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3c00, 0x40},
     {0x3b07, 0x0c},
 
-    // Timing configuration for VGA @ 30fps
+    // Timing configuration for VGA @ 30fps with 100MHz clock
     // HTS (Horizontal Total Size) = 1896 pixels (same as 800x640)
     {0x380c, (1896 >> 8) & 0x1F},
     {0x380d, 1896 & 0xFF},
-    // VTS (Vertical Total Size) = 738 lines (984 * 480/640 = 737.1 ≈ 738)
-    {0x380e, (738 >> 8) & 0xFF},
-    {0x380f, 738 & 0xFF},
+    // VTS (Vertical Total Size) = 1758 lines for 30fps (100MHz / (1896 * 30) = 1758)
+    {0x380e, (1758 >> 8) & 0xFF},
+    {0x380f, 1758 & 0xFF},
 
     // Binning configuration (same as 800x640)
     {0x3814, 0x31},  // Horizontal subsample (4x)
@@ -103,18 +104,17 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x3708, 0x64},
     {0x3709, 0x52},
 
-    // Crop window for VGA: use FULL sensor area for proper scaling
-    // For VGA 640×480 with 4x binning, we need AT LEAST 2560×1920 pixels
-    // Use sensor full width: 0-2591 (2592 pixels)
-    // Use sensor full height centered for 4:3: crop 1944 pixels
-    {0x3800, (0 >> 8) & 0x0F},     // X address start high - FULL WIDTH
-    {0x3801, 0 & 0xFF},            // X address start low
-    {0x3802, (0 >> 8) & 0x07},     // Y address start high - START at 0
+    // Crop window: same as 800x640 for consistent behavior
+    // X: 500 to 2623 (2124 pixels width)
+    // Y: 0 to 1953 (1954 pixels height)
+    {0x3800, (500 >> 8) & 0x0F},   // X address start high
+    {0x3801, 500 & 0xFF},          // X address start low
+    {0x3802, (0 >> 8) & 0x07},     // Y address start high
     {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2592 - 1) >> 8) & 0x0F},  // X address end high - FULL WIDTH
-    {0x3805, (2592 - 1) & 0xFF},         // X address end low
-    {0x3806, ((1944 - 1) >> 8) & 0x07},  // Y address end high - FULL HEIGHT
-    {0x3807, (1944 - 1) & 0xFF},         // Y address end low
+    {0x3804, ((2624 - 1) >> 8) & 0x0F},  // X address end high
+    {0x3805, (2624 - 1) & 0xFF},         // X address end low
+    {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
+    {0x3807, (1954 - 1) & 0xFF},         // Y address end low
 
     // Output size: 640x480
     {0x3808, (640 >> 8) & 0x0F},  // Output horizontal width high
@@ -166,7 +166,7 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
     {0x4001, 0x02},
     {0x4004, 0x02},
     {0x4000, 0x09},
-    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_640x480_30FPS / 4))},  // MIPI pclk period (calculated)
+    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_640x480_30FPS / 4))},  // MIPI pclk period (100MHz)
     {0x4050, 0x6e},
     {0x4051, 0x8f},
 
@@ -177,9 +177,9 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_640x480_30fps[] =
 static const esp_cam_sensor_isp_info_t ov5647_640x480_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
-        .pclk = 41962800,     // HTS × VTS × FPS = 1896 × 738 × 30
+        .pclk = 100004880,    // HTS × VTS × FPS = 1896 × 1758 × 30
         .hts = 1896,          // Horizontal Total Size (same as 800x640)
-        .vts = 738,           // Vertical Total Size (adapted for 480 lines)
+        .vts = 1758,          // Vertical Total Size for 30fps with 100MHz clock
         .exp_def = 0x300,     // Default exposure (same as 800x640)
         .gain_def = 0x100,    // Default gain (1x)
         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // GBRG (BGGR mirrored horizontally)
