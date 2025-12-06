@@ -445,7 +445,7 @@ interval:
       - lambda: |-
           // Seulement actif sur face_unlock_page
           lv_obj_t *current = lv_scr_act();
-          if (current != id(face_unlock_page)) return;
+          if (current != id(face_unlock_page)->obj) return;
 
           // === GESTION DU TIMEOUT ===
           uint32_t elapsed = (millis() - id(unlock_timeout_start)) / 1000;
@@ -500,7 +500,7 @@ interval:
           condition:
             lambda: |-
               lv_obj_t *current = lv_scr_act();
-              return (current == id(face_unlock_page)) && !id(display_lock);
+              return (current == id(face_unlock_page)->obj) && !id(display_lock);
           then:
             - delay: 800ms
             - lambda: |-
@@ -517,7 +517,7 @@ interval:
           condition:
             lambda: |-
               lv_obj_t *current = lv_scr_act();
-              if (current != id(face_unlock_page)) return false;
+              if (current != id(face_unlock_page)->obj) return false;
               uint32_t elapsed = (millis() - id(unlock_timeout_start)) / 1000;
               return elapsed >= (id(face_unlock_timeout_sec) + 1);  // +1 pour afficher message
           then:
