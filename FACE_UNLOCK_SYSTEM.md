@@ -9,15 +9,15 @@ page_home (ecran actif)
      |
      | Inactivite (auto_off secondes)
      v
-page_sleep (ecran noir, display_lock=true)
+page_sleep (ecran noir, display_lock=true, switch=ON)
      |
      | Touch
      v
 face_unlock_page (camera + clavier PIN)
      |
-     +--- Face reconnue --> page_home
+     +--- Face reconnue --> switch=OFF --> page_home
      |
-     +--- PIN correct ----> page_home
+     +--- PIN correct ----> switch=OFF --> page_home
      |
      +--- Timeout --------> page_sleep
 ```
@@ -56,7 +56,48 @@ globals:
 
 ---
 
-## 3. Number
+## 3. Switch (controle camera)
+
+```yaml
+switch:
+  - platform: template
+    name: "LVGL Camera Display"
+    id: lvgl_display_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }
+```
+
+---
+
+## 4. LVGL Camera Display
+
+```yaml
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  pedestrian_detection: false
+  face_detection: true
+  face_recognition: true
+  face_db_path: "/sdcard/faces.db"
+  recognition_threshold: 0.7
+```
+
+---
+
+## 5. Number
 
 ```yaml
 number:
@@ -119,7 +160,7 @@ Ce label doit exister dans votre page settings pour afficher la valeur actuelle 
 
 ---
 
-## 4. LVGL on_idle
+## 6. LVGL on_idle
 
 ```yaml
 lvgl:
@@ -134,17 +175,6 @@ lvgl:
         int timeout = id(auto_off).state;
         return (timeout == -1) ? 86400000 : (timeout * 1000);
       then:
-        - lambda: |-
-            static bool canvas_configured = false;
-            if (!canvas_configured) {
-              auto canvas = id(camera_canvas);
-              if (canvas != nullptr) {
-                id(camera_display).configure_canvas(canvas);
-                canvas_configured = true;
-                ESP_LOGI("lvgl", "Canvas configure pour camera 640x480");
-              }
-            }
-
         - if:
             condition:
               lambda: 'return id(auto_off).state > 0;'
@@ -158,9 +188,9 @@ lvgl:
 
 ---
 
-## 5. LVGL Pages
+## 7. LVGL Pages
 
-### 5.1 Page Sleep (ecran noir)
+### 7.1 Page Sleep (ecran noir)
 
 ```yaml
     - id: page_sleep
@@ -169,6 +199,14 @@ lvgl:
         - lambda: |-
             ESP_LOGI("lock", "Page veille - ecran verrouille");
             id(display_lock) = true;
+        # AUTO-ACTIVER le switch pour la reconnaissance faciale
+        - switch.turn_on: lvgl_display_enable_switch
+        - lambda: |-
+            // Pre-configurer le canvas pour face_unlock_page
+            auto canvas = id(face_unlock_canvas);
+            if (canvas != nullptr) {
+              id(camera_display).configure_canvas(canvas);
+            }
       widgets:
         - obj:
             width: 1024
@@ -206,7 +244,7 @@ lvgl:
                 - lvgl.page.show: face_unlock_page
 ```
 
-### 5.2 Face Unlock Page (camera + clavier)
+### 7.2 Face Unlock Page (camera + clavier)
 
 ```yaml
     - id: face_unlock_page
@@ -424,7 +462,7 @@ lvgl:
 
 ---
 
-## 6. Key Collector
+## 8. Key Collector
 
 ```yaml
 key_collector:
@@ -471,13 +509,14 @@ key_collector:
             - lambda: |-
                 ESP_LOGI("unlock", "Code ecran correct - deverrouillage!");
                 id(display_lock) = false;
-            - delay: 500ms
-            - lambda: |-
                 id(tab5_cam).stop_streaming();
                 auto canvas = id(camera_canvas);
                 if (canvas != nullptr) {
                   id(camera_display).configure_canvas(canvas);
                 }
+            # DESACTIVER le switch apres PIN correct
+            - switch.turn_off: lvgl_display_enable_switch
+            - delay: 500ms
             - lvgl.page.show: page_home
           else:
             # Code incorrect
@@ -495,7 +534,7 @@ key_collector:
 
 ---
 
-## 7. Interval (reconnaissance faciale + timeout)
+## 9. Interval (reconnaissance faciale + timeout)
 
 ```yaml
 interval:
@@ -557,6 +596,8 @@ interval:
               lv_obj_t *current = lv_scr_act();
               return (current == id(face_unlock_page)->obj) && !id(display_lock);
           then:
+            # DESACTIVER le switch apres reconnaissance faciale
+            - switch.turn_off: lvgl_display_enable_switch
             - delay: 500ms
             - lvgl.page.show: page_home
 
@@ -575,7 +616,37 @@ interval:
 
 ---
 
-## 8. Resume des valeurs
+## 10. Camera Page (utilisation manuelle)
+
+Pour votre page camera, le switch peut etre active manuellement ou automatiquement :
+
+```yaml
+      - id: camera_page
+        bg_color: 0x000000
+        on_load:
+          - lambda: |-
+              ESP_LOGI("camera", "Page camera chargee");
+              // Configurer canvas pour cette page
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+              }
+          # Optionnel: activer automatiquement
+          # - switch.turn_on: lvgl_display_enable_switch
+          # - lambda: id(tab5_cam).start_streaming();
+
+        on_unload:
+          - lambda: |-
+              ESP_LOGI("camera", "Quitte page camera");
+              id(tab5_cam).stop_streaming();
+          - switch.turn_off: lvgl_display_enable_switch
+```
+
+**Note:** Sur camera_page, l'utilisateur peut controler le switch manuellement via les boutons START/STOP.
+
+---
+
+## 11. Resume des valeurs
 
 | Parametre | Valeur par defaut | Description |
 |-----------|-------------------|-------------|
@@ -586,7 +657,7 @@ interval:
 
 ---
 
-## 9. Fonctions C++ disponibles
+## 12. Fonctions C++ disponibles
 
 | Fonction | Description |
 |----------|-------------|
@@ -596,3 +667,34 @@ interval:
 | `enroll_face()` | Enregistrer un nouveau visage |
 | `get_enrolled_count()` | Nombre de visages enregistres |
 | `clear_all_faces()` | Supprimer tous les visages |
+
+---
+
+## 13. Flux du switch camera
+
+```
+page_home
+     |
+     | [idle timeout]
+     v
+page_sleep -----> switch.turn_on (auto)
+     |            configure_canvas(face_unlock_canvas)
+     | [touch]
+     v
+face_unlock_page
+     |
+     +--- [face reconnu] ---> switch.turn_off --> page_home
+     |
+     +--- [PIN correct] ----> switch.turn_off --> page_home
+     |
+     +--- [timeout] --------> page_sleep (switch reste ON)
+
+
+camera_page (manuel)
+     |
+     | [btn START] --> switch.turn_on + start_streaming
+     |
+     | [btn STOP]  --> switch.turn_off + stop_streaming
+     |
+     | [on_unload] --> switch.turn_off + stop_streaming
+```
