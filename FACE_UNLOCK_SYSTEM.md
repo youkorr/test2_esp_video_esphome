@@ -80,6 +80,24 @@ number:
               int timeout = id(auto_off).state;
               if (timeout == -1) return "OFF";
               return (std::to_string(timeout) + "s").c_str();
+
+  # Timeout sur la page face_unlock (configurable depuis Home Assistant)
+  - platform: template
+    name: "Face Unlock Timeout"
+    id: face_unlock_timeout_number
+    icon: "mdi:timer-lock"
+    unit_of_measurement: "s"
+    min_value: 10
+    max_value: 120
+    step: 5
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            id(face_unlock_timeout_sec) = (int)x;
+            ESP_LOGI("lock", "Face unlock timeout: %d sec", (int)x);
 ```
 
 ### Label requis dans votre page settings (current_timeout_value)
