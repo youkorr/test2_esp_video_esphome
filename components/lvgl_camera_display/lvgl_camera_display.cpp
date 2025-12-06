@@ -378,13 +378,26 @@ void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t wid
     if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(1)) == pdTRUE) {
       // RGB565 little-endian: Green = 0x07E0 -> {0xE0, 0x07}
       std::vector<uint8_t> green = {0xE0, 0x07};
+      // RGB565 little-endian: Red = 0xF800 -> {0x00, 0xF8}
+      std::vector<uint8_t> red = {0x00, 0xF8};
+
       for (auto &box : this->cached_face_results_) {
+        // Draw green bounding box
         dl::image::draw_hollow_rectangle(
           img,
           box.x1, box.y1,
           box.x2, box.y2,
           green, 3
         );
+
+        // Draw red landmarks (5 points: left eye, right eye, nose, left mouth, right mouth)
+        for (int i = 0; i < 5; i++) {
+          int x = box.keypoints[i * 2];
+          int y = box.keypoints[i * 2 + 1];
+          if (x > 0 && y > 0 && x < width && y < height) {
+            dl::image::draw_point(img, x, y, red, 3);
+          }
+        }
       }
       xSemaphoreGive(this->face_results_mutex_);
     }

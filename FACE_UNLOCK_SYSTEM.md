@@ -1,53 +1,175 @@
-# ============================================================================
-# FACE UNLOCK PAGE - Déverrouillage par reconnaissance faciale + Code PIN
-# ============================================================================
-# À inclure dans votre configuration principale ESPHome
-#
-# Prérequis:
-#   - Ajouter dans substitutions: unlock_pin_code: "0000"
-#   - Ajouter les globals ci-dessous
-#   - Modifier votre on_idle existant
-# ============================================================================
+# Face Unlock System - ESPHome LVGL
 
-# ============================================================================
-# SUBSTITUTIONS (à ajouter dans votre fichier principal)
-# ============================================================================
-# substitutions:
-#   pin_code: "1234"           # Code alarme (existant)
-#   unlock_pin_code: "0000"    # Code déverrouillage écran (NOUVEAU)
+Systeme de deverrouillage par reconnaissance faciale + Code PIN pour ESP32-P4.
 
-# ============================================================================
-# GLOBALS (à ajouter dans votre fichier principal)
-# ============================================================================
+## Architecture
+
+```
+page_home (ecran actif)
+     |
+     | Inactivite (auto_off secondes)
+     v
+page_sleep (ecran noir, display_lock=true)
+     |
+     | Touch
+     v
+face_unlock_page (camera + clavier PIN)
+     |
+     +--- Face reconnue --> page_home
+     |
+     +--- PIN correct ----> page_home
+     |
+     +--- Timeout --------> page_sleep
+```
+
+---
+
+## 1. Substitutions
+
+```yaml
+substitutions:
+  # Code PIN pour deverrouiller l'ecran (different du code alarme)
+  unlock_pin_code: "0000"
+```
+
+---
+
+## 2. Globals
+
+```yaml
 globals:
+  # Etat de verrouillage de l'ecran
   - id: display_lock
     type: bool
     initial_value: 'false'
+
+  # Timestamp de debut du timeout sur face_unlock_page
   - id: unlock_timeout_start
     type: uint32_t
     initial_value: '0'
+
+  # Duree du timeout sur face_unlock_page (en secondes)
   - id: face_unlock_timeout_sec
     type: int
-    initial_value: '15'
+    initial_value: '45'
+```
 
-# ============================================================================
-# PAGES LVGL
-# ============================================================================
+---
+
+## 3. Number
+
+```yaml
+number:
+  # Timeout avant mise en veille
+  - platform: template
+    name: "Screen Off"
+    id: auto_off
+    optimistic: true
+    restore_value: true
+    min_value: -1
+    max_value: 300
+    step: 1
+    unit_of_measurement: s
+    icon: 'mdi:television-off'
+    initial_value: 30
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: current_timeout_value
+            text: !lambda |-
+              int timeout = id(auto_off).state;
+              if (timeout == -1) return "OFF";
+              return (std::to_string(timeout) + "s").c_str();
+
+  # Timeout sur la page face_unlock (configurable depuis Home Assistant)
+  - platform: template
+    name: "Face Unlock Timeout"
+    id: face_unlock_timeout_number
+    icon: "mdi:timer-lock"
+    unit_of_measurement: "s"
+    min_value: 10
+    max_value: 120
+    step: 5
+    initial_value: 45
+    optimistic: true
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            id(face_unlock_timeout_sec) = (int)x;
+            ESP_LOGI("lock", "Face unlock timeout: %d sec", (int)x);
+```
+
+### Label requis dans votre page settings (current_timeout_value)
+
+Ce label doit exister dans votre page settings pour afficher la valeur actuelle :
+
+```yaml
+# Dans votre page settings
+- label:
+    id: current_timeout_value
+    text: "30s"
+    x: 285
+    align: LEFT_MID
+    width: 80
+    text_font: roboto_32
+    text_color: color_white
+    text_align: CENTER
+```
+
+---
+
+## 4. LVGL on_idle
+
+```yaml
 lvgl:
-  pages:
-    # ========================================================================
-    # PAGE DE VEILLE (écran noir avec détection tactile)
-    # ========================================================================
+  byte_order: little_endian
+  displays:
+    - main_display
+  touchscreens:
+    - touch
+
+  on_idle:
+    - timeout: !lambda |-
+        int timeout = id(auto_off).state;
+        return (timeout == -1) ? 86400000 : (timeout * 1000);
+      then:
+        - lambda: |-
+            static bool canvas_configured = false;
+            if (!canvas_configured) {
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+                canvas_configured = true;
+                ESP_LOGI("lvgl", "Canvas configure pour camera 640x480");
+              }
+            }
+
+        - if:
+            condition:
+              lambda: 'return id(auto_off).state > 0;'
+            then:
+              - lambda: |-
+                  id(display_lock) = true;
+                  ESP_LOGI("lock", "Verrouillage automatique apres inactivite");
+              - lvgl.page.show: page_sleep
+              - light.turn_off: backlight
+```
+
+---
+
+## 5. LVGL Pages
+
+### 5.1 Page Sleep (ecran noir)
+
+```yaml
     - id: page_sleep
       bg_color: 0x000000
-
       on_load:
         - lambda: |-
-            ESP_LOGI("lock", "🔒 Page veille - écran verrouillé");
+            ESP_LOGI("lock", "Page veille - ecran verrouille");
             id(display_lock) = true;
-
       widgets:
-        # Fond noir
         - obj:
             width: 1024
             height: 600
@@ -56,8 +178,6 @@ lvgl:
             bg_color: 0x000000
             bg_opa: COVER
             border_opa: TRANSP
-
-        # Horloge centrée (optionnel - visible avant extinction backlight)
         - label:
             id: sleep_time_label
             text: "12:34"
@@ -65,16 +185,12 @@ lvgl:
             y: -50
             text_color: 0x333333
             text_font: roboto_48
-
-        # Message "Touchez pour déverrouiller"
         - label:
-            text: "Touchez l'écran pour déverrouiller"
+            text: "Touchez l ecran pour deverrouiller"
             align: CENTER
             y: 50
             text_color: 0x222222
             text_font: roboto_24
-
-        # Zone tactile invisible plein écran
         - obj:
             id: sleep_touch_zone
             width: 1024
@@ -85,36 +201,33 @@ lvgl:
             border_opa: TRANSP
             on_click:
               then:
-                - lambda: |-
-                    ESP_LOGI("lock", "👆 Touch détecté - affichage page déverrouillage");
+                - lambda: ESP_LOGI("lock", "Touch detecte");
                 - light.turn_on: backlight
                 - lvgl.page.show: face_unlock_page
+```
 
-    # ========================================================================
-    # PAGE DE DÉVERROUILLAGE (Face Recognition + Code PIN)
-    # ========================================================================
+### 5.2 Face Unlock Page (camera + clavier)
+
+```yaml
     - id: face_unlock_page
       bg_color: 0x0d1117
 
       on_load:
         - lambda: |-
-            ESP_LOGI("lock", "🔓 Page déverrouillage chargée");
-            // Démarrer la caméra
+            ESP_LOGI("lock", "Page deverrouillage chargee");
+            // Toujours verrouiller quand on entre sur cette page
+            id(display_lock) = true;
+            // Reset le resultat precedent
+            id(camera_display).reset_last_recognition();
+            // Demarrer la camera
             id(tab5_cam).start_streaming();
             // Configurer le canvas
             auto canvas = id(face_unlock_canvas);
             if (canvas != nullptr) {
               id(camera_display).configure_canvas(canvas);
-              ESP_LOGI("lock", "Canvas configuré pour reconnaissance faciale");
             }
             // Reset timeout
             id(unlock_timeout_start) = millis();
-            // Reset affichage code
-            lv_label_set_text(id(unlock_code_display), "○ ○ ○ ○");
-            lv_obj_set_style_text_color(id(unlock_code_display), lv_color_hex(0xFFFFFF), 0);
-            // Reset status
-            lv_label_set_text(id(face_status_label), "Regardez la caméra...");
-            lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0x58a6ff), 0);
 
       widgets:
         # ===== HEADER =====
@@ -128,30 +241,12 @@ lvgl:
             border_opa: TRANSP
             radius: 0
             widgets:
-              # Icône cadenas
               - label:
-                  text: "\U000F0341"
+                  text: "DEVERROUILLAGE"
                   x: 20
-                  y: 5
-                  text_color: 0xf85149
-                  text_font: mdi_icons_40
-
-              # Titre
-              - label:
-                  text: "DÉVERROUILLAGE"
-                  x: 70
                   y: 10
                   text_color: 0xFFFFFF
                   text_font: roboto_32
-
-              # Heure
-              - label:
-                  id: unlock_time_label
-                  text: "12:34"
-                  x: 900
-                  y: 12
-                  text_color: 0x8b949e
-                  text_font: roboto_24
 
         # ===== SECTION GAUCHE: CAMERA =====
         - obj:
@@ -166,7 +261,6 @@ lvgl:
             border_width: 1
             border_color: 0x30363d
             widgets:
-              # Header section caméra
               - obj:
                   x: 0
                   y: 0
@@ -178,19 +272,12 @@ lvgl:
                   border_opa: TRANSP
                   widgets:
                     - label:
-                        text: "\U000F0644"
-                        x: 15
-                        y: 5
-                        text_color: 0x58a6ff
-                        text_font: mdi_icons_32
-                    - label:
                         text: "Reconnaissance Faciale"
-                        x: 55
+                        x: 15
                         y: 10
                         text_color: 0x58a6ff
                         text_font: roboto_24
 
-              # Canvas caméra 640x480
               - canvas:
                   id: face_unlock_canvas
                   width: 640
@@ -200,10 +287,9 @@ lvgl:
                   bg_color: 0x000000
                   radius: 8
 
-              # Status reconnaissance
               - label:
                   id: face_status_label
-                  text: "Regardez la caméra..."
+                  text: "Regardez la camera..."
                   x: 0
                   y: 505
                   width: 660
@@ -224,7 +310,6 @@ lvgl:
             border_width: 1
             border_color: 0x30363d
             widgets:
-              # Header section PIN
               - obj:
                   x: 0
                   y: 0
@@ -236,19 +321,12 @@ lvgl:
                   border_opa: TRANSP
                   widgets:
                     - label:
-                        text: "\U000F09A0"
-                        x: 15
-                        y: 5
-                        text_color: 0x58a6ff
-                        text_font: mdi_icons_32
-                    - label:
                         text: "Code PIN"
-                        x: 55
+                        x: 15
                         y: 10
                         text_color: 0x58a6ff
                         text_font: roboto_24
 
-              # Affichage du code (points)
               - obj:
                   x: 17
                   y: 55
@@ -261,12 +339,11 @@ lvgl:
                   widgets:
                     - label:
                         id: unlock_code_display
-                        text: "○ ○ ○ ○"
+                        text: "_ _ _ _"
                         align: CENTER
                         text_color: 0xFFFFFF
                         text_font: roboto_32
 
-              # Clavier numérique
               - buttonmatrix:
                   id: unlock_keypad
                   x: 17
@@ -318,47 +395,40 @@ lvgl:
                           control:
                             no_repeat: true
                     - buttons:
-                        - text: "\U000F0B5C"
+                        - text: "<"
                           key_code: "*"
                           control:
                             no_repeat: true
                         - text: "0"
                           control:
                             no_repeat: true
-                        - text: "\U000F012C"
+                        - text: "OK"
                           key_code: "#"
                           control:
                             no_repeat: true
 
-        # ===== BARRE DE TIMEOUT EN BAS =====
-        - obj:
+        # ===== BARRE TIMEOUT =====
+        - bar:
+            id: unlock_timeout_bar
             x: 10
             y: 595
             width: 1004
             height: 5
+            value: 100
             bg_color: 0x21262d
-            bg_opa: COVER
             radius: 3
-            border_opa: TRANSP
-            widgets:
-              - bar:
-                  id: unlock_timeout_bar
-                  x: 0
-                  y: 0
-                  width: 1004
-                  height: 5
-                  value: 100
-                  bg_color: 0x21262d
-                  bg_opa: TRANSP
-                  radius: 3
-                  indicator:
-                    bg_color: 0x3fb950
-                    radius: 3
+            indicator:
+              bg_color: 0x3fb950
+              radius: 3
+```
 
-# ============================================================================
-# KEY COLLECTOR POUR LE DÉVERROUILLAGE ÉCRAN
-# ============================================================================
+---
+
+## 6. Key Collector
+
+```yaml
 key_collector:
+  # Deverrouillage ecran
   - source_id: unlock_keypad
     min_length: 4
     max_length: 4
@@ -377,38 +447,33 @@ key_collector:
                 text: !lambda |-
                   std::string display = "";
                   for (size_t i = 0; i < x.length(); i++) {
-                    display += "● ";
+                    display += "* ";
                   }
                   for (size_t i = x.length(); i < 4; i++) {
-                    display += "○ ";
+                    display += "_ ";
                   }
                   return display.c_str();
           else:
             - lvgl.label.update:
                 id: unlock_code_display
                 text_color: 0xFFFFFF
-                text: "○ ○ ○ ○"
+                text: "_ _ _ _"
     on_result:
       - if:
           condition:
             lambda: 'return x == "${unlock_pin_code}";'
           then:
-            # Code correct - déverrouiller
+            # Code correct
             - lvgl.label.update:
                 id: unlock_code_display
                 text_color: 0x3fb950
-                text: "✓ ✓ ✓ ✓"
-            - lvgl.label.update:
-                id: face_status_label
-                text_color: 0x3fb950
-                text: "Code correct - Bienvenue!"
+                text: "O K"
             - lambda: |-
-                ESP_LOGI("unlock", "🔓 Code PIN correct - déverrouillage!");
+                ESP_LOGI("unlock", "Code ecran correct - deverrouillage!");
                 id(display_lock) = false;
             - delay: 500ms
             - lambda: |-
                 id(tab5_cam).stop_streaming();
-                // Reconfigurer le canvas pour la page caméra normale
                 auto canvas = id(camera_canvas);
                 if (canvas != nullptr) {
                   id(camera_display).configure_canvas(canvas);
@@ -419,138 +484,113 @@ key_collector:
             - lvgl.label.update:
                 id: unlock_code_display
                 text_color: 0xf85149
-                text: "✗ ✗ ✗ ✗"
-            - lvgl.label.update:
-                id: face_status_label
-                text_color: 0xf85149
-                text: "Code incorrect!"
-            - lambda: |-
-                ESP_LOGW("unlock", "❌ Code PIN incorrect!");
+                text: "ERREUR"
+            - lambda: ESP_LOGW("unlock", "Code ecran incorrect!");
             - delay: 1000ms
             - lvgl.label.update:
                 id: unlock_code_display
                 text_color: 0xFFFFFF
-                text: "○ ○ ○ ○"
-            - lvgl.label.update:
-                id: face_status_label
-                text_color: 0x58a6ff
-                text: "Regardez la caméra..."
+                text: "_ _ _ _"
+```
 
-# ============================================================================
-# INTERVAL POUR RECONNAISSANCE FACIALE ET TIMEOUT
-# ============================================================================
+---
+
+## 7. Interval (reconnaissance faciale + timeout)
+
+```yaml
 interval:
-  - interval: 200ms
+  - interval: 500ms
     then:
       - lambda: |-
-          // Seulement actif sur face_unlock_page
           lv_obj_t *current = lv_scr_act();
           if (current != id(face_unlock_page)->obj) return;
 
-          // === GESTION DU TIMEOUT ===
+          // Timeout
           uint32_t elapsed = (millis() - id(unlock_timeout_start)) / 1000;
           int remaining = id(face_unlock_timeout_sec) - elapsed;
           int percent = (remaining * 100) / id(face_unlock_timeout_sec);
           if (percent < 0) percent = 0;
-
-          // Mettre à jour la barre de progression
           lv_bar_set_value(id(unlock_timeout_bar), percent, LV_ANIM_ON);
 
-          // Changer couleur selon temps restant
           if (remaining <= 5) {
             lv_obj_set_style_bg_color(id(unlock_timeout_bar), lv_color_hex(0xf85149), LV_PART_INDICATOR);
-          } else if (remaining <= 10) {
-            lv_obj_set_style_bg_color(id(unlock_timeout_bar), lv_color_hex(0xd29922), LV_PART_INDICATOR);
           } else {
             lv_obj_set_style_bg_color(id(unlock_timeout_bar), lv_color_hex(0x3fb950), LV_PART_INDICATOR);
           }
 
-          // === TIMEOUT EXPIRÉ ===
+          // Timeout expire
           if (remaining <= 0) {
-            ESP_LOGI("lock", "⏱️ Timeout - retour veille");
-            lv_label_set_text(id(face_status_label), "Timeout - Retour veille...");
-            lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0xf85149), 0);
+            ESP_LOGI("lock", "Timeout - retour veille");
             id(tab5_cam).stop_streaming();
-            // Reconfigurer canvas pour page caméra normale
             auto canvas = id(camera_canvas);
-            if (canvas != nullptr) {
-              id(camera_display).configure_canvas(canvas);
-            }
+            if (canvas) id(camera_display).configure_canvas(canvas);
           }
 
-          // === VÉRIFIER RECONNAISSANCE FACIALE ===
+          // Verifier visage detecte
+          int face_count = id(camera_display).get_detected_face_count();
+          if (face_count == 0) {
+            lv_label_set_text(id(face_status_label), "Aucun visage detecte...");
+            lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0x8b949e), 0);
+            return;
+          }
+
+          lv_label_set_text(id(face_status_label), "Visage detecte - Verification...");
+          lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0x58a6ff), 0);
+
+          // Verifier reconnaissance
           auto result = id(camera_display).get_last_recognition();
           if (result.recognized && result.similarity >= 0.70f) {
-            ESP_LOGI("lock", "🔓 VISAGE RECONNU! ID=%d sim=%.2f", result.id, result.similarity);
+            ESP_LOGI("lock", "VISAGE RECONNU! ID=%d sim=%.2f", result.id, result.similarity);
             id(display_lock) = false;
-
-            // Afficher message de bienvenue
-            char msg[64];
-            snprintf(msg, sizeof(msg), "✓ Bienvenue! (ID:%d)", result.id);
-            lv_label_set_text(id(face_status_label), msg);
+            lv_label_set_text(id(face_status_label), "Bienvenue!");
             lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0x3fb950), 0);
 
-            // Afficher succès sur le code aussi
-            lv_label_set_text(id(unlock_code_display), "✓ ✓ ✓ ✓");
-            lv_obj_set_style_text_color(id(unlock_code_display), lv_color_hex(0x3fb950), 0);
+            id(tab5_cam).stop_streaming();
+            auto canvas = id(camera_canvas);
+            if (canvas) id(camera_display).configure_canvas(canvas);
           }
 
-      # === TRANSITION APRÈS DÉVERROUILLAGE ===
+      # Transition apres reconnaissance
       - if:
           condition:
-            lambda: |-
-              lv_obj_t *current = lv_scr_act();
-              return (current == id(face_unlock_page)->obj) && !id(display_lock);
+            lambda: 'return !id(display_lock);'
           then:
-            - delay: 800ms
-            - lambda: |-
-                id(tab5_cam).stop_streaming();
-                // Reconfigurer canvas
-                auto canvas = id(camera_canvas);
-                if (canvas != nullptr) {
-                  id(camera_display).configure_canvas(canvas);
-                }
+            - delay: 500ms
             - lvgl.page.show: page_home
 
-      # === RETOUR VEILLE SI TIMEOUT ===
+      # Retour veille si timeout
       - if:
           condition:
             lambda: |-
               lv_obj_t *current = lv_scr_act();
               if (current != id(face_unlock_page)->obj) return false;
               uint32_t elapsed = (millis() - id(unlock_timeout_start)) / 1000;
-              return elapsed >= (id(face_unlock_timeout_sec) + 1);  // +1 pour afficher message
+              return elapsed >= id(face_unlock_timeout_sec);
           then:
             - light.turn_off: backlight
             - lvgl.page.show: page_sleep
+```
 
-# ============================================================================
-# MODIFIER VOTRE on_idle EXISTANT (à remplacer dans votre fichier principal)
-# ============================================================================
-# lvgl:
-#   on_idle:
-#     - timeout: !lambda |-
-#         int timeout = id(auto_off).state;
-#         return (timeout == -1) ? 86400000 : (timeout * 1000);
-#       then:
-#         - lambda: |-
-#             static bool canvas_configured = false;
-#             if (!canvas_configured) {
-#               auto canvas = id(camera_canvas);
-#               if (canvas != nullptr) {
-#                 id(camera_display).configure_canvas(canvas);
-#                 canvas_configured = true;
-#                 ESP_LOGI("lvgl", "Canvas configuré pour caméra 640x480");
-#               }
-#             }
-#
-#         - if:
-#             condition:
-#               lambda: 'return id(auto_off).state > 0;'
-#             then:
-#               # NOUVEAU: Verrouiller et afficher page de veille
-#               - lambda: |-
-#                   id(display_lock) = true;
-#                   ESP_LOGI("lock", "🔒 Verrouillage automatique après inactivité");
-#               - lvgl.page.show: page_sleep
-#               - light.turn_off: backlight
+---
+
+## 8. Resume des valeurs
+
+| Parametre | Valeur par defaut | Description |
+|-----------|-------------------|-------------|
+| `unlock_pin_code` | "0000" | Code PIN pour deverrouiller |
+| `auto_off` | 30s | Temps avant mise en veille |
+| `face_unlock_timeout_sec` | 45s | Temps sur la page face_unlock |
+| Seuil reconnaissance | 0.70 | Similarite minimum (70%) |
+
+---
+
+## 9. Fonctions C++ disponibles
+
+| Fonction | Description |
+|----------|-------------|
+| `reset_last_recognition()` | Reset le resultat de reconnaissance |
+| `get_detected_face_count()` | Nombre de visages detectes |
+| `get_last_recognition()` | Dernier resultat de reconnaissance |
+| `enroll_face()` | Enregistrer un nouveau visage |
+| `get_enrolled_count()` | Nombre de visages enregistres |
+| `clear_all_faces()` | Supprimer tous les visages |
