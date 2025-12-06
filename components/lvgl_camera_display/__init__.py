@@ -11,6 +11,9 @@ CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FACE_DETECTION = "face_detection"
 CONF_PEDESTRIAN_DETECTION = "pedestrian_detection"
+CONF_FACE_RECOGNITION = "face_recognition"
+CONF_FACE_DB_PATH = "face_db_path"
+CONF_RECOGNITION_THRESHOLD = "recognition_threshold"
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -26,6 +29,9 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_UPDATE_INTERVAL, default="33ms"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_FACE_DETECTION, default=False): cv.boolean,
     cv.Optional(CONF_PEDESTRIAN_DETECTION, default=False): cv.boolean,
+    cv.Optional(CONF_FACE_RECOGNITION, default=False): cv.boolean,
+    cv.Optional(CONF_FACE_DB_PATH, default="/sdcard/faces.db"): cv.string,
+    cv.Optional(CONF_RECOGNITION_THRESHOLD, default=0.7): cv.float_range(min=0.0, max=1.0),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -45,6 +51,11 @@ async def to_code(config):
     if config[CONF_PEDESTRIAN_DETECTION]:
         cg.add(var.set_pedestrian_detection_enabled(True))
 
+    if config[CONF_FACE_RECOGNITION]:
+        cg.add(var.set_face_recognition_enabled(True))
+        cg.add(var.set_face_db_path(config[CONF_FACE_DB_PATH]))
+        cg.add(var.set_recognition_threshold(config[CONF_RECOGNITION_THRESHOLD]))
+
     # Add ESP-DL detection component defines (from Kconfig)
     cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=1")
     cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=1")
@@ -54,6 +65,10 @@ async def to_code(config):
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_TYPE=0")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MFN_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_TYPE=0")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION=0")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
     # Add ESP-DL detection components include paths
@@ -69,6 +84,11 @@ async def to_code(config):
     pedestrian_detect_dir = os.path.join(parent_components_dir, "pedestrian_detect")
     if os.path.exists(pedestrian_detect_dir):
         cg.add_build_flag(f"-I{pedestrian_detect_dir}")
+
+    # Add human_face_recognition include path
+    human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
+    if os.path.exists(human_face_recognition_dir):
+        cg.add_build_flag(f"-I{human_face_recognition_dir}")
 
     # Add ESP-DL include paths
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")

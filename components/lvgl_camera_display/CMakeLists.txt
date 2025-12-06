@@ -14,5 +14,5 @@ set(include_dirs
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS ${include_dirs}
-    REQUIRES human_face_detect pedestrian_detect esp-dl
+    REQUIRES human_face_detect pedestrian_detect human_face_recognition esp-dl
 )

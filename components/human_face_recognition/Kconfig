@@ -1,0 +1,56 @@
+menu "models: human_face_recognition"
+    config HUMAN_FACE_RECOGNITION_MFN_S8_V1
+        bool "Enable MFN (MobileFaceNet) S8 V1 model"
+        default y
+        help
+            Enable the MobileFaceNet S8 V1 model for face recognition
+
+    choice HUMAN_FACE_RECOGNITION_MODEL_TYPE
+        prompt "Human face recognition model type"
+        default HUMAN_FACE_RECOGNITION_MODEL_TYPE_MFN_S8_V1
+        help
+            Select the human face recognition model type
+
+        config HUMAN_FACE_RECOGNITION_MODEL_TYPE_MFN_S8_V1
+            bool "MFN_S8_V1"
+            depends on HUMAN_FACE_RECOGNITION_MFN_S8_V1
+
+        config HUMAN_FACE_RECOGNITION_MODEL_TYPE_MBF_S8_V1
+            bool "MBF_S8_V1"
+            depends on HUMAN_FACE_RECOGNITION_MFN_S8_V1
+    endchoice
+
+    config HUMAN_FACE_RECOGNITION_MODEL_TYPE
+        int
+        default 0 if HUMAN_FACE_RECOGNITION_MODEL_TYPE_MFN_S8_V1
+        default 1 if HUMAN_FACE_RECOGNITION_MODEL_TYPE_MBF_S8_V1
+
+    choice HUMAN_FACE_RECOGNITION_MODEL_LOCATION
+        prompt "Human face recognition model location"
+        default HUMAN_FACE_RECOGNITION_MODEL_IN_FLASH_RODATA
+        help
+            Select where the model is stored
+
+        config HUMAN_FACE_RECOGNITION_MODEL_IN_FLASH_RODATA
+            bool "Embed in flash (RODATA)"
+
+        config HUMAN_FACE_RECOGNITION_MODEL_IN_FLASH_PARTITION
+            bool "Flash partition"
+
+        config HUMAN_FACE_RECOGNITION_MODEL_IN_SDCARD
+            bool "SD card"
+    endchoice
+
+    config HUMAN_FACE_RECOGNITION_MODEL_LOCATION
+        int
+        default 0 if HUMAN_FACE_RECOGNITION_MODEL_IN_FLASH_RODATA
+        default 1 if HUMAN_FACE_RECOGNITION_MODEL_IN_FLASH_PARTITION
+        default 2 if HUMAN_FACE_RECOGNITION_MODEL_IN_SDCARD
+
+    config HUMAN_FACE_RECOGNITION_MODEL_SDCARD_DIR
+        string "SD card model directory"
+        default "/sdcard/models/p4"
+        depends on HUMAN_FACE_RECOGNITION_MODEL_IN_SDCARD
+        help
+            Path to models on SD card
+endmenu
