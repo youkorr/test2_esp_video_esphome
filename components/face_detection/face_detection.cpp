@@ -169,6 +169,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
       if (new_id >= 0) {
         ESP_LOGI(TAG, "Face enrolled with ID: %d", new_id);
+        // Save name if provided
+        if (!this->pending_enroll_name_.empty()) {
+          this->face_names_[new_id] = this->pending_enroll_name_;
+          ESP_LOGI(TAG, "Name '%s' saved for ID %d", this->pending_enroll_name_.c_str(), new_id);
+          this->pending_enroll_name_.clear();
+        }
       } else {
         ESP_LOGE(TAG, "Failed to enroll face");
       }
@@ -226,6 +232,19 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
 
       // Draw bounding box
       dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, 3);
+
+      // Draw name above the box if recognized
+      if (this->last_recognition_.recognized) {
+        std::string name = this->get_face_name(this->last_recognition_.id);
+        if (name.empty()) {
+          // Show ID if no name set
+          name = "ID " + std::to_string(this->last_recognition_.id);
+        }
+        // Draw name above the box with white color, scale 2
+        std::vector<uint8_t> white = {0xFF, 0xFF};
+        int text_y = std::max(2, y1 - 18);  // 18 pixels above box
+        this->draw_text_(img_data, width, height, x1, text_y, name, white, 2);
+      }
 
       // Draw red keypoints (5 facial landmarks) as filled squares
       // Using hollow rectangles to create filled effect
@@ -335,6 +354,132 @@ void FaceDetectionComponent::reset_last_recognition() {
   this->last_recognition_.similarity = 0.0f;
   this->last_recognition_.recognized = false;
   ESP_LOGI(TAG, "Recognition result reset");
+}
+
+int FaceDetectionComponent::enroll_face_with_name(const std::string &name) {
+  if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
+    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
+    return -1;
+  }
+
+  ESP_LOGI(TAG, "Enrollment requested with name '%s' - will capture on next face detection", name.c_str());
+  this->pending_enroll_name_ = name;
+  this->enroll_pending_ = true;
+  return 0;
+}
+
+void FaceDetectionComponent::set_face_name(int id, const std::string &name) {
+  this->face_names_[id] = name;
+  ESP_LOGI(TAG, "Set name for face ID %d: %s", id, name.c_str());
+}
+
+std::string FaceDetectionComponent::get_face_name(int id) {
+  auto it = this->face_names_.find(id);
+  if (it != this->face_names_.end()) {
+    return it->second;
+  }
+  return "";
+}
+
+std::string FaceDetectionComponent::get_last_recognized_name() {
+  if (this->last_recognition_.recognized) {
+    return this->get_face_name(this->last_recognition_.id);
+  }
+  return "";
+}
+
+// Simple 5x7 bitmap font for digits and uppercase letters
+static const uint8_t FONT_5X7[][7] = {
+  // A-Z (index 0-25)
+  {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // A
+  {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}, // B
+  {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}, // C
+  {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // D
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}, // E
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}, // F
+  {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F}, // G
+  {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // H
+  {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // I
+  {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C}, // J
+  {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}, // K
+  {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}, // L
+  {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // M
+  {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // N
+  {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // O
+  {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}, // P
+  {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}, // Q
+  {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // R
+  {0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E}, // S
+  {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // T
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // U
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}, // V
+  {0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A}, // W
+  {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}, // X
+  {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}, // Y
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}, // Z
+  // 0-9 (index 26-35)
+  {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}, // 0
+  {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1
+  {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
+  {0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E}, // 3
+  {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, // 4
+  {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}, // 5
+  {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}, // 6
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, // 7
+  {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, // 8
+  {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}, // 9
+  // Space (index 36)
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // Space
+};
+
+void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                                        int x, int y, char c, const std::vector<uint8_t> &color, int scale) {
+  int font_idx = -1;
+
+  if (c >= 'A' && c <= 'Z') {
+    font_idx = c - 'A';
+  } else if (c >= 'a' && c <= 'z') {
+    font_idx = c - 'a';  // Convert to uppercase
+  } else if (c >= '0' && c <= '9') {
+    font_idx = 26 + (c - '0');
+  } else if (c == ' ') {
+    font_idx = 36;
+  }
+
+  if (font_idx < 0) return;
+
+  for (int row = 0; row < 7; row++) {
+    uint8_t row_data = FONT_5X7[font_idx][row];
+    for (int col = 0; col < 5; col++) {
+      if (row_data & (0x10 >> col)) {
+        // Draw scaled pixel
+        for (int sy = 0; sy < scale; sy++) {
+          for (int sx = 0; sx < scale; sx++) {
+            int px = x + col * scale + sx;
+            int py = y + row * scale + sy;
+            if (px >= 0 && px < img_width && py >= 0 && py < img_height) {
+              int offset = (py * img_width + px) * 2;  // RGB565 = 2 bytes
+              img_data[offset] = color[0];
+              img_data[offset + 1] = color[1];
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void FaceDetectionComponent::draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                                        int x, int y, const std::string &text,
+                                        const std::vector<uint8_t> &color, int scale) {
+  int char_width = 6 * scale;  // 5 pixels + 1 spacing
+  int current_x = x;
+
+  for (char c : text) {
+    if (current_x + 5 * scale >= img_width) break;  // Stop if out of bounds
+    draw_char_(img_data, img_width, img_height, current_x, y, c, color, scale);
+    current_x += char_width;
+  }
 }
 
 }  // namespace face_detection

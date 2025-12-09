@@ -26,6 +26,13 @@ FaceDetectionComponent = face_detection_ns.class_("FaceDetectionComponent", cg.C
 FaceDetectedTrigger = face_detection_ns.class_("FaceDetectedTrigger", automation.Trigger.template(cg.int_))
 FaceRecognizedTrigger = face_detection_ns.class_("FaceRecognizedTrigger", automation.Trigger.template(cg.int_, cg.float_))
 
+# Actions
+EnrollFaceAction = face_detection_ns.class_("EnrollFaceAction", automation.Action)
+EnrollFaceWithNameAction = face_detection_ns.class_("EnrollFaceWithNameAction", automation.Action)
+SetFaceNameAction = face_detection_ns.class_("SetFaceNameAction", automation.Action)
+DeleteFaceAction = face_detection_ns.class_("DeleteFaceAction", automation.Action)
+ClearAllFacesAction = face_detection_ns.class_("ClearAllFacesAction", automation.Action)
+
 mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
 MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 
@@ -144,3 +151,75 @@ async def to_code(config):
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+
+
+# Action schemas
+CONF_NAME = "name"
+CONF_FACE_ID = "face_id"
+
+ENROLL_FACE_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(FaceDetectionComponent),
+})
+
+ENROLL_FACE_WITH_NAME_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(FaceDetectionComponent),
+    cv.Required(CONF_NAME): cv.templatable(cv.string),
+})
+
+SET_FACE_NAME_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(FaceDetectionComponent),
+    cv.Required(CONF_FACE_ID): cv.templatable(cv.int_),
+    cv.Required(CONF_NAME): cv.templatable(cv.string),
+})
+
+DELETE_FACE_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(FaceDetectionComponent),
+    cv.Required(CONF_FACE_ID): cv.templatable(cv.int_),
+})
+
+CLEAR_ALL_FACES_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(FaceDetectionComponent),
+})
+
+
+@automation.register_action("face_detection.enroll", EnrollFaceAction, ENROLL_FACE_ACTION_SCHEMA)
+async def enroll_face_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("face_detection.enroll_with_name", EnrollFaceWithNameAction, ENROLL_FACE_WITH_NAME_ACTION_SCHEMA)
+async def enroll_face_with_name_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    template_ = await cg.templatable(config[CONF_NAME], args, cg.std_string)
+    cg.add(var.set_name(template_))
+    return var
+
+
+@automation.register_action("face_detection.set_name", SetFaceNameAction, SET_FACE_NAME_ACTION_SCHEMA)
+async def set_face_name_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    template_id = await cg.templatable(config[CONF_FACE_ID], args, cg.int_)
+    cg.add(var.set_face_id(template_id))
+    template_name = await cg.templatable(config[CONF_NAME], args, cg.std_string)
+    cg.add(var.set_name(template_name))
+    return var
+
+
+@automation.register_action("face_detection.delete", DeleteFaceAction, DELETE_FACE_ACTION_SCHEMA)
+async def delete_face_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    template_ = await cg.templatable(config[CONF_FACE_ID], args, cg.int_)
+    cg.add(var.set_face_id(template_))
+    return var
+
+
+@automation.register_action("face_detection.clear_all", ClearAllFacesAction, CLEAR_ALL_FACES_ACTION_SCHEMA)
+async def clear_all_faces_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var

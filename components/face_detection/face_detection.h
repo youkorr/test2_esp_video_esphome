@@ -5,6 +5,8 @@
 #include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
 #include <vector>
 #include <functional>
+#include <map>
+#include <string>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
@@ -55,11 +57,17 @@ class FaceDetectionComponent : public Component {
 
   // Face recognition API
   int enroll_face();
+  int enroll_face_with_name(const std::string &name);
   bool delete_face(int id);
   void clear_all_faces();
   int get_enrolled_count();
   RecognitionResult get_last_recognition();
   void reset_last_recognition();
+
+  // Name management API
+  void set_face_name(int id, const std::string &name);
+  std::string get_face_name(int id);
+  std::string get_last_recognized_name();
 
   // External drawing - allows camera display to call drawing on its buffer
   void draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height);
@@ -103,6 +111,10 @@ class FaceDetectionComponent : public Component {
   // Recognition state
   RecognitionResult last_recognition_{-1, 0.0f, false};
   bool enroll_pending_{false};
+  std::string pending_enroll_name_{};
+
+  // Face name mapping (ID -> name)
+  std::map<int, std::string> face_names_;
 
   // Callbacks
   std::vector<std::function<void(int)>> on_face_detected_callbacks_;
@@ -112,6 +124,10 @@ class FaceDetectionComponent : public Component {
   void process_frame_();
   void detect_faces_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
+  void draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, char c, const std::vector<uint8_t> &color, int scale);
+  void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, const std::string &text, const std::vector<uint8_t> &color, int scale);
 };
 
 // Automation triggers
@@ -130,6 +146,54 @@ class FaceRecognizedTrigger : public Trigger<int, float> {
     parent->add_on_face_recognized_callback([this](int face_id, float similarity) {
       this->trigger(face_id, similarity);
     });
+  }
+};
+
+// Actions
+template<typename... Ts>
+class EnrollFaceAction : public Action<Ts...>, public Parented<FaceDetectionComponent> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->enroll_face();
+  }
+};
+
+template<typename... Ts>
+class EnrollFaceWithNameAction : public Action<Ts...>, public Parented<FaceDetectionComponent> {
+ public:
+  TEMPLATABLE_VALUE(std::string, name)
+
+  void play(Ts... x) override {
+    this->parent_->enroll_face_with_name(this->name_.value(x...));
+  }
+};
+
+template<typename... Ts>
+class SetFaceNameAction : public Action<Ts...>, public Parented<FaceDetectionComponent> {
+ public:
+  TEMPLATABLE_VALUE(int, face_id)
+  TEMPLATABLE_VALUE(std::string, name)
+
+  void play(Ts... x) override {
+    this->parent_->set_face_name(this->face_id_.value(x...), this->name_.value(x...));
+  }
+};
+
+template<typename... Ts>
+class DeleteFaceAction : public Action<Ts...>, public Parented<FaceDetectionComponent> {
+ public:
+  TEMPLATABLE_VALUE(int, face_id)
+
+  void play(Ts... x) override {
+    this->parent_->delete_face(this->face_id_.value(x...));
+  }
+};
+
+template<typename... Ts>
+class ClearAllFacesAction : public Action<Ts...>, public Parented<FaceDetectionComponent> {
+ public:
+  void play(Ts... x) override {
+    this->parent_->clear_all_faces();
   }
 };
 
