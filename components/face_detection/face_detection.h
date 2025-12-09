@@ -61,6 +61,9 @@ class FaceDetectionComponent : public Component {
   RecognitionResult get_last_recognition();
   void reset_last_recognition();
 
+  // External drawing - allows camera display to call drawing on its buffer
+  void draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height);
+
   // Callbacks
   void add_on_face_detected_callback(std::function<void(int)> callback) {
     this->on_face_detected_callbacks_.push_back(std::move(callback));
