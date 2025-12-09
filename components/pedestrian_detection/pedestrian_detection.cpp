@@ -44,6 +44,7 @@ void PedestrianDetectionComponent::setup() {
 
   ESP_LOGI(TAG, "Pedestrian Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
+  ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
 }
 
 void PedestrianDetectionComponent::loop() {
@@ -60,20 +61,6 @@ void PedestrianDetectionComponent::process_frame_() {
 
   // Only run detection every N frames
   if (this->frame_counter_ < this->detection_interval_) {
-    // Still draw cached results if canvas is available
-    if (this->canvas_obj_ != nullptr) {
-      mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
-      if (buffer != nullptr) {
-        uint8_t *img_data = this->camera_->get_buffer_data(buffer);
-        uint16_t width = this->camera_->get_image_width();
-        uint16_t height = this->camera_->get_image_height();
-
-        if (img_data != nullptr) {
-          this->draw_results_(img_data, width, height);
-        }
-        this->camera_->release_buffer(buffer);
-      }
-    }
     return;
   }
 
@@ -91,7 +78,9 @@ void PedestrianDetectionComponent::process_frame_() {
 
   if (img_data != nullptr) {
     this->detect_pedestrians_(img_data, width, height);
-    this->draw_results_(img_data, width, height);
+    if (this->draw_enabled_) {
+      this->draw_results_(img_data, width, height);
+    }
   }
 
   this->camera_->release_buffer(buffer);
@@ -170,16 +159,12 @@ void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t wid
   }
 }
 
-void PedestrianDetectionComponent::configure_canvas(lv_obj_t *canvas) {
-  this->canvas_obj_ = canvas;
-  ESP_LOGI(TAG, "Canvas configured: %p", canvas);
-}
-
 void PedestrianDetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Pedestrian Detection:");
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);
+  ESP_LOGCONFIG(TAG, "  Draw enabled: %s", this->draw_enabled_ ? "YES" : "NO");
 }
 
 int PedestrianDetectionComponent::get_detected_pedestrian_count() {

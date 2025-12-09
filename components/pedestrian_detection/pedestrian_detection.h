@@ -28,13 +28,10 @@ class PedestrianDetectionComponent : public Component {
 
   // Configuration setters
   void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
-  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
-
-  // Canvas configuration (called by LVGL component)
-  void configure_canvas(lv_obj_t *canvas);
+  void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
 
   // Detection API
   int get_detected_pedestrian_count();
@@ -49,8 +46,7 @@ class PedestrianDetectionComponent : public Component {
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
-  lv_obj_t *canvas_obj_{nullptr};
-  std::string canvas_id_{};
+  bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 
   // Detection configuration
   float score_threshold_{0.5f};

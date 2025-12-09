@@ -8,7 +8,6 @@ DEPENDENCIES = ["mipi_dsi_cam"]
 AUTO_LOAD = ["mipi_dsi_cam"]
 
 CONF_CAMERA_ID = "camera_id"
-CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_RECOGNITION_ENABLED = "recognition_enabled"
@@ -17,6 +16,7 @@ CONF_RECOGNITION_THRESHOLD = "recognition_threshold"
 CONF_ON_FACE_DETECTED = "on_face_detected"
 CONF_ON_FACE_RECOGNIZED = "on_face_recognized"
 CONF_DETECTION_INTERVAL = "detection_interval"
+CONF_DRAW_ENABLED = "draw_enabled"
 
 face_detection_ns = cg.esphome_ns.namespace("face_detection")
 FaceDetectionComponent = face_detection_ns.class_("FaceDetectionComponent", cg.Component)
@@ -31,10 +31,10 @@ MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(FaceDetectionComponent),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
-    cv.Optional(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
+    cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
     cv.Optional(CONF_RECOGNITION_ENABLED, default=False): cv.boolean,
     cv.Optional(CONF_FACE_DB_PATH, default="/sdcard/faces.db"): cv.string,
     cv.Optional(CONF_RECOGNITION_THRESHOLD, default=0.7): cv.float_range(min=0.0, max=1.0),
@@ -57,9 +57,7 @@ async def to_code(config):
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
     cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))
     cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
-
-    if CONF_CANVAS_ID in config:
-        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
+    cg.add(var.set_draw_enabled(config[CONF_DRAW_ENABLED]))
 
     if config[CONF_RECOGNITION_ENABLED]:
         cg.add(var.set_recognition_enabled(True))
