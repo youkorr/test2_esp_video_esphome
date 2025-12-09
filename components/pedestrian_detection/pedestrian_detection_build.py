@@ -4,6 +4,7 @@ Embeds pedestrian detection model and compiles optimized ESP-DL sources
 """
 
 import os
+import glob
 Import("env")
 
 script_dir = Dir('.').srcnode().abspath
@@ -135,69 +136,51 @@ if os.path.exists(esp_dl_dir):
 
     print("[Pedestrian Detection] ESP-DL includes added")
 
-    # Optimized: only essential ESP-DL source files for pedestrian detection
-    esp_dl_essential_sources = [
-        # Core tensor operations
-        "dl/tensor/src/dl_tensor_base.cpp",
-        # Model loading
-        "dl/model/src/dl_model_base.cpp",
-        "dl/model/src/dl_model_context.cpp",
-        "dl/model/src/dl_memory_manager.cpp",
-        "dl/model/src/dl_memory_manager_greedy.cpp",
-        # Module base
-        "dl/module/src/dl_module_base.cpp",
-        # Tools
-        "dl/tool/src/dl_tool.cpp",
-        "dl/tool/src/dl_tool_cache.cpp",
-        # Math operations
-        "dl/math/src/dl_math.cpp",
-        "dl/math/src/dl_math_matrix.cpp",
-        # FBS loader
-        "fbs_loader/src/fbs_loader.cpp",
-        # Vision - Image processing
-        "vision/image/dl_image_preprocessor.cpp",
-        "vision/image/dl_image_draw.cpp",
-        "vision/image/dl_image_process.cpp",
-        "vision/image/dl_image_pixel_cvt_dispatch_rgb565.cpp",
-        "vision/image/dl_image_pixel_cvt_dispatch_rgb888.cpp",
-        "vision/image/dl_image_pixel_cvt_dispatch_gray.cpp",
-        "vision/image/dl_image_ppa.cpp",
-        # Vision - Detection (pico for pedestrian)
-        "vision/detect/dl_detect_base.cpp",
-        "vision/detect/dl_detect_postprocessor.cpp",
-        "vision/detect/dl_detect_pico_postprocessor.cpp",
-        # Neural network layers - essential operations
-        "dl/base/dl_base_conv2d.cpp",
-        "dl/base/dl_base_depthwise_conv2d.cpp",
-        "dl/base/dl_base_relu.cpp",
-        "dl/base/dl_base_leakyrelu.cpp",
-        "dl/base/dl_base_prelu.cpp",
-        "dl/base/dl_base_add.cpp",
-        "dl/base/dl_base_add2d.cpp",
-        "dl/base/dl_base_sub.cpp",
-        "dl/base/dl_base_sub2d.cpp",
-        "dl/base/dl_base_mul.cpp",
-        "dl/base/dl_base_mul2d.cpp",
-        "dl/base/dl_base_div.cpp",
-        "dl/base/dl_base_max.cpp",
-        "dl/base/dl_base_max2d.cpp",
-        "dl/base/dl_base_min.cpp",
-        "dl/base/dl_base_min2d.cpp",
-        "dl/base/dl_base_max_pool2d.cpp",
-        "dl/base/dl_base_avg_pool2d.cpp",
-        "dl/base/dl_base_pad.cpp",
-        "dl/base/dl_base_resize.cpp",
-        "dl/base/dl_base_shape.cpp",
-        "dl/base/dl_base_elemwise.cpp",
-        "dl/base/dl_base_requantize_linear.cpp",
+    # ESP-DL source files - specific directories
+    esp_dl_source_dirs = [
+        "dl/tensor/src",
+        "dl/model/src",
+        "dl/module/src",
+        "dl/tool/src",
+        "dl/math/src",
+        "fbs_loader/src",
+        "vision/image",
+        "vision/detect",
     ]
 
-    for src in esp_dl_essential_sources:
-        src_path = os.path.join(esp_dl_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
+    # Files to exclude
+    esp_dl_exclude = [
+        "dl_base_dotprod.cpp",  # Use custom implementation
+        "dl_image_jpeg.cpp",
+        "dl_image_bmp.cpp",
+    ]
 
-    print(f"[Pedestrian Detection] ESP-DL: {len(esp_dl_essential_sources)} essential source files")
+    esp_dl_count = 0
+    # Add sources from specific directories
+    for src_dir in esp_dl_source_dirs:
+        src_dir_path = os.path.join(esp_dl_dir, src_dir)
+        if os.path.exists(src_dir_path):
+            for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
+                if os.path.basename(src_file) not in esp_dl_exclude:
+                    sources_to_add.append(src_file)
+                    esp_dl_count += 1
+
+    # Add ALL dl/base/*.cpp files (required for neural network operations)
+    dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
+    if os.path.exists(dl_base_dir):
+        for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
+            if os.path.basename(src_file) not in esp_dl_exclude:
+                sources_to_add.append(src_file)
+                esp_dl_count += 1
+
+    # Add ESP32P4 assembly files (required for low-level operations)
+    esp32p4_isa_dir = os.path.join(esp_dl_dir, "dl", "base", "isa", "esp32p4")
+    if os.path.exists(esp32p4_isa_dir):
+        for asm_file in glob.glob(os.path.join(esp32p4_isa_dir, "*.S")):
+            sources_to_add.append(asm_file)
+            esp_dl_count += 1
+
+    print(f"[Pedestrian Detection] ESP-DL: {esp_dl_count} source files")
 
     # Add prebuilt FBS library
     fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
