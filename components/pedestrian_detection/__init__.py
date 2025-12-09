@@ -4,8 +4,8 @@ from esphome.const import CONF_ID
 from esphome import automation
 import os
 
-DEPENDENCIES = ["mipi_dsi_cam"]
-AUTO_LOAD = ["mipi_dsi_cam"]
+DEPENDENCIES = ["mipi_dsi_cam", "esp_dl"]
+AUTO_LOAD = ["mipi_dsi_cam", "esp_dl"]
 
 CONF_CAMERA_ID = "camera_id"
 CONF_SCORE_THRESHOLD = "score_threshold"

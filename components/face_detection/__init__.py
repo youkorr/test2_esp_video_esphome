@@ -4,10 +4,11 @@ from esphome.const import CONF_ID
 from esphome import automation
 import os
 
-DEPENDENCIES = ["mipi_dsi_cam"]
-AUTO_LOAD = ["mipi_dsi_cam"]
+DEPENDENCIES = ["mipi_dsi_cam", "esp_dl"]
+AUTO_LOAD = ["mipi_dsi_cam", "esp_dl"]
 
 CONF_CAMERA_ID = "camera_id"
+CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_RECOGNITION_ENABLED = "recognition_enabled"
@@ -31,6 +32,7 @@ MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(FaceDetectionComponent),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+    cv.Optional(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
@@ -53,6 +55,9 @@ async def to_code(config):
 
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
+
+    if CONF_CANVAS_ID in config:
+        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
 
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
     cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))

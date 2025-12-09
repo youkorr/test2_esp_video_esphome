@@ -37,6 +37,7 @@ class FaceDetectionComponent : public Component {
 
   // Configuration setters
   void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
@@ -44,6 +45,9 @@ class FaceDetectionComponent : public Component {
   void set_face_db_path(const std::string &path) { this->face_db_path_ = path; }
   void set_recognition_threshold(float threshold) { this->recognition_threshold_ = threshold; }
   void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
+
+  // Get canvas ID for LVGL integration
+  const std::string &get_canvas_id() { return this->canvas_id_; }
 
   // Detection API
   int get_detected_face_count();
@@ -69,6 +73,7 @@ class FaceDetectionComponent : public Component {
 
  protected:
   mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  std::string canvas_id_{};  // Canvas ID for LVGL integration
   bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 
   // Detection configuration

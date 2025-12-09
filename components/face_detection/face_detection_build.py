@@ -1,10 +1,10 @@
 """
 Build script for Face Detection component
-Compiles ESP-DL sources and embeds face detection/recognition models
+Embeds face detection/recognition models and compiles detection-specific sources
+ESP-DL core is provided by the esp_dl component
 """
 
 import os
-import glob
 Import("env")
 
 script_dir = Dir('.').srcnode().abspath
@@ -187,104 +187,10 @@ const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
             sources_to_add.append(src_path)
             print(f"[Face Detection] + {src}")
 
-# ========================================================================
-# ESP-DL Sources
-# ========================================================================
-esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
-if os.path.exists(esp_dl_dir):
-    esp_dl_include_dirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
-        "dl/tool/isa/xtensa", "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4", "dl/base/isa/tie728",
-        "dl/base/isa/xtensa", "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src", "fbs_loader/include",
-        "fbs_loader/lib/esp32p4", "fbs_loader/src", "vision/detect", "vision/image",
-        "vision/image/isa", "vision/image/isa/esp32p4", "vision/recognition",
-        "vision/classification",
-    ]
-
-    for inc_dir in esp_dl_include_dirs:
-        inc_path = os.path.join(esp_dl_dir, inc_dir)
-        if os.path.exists(inc_path):
-            env.Append(CPPPATH=[inc_path])
-
-    print(f"[Face Detection] ESP-DL includes added")
-
-    esp_dl_source_dirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/src",
-        "dl/tensor/include", "dl/tensor/src", "dl/base", "dl/base/isa",
-        "dl/base/isa/esp32p4", "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src", "fbs_loader/include",
-        "fbs_loader/lib/esp32p4", "fbs_loader/src", "vision/detect", "vision/image",
-        "vision/image/isa", "vision/image/isa/esp32p4", "vision/recognition",
-        "vision/classification",
-    ]
-
-    esp_dl_exclude_files = [
-        "dl_base_dotprod.cpp",
-        "dl_image_jpeg.cpp",
-        "dl_image_bmp.cpp",
-    ]
-
-    esp_dl_count = 0
-    for src_dir in esp_dl_source_dirs:
-        src_dir_path = os.path.join(esp_dl_dir, src_dir)
-        if os.path.exists(src_dir_path):
-            patterns = ['*.cpp', '*.c', '*.S']
-            for pattern in patterns:
-                files = glob.glob(os.path.join(src_dir_path, pattern))
-                for src_file in files:
-                    basename = os.path.basename(src_file)
-                    if basename not in esp_dl_exclude_files:
-                        sources_to_add.append(src_file)
-                        esp_dl_count += 1
-
-    print(f"[Face Detection] ESP-DL: {esp_dl_count} source files")
-
-    # Add prebuilt FBS library
-    fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
-    fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
-    if os.path.exists(fbs_lib):
-        env.Append(LIBPATH=[fbs_lib_dir])
-        env.Prepend(LIBS=["fbs_model"])
-        print("[Face Detection] Added libfbs_model.a")
-
-    env.Append(CPPPATH=[component_dir])
+env.Append(CPPPATH=[component_dir])
 
 # ========================================================================
-# Copy stub files from lvgl_camera_display if they exist
-# ========================================================================
-lvgl_cam_dir = os.path.join(parent_components_dir, "lvgl_camera_display")
-
-# Custom dotprod implementation
-dotprod_src = os.path.join(lvgl_cam_dir, "dl_base_dotprod_no_dsp.cpp")
-dotprod_dst = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
-if os.path.exists(dotprod_src) and not os.path.exists(dotprod_dst):
-    import shutil
-    shutil.copy(dotprod_src, dotprod_dst)
-if os.path.exists(dotprod_dst):
-    sources_to_add.append(dotprod_dst)
-    print("[Face Detection] + dl_base_dotprod_no_dsp.cpp")
-
-# mbedTLS stub
-mbedtls_stub_src = os.path.join(lvgl_cam_dir, "mbedtls_aes_stub.c")
-mbedtls_stub_dst = os.path.join(component_dir, "mbedtls_aes_stub.c")
-if os.path.exists(mbedtls_stub_src) and not os.path.exists(mbedtls_stub_dst):
-    import shutil
-    shutil.copy(mbedtls_stub_src, mbedtls_stub_dst)
-if os.path.exists(mbedtls_stub_dst):
-    sources_to_add.append(mbedtls_stub_dst)
-    print("[Face Detection] + mbedtls_aes_stub.c")
-
-# mbedTLS header directory
-mbedtls_header_src = os.path.join(lvgl_cam_dir, "mbedtls")
-mbedtls_header_dst = os.path.join(component_dir, "mbedtls")
-if os.path.exists(mbedtls_header_src) and not os.path.exists(mbedtls_header_dst):
-    import shutil
-    shutil.copytree(mbedtls_header_src, mbedtls_header_dst)
-
-# ========================================================================
-# Compile sources
+# Compile sources (only detection-specific, ESP-DL is in esp_dl component)
 # ========================================================================
 if sources_to_add:
     objects = []
@@ -301,7 +207,6 @@ if sources_to_add:
             objects
         )
         env.Prepend(LIBS=[lib])
-        env['_LIBFLAGS'] = '-Wl,--start-group ' + env['_LIBFLAGS'] + ' -Wl,--end-group'
         print(f"[Face Detection] {len(sources_to_add)} source files compiled")
         print("[Face Detection] libface_detection.a created")
 
