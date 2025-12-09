@@ -180,6 +180,20 @@ if os.path.exists(esp_dl_dir):
             sources_to_add.append(asm_file)
             esp_dl_count += 1
 
+    # Add ESP32P4 tool assembly files (dl_esp32p4_memcpy, dl_esp32p4_cfg_round)
+    esp32p4_tool_isa_dir = os.path.join(esp_dl_dir, "dl", "tool", "isa", "esp32p4")
+    if os.path.exists(esp32p4_tool_isa_dir):
+        for asm_file in glob.glob(os.path.join(esp32p4_tool_isa_dir, "*.S")):
+            sources_to_add.append(asm_file)
+            esp_dl_count += 1
+
+    # Add ESP32P4 vision/image assembly files (color conversion, resize)
+    esp32p4_vision_isa_dir = os.path.join(esp_dl_dir, "vision", "image", "isa", "esp32p4")
+    if os.path.exists(esp32p4_vision_isa_dir):
+        for asm_file in glob.glob(os.path.join(esp32p4_vision_isa_dir, "*.S")):
+            sources_to_add.append(asm_file)
+            esp_dl_count += 1
+
     print(f"[Pedestrian Detection] ESP-DL: {esp_dl_count} source files")
 
     # Add prebuilt FBS library
