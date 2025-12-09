@@ -1,0 +1,143 @@
+import esphome.codegen as cg
+import esphome.config_validation as cv
+from esphome.const import CONF_ID
+from esphome import automation
+import os
+
+DEPENDENCIES = ["mipi_dsi_cam"]
+AUTO_LOAD = ["mipi_dsi_cam"]
+
+CONF_CAMERA_ID = "camera_id"
+CONF_CANVAS_ID = "canvas_id"
+CONF_SCORE_THRESHOLD = "score_threshold"
+CONF_NMS_THRESHOLD = "nms_threshold"
+CONF_RECOGNITION_ENABLED = "recognition_enabled"
+CONF_FACE_DB_PATH = "face_db_path"
+CONF_RECOGNITION_THRESHOLD = "recognition_threshold"
+CONF_ON_FACE_DETECTED = "on_face_detected"
+CONF_ON_FACE_RECOGNIZED = "on_face_recognized"
+CONF_DETECTION_INTERVAL = "detection_interval"
+
+face_detection_ns = cg.esphome_ns.namespace("face_detection")
+FaceDetectionComponent = face_detection_ns.class_("FaceDetectionComponent", cg.Component)
+
+# Triggers
+FaceDetectedTrigger = face_detection_ns.class_("FaceDetectedTrigger", automation.Trigger.template(cg.int_))
+FaceRecognizedTrigger = face_detection_ns.class_("FaceRecognizedTrigger", automation.Trigger.template(cg.int_, cg.float_))
+
+mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
+MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
+
+CONFIG_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.declare_id(FaceDetectionComponent),
+    cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+    cv.Optional(CONF_CANVAS_ID): cv.string,
+    cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
+    cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
+    cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
+    cv.Optional(CONF_RECOGNITION_ENABLED, default=False): cv.boolean,
+    cv.Optional(CONF_FACE_DB_PATH, default="/sdcard/faces.db"): cv.string,
+    cv.Optional(CONF_RECOGNITION_THRESHOLD, default=0.7): cv.float_range(min=0.0, max=1.0),
+    cv.Optional(CONF_ON_FACE_DETECTED): automation.validate_automation({
+        cv.GenerateID(): cv.declare_id(FaceDetectedTrigger),
+    }),
+    cv.Optional(CONF_ON_FACE_RECOGNIZED): automation.validate_automation({
+        cv.GenerateID(): cv.declare_id(FaceRecognizedTrigger),
+    }),
+}).extend(cv.COMPONENT_SCHEMA)
+
+
+async def to_code(config):
+    var = cg.new_Pvariable(config[CONF_ID])
+    await cg.register_component(var, config)
+
+    camera = await cg.get_variable(config[CONF_CAMERA_ID])
+    cg.add(var.set_camera(camera))
+
+    cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
+    cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))
+    cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
+
+    if CONF_CANVAS_ID in config:
+        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
+
+    if config[CONF_RECOGNITION_ENABLED]:
+        cg.add(var.set_recognition_enabled(True))
+        cg.add(var.set_face_db_path(config[CONF_FACE_DB_PATH]))
+        cg.add(var.set_recognition_threshold(config[CONF_RECOGNITION_THRESHOLD]))
+
+    # Setup automations
+    for conf in config.get(CONF_ON_FACE_DETECTED, []):
+        trigger = cg.new_Pvariable(conf[CONF_ID], var)
+        await automation.build_automation(trigger, [(cg.int_, "face_count")], conf)
+
+    for conf in config.get(CONF_ON_FACE_RECOGNIZED, []):
+        trigger = cg.new_Pvariable(conf[CONF_ID], var)
+        await automation.build_automation(trigger, [(cg.int_, "face_id"), (cg.float_, "similarity")], conf)
+
+    # Add build flags for face detection models
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=1")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_TYPE=0")
+    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION=0")
+    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
+    # Add build flags for face recognition if enabled
+    if config[CONF_RECOGNITION_ENABLED]:
+        cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MFN_S8_V1=1")
+        cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA=1")
+        cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_TYPE=0")
+        cg.add_build_flag("-DCONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION=0")
+
+    # Add include paths
+    component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+
+    # Add human_face_detect include path
+    human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
+    if os.path.exists(human_face_detect_dir):
+        cg.add_build_flag(f"-I{human_face_detect_dir}")
+
+    # Add human_face_recognition include path
+    human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
+    if os.path.exists(human_face_recognition_dir):
+        cg.add_build_flag(f"-I{human_face_recognition_dir}")
+
+    # Add ESP-DL include paths
+    esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
+    if os.path.exists(esp_dl_dir):
+        esp_dl_includes = [
+            "dl",
+            "dl/tool/include",
+            "dl/tool/isa/esp32p4",
+            "dl/tool/src",
+            "dl/tensor/include",
+            "dl/tensor/src",
+            "dl/base",
+            "dl/base/isa",
+            "dl/base/isa/esp32p4",
+            "dl/math/include",
+            "dl/math/src",
+            "dl/model/include",
+            "dl/model/src",
+            "dl/module/include",
+            "dl/module/src",
+            "fbs_loader/include",
+            "fbs_loader/lib/esp32p4",
+            "fbs_loader/src",
+            "vision/detect",
+            "vision/image",
+            "vision/image/isa",
+            "vision/image/isa/esp32p4",
+            "vision/recognition",
+            "vision/classification",
+        ]
+        for inc in esp_dl_includes:
+            inc_path = os.path.join(esp_dl_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
+    # Add build script for compiling ESP-DL sources and embedding models
+    build_script_path = os.path.join(component_dir, "face_detection_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])

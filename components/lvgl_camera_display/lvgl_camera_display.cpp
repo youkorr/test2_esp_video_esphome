@@ -2,106 +2,32 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// ESP-IDF detection components - now enabled with proper Kconfig options
-#include "human_face_detect.hpp"
-#include "pedestrian_detect.hpp"
-#include "human_face_recognition.hpp"
-#include "dl_image.hpp"
-
-// Detection is now enabled
-// #define ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION 1
-
 namespace esphome {
 namespace lvgl_camera_display {
 
 static const char *const TAG = "lvgl_camera_display";
 
 void LVGLCameraDisplay::setup() {
-  ESP_LOGCONFIG(TAG, "🎥 Configuration LVGL Camera Display...");
+  ESP_LOGCONFIG(TAG, "Configuration LVGL Camera Display...");
   ESP_LOGI(TAG, "Display is DISABLED by default - enable via switch in Home Assistant");
 
   if (this->camera_ == nullptr) {
-    ESP_LOGE(TAG, "❌ Camera non configurée");
+    ESP_LOGE(TAG, "Camera non configuree");
     this->mark_failed();
     return;
   }
 
-  // Vérifier que la caméra est opérationnelle
+  // Verifier que la camera est operationnelle
   if (!this->camera_->is_pipeline_ready()) {
-    ESP_LOGE(TAG, "❌ Camera non opérationnelle - pipeline non démarré");
-    ESP_LOGE(TAG, "   Le composant mipi_dsi_cam a échoué à s'initialiser");
-    ESP_LOGE(TAG, "   Vérifiez les logs de mipi_dsi_cam pour plus de détails");
+    ESP_LOGE(TAG, "Camera non operationnelle - pipeline non demarre");
+    ESP_LOGE(TAG, "   Le composant mipi_dsi_cam a echoue a s'initialiser");
+    ESP_LOGE(TAG, "   Verifiez les logs de mipi_dsi_cam pour plus de details");
     this->mark_failed();
     return;
   }
 
-  // Initialize face detector if enabled
-  if (this->face_detection_enabled_) {
-    ESP_LOGI(TAG, "🔍 Initializing face detection...");
-
-    // Create mutex for thread-safe access to cached results
-    this->face_results_mutex_ = xSemaphoreCreateMutex();
-    if (this->face_results_mutex_ == nullptr) {
-      ESP_LOGE(TAG, "❌ Failed to create face results mutex");
-      this->face_detection_enabled_ = false;
-    } else {
-      this->face_detector_ = new HumanFaceDetect();
-      if (this->face_detector_ != nullptr) {
-        // Low thresholds for maximum sensitivity
-        // score_thr: lower = more sensitive (0.3 detects faces with 30%+ confidence)
-        // nms_thr: higher = less aggressive overlap filtering
-        this->face_detector_->set_score_thr(0.3);  // Low threshold = more sensitive
-        this->face_detector_->set_nms_thr(0.5);    // Moderate overlap filtering
-        ESP_LOGI(TAG, "✅ Face detector initialized (score_thr=0.3, nms_thr=0.5 - sensitive)");
-      } else {
-        ESP_LOGE(TAG, "❌ Failed to initialize face detector");
-        this->face_detection_enabled_ = false;
-      }
-    }
-  }
-
-  // Initialize pedestrian detector if enabled
-  if (this->pedestrian_detection_enabled_) {
-    ESP_LOGI(TAG, "🚶 Initializing pedestrian detection...");
-    this->pedestrian_detector_ = new PedestrianDetect();
-    if (this->pedestrian_detector_ != nullptr) {
-      ESP_LOGI(TAG, "✅ Pedestrian detector initialized");
-    } else {
-      ESP_LOGE(TAG, "❌ Failed to initialize pedestrian detector");
-      this->pedestrian_detection_enabled_ = false;
-    }
-  }
-
-  // Initialize face recognizer if enabled (requires face detection)
-  if (this->face_recognition_enabled_ && this->face_detection_enabled_) {
-    ESP_LOGI(TAG, "🔓 Initializing face recognition...");
-    ESP_LOGI(TAG, "   Database path: %s", this->face_db_path_.c_str());
-    ESP_LOGI(TAG, "   Recognition threshold: %.2f", this->recognition_threshold_);
-
-    this->face_recognizer_ = new HumanFaceRecognizer(
-      this->face_db_path_.c_str(),  // Database path on SD card
-      nullptr,                       // Model from flash
-      HumanFaceFeat::MFN_S8_V1,     // Model type
-      false                          // Not lazy load
-    );
-
-    if (this->face_recognizer_ != nullptr) {
-      int enrolled = this->face_recognizer_->get_num_feats();
-      ESP_LOGI(TAG, "✅ Face recognizer initialized (%d faces enrolled)", enrolled);
-    } else {
-      ESP_LOGE(TAG, "❌ Failed to initialize face recognizer");
-      this->face_recognition_enabled_ = false;
-    }
-  } else if (this->face_recognition_enabled_ && !this->face_detection_enabled_) {
-    ESP_LOGW(TAG, "⚠️ Face recognition requires face detection - enabling face detection");
-    this->face_detection_enabled_ = true;
-  }
-
-  ESP_LOGI(TAG, "✅ LVGL Camera Display initialisé (not started yet)");
-  ESP_LOGI(TAG, "   Camera: Opérationnelle");
-  ESP_LOGI(TAG, "   Face detection: %s", this->face_detection_enabled_ ? "ENABLED" : "DISABLED");
-  ESP_LOGI(TAG, "   Face recognition: %s", this->face_recognition_enabled_ ? "ENABLED" : "DISABLED");
-  ESP_LOGI(TAG, "   Pedestrian detection: %s", this->pedestrian_detection_enabled_ ? "ENABLED" : "DISABLED");
+  ESP_LOGI(TAG, "LVGL Camera Display initialise (not started yet)");
+  ESP_LOGI(TAG, "   Camera: Operationnelle");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
@@ -113,9 +39,9 @@ void LVGLCameraDisplay::loop() {
     ESP_LOGI(TAG, "Starting LVGL Camera Display...");
     this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
     if (this->lvgl_timer_ == nullptr) {
-      ESP_LOGE(TAG, "❌ Failed to create LVGL timer");
+      ESP_LOGE(TAG, "Failed to create LVGL timer");
     } else {
-      ESP_LOGI(TAG, "✅ LVGL Camera Display started");
+      ESP_LOGI(TAG, "LVGL Camera Display started");
     }
   }
 
@@ -128,7 +54,7 @@ void LVGLCameraDisplay::loop() {
   }
 }
 
-// Callback du timer LVGL (appelé périodiquement par LVGL)
+// Callback du timer LVGL (appele periodiquement par LVGL)
 void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
   LVGLCameraDisplay *display = static_cast<LVGLCameraDisplay *>(timer->user_data);
   if (display != nullptr) {
@@ -136,14 +62,14 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
   }
 }
 
-// Mise à jour de la frame caméra (appelée par le timer LVGL)
+// Mise a jour de la frame camera (appelee par le timer LVGL)
 void LVGLCameraDisplay::update_camera_frame_() {
-  // Si la caméra est en streaming, capturer ET mettre à jour le canvas
+  // Si la camera est en streaming, capturer ET mettre a jour le canvas
   if (!this->camera_->is_streaming()) {
     return;
   }
 
-  // Statistiques de frames manquées
+  // Statistiques de frames manquees
   static uint32_t attempts = 0;
   static uint32_t skipped = 0;
 
@@ -179,7 +105,7 @@ void LVGLCameraDisplay::update_camera_frame_() {
       float avg_capture = total_capture_ms / 100.0f;
       float avg_canvas = total_canvas_ms / 100.0f;
       float skip_rate = (skipped * 100.0f) / attempts;
-      ESP_LOGI(TAG, "🎞️ %u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
+      ESP_LOGI(TAG, "%u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
                this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
     }
     last_time = now_time;
@@ -194,7 +120,7 @@ void LVGLCameraDisplay::dump_config() {
   ESP_LOGCONFIG(TAG, "LVGL Camera Display:");
   ESP_LOGCONFIG(TAG, "  Update interval: %u ms", this->update_interval_);
   ESP_LOGCONFIG(TAG, "  FPS cible: ~%d", 1000 / this->update_interval_);
-  ESP_LOGCONFIG(TAG, "  Canvas configuré: %s", this->canvas_obj_ ? "OUI" : "NON");
+  ESP_LOGCONFIG(TAG, "  Canvas configure: %s", this->canvas_obj_ ? "OUI" : "NON");
 }
 
 void LVGLCameraDisplay::update_canvas_() {
@@ -204,22 +130,22 @@ void LVGLCameraDisplay::update_canvas_() {
 
   if (this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
-      ESP_LOGW(TAG, "❌ Canvas null - pas encore configuré?");
+      ESP_LOGW(TAG, "Canvas null - pas encore configure?");
       this->canvas_warning_shown_ = true;
     }
     return;
   }
 
-  // Libérer l'ancien buffer affiché (si présent)
+  // Liberer l'ancien buffer affiche (si present)
   if (this->displayed_buffer_ != nullptr) {
     this->camera_->release_buffer(this->displayed_buffer_);
     this->displayed_buffer_ = nullptr;
   }
 
-  // Acquérir le nouveau buffer depuis le pool
+  // Acquerir le nouveau buffer depuis le pool
   mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
-    // Pas de buffer disponible - garder l'affichage précédent
+    // Pas de buffer disponible - garder l'affichage precedent
     return;
   }
 
@@ -232,7 +158,7 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   if (this->first_update_) {
-    ESP_LOGI(TAG, "🖼️  Premier update canvas (buffer pool):");
+    ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
@@ -240,22 +166,16 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  // Détecter et dessiner les objets avant d'afficher
-  if ((this->face_detection_enabled_ && this->face_detector_ != nullptr) ||
-      (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr)) {
-    this->detect_and_draw_objects_(img_data, width, height);
-  }
-
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
-  // Tracker ce buffer pour le libérer au prochain update
+  // Tracker ce buffer pour le liberer au prochain update
   this->displayed_buffer_ = buffer;
 }
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
-  ESP_LOGI(TAG, "🎨 Canvas configuré: %p", canvas);
+  ESP_LOGI(TAG, "Canvas configure: %p", canvas);
 
   if (canvas != nullptr) {
     lv_coord_t w = lv_obj_get_width(canvas);
@@ -264,269 +184,5 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   }
 }
 
-void LVGLCameraDisplay::detect_and_draw_objects_(uint8_t* img_data, uint16_t width, uint16_t height) {
-#ifndef ESPHOME_BUILD_WITHOUT_ESPIDF_DETECTION
-  if (img_data == nullptr) {
-    return;
-  }
-
-  // Créer la structure d'image pour esp-dl
-  dl::image::img_t img = {
-    .data = img_data,
-    .width = width,
-    .height = height,
-    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
-  };
-
-  // Statistiques
-  static uint32_t detect_count = 0;
-  static uint32_t total_face_time = 0;
-  static uint32_t total_ped_time = 0;
-  static uint32_t total_faces = 0;
-  static uint32_t total_pedestrians = 0;
-
-  detect_count++;
-
-  // Détecter les visages (avec frame skipping pour améliorer les performances)
-  // Detection runs every 8th frame (~2 detections/sec at 15FPS), but we draw cached results every frame
-  if (this->face_detection_enabled_ && this->face_detector_ != nullptr && this->face_results_mutex_ != nullptr) {
-    this->face_detection_frame_skip_++;
-
-    // Only run face detection every 8th frame (reduces jitter significantly)
-    if (this->face_detection_frame_skip_ >= 8) {
-      this->face_detection_frame_skip_ = 0;
-
-      uint32_t t1 = millis();
-      std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
-      uint32_t t2 = millis();
-
-      total_face_time += (t2 - t1);
-      total_faces += face_results.size();
-
-      // Cache the results for drawing on every frame (mutex protected)
-      if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-        this->cached_face_results_.clear();
-        for (auto &result : face_results) {
-          DetectionBox box;
-          box.x1 = result.box[0];
-          box.y1 = result.box[1];
-          box.x2 = result.box[2];
-          box.y2 = result.box[3];
-          box.score = result.score;
-          // Store keypoints for recognition
-          for (int i = 0; i < 10; i++) {
-            box.keypoints[i] = result.keypoint[i];
-          }
-          this->cached_face_results_.push_back(box);
-        }
-        xSemaphoreGive(this->face_results_mutex_);
-      }
-
-      // Face recognition (if enabled and faces detected)
-      if (this->face_recognition_enabled_ && this->face_recognizer_ != nullptr && face_results.size() > 0) {
-        auto &first_face_result = face_results.front();
-
-        // Check if enrollment is pending
-        if (this->enroll_pending_) {
-          int new_id = this->face_recognizer_->enroll(img, first_face_result);
-          if (new_id >= 0) {
-            ESP_LOGI(TAG, "✅ Face enrolled with ID: %d", new_id);
-          } else {
-            ESP_LOGE(TAG, "❌ Failed to enroll face");
-          }
-          this->enroll_pending_ = false;
-        } else {
-          // Try to recognize
-          dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
-          if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
-            this->last_recognition_.id = rec_result->id;
-            this->last_recognition_.similarity = rec_result->similarity;
-            this->last_recognition_.recognized = true;
-
-            ESP_LOGI(TAG, "🔓 Face RECOGNIZED! ID=%d, similarity=%.2f",
-                     rec_result->id, rec_result->similarity);
-
-            // Trigger callback
-            if (this->on_face_recognized_ != nullptr) {
-              this->on_face_recognized_(rec_result->id, rec_result->similarity);
-            }
-          } else {
-            this->last_recognition_.recognized = false;
-          }
-        }
-      }
-
-      // Debug: Log detection results every 20 detections
-      static uint32_t debug_count = 0;
-      debug_count++;
-      if (debug_count % 20 == 0) {
-        ESP_LOGI(TAG, "🔍 DEBUG: Detection #%u - Found %u faces in %ums",
-                 debug_count, face_results.size(), (t2 - t1));
-      }
-
-      // Log la première détection
-      static bool first_face = true;
-      if (first_face && face_results.size() > 0) {
-        auto &result = face_results.front();
-        ESP_LOGI(TAG, "👤 Visage détecté: box=[%d,%d,%d,%d] score=%.2f",
-                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
-        first_face = false;
-      }
-    }
-
-    // Draw cached face results on EVERY frame (no flickering, mutex protected)
-    if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(1)) == pdTRUE) {
-      // RGB565 little-endian: Green = 0x07E0 -> {0xE0, 0x07}
-      std::vector<uint8_t> green = {0xE0, 0x07};
-      // RGB565 little-endian: Red = 0xF800 -> {0x00, 0xF8}
-      std::vector<uint8_t> red = {0x00, 0xF8};
-
-      for (auto &box : this->cached_face_results_) {
-        // Draw green bounding box
-        dl::image::draw_hollow_rectangle(
-          img,
-          box.x1, box.y1,
-          box.x2, box.y2,
-          green, 3
-        );
-
-        // Draw red landmarks (5 points: left eye, right eye, nose, left mouth, right mouth)
-        for (int i = 0; i < 5; i++) {
-          int x = box.keypoints[i * 2];
-          int y = box.keypoints[i * 2 + 1];
-          if (x > 0 && y > 0 && x < width && y < height) {
-            dl::image::draw_point(img, x, y, red, 3);
-          }
-        }
-      }
-      xSemaphoreGive(this->face_results_mutex_);
-    }
-  }
-
-  // Détecter les piétons
-  if (this->pedestrian_detection_enabled_ && this->pedestrian_detector_ != nullptr) {
-    uint32_t t1 = millis();
-    std::list<dl::detect::result_t> &ped_results = this->pedestrian_detector_->run(img);
-    uint32_t t2 = millis();
-
-    total_ped_time += (t2 - t1);
-    total_pedestrians += ped_results.size();
-
-    // Dessiner les rectangles BLEUS pour les piétons
-    std::vector<uint8_t> blue = {0x1F, 0x00};  // Bleu en RGB565 big-endian
-    for (auto &result : ped_results) {
-      dl::image::draw_hollow_rectangle(
-        img,
-        result.box[0], result.box[1],
-        result.box[2], result.box[3],
-        blue, 3
-      );
-
-      // Log la première détection
-      static bool first_ped = true;
-      if (first_ped) {
-        ESP_LOGI(TAG, "🚶 Piéton détecté: box=[%d,%d,%d,%d] score=%.2f",
-                 result.box[0], result.box[1], result.box[2], result.box[3], result.score);
-        first_ped = false;
-      }
-    }
-  }
-
-  // Log des statistiques toutes les 100 frames
-  if (detect_count % 100 == 0) {
-    if (this->face_detection_enabled_) {
-      float avg_time = total_face_time / 100.0f;
-      float avg_faces = total_faces / 100.0f;
-      ESP_LOGI(TAG, "🔍 Face detection: %.1fms avg | %.1f faces avg", avg_time, avg_faces);
-    }
-    if (this->pedestrian_detection_enabled_) {
-      float avg_time = total_ped_time / 100.0f;
-      float avg_peds = total_pedestrians / 100.0f;
-      ESP_LOGI(TAG, "🚶 Pedestrian detection: %.1fms avg | %.1f pedestrians avg", avg_time, avg_peds);
-    }
-    total_face_time = 0;
-    total_ped_time = 0;
-    total_faces = 0;
-    total_pedestrians = 0;
-  }
-#else
-  // Détection désactivée - ne rien faire
-  (void)img_data;
-  (void)width;
-  (void)height;
-#endif
-}
-
-// Face recognition API functions
-int LVGLCameraDisplay::enroll_face() {
-  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
-    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
-    return -1;
-  }
-
-  ESP_LOGI(TAG, "📸 Enrollment requested - will capture on next face detection");
-  this->enroll_pending_ = true;
-  return 0;  // Will return actual ID after enrollment completes
-}
-
-bool LVGLCameraDisplay::delete_face(int id) {
-  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
-    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
-    return false;
-  }
-
-  bool success = this->face_recognizer_->delete_feat(id);
-  if (success) {
-    ESP_LOGI(TAG, "🗑️ Face ID %d deleted", id);
-  }
-  return success;
-}
-
-void LVGLCameraDisplay::clear_all_faces() {
-  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
-    ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
-    return;
-  }
-
-  this->face_recognizer_->clear_all_feats();
-  ESP_LOGI(TAG, "🗑️ All faces cleared from database");
-}
-
-int LVGLCameraDisplay::get_enrolled_count() {
-  if (!this->face_recognition_enabled_ || this->face_recognizer_ == nullptr) {
-    return 0;
-  }
-  return this->face_recognizer_->get_num_feats();
-}
-
-RecognitionResult LVGLCameraDisplay::get_last_recognition() {
-  return this->last_recognition_;
-}
-
-void LVGLCameraDisplay::reset_last_recognition() {
-  this->last_recognition_.id = -1;
-  this->last_recognition_.similarity = 0.0f;
-  this->last_recognition_.recognized = false;
-  ESP_LOGI("lvgl_camera_display", "🔄 Recognition result reset");
-}
-
-int LVGLCameraDisplay::get_detected_face_count() {
-  if (this->face_results_mutex_ == nullptr) {
-    return 0;
-  }
-  int count = 0;
-  if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    count = this->cached_face_results_.size();
-    xSemaphoreGive(this->face_results_mutex_);
-  }
-  return count;
-}
-
 }  // namespace lvgl_camera_display
 }  // namespace esphome
-
-
-
-
-
-
