@@ -222,21 +222,30 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
       int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 4));
 
       // Choose color based on recognition status
-      // Blue = recognized, Green = unknown
       std::vector<uint8_t> &box_color = this->last_recognition_.recognized ? blue : green;
 
       // Draw bounding box
       dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, 3);
 
-      // Draw red keypoints (5 facial landmarks) - larger circles
+      // Draw red keypoints (5 facial landmarks) as filled squares
+      // Using hollow rectangles to create filled effect
       for (int i = 0; i < 5; i++) {
-        int x = box.keypoints[i * 2];
-        int y = box.keypoints[i * 2 + 1];
+        int kp_x = box.keypoints[i * 2];
+        int kp_y = box.keypoints[i * 2 + 1];
 
-        // Check bounds with margin for the point radius
-        if (x >= 8 && y >= 8 && x < width - 8 && y < height - 8) {
-          // Draw larger filled circle (radius 6)
-          dl::image::draw_point(img, x, y, red, 6);
+        // Check bounds with margin
+        if (kp_x >= 10 && kp_y >= 10 && kp_x < (int)width - 10 && kp_y < (int)height - 10) {
+          // Draw a filled square by drawing nested rectangles
+          int size = 8;  // 8x8 pixel square
+          for (int s = 0; s <= size; s++) {
+            int rx1 = kp_x - size + s;
+            int ry1 = kp_y - size + s;
+            int rx2 = kp_x + size - s;
+            int ry2 = kp_y + size - s;
+            if (rx1 < rx2 && ry1 < ry2) {
+              dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red, 1);
+            }
+          }
         }
       }
     }
