@@ -10,6 +10,7 @@
 // File I/O for name persistence
 #include <fstream>
 #include <sstream>
+#include <cstdio>
 
 namespace esphome {
 namespace face_detection {
@@ -346,10 +347,30 @@ void FaceDetectionComponent::clear_all_faces() {
     return;
   }
 
+  // Clear in-memory features
   this->face_recognizer_->clear_all_feats();
+
+  // Clear names
   this->face_names_.clear();
   this->save_names_to_sd_();
-  ESP_LOGI(TAG, "All faces and names cleared from database");
+
+  // Delete the database file from SD card
+  if (std::remove(this->face_db_path_.c_str()) == 0) {
+    ESP_LOGI(TAG, "Deleted face database: %s", this->face_db_path_.c_str());
+  } else {
+    ESP_LOGW(TAG, "Could not delete face database (may not exist): %s", this->face_db_path_.c_str());
+  }
+
+  // Reinitialize the recognizer with empty database
+  delete this->face_recognizer_;
+  this->face_recognizer_ = new HumanFaceRecognizer(
+    this->face_db_path_.c_str(),
+    nullptr,
+    HumanFaceFeat::MFN_S8_V1,
+    false
+  );
+
+  ESP_LOGI(TAG, "All faces and names cleared, database reset");
 }
 
 int FaceDetectionComponent::get_enrolled_count() {
