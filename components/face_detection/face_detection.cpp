@@ -240,8 +240,9 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
       // Choose color based on recognition status
       std::vector<uint8_t> &box_color = this->last_recognition_.recognized ? blue : green;
 
-      // Draw bounding box
-      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, 3);
+      // Draw bounding box (thicker for recognized faces)
+      int line_width = this->last_recognition_.recognized ? 4 : 3;
+      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, line_width);
 
       // Draw name above the box if recognized
       if (this->last_recognition_.recognized) {
@@ -256,25 +257,20 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
         this->draw_text_(img_data, width, height, x1, text_y, name, white, 2);
       }
 
-      // Draw red keypoints (5 facial landmarks) as filled squares
-      // Using hollow rectangles to create filled effect
+      // Draw red keypoints (5 facial landmarks) as hollow rectangles
       for (int i = 0; i < 5; i++) {
         int kp_x = box.keypoints[i * 2];
         int kp_y = box.keypoints[i * 2 + 1];
 
         // Check bounds with margin
-        if (kp_x >= 10 && kp_y >= 10 && kp_x < (int)width - 10 && kp_y < (int)height - 10) {
-          // Draw a filled square by drawing nested rectangles
-          int size = 8;  // 8x8 pixel square
-          for (int s = 0; s <= size; s++) {
-            int rx1 = kp_x - size + s;
-            int ry1 = kp_y - size + s;
-            int rx2 = kp_x + size - s;
-            int ry2 = kp_y + size - s;
-            if (rx1 < rx2 && ry1 < ry2) {
-              dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red, 1);
-            }
-          }
+        if (kp_x >= 12 && kp_y >= 12 && kp_x < (int)width - 12 && kp_y < (int)height - 12) {
+          // Draw hollow rectangle (not filled)
+          int size = 10;  // 20x20 pixel rectangle
+          int rx1 = kp_x - size;
+          int ry1 = kp_y - size;
+          int rx2 = kp_x + size;
+          int ry2 = kp_y + size;
+          dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red, 2);
         }
       }
     }
