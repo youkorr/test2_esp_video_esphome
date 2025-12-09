@@ -178,11 +178,14 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     if (this->enroll_pending_) {
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
       if (new_id >= 0) {
-        ESP_LOGI(TAG, "Face enrolled with ID: %d", new_id);
+        // ESP-DL returns ID from enroll, but recognition returns ID+1
+        // So we save the name with ID+1 to match recognition results
+        int recognition_id = new_id + 1;
+        ESP_LOGI(TAG, "Face enrolled with ID: %d (recognition ID: %d)", new_id, recognition_id);
         // Save name if provided
         if (!this->pending_enroll_name_.empty()) {
-          this->face_names_[new_id] = this->pending_enroll_name_;
-          ESP_LOGI(TAG, "Name '%s' saved for ID %d", this->pending_enroll_name_.c_str(), new_id);
+          this->face_names_[recognition_id] = this->pending_enroll_name_;
+          ESP_LOGI(TAG, "Name '%s' saved for ID %d", this->pending_enroll_name_.c_str(), recognition_id);
           this->pending_enroll_name_.clear();
           this->save_names_to_sd_();
         }
