@@ -204,25 +204,29 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
   };
 
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    // RGB565 little-endian colors
-    std::vector<uint8_t> green = {0xE0, 0x07};  // Green
-    std::vector<uint8_t> red = {0x00, 0xF8};    // Red
+    // RGB565 colors (little-endian)
+    std::vector<uint8_t> green = {0xE0, 0x07};  // Green for bounding box
+    std::vector<uint8_t> red = {0x00, 0xF8};    // Red for keypoints
 
     for (auto &box : this->cached_face_results_) {
-      // Draw green bounding box
-      dl::image::draw_hollow_rectangle(
-        img,
-        box.x1, box.y1,
-        box.x2, box.y2,
-        green, 3
-      );
+      // Clamp bounding box coordinates to valid range
+      int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
+      int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
+      int x2 = std::max(x1 + 1, std::min((int)box.x2, (int)width - 3));
+      int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 3));
 
-      // Draw red landmarks (5 points)
+      // Draw green bounding box
+      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, green, 2);
+
+      // Draw red keypoints (5 facial landmarks) as small squares
       for (int i = 0; i < 5; i++) {
         int x = box.keypoints[i * 2];
         int y = box.keypoints[i * 2 + 1];
-        if (x > 0 && y > 0 && x < width && y < height) {
-          dl::image::draw_point(img, x, y, red, 3);
+
+        // Check bounds with margin for the point radius
+        if (x >= 4 && y >= 4 && x < width - 4 && y < height - 4) {
+          // Draw a small filled square by drawing multiple points
+          dl::image::draw_point(img, x, y, red, 4);
         }
       }
     }
