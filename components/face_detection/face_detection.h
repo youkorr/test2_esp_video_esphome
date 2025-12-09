@@ -128,6 +128,11 @@ class FaceDetectionComponent : public Component {
                   int x, int y, char c, const std::vector<uint8_t> &color, int scale);
   void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
                   int x, int y, const std::string &text, const std::vector<uint8_t> &color, int scale);
+
+  // SD card persistence for names
+  std::string get_names_file_path_();
+  void load_names_from_sd_();
+  void save_names_to_sd_();
 };
 
 // Automation triggers

@@ -7,6 +7,10 @@
 #include "human_face_recognition.hpp"
 #include "dl_image.hpp"
 
+// File I/O for name persistence
+#include <fstream>
+#include <sstream>
+
 namespace esphome {
 namespace face_detection {
 
@@ -63,6 +67,11 @@ void FaceDetectionComponent::setup() {
       ESP_LOGE(TAG, "Failed to initialize face recognizer");
       this->recognition_enabled_ = false;
     }
+  }
+
+  // Load face names from SD card
+  if (this->recognition_enabled_) {
+    this->load_names_from_sd_();
   }
 
   ESP_LOGI(TAG, "Face Detection ready");
@@ -174,6 +183,7 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
           this->face_names_[new_id] = this->pending_enroll_name_;
           ESP_LOGI(TAG, "Name '%s' saved for ID %d", this->pending_enroll_name_.c_str(), new_id);
           this->pending_enroll_name_.clear();
+          this->save_names_to_sd_();
         }
       } else {
         ESP_LOGE(TAG, "Failed to enroll face");
@@ -371,6 +381,7 @@ int FaceDetectionComponent::enroll_face_with_name(const std::string &name) {
 void FaceDetectionComponent::set_face_name(int id, const std::string &name) {
   this->face_names_[id] = name;
   ESP_LOGI(TAG, "Set name for face ID %d: %s", id, name.c_str());
+  this->save_names_to_sd_();
 }
 
 std::string FaceDetectionComponent::get_face_name(int id) {
@@ -480,6 +491,71 @@ void FaceDetectionComponent::draw_text_(uint8_t *img_data, uint16_t img_width, u
     draw_char_(img_data, img_width, img_height, current_x, y, c, color, scale);
     current_x += char_width;
   }
+}
+
+std::string FaceDetectionComponent::get_names_file_path_() {
+  // Create names file path next to face database
+  // e.g., /sdcard/reconnaisance_faciale/faces.db -> /sdcard/reconnaisance_faciale/faces_names.txt
+  std::string names_path = this->face_db_path_;
+  size_t dot_pos = names_path.rfind('.');
+  if (dot_pos != std::string::npos) {
+    names_path = names_path.substr(0, dot_pos) + "_names.txt";
+  } else {
+    names_path += "_names.txt";
+  }
+  return names_path;
+}
+
+void FaceDetectionComponent::load_names_from_sd_() {
+  std::string names_path = this->get_names_file_path_();
+
+  std::ifstream file(names_path);
+  if (!file.is_open()) {
+    ESP_LOGI(TAG, "No names file found at %s (will create on first save)", names_path.c_str());
+    return;
+  }
+
+  this->face_names_.clear();
+  std::string line;
+  int loaded_count = 0;
+
+  while (std::getline(file, line)) {
+    // Format: ID:NAME
+    size_t colon_pos = line.find(':');
+    if (colon_pos != std::string::npos) {
+      try {
+        int id = std::stoi(line.substr(0, colon_pos));
+        std::string name = line.substr(colon_pos + 1);
+        this->face_names_[id] = name;
+        loaded_count++;
+        ESP_LOGD(TAG, "Loaded name: ID=%d, Name=%s", id, name.c_str());
+      } catch (...) {
+        ESP_LOGW(TAG, "Invalid line in names file: %s", line.c_str());
+      }
+    }
+  }
+
+  file.close();
+  ESP_LOGI(TAG, "Loaded %d face names from %s", loaded_count, names_path.c_str());
+}
+
+void FaceDetectionComponent::save_names_to_sd_() {
+  std::string names_path = this->get_names_file_path_();
+
+  std::ofstream file(names_path);
+  if (!file.is_open()) {
+    ESP_LOGE(TAG, "Failed to open names file for writing: %s", names_path.c_str());
+    return;
+  }
+
+  int saved_count = 0;
+  for (const auto &pair : this->face_names_) {
+    file << pair.first << ":" << pair.second << "\n";
+    saved_count++;
+  }
+
+  file.close();
+  ESP_LOGI(TAG, "Saved %d face names to %s", saved_count, names_path.c_str());
 }
 
 }  // namespace face_detection
