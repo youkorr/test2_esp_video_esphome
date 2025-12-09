@@ -210,28 +210,33 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
 
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
     // RGB565 colors (little-endian)
-    std::vector<uint8_t> green = {0xE0, 0x07};  // Green for bounding box
-    std::vector<uint8_t> red = {0x00, 0xF8};    // Red for keypoints
+    std::vector<uint8_t> green = {0xE0, 0x07};   // Green - unknown face
+    std::vector<uint8_t> blue = {0x1F, 0x00};    // Blue - recognized face
+    std::vector<uint8_t> red = {0x00, 0xF8};     // Red for keypoints
 
     for (auto &box : this->cached_face_results_) {
       // Clamp bounding box coordinates to valid range
-      int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
-      int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
-      int x2 = std::max(x1 + 1, std::min((int)box.x2, (int)width - 3));
-      int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 3));
+      int x1 = std::max(3, std::min((int)box.x1, (int)width - 4));
+      int y1 = std::max(3, std::min((int)box.y1, (int)height - 4));
+      int x2 = std::max(x1 + 1, std::min((int)box.x2, (int)width - 4));
+      int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 4));
 
-      // Draw green bounding box
-      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, green, 2);
+      // Choose color based on recognition status
+      // Blue = recognized, Green = unknown
+      std::vector<uint8_t> &box_color = this->last_recognition_.recognized ? blue : green;
 
-      // Draw red keypoints (5 facial landmarks) as small squares
+      // Draw bounding box
+      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, 3);
+
+      // Draw red keypoints (5 facial landmarks) - larger circles
       for (int i = 0; i < 5; i++) {
         int x = box.keypoints[i * 2];
         int y = box.keypoints[i * 2 + 1];
 
         // Check bounds with margin for the point radius
-        if (x >= 4 && y >= 4 && x < width - 4 && y < height - 4) {
-          // Draw a small filled square by drawing multiple points
-          dl::image::draw_point(img, x, y, red, 4);
+        if (x >= 8 && y >= 8 && x < width - 8 && y < height - 8) {
+          // Draw larger filled circle (radius 6)
+          dl::image::draw_point(img, x, y, red, 6);
         }
       }
     }
