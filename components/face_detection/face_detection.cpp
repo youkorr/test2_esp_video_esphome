@@ -522,14 +522,25 @@ void FaceDetectionComponent::load_names_from_sd_() {
   while (std::getline(file, line)) {
     // Format: ID:NAME
     size_t colon_pos = line.find(':');
-    if (colon_pos != std::string::npos) {
-      try {
-        int id = std::stoi(line.substr(0, colon_pos));
-        std::string name = line.substr(colon_pos + 1);
+    if (colon_pos != std::string::npos && colon_pos > 0) {
+      std::string id_str = line.substr(0, colon_pos);
+      std::string name = line.substr(colon_pos + 1);
+
+      // Check if id_str contains only digits
+      bool valid_id = true;
+      for (char c : id_str) {
+        if (c < '0' || c > '9') {
+          valid_id = false;
+          break;
+        }
+      }
+
+      if (valid_id && !id_str.empty()) {
+        int id = std::stoi(id_str);
         this->face_names_[id] = name;
         loaded_count++;
         ESP_LOGD(TAG, "Loaded name: ID=%d, Name=%s", id, name.c_str());
-      } catch (...) {
+      } else {
         ESP_LOGW(TAG, "Invalid line in names file: %s", line.c_str());
       }
     }
