@@ -334,6 +334,12 @@ bool FaceDetectionComponent::delete_face(int id) {
   bool success = this->face_recognizer_->delete_feat(id);
   if (success) {
     ESP_LOGI(TAG, "Face ID %d deleted", id);
+    // Also remove the name if exists
+    auto it = this->face_names_.find(id);
+    if (it != this->face_names_.end()) {
+      this->face_names_.erase(it);
+      this->save_names_to_sd_();
+    }
   }
   return success;
 }
@@ -345,7 +351,9 @@ void FaceDetectionComponent::clear_all_faces() {
   }
 
   this->face_recognizer_->clear_all_feats();
-  ESP_LOGI(TAG, "All faces cleared from database");
+  this->face_names_.clear();
+  this->save_names_to_sd_();
+  ESP_LOGI(TAG, "All faces and names cleared from database");
 }
 
 int FaceDetectionComponent::get_enrolled_count() {
