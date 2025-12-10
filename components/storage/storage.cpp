@@ -205,9 +205,12 @@ void SdImageComponent::loop() {
     #ifdef USE_LVGL
     // Feed watchdog before potentially long operation
     App.feed_wdt();
-    // Use lv_obj_invalidate or let LVGL refresh naturally
-    // lv_refr_now(NULL) is too blocking - removed to prevent watchdog
-    // The display will refresh on the next LVGL tick
+    // Invalidate the current screen to force LVGL to redraw
+    // This tells LVGL that the image data has changed
+    lv_obj_t *screen = lv_scr_act();
+    if (screen != nullptr) {
+      lv_obj_invalidate(screen);
+    }
     #endif
 
     // Log frame change (only occasionally to avoid spam)
