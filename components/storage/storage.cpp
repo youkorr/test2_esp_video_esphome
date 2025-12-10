@@ -298,8 +298,20 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
     return;
   }
 
+  // Get canvas dimensions for bounds checking
+  lv_coord_t canvas_w = lv_obj_get_width(canvas);
+  lv_coord_t canvas_h = lv_obj_get_height(canvas);
+
+  if (canvas_w <= 0 || canvas_h <= 0) {
+    ESP_LOGW(TAG_IMAGE, "Canvas has invalid dimensions: %dx%d", canvas_w, canvas_h);
+    return;
+  }
+
   int img_w = this->get_current_width();
   int img_h = this->get_current_height();
+
+  ESP_LOGD(TAG_IMAGE, "Drawing to canvas: img=%dx%d, canvas=%dx%d, pos=(%d,%d)",
+           img_w, img_h, canvas_w, canvas_h, x, y);
 
   // Get transparency mask for current frame (if GIF animation)
   const std::vector<bool> *transparency_mask = nullptr;
@@ -316,6 +328,14 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
   // API differs between LVGL v8 and v9
   for (int py = 0; py < img_h; py++) {
     for (int px = 0; px < img_w; px++) {
+      int canvas_x = x + px;
+      int canvas_y = y + py;
+
+      // Bounds check - CRITICAL to prevent memory access fault
+      if (canvas_x < 0 || canvas_x >= canvas_w || canvas_y < 0 || canvas_y >= canvas_h) {
+        continue;  // Skip pixels outside canvas bounds
+      }
+
       size_t pixel_idx = py * img_w + px;
 
       // Skip transparent pixels - they keep the canvas background
@@ -324,9 +344,6 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
           continue;  // Skip this pixel, it's transparent
         }
       }
-
-      int canvas_x = x + px;
-      int canvas_y = y + py;
 
       // Get RGB565 pixel from our buffer
       size_t offset = pixel_idx * 2;
