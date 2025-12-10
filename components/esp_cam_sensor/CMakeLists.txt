@@ -25,6 +25,29 @@ idf_component_register(SRCS ${srcs}
                        REQUIRES ${requires}
                        PRIV_REQUIRES ${priv_requires})
 
+# SC202CS configuration - Match M5Stack Tab5 settings
+# These flags MUST be set here to be compiled into the driver
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    CONFIG_CAMERA_SC202CS=1
+    CONFIG_CAMERA_SC202CS_AUTO_DETECT=1
+    CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1
+    CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT=0
+    CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=63008
+    CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=0
+    CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY=1
+    CONFIG_CAMERA_SC202CS_MAX_SUPPORT=1
+)
+
+# OV5647 configuration
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    CONFIG_CAMERA_OV5647=1
+    CONFIG_CAMERA_OV5647_AUTO_DETECT=1
+    CONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1
+    CONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT=0
+    CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=0
+    CONFIG_CAMERA_OV5647_MAX_SUPPORT=1
+)
+
 # Force linker to include sensor detection functions (prevent optimization)
 # These symbols are defined via ESP_CAM_SENSOR_DETECT_FN macro in sensor source files
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_sc202cs_detect_1")

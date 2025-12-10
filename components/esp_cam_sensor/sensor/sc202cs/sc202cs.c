@@ -16,6 +16,41 @@
 #include "sc202cs_settings.h"
 #include "sc202cs.h"
 
+/* =========================================================================
+ * SC202CS Configuration Defaults - Match M5Stack Tab5 settings
+ * These must be defined BEFORE they are used in the code below.
+ * Digital gain priority is recommended to avoid noise in low light.
+ * ========================================================================= */
+#ifndef CONFIG_CAMERA_SC202CS
+#define CONFIG_CAMERA_SC202CS 1
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT
+#define CONFIG_CAMERA_SC202CS_AUTO_DETECT 1
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR
+#define CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR 1
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT
+#define CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT 63008  /* M5Stack Tab5 value */
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_MAX_SUPPORT
+#define CONFIG_CAMERA_SC202CS_MAX_SUPPORT 1
+#endif
+
+/* IMPORTANT: Digital gain priority (M5Stack Tab5 config)
+ * This MUST be set to avoid green tint issues */
+#ifndef CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY
+#define CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY 1
+#endif
+
+#ifndef CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY
+#define CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY 0
+#endif
+
 /*
  * SC202CS camera sensor gain control.
  * Note1: The analog gain only has coarse gain, and no fine gain, so in the adjustment of analog gain.
@@ -879,8 +914,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -889,8 +924,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -899,8 +934,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     {.isp_v1_info =
@@ -909,8 +944,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 32,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x180,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
+             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
 };
