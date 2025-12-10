@@ -131,15 +131,15 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {SC202CS_REG_END, 0x00},
 };
 
-/* ISP info for 800x600 mode */
+/* ISP info for 800x600 mode - MUST match official SC202CS driver values */
 static const esp_cam_sensor_isp_info_t sc202cs_800x600_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
-        .pclk = 72000000,     /* Pixel clock */
-        .hts = 2200,          /* Horizontal Total Size */
-        .vts = 1080,          /* Vertical Total Size for 30fps */
-        .exp_def = 0x300,     /* Default exposure */
-        .gain_def = 0x40,     /* Default gain */
+        .pclk = 72000000,     /* Pixel clock - same as official */
+        .hts = 1920,          /* Horizontal Total Size - official value */
+        .vts = 1250,          /* Vertical Total Size - official value */
+        .exp_def = 0x180,     /* Default exposure - official (384, 31% max) */
+        .gain_def = 32,       /* gain index=32 (2x analog) - prevents green tint! */
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
     }
 };

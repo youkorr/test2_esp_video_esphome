@@ -193,14 +193,16 @@ async def to_code(config):
     # Capteurs de caméra - configurations pour TOUS les capteurs supportés
     # L'auto-détection essaiera tous les capteurs et utilisera celui détecté
 
-    # SC202CS (pas de fichier JSON cfg disponible - utilise configs par défaut de libesp_ipa.a)
+    # SC202CS - Configuration identique à M5Stack Tab5
+    # Digital gain priority recommandé pour éviter le bruit à faible lumière
     flags.extend([
         "-DCONFIG_CAMERA_SC202CS=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT=1",
         "-DCONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1",
-        "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=16000",  # 16x max
-        "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=1",
-        "-DCONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY=0",
+        "-DCONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT=63008",  # M5Stack value
+        "-DCONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY=0",        # Disabled (M5Stack)
+        "-DCONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY=1",        # Enabled (M5Stack)
+        "-DCONFIG_CAMERA_SC202CS_MAX_SUPPORT=1",
     ])
 
     # OV5647
