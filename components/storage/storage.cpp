@@ -1088,16 +1088,14 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
   uint16_t gif_height = gif_data[pos + 2] | (gif_data[pos + 3] << 8);
   uint8_t packed = gif_data[pos + 4];
   uint8_t bg_color_index = gif_data[pos + 5];
-  // uint8_t pixel_aspect = gif_data[pos + 6]; // Not used
   pos += 7;
 
   bool has_global_palette = (packed & 0x80) != 0;
-  uint8_t color_resolution = ((packed >> 4) & 0x07) + 1;
   uint8_t palette_bits = (packed & 0x07) + 1;
   size_t palette_size = 1 << palette_bits;
 
-  ESP_LOGI(TAG_IMAGE, "GIF dimensions: %dx%d, global palette: %s, colors: %zu",
-           gif_width, gif_height, has_global_palette ? "yes" : "no", palette_size);
+  ESP_LOGI(TAG_IMAGE, "GIF dimensions: %dx%d, global palette: %s, colors: %zu, bg_index: %d",
+           gif_width, gif_height, has_global_palette ? "yes" : "no", palette_size, bg_color_index);
 
   if (gif_width == 0 || gif_height == 0 || gif_width > 2048 || gif_height > 2048) {
     ESP_LOGE(TAG_IMAGE, "Invalid GIF dimensions: %dx%d", gif_width, gif_height);
@@ -1114,13 +1112,37 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     }
     global_palette.assign(gif_data.begin() + pos, gif_data.begin() + pos + palette_bytes);
     pos += palette_bytes;
-    ESP_LOGD(TAG_IMAGE, "Read global palette: %zu colors (%zu bytes)", palette_size, palette_bytes);
   }
 
   // Clear any existing animation frames
   this->gif_frames_.clear();
   this->current_gif_frame_ = 0;
   this->is_gif_animated_ = false;
+
+  // Set image dimensions (original GIF size - we'll resize at the end if needed)
+  uint16_t output_width = gif_width;
+  uint16_t output_height = gif_height;
+  bool needs_resize = (this->resize_width_ > 0 && this->resize_height_ > 0);
+
+  if (needs_resize) {
+    this->image_width_ = this->resize_width_;
+    this->image_height_ = this->resize_height_;
+    ESP_LOGI(TAG_IMAGE, "Will resize from %dx%d to %dx%d", gif_width, gif_height, this->image_width_, this->image_height_);
+  } else {
+    this->image_width_ = gif_width;
+    this->image_height_ = gif_height;
+  }
+
+  // Composite buffer - holds the current composed image (at original GIF size)
+  // This is what would be displayed at any moment
+  std::vector<uint8_t> composite(gif_width * gif_height);  // Palette indices
+  std::vector<bool> composite_set(gif_width * gif_height, false);  // Track which pixels are set
+
+  // Initialize composite with background color
+  std::fill(composite.begin(), composite.end(), bg_color_index);
+
+  // Previous composite for disposal method 3
+  std::vector<uint8_t> prev_composite = composite;
 
   // Frame parsing state
   struct FrameData {
@@ -1136,7 +1158,7 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 
   std::vector<FrameData> frames;
   FrameData current_frame;
-  current_frame.delay_ms = 100;  // Default 100ms delay
+  current_frame.delay_ms = 100;
   current_frame.disposal_method = 0;
   current_frame.has_transparency = false;
   current_frame.transparent_index = 0;
@@ -1151,29 +1173,24 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 
       if (label == 0xF9) {  // Graphic Control Extension
         if (pos + 6 > gif_data.size()) break;
-        pos++; // skip block size (should be 4)
+        pos++; // skip block size
         uint8_t packed_gce = gif_data[pos++];
         uint16_t delay = gif_data[pos] | (gif_data[pos + 1] << 8);
         pos += 2;
         current_frame.transparent_index = gif_data[pos++];
         current_frame.has_transparency = (packed_gce & 0x01) != 0;
         current_frame.disposal_method = (packed_gce >> 2) & 0x07;
-        current_frame.delay_ms = delay * 10;  // Convert to milliseconds
-        if (current_frame.delay_ms == 0) current_frame.delay_ms = 100;  // Minimum delay
+        current_frame.delay_ms = delay * 10;
+        if (current_frame.delay_ms == 0) current_frame.delay_ms = 100;
         pos++; // Block terminator
         ESP_LOGD(TAG_IMAGE, "GCE: delay=%dms, transparency=%s, index=%d, disposal=%d",
                  current_frame.delay_ms, current_frame.has_transparency ? "yes" : "no",
                  current_frame.transparent_index, current_frame.disposal_method);
       } else {
-        // Skip other extension blocks
         while (pos < gif_data.size()) {
           uint8_t block_size = gif_data[pos++];
           if (block_size == 0) break;
           pos += block_size;
-          if (pos > gif_data.size()) {
-            ESP_LOGE(TAG_IMAGE, "Extension block overflow");
-            return false;
-          }
         }
       }
     } else if (separator == 0x2C) {  // Image descriptor
@@ -1187,16 +1204,14 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
       pos += 9;
 
       bool has_local_palette = (packed_img & 0x80) != 0;
-      bool interlaced = (packed_img & 0x40) != 0;
       uint8_t local_palette_bits = (packed_img & 0x07) + 1;
       size_t local_palette_size = 1 << local_palette_bits;
 
-      ESP_LOGI(TAG_IMAGE, "Frame %zu: %dx%d at (%d,%d), local palette: %s, delay: %dms",
+      ESP_LOGI(TAG_IMAGE, "Frame %zu: %dx%d at (%d,%d), disposal=%d, transparency=%s",
                frames.size(), current_frame.width, current_frame.height,
-               current_frame.left, current_frame.top,
-               has_local_palette ? "yes" : "no", current_frame.delay_ms);
+               current_frame.left, current_frame.top, current_frame.disposal_method,
+               current_frame.has_transparency ? "yes" : "no");
 
-      // Read local color table if present
       current_frame.local_palette.clear();
       if (has_local_palette) {
         size_t local_palette_bytes = local_palette_size * 3;
@@ -1208,7 +1223,6 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
         pos += local_palette_bytes;
       }
 
-      // Read LZW minimum code size
       if (pos >= gif_data.size()) break;
       current_frame.lzw_min_code_size = gif_data[pos++];
 
@@ -1217,11 +1231,10 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
         return false;
       }
 
-      // Read compressed data blocks
       current_frame.compressed_data.clear();
       while (pos < gif_data.size()) {
         uint8_t block_size = gif_data[pos++];
-        if (block_size == 0) break;  // End of data blocks
+        if (block_size == 0) break;
         if (pos + block_size > gif_data.size()) {
           ESP_LOGE(TAG_IMAGE, "Compressed data block overflow");
           return false;
@@ -1232,24 +1245,20 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
         pos += block_size;
       }
 
-      // Save this frame and prepare for next
       frames.push_back(current_frame);
 
-      // Check frame limit
       if (frames.size() >= MAX_GIF_FRAMES) {
-        ESP_LOGW(TAG_IMAGE, "Reached max frame limit (%zu), stopping frame collection", MAX_GIF_FRAMES);
+        ESP_LOGW(TAG_IMAGE, "Reached max frame limit (%zu)", MAX_GIF_FRAMES);
         break;
       }
 
-      // Reset frame data for next frame
       current_frame = FrameData();
       current_frame.delay_ms = 100;
       current_frame.disposal_method = 0;
       current_frame.has_transparency = false;
       current_frame.transparent_index = 0;
 
-    } else if (separator == 0x3B) {  // Trailer
-      ESP_LOGD(TAG_IMAGE, "GIF trailer found");
+    } else if (separator == 0x3B) {
       break;
     } else {
       ESP_LOGW(TAG_IMAGE, "Unknown GIF separator: 0x%02X at pos %zu", separator, pos - 1);
@@ -1265,36 +1274,26 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
   ESP_LOGI(TAG_IMAGE, "Found %zu frame(s) in GIF", frames.size());
   this->is_gif_animated_ = (frames.size() > 1);
 
-  // Set image dimensions (use resize if specified, otherwise use GIF dimensions)
-  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
-    this->image_width_ = this->resize_width_;
-    this->image_height_ = this->resize_height_;
-    ESP_LOGI(TAG_IMAGE, "Will resize to: %dx%d", this->image_width_, this->image_height_);
-  } else {
-    this->image_width_ = gif_width;
-    this->image_height_ = gif_height;
-  }
-
-  // Allocate output buffer for current frame
+  // Allocate output buffer
   if (!this->allocate_image_buffer()) {
     ESP_LOGE(TAG_IMAGE, "Failed to allocate image buffer");
     return false;
   }
 
-  // Process all frames
+  // Process each frame and create composited frames
   for (size_t frame_idx = 0; frame_idx < frames.size(); frame_idx++) {
     const FrameData &frame = frames[frame_idx];
 
-    ESP_LOGI(TAG_IMAGE, "Decoding frame %zu/%zu...", frame_idx + 1, frames.size());
+    ESP_LOGD(TAG_IMAGE, "Processing frame %zu/%zu...", frame_idx + 1, frames.size());
 
-    // Choose palette for this frame
+    // Choose palette
     const std::vector<uint8_t> *palette_ptr = nullptr;
-    if (!frame.local_palette.empty() && frame.local_palette.size() / 3 >= 16) {
+    if (!frame.local_palette.empty()) {
       palette_ptr = &frame.local_palette;
     } else if (!global_palette.empty()) {
       palette_ptr = &global_palette;
     } else {
-      ESP_LOGE(TAG_IMAGE, "No color palette available for frame %zu", frame_idx);
+      ESP_LOGE(TAG_IMAGE, "No palette for frame %zu", frame_idx);
       return false;
     }
     const std::vector<uint8_t> &palette = *palette_ptr;
@@ -1306,7 +1305,6 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     uint16_t code_size = frame.lzw_min_code_size + 1;
     uint16_t code_mask = (1 << code_size) - 1;
 
-    // LZW dictionary (code -> sequence of palette indices)
     std::vector<std::vector<uint8_t>> table(4096);
     for (uint16_t i = 0; i < clear_code; i++) {
       table[i] = {static_cast<uint8_t>(i)};
@@ -1318,7 +1316,6 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     size_t bit_pos = 0;
     std::vector<uint8_t> prev_sequence;
 
-    // Lambda to read variable-length code from bit stream
     auto read_code = [&]() -> uint16_t {
       uint32_t code = 0;
       for (int i = 0; i < code_size; i++) {
@@ -1334,12 +1331,9 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     while (bit_pos < frame.compressed_data.size() * 8) {
       uint16_t code = read_code();
 
-      if (code == end_code) {
-        break;
-      }
+      if (code == end_code) break;
 
       if (code == clear_code) {
-        // Reset dictionary
         next_code = end_code + 1;
         code_size = frame.lzw_min_code_size + 1;
         code_mask = (1 << code_size) - 1;
@@ -1351,117 +1345,145 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
       }
 
       std::vector<uint8_t> sequence;
-
       if (code < next_code) {
-        // Code is in table
         sequence = table[code];
       } else if (code == next_code) {
-        // Special case: code not yet in table
         sequence = prev_sequence;
-        sequence.push_back(prev_sequence[0]);
+        if (!prev_sequence.empty()) sequence.push_back(prev_sequence[0]);
       } else {
-        ESP_LOGE(TAG_IMAGE, "Invalid LZW code: %d (next: %d)", code, next_code);
+        ESP_LOGE(TAG_IMAGE, "Invalid LZW code: %d", code);
         return false;
       }
 
-      // Output sequence
       decoded_indices.insert(decoded_indices.end(), sequence.begin(), sequence.end());
 
-      // Add new entry to dictionary
       if (!prev_sequence.empty() && next_code < 4096) {
         std::vector<uint8_t> new_entry = prev_sequence;
         new_entry.push_back(sequence[0]);
         table[next_code] = new_entry;
         next_code++;
-
-        // Increase code size when needed
         if (next_code > code_mask && code_size < 12) {
           code_size++;
           code_mask = (1 << code_size) - 1;
         }
       }
-
       prev_sequence = sequence;
 
-      // Feed watchdog periodically
-      if (decoded_indices.size() % 1024 == 0) {
+      if (decoded_indices.size() % 2048 == 0) {
         App.feed_wdt();
         yield();
       }
     }
 
-    if (decoded_indices.size() < frame.width * frame.height) {
-      decoded_indices.resize(frame.width * frame.height, bg_color_index);
+    // Save previous composite for disposal method 3
+    if (frame.disposal_method == 3) {
+      prev_composite = composite;
     }
 
-    // Create GifFrame and convert palette indices to RGB565
-    GifFrame gif_frame;
-    gif_frame.pixels.resize(this->image_width_ * this->image_height_ * 2);  // RGB565 = 2 bytes per pixel
-    gif_frame.transparency.resize(this->image_width_ * this->image_height_, false);  // Transparency mask
-    gif_frame.delay_ms = frame.delay_ms;
-    gif_frame.left = frame.left;
-    gif_frame.top = frame.top;
-    gif_frame.width = frame.width;
-    gif_frame.height = frame.height;
-    gif_frame.disposal_method = frame.disposal_method;
-    gif_frame.has_transparency = frame.has_transparency;
+    // Apply frame to composite at position (left, top)
+    for (int fy = 0; fy < frame.height; fy++) {
+      for (int fx = 0; fx < frame.width; fx++) {
+        int gx = frame.left + fx;
+        int gy = frame.top + fy;
 
-    // Convert palette indices to RGB565 and track transparency
-    size_t transparent_pixel_count = 0;
-    for (int y = 0; y < this->image_height_; y++) {
-      for (int x = 0; x < this->image_width_; x++) {
-        // Map output coordinates to source frame coordinates
-        int src_x = (x * frame.width) / this->image_width_;
-        int src_y = (y * frame.height) / this->image_height_;
+        if (gx >= gif_width || gy >= gif_height) continue;
 
-        size_t src_idx = src_y * frame.width + src_x;
-        size_t dst_idx = y * this->image_width_ + x;
-        uint8_t r = 0, g = 0, b = 0;
-        bool is_transparent = false;
+        size_t src_idx = fy * frame.width + fx;
+        size_t dst_idx = gy * gif_width + gx;
 
-        if (src_idx < decoded_indices.size()) {
-          uint8_t palette_idx = decoded_indices[src_idx];
+        if (src_idx >= decoded_indices.size()) continue;
 
-          // Check transparency
-          if (frame.has_transparency && palette_idx == frame.transparent_index) {
-            is_transparent = true;
-            transparent_pixel_count++;
-          } else {
-            // Get RGB from palette
-            if (palette_idx * 3 + 2 < palette.size()) {
-              r = palette[palette_idx * 3];
-              g = palette[palette_idx * 3 + 1];
-              b = palette[palette_idx * 3 + 2];
-            }
-          }
+        uint8_t idx = decoded_indices[src_idx];
+
+        // Skip transparent pixels
+        if (frame.has_transparency && idx == frame.transparent_index) {
+          continue;
         }
 
-        // Store transparency info
-        gif_frame.transparency[dst_idx] = is_transparent;
+        composite[dst_idx] = idx;
+        composite_set[dst_idx] = true;
+      }
+    }
 
-        // Convert RGB888 to RGB565
+    // Create GifFrame from current composite
+    GifFrame gif_frame;
+    gif_frame.pixels.resize(this->image_width_ * this->image_height_ * 2);
+    gif_frame.transparency.resize(this->image_width_ * this->image_height_, false);
+    gif_frame.delay_ms = frame.delay_ms;
+    gif_frame.left = 0;
+    gif_frame.top = 0;
+    gif_frame.width = this->image_width_;
+    gif_frame.height = this->image_height_;
+    gif_frame.disposal_method = frame.disposal_method;
+    gif_frame.has_transparency = false;
+
+    // Convert composite to RGB565 (with optional resize)
+    for (int y = 0; y < this->image_height_; y++) {
+      for (int x = 0; x < this->image_width_; x++) {
+        // Map to source coordinates (for resize)
+        int src_x = needs_resize ? (x * gif_width / this->image_width_) : x;
+        int src_y = needs_resize ? (y * gif_height / this->image_height_) : y;
+
+        size_t src_idx = src_y * gif_width + src_x;
+        size_t dst_idx = y * this->image_width_ + x;
+
+        uint8_t palette_idx = composite[src_idx];
+        bool is_set = composite_set[src_idx];
+
+        uint8_t r = 0, g = 0, b = 0;
+
+        if (is_set && palette_idx * 3 + 2 < palette.size()) {
+          r = palette[palette_idx * 3];
+          g = palette[palette_idx * 3 + 1];
+          b = palette[palette_idx * 3 + 2];
+        } else if (bg_color_index * 3 + 2 < palette.size()) {
+          // Use background color
+          r = palette[bg_color_index * 3];
+          g = palette[bg_color_index * 3 + 1];
+          b = palette[bg_color_index * 3 + 2];
+          gif_frame.transparency[dst_idx] = true;
+          gif_frame.has_transparency = true;
+        }
+
         uint16_t rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
         size_t pixel_pos = dst_idx * 2;
         gif_frame.pixels[pixel_pos] = rgb565 & 0xFF;
         gif_frame.pixels[pixel_pos + 1] = (rgb565 >> 8) & 0xFF;
       }
 
-      // Feed watchdog every few rows
-      if (y % 16 == 0) {
+      if (y % 32 == 0) {
         App.feed_wdt();
         yield();
       }
     }
 
-    if (transparent_pixel_count > 0) {
-      ESP_LOGD(TAG_IMAGE, "Frame %zu has %zu transparent pixels", frame_idx, transparent_pixel_count);
+    this->gif_frames_.push_back(std::move(gif_frame));
+
+    // Handle disposal method for next frame
+    switch (frame.disposal_method) {
+      case 2:  // Restore to background
+        for (int fy = 0; fy < frame.height; fy++) {
+          for (int fx = 0; fx < frame.width; fx++) {
+            int gx = frame.left + fx;
+            int gy = frame.top + fy;
+            if (gx < gif_width && gy < gif_height) {
+              size_t idx = gy * gif_width + gx;
+              composite[idx] = bg_color_index;
+              composite_set[idx] = false;
+            }
+          }
+        }
+        break;
+      case 3:  // Restore to previous
+        composite = prev_composite;
+        break;
+      // Case 0, 1: Do not dispose - keep composite as-is
     }
 
-    // Store this frame
-    this->gif_frames_.push_back(std::move(gif_frame));
+    App.feed_wdt();
   }
 
-  // Copy first frame to image_buffer_ for initial display
+  // Copy first frame to image_buffer_
   if (!this->gif_frames_.empty()) {
     memcpy(this->image_buffer_.data(), this->gif_frames_[0].pixels.data(), this->image_buffer_.size());
     ESP_LOGI(TAG_IMAGE, "GIF decoded successfully: %zu frame(s), animated: %s",
