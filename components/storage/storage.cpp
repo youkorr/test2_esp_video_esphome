@@ -301,13 +301,6 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
   int img_w = this->get_current_width();
   int img_h = this->get_current_height();
 
-  // Get canvas buffer info
-  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas);
-  if (draw_buf == nullptr) {
-    ESP_LOGW(TAG_IMAGE, "Cannot get canvas draw buffer");
-    return;
-  }
-
   // Get transparency mask for current frame (if GIF animation)
   const std::vector<bool> *transparency_mask = nullptr;
   bool has_transparency = false;
@@ -320,7 +313,7 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
   }
 
   // Draw pixels directly to canvas
-  // For RGB565 format, we can use lv_canvas_set_px
+  // API differs between LVGL v8 and v9
   for (int py = 0; py < img_h; py++) {
     for (int px = 0; px < img_w; px++) {
       size_t pixel_idx = py * img_w + px;
@@ -347,7 +340,14 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
       uint8_t b = (rgb565 & 0x1F) << 3;
 
       lv_color_t color = lv_color_make(r, g, b);
+
+      // LVGL v8 vs v9 API difference
+      #if LVGL_VERSION_MAJOR >= 9
       lv_canvas_set_px(canvas, canvas_x, canvas_y, color, LV_OPA_COVER);
+      #else
+      // LVGL v8: lv_canvas_set_px takes only 4 arguments
+      lv_canvas_set_px(canvas, canvas_x, canvas_y, color);
+      #endif
     }
 
     // Feed watchdog periodically
