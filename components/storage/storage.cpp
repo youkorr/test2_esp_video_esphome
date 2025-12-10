@@ -237,10 +237,141 @@ void SdImageComponent::dump_config() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Loaded: %s", this->image_loaded_ ? "YES" : "NO");
   if (this->image_loaded_) {
     ESP_LOGCONFIG(TAG_IMAGE, "  Buffer size: %zu bytes", this->image_buffer_.size());
-    ESP_LOGCONFIG(TAG_IMAGE, "  Base Image - W:%d H:%d Type:%d Data:%p", 
+    ESP_LOGCONFIG(TAG_IMAGE, "  Base Image - W:%d H:%d Type:%d Data:%p",
                   this->width_, this->height_, this->type_, this->data_start_);
+    if (this->is_gif_animated_) {
+      ESP_LOGCONFIG(TAG_IMAGE, "  GIF Frames: %zu, Animated: YES", this->gif_frames_.size());
+    }
   }
 }
+
+// =====================================================
+// GIF Animation Control Methods
+// =====================================================
+
+void SdImageComponent::set_frame(size_t frame_index) {
+  if (this->gif_frames_.empty()) return;
+
+  this->current_gif_frame_ = frame_index % this->gif_frames_.size();
+
+  // Copy frame to image buffer
+  const GifFrame &frame = this->gif_frames_[this->current_gif_frame_];
+  if (frame.pixels.size() <= this->image_buffer_.size()) {
+    memcpy(this->image_buffer_.data(), frame.pixels.data(), frame.pixels.size());
+    this->data_start_ = this->image_buffer_.data();
+  }
+}
+
+void SdImageComponent::next_frame() {
+  if (this->gif_frames_.empty()) return;
+  this->set_frame(this->current_gif_frame_ + 1);
+}
+
+void SdImageComponent::prev_frame() {
+  if (this->gif_frames_.empty()) return;
+  if (this->current_gif_frame_ == 0) {
+    this->set_frame(this->gif_frames_.size() - 1);
+  } else {
+    this->set_frame(this->current_gif_frame_ - 1);
+  }
+}
+
+uint16_t SdImageComponent::get_frame_delay() const {
+  if (this->gif_frames_.empty()) return 100;
+  return this->gif_frames_[this->current_gif_frame_].delay_ms;
+}
+
+// =====================================================
+// LVGL Canvas Drawing Support
+// =====================================================
+
+#ifdef USE_LVGL
+
+void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
+  if (!this->image_loaded_ || this->image_buffer_.empty()) {
+    ESP_LOGW(TAG_IMAGE, "Cannot draw to canvas: image not loaded");
+    return;
+  }
+
+  if (canvas == nullptr) {
+    ESP_LOGW(TAG_IMAGE, "Cannot draw to canvas: canvas is null");
+    return;
+  }
+
+  int img_w = this->get_current_width();
+  int img_h = this->get_current_height();
+
+  // Get canvas buffer info
+  lv_draw_buf_t *draw_buf = lv_canvas_get_draw_buf(canvas);
+  if (draw_buf == nullptr) {
+    ESP_LOGW(TAG_IMAGE, "Cannot get canvas draw buffer");
+    return;
+  }
+
+  // Draw pixels directly to canvas
+  // For RGB565 format, we can use lv_canvas_set_px
+  for (int py = 0; py < img_h; py++) {
+    for (int px = 0; px < img_w; px++) {
+      int canvas_x = x + px;
+      int canvas_y = y + py;
+
+      // Get RGB565 pixel from our buffer
+      size_t offset = (py * img_w + px) * 2;
+      if (offset + 1 >= this->image_buffer_.size()) continue;
+
+      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+
+      // Convert RGB565 to lv_color_t
+      uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
+      uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
+      uint8_t b = (rgb565 & 0x1F) << 3;
+
+      lv_color_t color = lv_color_make(r, g, b);
+      lv_canvas_set_px(canvas, canvas_x, canvas_y, color, LV_OPA_COVER);
+    }
+
+    // Feed watchdog periodically
+    if (py % 32 == 0) {
+      App.feed_wdt();
+    }
+  }
+
+  // Invalidate canvas to trigger redraw
+  lv_obj_invalidate(canvas);
+}
+
+bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
+  if (!this->is_gif_animated_ || this->gif_frames_.empty()) {
+    return false;
+  }
+
+  uint32_t now = millis();
+
+  // Initialize timing on first call
+  if (this->last_frame_time_ == 0) {
+    this->last_frame_time_ = now;
+    this->draw_to_canvas(canvas, x, y);
+    return true;
+  }
+
+  // Check if it's time to advance frame
+  const GifFrame &current_frame = this->gif_frames_[this->current_gif_frame_];
+  uint32_t elapsed = now - this->last_frame_time_;
+
+  if (elapsed >= current_frame.delay_ms) {
+    // Advance to next frame
+    this->next_frame();
+    this->last_frame_time_ = now;
+
+    // Draw new frame to canvas
+    this->draw_to_canvas(canvas, x, y);
+    return true;
+  }
+
+  return false;
+}
+
+#endif  // USE_LVGL
 
 // Compatibility methods for YAML configuration
 void SdImageComponent::set_output_format_string(const std::string &format) {

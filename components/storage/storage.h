@@ -125,12 +125,33 @@ class SdImageComponent : public Component, public image::Image {
   // Status
   bool is_loaded() const { return this->image_loaded_; }
   const std::string &get_file_path() const { return this->file_path_; }
-  
+
   // CRITIQUE: Accès au buffer d'image pour LVGL
   const std::vector<uint8_t> &get_image_buffer() const { return this->image_buffer_; }
   uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
   size_t get_image_data_size() const { return this->image_buffer_.size(); }
-  
+
+  // GIF Animation control
+  bool is_animated() const { return this->is_gif_animated_; }
+  size_t get_frame_count() const { return this->gif_frames_.size(); }
+  size_t get_current_frame() const { return this->current_gif_frame_; }
+  void set_frame(size_t frame_index);
+  void next_frame();
+  void prev_frame();
+  uint16_t get_frame_delay() const;
+
+  // LVGL Canvas drawing support
+  #ifdef USE_LVGL
+  // Draw current frame directly to an LVGL canvas
+  // canvas: pointer to lv_obj_t canvas widget
+  // x, y: position on canvas to draw
+  void draw_to_canvas(lv_obj_t *canvas, int x = 0, int y = 0);
+
+  // Update canvas with current animation frame (call this in interval)
+  // Returns true if frame was updated
+  bool update_canvas_animation(lv_obj_t *canvas, int x = 0, int y = 0);
+  #endif
+
   // Debug info
   std::string get_debug_info() const;
 
