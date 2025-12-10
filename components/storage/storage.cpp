@@ -308,15 +308,35 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
     return;
   }
 
+  // Get transparency mask for current frame (if GIF animation)
+  const std::vector<bool> *transparency_mask = nullptr;
+  bool has_transparency = false;
+  if (!this->gif_frames_.empty() && this->current_gif_frame_ < this->gif_frames_.size()) {
+    const GifFrame &frame = this->gif_frames_[this->current_gif_frame_];
+    if (frame.has_transparency && !frame.transparency.empty()) {
+      transparency_mask = &frame.transparency;
+      has_transparency = true;
+    }
+  }
+
   // Draw pixels directly to canvas
   // For RGB565 format, we can use lv_canvas_set_px
   for (int py = 0; py < img_h; py++) {
     for (int px = 0; px < img_w; px++) {
+      size_t pixel_idx = py * img_w + px;
+
+      // Skip transparent pixels - they keep the canvas background
+      if (has_transparency && transparency_mask && pixel_idx < transparency_mask->size()) {
+        if ((*transparency_mask)[pixel_idx]) {
+          continue;  // Skip this pixel, it's transparent
+        }
+      }
+
       int canvas_x = x + px;
       int canvas_y = y + py;
 
       // Get RGB565 pixel from our buffer
-      size_t offset = (py * img_w + px) * 2;
+      size_t offset = pixel_idx * 2;
       if (offset + 1 >= this->image_buffer_.size()) continue;
 
       uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
@@ -1320,14 +1340,17 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
     // Create GifFrame and convert palette indices to RGB565
     GifFrame gif_frame;
     gif_frame.pixels.resize(this->image_width_ * this->image_height_ * 2);  // RGB565 = 2 bytes per pixel
+    gif_frame.transparency.resize(this->image_width_ * this->image_height_, false);  // Transparency mask
     gif_frame.delay_ms = frame.delay_ms;
     gif_frame.left = frame.left;
     gif_frame.top = frame.top;
     gif_frame.width = frame.width;
     gif_frame.height = frame.height;
     gif_frame.disposal_method = frame.disposal_method;
+    gif_frame.has_transparency = frame.has_transparency;
 
-    // Convert palette indices to RGB565
+    // Convert palette indices to RGB565 and track transparency
+    size_t transparent_pixel_count = 0;
     for (int y = 0; y < this->image_height_; y++) {
       for (int x = 0; x < this->image_width_; x++) {
         // Map output coordinates to source frame coordinates
@@ -1335,13 +1358,18 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
         int src_y = (y * frame.height) / this->image_height_;
 
         size_t src_idx = src_y * frame.width + src_x;
+        size_t dst_idx = y * this->image_width_ + x;
         uint8_t r = 0, g = 0, b = 0;
+        bool is_transparent = false;
 
         if (src_idx < decoded_indices.size()) {
           uint8_t palette_idx = decoded_indices[src_idx];
 
           // Check transparency
-          if (!frame.has_transparency || palette_idx != frame.transparent_index) {
+          if (frame.has_transparency && palette_idx == frame.transparent_index) {
+            is_transparent = true;
+            transparent_pixel_count++;
+          } else {
             // Get RGB from palette
             if (palette_idx * 3 + 2 < palette.size()) {
               r = palette[palette_idx * 3];
@@ -1351,9 +1379,12 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
           }
         }
 
+        // Store transparency info
+        gif_frame.transparency[dst_idx] = is_transparent;
+
         // Convert RGB888 to RGB565
         uint16_t rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
-        size_t pixel_pos = (y * this->image_width_ + x) * 2;
+        size_t pixel_pos = dst_idx * 2;
         gif_frame.pixels[pixel_pos] = rgb565 & 0xFF;
         gif_frame.pixels[pixel_pos + 1] = (rgb565 >> 8) & 0xFF;
       }
@@ -1363,6 +1394,10 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
         App.feed_wdt();
         yield();
       }
+    }
+
+    if (transparent_pixel_count > 0) {
+      ESP_LOGD(TAG_IMAGE, "Frame %zu has %zu transparent pixels", frame_idx, transparent_pixel_count);
     }
 
     // Store this frame

@@ -172,11 +172,13 @@ class SdImageComponent : public Component, public image::Image {
 
   // GIF animation support
   struct GifFrame {
-    std::vector<uint8_t> pixels;  // RGB565 pixel data for this frame
-    uint16_t delay_ms;             // Delay before next frame in milliseconds
-    uint16_t left, top;            // Frame position
-    uint16_t width, height;        // Frame dimensions
-    uint8_t disposal_method;       // How to dispose of frame (0-3)
+    std::vector<uint8_t> pixels;       // RGB565 pixel data for this frame
+    std::vector<bool> transparency;    // Per-pixel transparency mask (true = transparent)
+    uint16_t delay_ms;                 // Delay before next frame in milliseconds
+    uint16_t left, top;                // Frame position
+    uint16_t width, height;            // Frame dimensions
+    uint8_t disposal_method;           // How to dispose of frame (0-3)
+    bool has_transparency;             // Whether this frame has any transparent pixels
   };
   std::vector<GifFrame> gif_frames_;
   size_t current_gif_frame_{0};
