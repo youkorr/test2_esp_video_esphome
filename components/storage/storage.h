@@ -125,12 +125,36 @@ class SdImageComponent : public Component, public image::Image {
   // Status
   bool is_loaded() const { return this->image_loaded_; }
   const std::string &get_file_path() const { return this->file_path_; }
-  
+
   // CRITIQUE: Accès au buffer d'image pour LVGL
   const std::vector<uint8_t> &get_image_buffer() const { return this->image_buffer_; }
   uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
   size_t get_image_data_size() const { return this->image_buffer_.size(); }
-  
+
+  // GIF Animation control
+  bool is_animated() const { return this->is_gif_animated_; }
+  size_t get_frame_count() const { return this->gif_frames_.size(); }
+  size_t get_current_frame() const { return this->current_gif_frame_; }
+  void set_frame(size_t frame_index);
+  void next_frame();
+  void prev_frame();
+  uint16_t get_frame_delay() const;
+
+  // LVGL Canvas drawing support
+  #ifdef USE_LVGL
+  // Draw current frame directly to an LVGL canvas
+  // canvas: pointer to lv_obj_t canvas widget
+  // x, y: position on canvas to draw
+  void draw_to_canvas(lv_obj_t *canvas, int x = 0, int y = 0);
+
+  // Update canvas with current animation frame (call this in interval)
+  // Returns true if frame was updated
+  bool update_canvas_animation(lv_obj_t *canvas, int x = 0, int y = 0);
+
+  // Clear canvas area with background color (for transparency support)
+  void clear_canvas_area(lv_obj_t *canvas, int x = 0, int y = 0);
+  #endif
+
   // Debug info
   std::string get_debug_info() const;
 
@@ -151,18 +175,21 @@ class SdImageComponent : public Component, public image::Image {
 
   // GIF animation support
   struct GifFrame {
-    std::vector<uint8_t> pixels;  // RGB565 pixel data for this frame
-    uint16_t delay_ms;             // Delay before next frame in milliseconds
-    uint16_t left, top;            // Frame position
-    uint16_t width, height;        // Frame dimensions
-    uint8_t disposal_method;       // How to dispose of frame (0-3)
+    std::vector<uint8_t> pixels;       // RGB565 pixel data for this frame
+    std::vector<bool> transparency;    // Per-pixel transparency mask (true = transparent)
+    uint16_t delay_ms;                 // Delay before next frame in milliseconds
+    uint16_t left, top;                // Frame position
+    uint16_t width, height;            // Frame dimensions
+    uint8_t disposal_method;           // How to dispose of frame (0-3)
+    bool has_transparency;             // Whether this frame has any transparent pixels
   };
   std::vector<GifFrame> gif_frames_;
   size_t current_gif_frame_{0};
   bool is_gif_animated_{false};
   uint32_t last_frame_time_{0};
 
-  static const size_t MAX_GIF_FRAMES = 30;  // Limit to prevent memory exhaustion
+  static const size_t MAX_GIF_FRAMES = 60;   // Limit to prevent memory exhaustion (60 frames @ 128x128 = ~2MB)
+  static const size_t MAX_GIF_MEMORY_MB = 4;  // Maximum memory for GIF frames in MB
 
  private:
   // Retry logic for image loading

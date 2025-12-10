@@ -1,0 +1,273 @@
+# ============================================================================
+# WEATHER ICONS PAGE - Icônes météo avec Material Design Icons (MDI)
+# ============================================================================
+# Utilise les icônes MDI intégrées à ESPHome pour afficher la météo
+# Compatible avec Home Assistant weather entities
+#
+# Icônes MDI météo disponibles:
+#   \U000F0599 - weather-sunny (soleil)
+#   \U000F0594 - weather-night (nuit/lune)
+#   \U000F0590 - weather-cloudy (nuageux)
+#   \U000F0595 - weather-partly-cloudy (partiellement nuageux)
+#   \U000F0591 - weather-fog (brouillard)
+#   \U000F0597 - weather-rainy (pluie légère)
+#   \U000F0596 - weather-pouring (pluie forte)
+#   \U000F0593 - weather-lightning (orage)
+#   \U000F067E - weather-lightning-rainy (orage avec pluie)
+#   \U000F0598 - weather-snowy (neige)
+#   \U000F067F - weather-snowy-rainy (neige et pluie)
+#   \U000F059D - weather-windy (venteux)
+#   \U000F059E - weather-windy-variant (venteux variante)
+#   \U000F0592 - weather-hail (grêle)
+#   \U000F0F30 - weather-hurricane (ouragan)
+# ============================================================================
+
+# ============================================================================
+# GLOBALS pour stocker l'icône météo
+# ============================================================================
+globals:
+  - id: weather_icon_code
+    type: std::string
+    initial_value: '"\U000F0590"'  # cloudy par défaut
+
+# ============================================================================
+# TEXT SENSOR pour récupérer l'état météo de Home Assistant
+# ============================================================================
+text_sensor:
+  - platform: homeassistant
+    id: weather_condition
+    entity_id: weather.montauban
+    on_value:
+      then:
+        - lambda: |-
+            // Mapper l'état HA vers l'icône MDI correspondante
+            std::string state = id(weather_condition).state;
+            std::string icon = "\U000F0590";  // cloudy par défaut
+
+            if (state == "sunny" || state == "clear-day") {
+              icon = "\U000F0599";       // weather-sunny
+            } else if (state == "clear-night") {
+              icon = "\U000F0594";       // weather-night
+            } else if (state == "cloudy") {
+              icon = "\U000F0590";       // weather-cloudy
+            } else if (state == "partlycloudy") {
+              icon = "\U000F0595";       // weather-partly-cloudy
+            } else if (state == "fog" || state == "hazy") {
+              icon = "\U000F0591";       // weather-fog
+            } else if (state == "rainy") {
+              icon = "\U000F0597";       // weather-rainy
+            } else if (state == "pouring") {
+              icon = "\U000F0596";       // weather-pouring
+            } else if (state == "lightning") {
+              icon = "\U000F0593";       // weather-lightning
+            } else if (state == "lightning-rainy") {
+              icon = "\U000F067E";       // weather-lightning-rainy
+            } else if (state == "snowy") {
+              icon = "\U000F0598";       // weather-snowy
+            } else if (state == "snowy-rainy") {
+              icon = "\U000F067F";       // weather-snowy-rainy
+            } else if (state == "windy") {
+              icon = "\U000F059D";       // weather-windy
+            } else if (state == "windy-variant") {
+              icon = "\U000F059E";       // weather-windy-variant
+            } else if (state == "hail") {
+              icon = "\U000F0592";       // weather-hail
+            } else if (state == "exceptional" || state == "hurricane") {
+              icon = "\U000F0F30";       // weather-hurricane
+            }
+
+            id(weather_icon_code) = icon;
+            ESP_LOGI("weather", "État météo: %s -> icône: %s", state.c_str(), icon.c_str());
+
+        # Mettre à jour le label LVGL avec l'icône
+        - lvgl.label.update:
+            id: weather_icon_label
+            text: !lambda 'return id(weather_icon_code).c_str();'
+
+# ============================================================================
+# SENSORS pour température et humidité
+# ============================================================================
+sensor:
+  - platform: homeassistant
+    id: weather_temp
+    entity_id: weather.montauban
+    attribute: temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_temperature_page
+            text:
+              format: "%.0f°"
+              args: [id(weather_temp).state]
+
+  - platform: homeassistant
+    id: weather_humidity
+    entity_id: weather.montauban
+    attribute: humidity
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: weather_humidity_page
+            text:
+              format: "%.0f%%"
+              args: [id(weather_humidity).state]
+
+# ============================================================================
+# PAGE LVGL MÉTÉO
+# ============================================================================
+lvgl:
+  pages:
+    - id: weather_page
+      bg_color: 0x0d1117
+
+      widgets:
+        # ===== WIDGET MÉTÉO PRINCIPAL =====
+        - obj:
+            id: weather_widget
+            width: 252
+            height: 180
+            x: 8
+            y: 64
+            bg_color: 0x4682B4  # steel blue
+            bg_opa: COVER
+            radius: 12
+            widgets:
+              # Titre
+              - label:
+                  text: "Météo extérieure"
+                  x: 16
+                  y: 8
+                  text_color: 0xCCCCCC
+                  text_font: roboto_24
+
+              # Icône météo MDI (grande)
+              - label:
+                  id: weather_icon_label
+                  text: "\U000F0590"    # cloudy par défaut
+                  x: 16
+                  y: 40
+                  text_color: 0xFFFFFF
+                  text_font: mdi_icons_40
+
+              # Température
+              - label:
+                  id: weather_temperature_page
+                  text: "21°"
+                  x: 80
+                  y: 36
+                  text_color: 0xFFAA00
+                  text_font: roboto_48
+
+              # Icône humidité + valeur
+              - label:
+                  text: "\U000F058E"    # water-percent icon
+                  x: 16
+                  y: 100
+                  text_color: 0x00AAAA
+                  text_font: mdi_icons_32
+
+              - label:
+                  id: weather_humidity_page
+                  text: "67%"
+                  x: 56
+                  y: 106
+                  text_color: 0xFFFFFF
+                  text_font: roboto_24
+
+              # État météo en texte
+              - label:
+                  id: weather_condition_text
+                  text: "Nuageux"
+                  x: 120
+                  y: 106
+                  text_color: 0x8b949e
+                  text_font: roboto_18
+
+        # ===== WIDGET COMPACT (alternative) =====
+        - obj:
+            id: weather_widget_compact
+            width: 252
+            height: 130
+            x: 270
+            y: 64
+            bg_color: 0x4682B4
+            bg_opa: COVER
+            radius: 12
+            widgets:
+              - label:
+                  text: "outside temp"
+                  x: 28
+                  y: 2
+                  text_color: 0xCCCCCC
+                  text_font: roboto_24
+
+              # Icône météo
+              - label:
+                  id: weather_icon_compact
+                  text: "\U000F0590"
+                  x: 180
+                  y: 36
+                  text_color: 0xFFFFFF
+                  text_font: mdi_icons_40
+
+              # Température
+              - label:
+                  id: weather_temp_compact
+                  text: "21.5°"
+                  x: 16
+                  y: 44
+                  text_color: 0xFFAA00
+                  text_font: roboto_48
+
+              # Icône humidité
+              - label:
+                  text: "\U000F058E"
+                  text_font: mdi_icons_32
+                  x: 100
+                  y: 48
+                  text_color: 0x00AAAA
+
+              # Humidité valeur
+              - label:
+                  id: weather_humidity_compact
+                  text: "67%"
+                  x: 136
+                  y: 56
+                  text_color: 0xFFFFFF
+                  text_font: roboto_24
+
+# ============================================================================
+# RÉFÉRENCE DES ICÔNES MDI MÉTÉO
+# ============================================================================
+# Pour utiliser une icône MDI, utilisez le format: "\U000FXXXX"
+# où XXXX est le code hexadécimal de l'icône.
+#
+# États Home Assistant -> Icônes MDI:
+# ┌─────────────────────┬───────────────┬───────────────────────────┐
+# │ État HA             │ Code MDI      │ Description               │
+# ├─────────────────────┼───────────────┼───────────────────────────┤
+# │ sunny, clear-day    │ \U000F0599    │ Soleil                    │
+# │ clear-night         │ \U000F0594    │ Nuit claire / Lune        │
+# │ cloudy              │ \U000F0590    │ Nuageux                   │
+# │ partlycloudy        │ \U000F0595    │ Partiellement nuageux     │
+# │ fog, hazy           │ \U000F0591    │ Brouillard                │
+# │ rainy               │ \U000F0597    │ Pluie                     │
+# │ pouring             │ \U000F0596    │ Pluie forte               │
+# │ lightning           │ \U000F0593    │ Orage                     │
+# │ lightning-rainy     │ \U000F067E    │ Orage avec pluie          │
+# │ snowy               │ \U000F0598    │ Neige                     │
+# │ snowy-rainy         │ \U000F067F    │ Neige et pluie            │
+# │ windy               │ \U000F059D    │ Vent                      │
+# │ windy-variant       │ \U000F059E    │ Vent (variante)           │
+# │ hail                │ \U000F0592    │ Grêle                     │
+# │ exceptional         │ \U000F0F30    │ Conditions exceptionnelles│
+# └─────────────────────┴───────────────┴───────────────────────────┘
+#
+# Autres icônes utiles:
+# \U000F058E - water-percent (goutte d'eau avec %)
+# \U000F050F - thermometer (thermomètre)
+# \U000F0510 - thermometer-lines (thermomètre avec lignes)
+# \U000F058C - water (goutte d'eau)
+# \U000F0E03 - thermometer-high (thermomètre haut)
+# \U000F0E02 - thermometer-low (thermomètre bas)
+# ============================================================================
