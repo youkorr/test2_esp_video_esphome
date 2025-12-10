@@ -138,8 +138,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_800x600_isp_info = {
         .pclk = 72000000,     /* Pixel clock - same as official */
         .hts = 1920,          /* Horizontal Total Size - official value */
         .vts = 1250,          /* Vertical Total Size - official value */
-        .exp_def = 0x180,     /* Default exposure - official (384, 31% max) */
-        .gain_def = 32,       /* gain index=32 (2x analog) - prevents green tint! */
+        .exp_def = 0x4dc,     /* Default exposure - official (384, 31% max) */
+        .gain_def = 0,       /* gain index=32 (2x analog) - prevents green tint! */
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
     }
 };
