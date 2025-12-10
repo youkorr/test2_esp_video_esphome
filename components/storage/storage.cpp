@@ -1240,8 +1240,17 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 
       frames.push_back(current_frame);
 
+      // Check both frame count and estimated memory usage
+      size_t frame_size = this->image_width_ * this->image_height_ * 3;  // pixels (2B) + transparency (1B)
+      size_t estimated_memory = frames.size() * frame_size;
+      size_t max_memory = MAX_GIF_MEMORY_MB * 1024 * 1024;
+
       if (frames.size() >= MAX_GIF_FRAMES) {
-        ESP_LOGW(TAG_IMAGE, "Reached max frame limit (%zu)", MAX_GIF_FRAMES);
+        ESP_LOGW(TAG_IMAGE, "Reached max frame limit (%zu frames)", MAX_GIF_FRAMES);
+        break;
+      }
+      if (estimated_memory > max_memory) {
+        ESP_LOGW(TAG_IMAGE, "Reached memory limit (%zu frames, ~%zu KB)", frames.size(), estimated_memory / 1024);
         break;
       }
 

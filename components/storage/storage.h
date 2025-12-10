@@ -188,7 +188,8 @@ class SdImageComponent : public Component, public image::Image {
   bool is_gif_animated_{false};
   uint32_t last_frame_time_{0};
 
-  static const size_t MAX_GIF_FRAMES = 300;  // Limit to prevent memory exhaustion
+  static const size_t MAX_GIF_FRAMES = 60;   // Limit to prevent memory exhaustion (60 frames @ 128x128 = ~2MB)
+  static const size_t MAX_GIF_MEMORY_MB = 4;  // Maximum memory for GIF frames in MB
 
  private:
   // Retry logic for image loading
