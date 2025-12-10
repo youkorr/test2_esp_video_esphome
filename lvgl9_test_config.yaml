@@ -1,0 +1,169 @@
+# ============================================================================
+# TEST CONFIGURATION - LVGL v9.4.0 (PR #12312)
+# ============================================================================
+# Cette configuration utilise la branche de développement LVGL v9.4.0
+# de clydebarrow pour tester les nouvelles fonctionnalités.
+#
+# ATTENTION: C'est une branche en développement (DRAFT), des bugs sont possibles!
+#
+# IMPORTANT: ThorVG/SVG/Lottie ne sont PAS activés dans cette PR.
+# C'est une migration de base de LVGL v8 vers v9.4.0.
+# ============================================================================
+
+# ============================================================================
+# EXTERNAL COMPONENTS - LVGL v9.4.0 depuis la PR #12312
+# ============================================================================
+external_components:
+  # LVGL v9.4.0 depuis le fork de clydebarrow
+  - source:
+      type: git
+      url: https://github.com/clydebarrow/esphome
+      ref: lvgl-9.4
+    components:
+      - lvgl
+      - font
+      - image
+    refresh: 1d  # Rafraîchir tous les jours pour avoir les dernières corrections
+
+  # Vos composants locaux existants (gardez-les!)
+  - source:
+      type: local
+      path: components
+    components:
+      - sd_mmc_card
+      - storage
+      - mipi_dsi_cam
+      - lvgl_camera_display
+      # Ajoutez vos autres composants locaux ici
+
+# ============================================================================
+# STATUT DES FONCTIONNALITÉS LVGL v9.4.0 (PR #12312)
+# ============================================================================
+#
+# ✅ DISPONIBLE:
+#   - Migration LVGL v8 → v9.4.0
+#   - Compatibilité avec configs existantes
+#   - Amélioration mémoire RAM (-680 bytes)
+#   - Nouveaux widgets et améliorations UI
+#
+# ❌ NON DISPONIBLE (pas activé dans la PR):
+#   - ThorVG (moteur vectoriel)
+#   - Support SVG natif
+#   - Support Lottie animations
+#   - GIF via LVGL (mais votre composant storage fonctionne!)
+#
+# ============================================================================
+
+# ============================================================================
+# NOTES IMPORTANTES POUR LVGL v9
+# ============================================================================
+#
+# Changements majeurs dans LVGL v9 vs v8:
+#
+# 1. ThorVG est maintenant intégré - support SVG et Lottie potentiel
+#    Pour activer dans lv_conf.h:
+#    #define LV_USE_THORVG_INTERNAL 1
+#    #define LV_USE_SVG 1
+#
+# 2. Certaines propriétés sont dépréciées mais toujours fonctionnelles
+#
+# 3. Nouveaux widgets disponibles:
+#    - lv_lottie (animations Lottie)
+#    - lv_svg (images SVG)
+#
+# 4. API de dessin vectoriel améliorée
+#
+# ============================================================================
+
+# ============================================================================
+# EXEMPLE DE CONFIGURATION LVGL v9 AVEC POTENTIEL SVG/LOTTIE
+# ============================================================================
+#
+# Une fois LVGL v9 fonctionnel, vous pourriez utiliser:
+#
+# lvgl:
+#   # Configuration de base (identique à v8)
+#   displays:
+#     - display_id: my_display
+#
+#   # Nouveautés v9 (à tester):
+#   # - Support SVG natif via ThorVG
+#   # - Support Lottie pour animations
+#
+# ============================================================================
+
+# ============================================================================
+# CONFIGURATION DE TEST MINIMALE
+# ============================================================================
+# Décommentez et adaptez selon votre matériel ESP32-P4
+
+# esphome:
+#   name: esp32p4-lvgl9-test
+#   friendly_name: "ESP32-P4 LVGL9 Test"
+#
+# esp32:
+#   board: esp32-p4  # Adaptez selon votre board
+#   framework:
+#     type: esp-idf
+#     version: recommended
+#
+# logger:
+#   level: DEBUG
+#
+# # Votre configuration d'affichage existante...
+# # display:
+# #   ...
+#
+# # Test LVGL v9
+# lvgl:
+#   log_level: INFO
+#   # Votre configuration LVGL existante devrait fonctionner
+#   # Les propriétés dépréciées afficheront des warnings mais fonctionneront
+
+# ============================================================================
+# VÉRIFICATION DE LA VERSION LVGL
+# ============================================================================
+# Ajoutez ce lambda pour vérifier la version LVGL au démarrage:
+#
+# esphome:
+#   on_boot:
+#     priority: -100
+#     then:
+#       - lambda: |-
+#           ESP_LOGI("lvgl", "LVGL Version: %d.%d.%d",
+#                    LVGL_VERSION_MAJOR,
+#                    LVGL_VERSION_MINOR,
+#                    LVGL_VERSION_PATCH);
+#           #ifdef LV_USE_THORVG_INTERNAL
+#           ESP_LOGI("lvgl", "ThorVG: ENABLED");
+#           #else
+#           ESP_LOGI("lvgl", "ThorVG: DISABLED");
+#           #endif
+
+# ============================================================================
+# POUR TESTER LES ICÔNES MÉTÉO ANIMÉES (LOTTIE)
+# ============================================================================
+# Une fois LVGL v9 + ThorVG fonctionnel:
+#
+# 1. Téléchargez les fichiers Lottie Basmilius:
+#    https://github.com/basmilius/weather-icons (dossier production/lottie/)
+#
+# 2. Placez-les sur votre carte SD: /sdcard/weather/
+#    - clear-day.json
+#    - cloudy.json
+#    - rain.json
+#    - etc.
+#
+# 3. Configuration LVGL (hypothétique - à adapter selon l'implémentation):
+#
+# lvgl:
+#   widgets:
+#     - lottie:
+#         id: weather_animation
+#         src: "/sdcard/weather/clear-day.json"
+#         width: 128
+#         height: 128
+#         x: 50
+#         y: 50
+#         loop: true
+#         autoplay: true
