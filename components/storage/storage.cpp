@@ -205,8 +205,17 @@ void SdImageComponent::loop() {
     #ifdef USE_LVGL
     // Feed watchdog before potentially long operation
     App.feed_wdt();
-    // Invalidate the current screen to force LVGL to redraw
-    // This tells LVGL that the image data has changed
+
+    // Invalidate LVGL image cache for this source
+    // This forces LVGL to re-read the image data
+    #if LVGL_VERSION_MAJOR >= 9
+    lv_image_cache_drop(nullptr);  // LVGL v9 syntax
+    #else
+    // LVGL v8: invalidate cache for this specific image
+    lv_img_cache_invalidate_src(this);
+    #endif
+
+    // Also invalidate the screen to trigger redraw
     lv_obj_t *screen = lv_scr_act();
     if (screen != nullptr) {
       lv_obj_invalidate(screen);
