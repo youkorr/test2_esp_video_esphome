@@ -1,4 +1,4 @@
-# lvgl_camera_display component with face and pedestrian detection support
+# lvgl_camera_display component - pure camera display only
 
 # Source files
 set(srcs
@@ -10,9 +10,8 @@ set(include_dirs
     "${COMPONENT_DIR}"
 )
 
-# Register the component with ESP-IDF dependencies
+# Register the component (no detection dependencies)
 idf_component_register(
     SRCS ${srcs}
     INCLUDE_DIRS ${include_dirs}
-    REQUIRES human_face_detect pedestrian_detect human_face_recognition esp-dl
 )
