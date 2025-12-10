@@ -387,7 +387,7 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
   // Initialize timing on first call
   if (this->last_frame_time_ == 0) {
     this->last_frame_time_ = now;
-    // Clear canvas with background color before first draw
+    // Always clear canvas before first draw
     this->clear_canvas_area(canvas, x, y);
     this->draw_to_canvas(canvas, x, y);
     return true;
@@ -402,11 +402,9 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
     this->next_frame();
     this->last_frame_time_ = now;
 
-    // Clear canvas area before drawing new frame (for proper transparency)
-    const GifFrame &new_frame = this->gif_frames_[this->current_gif_frame_];
-    if (new_frame.has_transparency) {
-      this->clear_canvas_area(canvas, x, y);
-    }
+    // Always clear canvas before drawing new frame
+    // This prevents ghosting/overlay from previous frames
+    this->clear_canvas_area(canvas, x, y);
 
     // Draw new frame to canvas
     this->draw_to_canvas(canvas, x, y);
