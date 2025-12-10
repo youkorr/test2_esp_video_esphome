@@ -310,8 +310,14 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
   int img_w = this->get_current_width();
   int img_h = this->get_current_height();
 
-  ESP_LOGD(TAG_IMAGE, "Drawing to canvas: img=%dx%d, canvas=%dx%d, pos=(%d,%d)",
-           img_w, img_h, canvas_w, canvas_h, x, y);
+  // Log only occasionally to avoid spam
+  static uint32_t last_log_time = 0;
+  uint32_t now = millis();
+  if (now - last_log_time > 5000) {  // Log every 5 seconds max
+    ESP_LOGD(TAG_IMAGE, "Drawing to canvas: img=%dx%d, canvas=%dx%d, pos=(%d,%d)",
+             img_w, img_h, canvas_w, canvas_h, x, y);
+    last_log_time = now;
+  }
 
   // Get transparency mask for current frame (if GIF animation)
   const std::vector<bool> *transparency_mask = nullptr;
@@ -387,8 +393,11 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
   // Initialize timing on first call
   if (this->last_frame_time_ == 0) {
     this->last_frame_time_ = now;
-    // Always clear canvas before first draw
-    this->clear_canvas_area(canvas, x, y);
+    // Clear canvas before first draw if needed
+    const GifFrame &first_frame = this->gif_frames_[0];
+    if (first_frame.has_transparency) {
+      this->clear_canvas_area(canvas, x, y);
+    }
     this->draw_to_canvas(canvas, x, y);
     return true;
   }
@@ -402,9 +411,12 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
     this->next_frame();
     this->last_frame_time_ = now;
 
-    // Always clear canvas before drawing new frame
-    // This prevents ghosting/overlay from previous frames
-    this->clear_canvas_area(canvas, x, y);
+    // Only clear canvas if the new frame has transparency
+    // Fully opaque frames will overwrite everything anyway
+    const GifFrame &new_frame = this->gif_frames_[this->current_gif_frame_];
+    if (new_frame.has_transparency) {
+      this->clear_canvas_area(canvas, x, y);
+    }
 
     // Draw new frame to canvas
     this->draw_to_canvas(canvas, x, y);
@@ -417,35 +429,16 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
 void SdImageComponent::clear_canvas_area(lv_obj_t *canvas, int x, int y) {
   if (canvas == nullptr) return;
 
-  int img_w = this->get_current_width();
-  int img_h = this->get_current_height();
-
-  lv_coord_t canvas_w = lv_obj_get_width(canvas);
-  lv_coord_t canvas_h = lv_obj_get_height(canvas);
-
-  // Get background color from canvas style
+  // Use lv_canvas_fill_bg for efficient clearing (LVGL v8)
+  #if LVGL_VERSION_MAJOR >= 9
+  // LVGL v9 - use fill
   lv_color_t bg_color = lv_obj_get_style_bg_color(canvas, LV_PART_MAIN);
-
-  // Clear the area where the image will be drawn
-  for (int py = 0; py < img_h && (y + py) < canvas_h; py++) {
-    for (int px = 0; px < img_w && (x + px) < canvas_w; px++) {
-      int canvas_x = x + px;
-      int canvas_y = y + py;
-
-      if (canvas_x >= 0 && canvas_y >= 0) {
-        #if LVGL_VERSION_MAJOR >= 9
-        lv_canvas_set_px(canvas, canvas_x, canvas_y, bg_color, LV_OPA_COVER);
-        #else
-        lv_canvas_set_px(canvas, canvas_x, canvas_y, bg_color);
-        #endif
-      }
-    }
-
-    // Feed watchdog periodically
-    if (py % 64 == 0) {
-      App.feed_wdt();
-    }
-  }
+  lv_canvas_fill_bg(canvas, bg_color, LV_OPA_COVER);
+  #else
+  // LVGL v8 - use fill_bg with 3 params
+  lv_color_t bg_color = lv_obj_get_style_bg_color(canvas, LV_PART_MAIN);
+  lv_canvas_fill_bg(canvas, bg_color, LV_OPA_COVER);
+  #endif
 }
 
 #endif  // USE_LVGL
