@@ -203,8 +203,11 @@ void SdImageComponent::loop() {
 
     // Trigger LVGL display update so the new frame is rendered
     #ifdef USE_LVGL
-    // Schedule a display refresh to show the new frame
-    lv_refr_now(NULL);
+    // Feed watchdog before potentially long operation
+    App.feed_wdt();
+    // Use lv_obj_invalidate or let LVGL refresh naturally
+    // lv_refr_now(NULL) is too blocking - removed to prevent watchdog
+    // The display will refresh on the next LVGL tick
     #endif
 
     // Log frame change (only occasionally to avoid spam)
