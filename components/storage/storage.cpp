@@ -387,6 +387,8 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
   // Initialize timing on first call
   if (this->last_frame_time_ == 0) {
     this->last_frame_time_ = now;
+    // Clear canvas with background color before first draw
+    this->clear_canvas_area(canvas, x, y);
     this->draw_to_canvas(canvas, x, y);
     return true;
   }
@@ -400,12 +402,52 @@ bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
     this->next_frame();
     this->last_frame_time_ = now;
 
+    // Clear canvas area before drawing new frame (for proper transparency)
+    const GifFrame &new_frame = this->gif_frames_[this->current_gif_frame_];
+    if (new_frame.has_transparency) {
+      this->clear_canvas_area(canvas, x, y);
+    }
+
     // Draw new frame to canvas
     this->draw_to_canvas(canvas, x, y);
     return true;
   }
 
   return false;
+}
+
+void SdImageComponent::clear_canvas_area(lv_obj_t *canvas, int x, int y) {
+  if (canvas == nullptr) return;
+
+  int img_w = this->get_current_width();
+  int img_h = this->get_current_height();
+
+  lv_coord_t canvas_w = lv_obj_get_width(canvas);
+  lv_coord_t canvas_h = lv_obj_get_height(canvas);
+
+  // Get background color from canvas style
+  lv_color_t bg_color = lv_obj_get_style_bg_color(canvas, LV_PART_MAIN);
+
+  // Clear the area where the image will be drawn
+  for (int py = 0; py < img_h && (y + py) < canvas_h; py++) {
+    for (int px = 0; px < img_w && (x + px) < canvas_w; px++) {
+      int canvas_x = x + px;
+      int canvas_y = y + py;
+
+      if (canvas_x >= 0 && canvas_y >= 0) {
+        #if LVGL_VERSION_MAJOR >= 9
+        lv_canvas_set_px(canvas, canvas_x, canvas_y, bg_color, LV_OPA_COVER);
+        #else
+        lv_canvas_set_px(canvas, canvas_x, canvas_y, bg_color);
+        #endif
+      }
+    }
+
+    // Feed watchdog periodically
+    if (py % 64 == 0) {
+      App.feed_wdt();
+    }
+  }
 }
 
 #endif  // USE_LVGL

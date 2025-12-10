@@ -150,6 +150,9 @@ class SdImageComponent : public Component, public image::Image {
   // Update canvas with current animation frame (call this in interval)
   // Returns true if frame was updated
   bool update_canvas_animation(lv_obj_t *canvas, int x = 0, int y = 0);
+
+  // Clear canvas area with background color (for transparency support)
+  void clear_canvas_area(lv_obj_t *canvas, int x = 0, int y = 0);
   #endif
 
   // Debug info
