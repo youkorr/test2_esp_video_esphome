@@ -3,7 +3,8 @@
  * Support for 1280x720, 1600x1200 and custom 800x600
  *
  * SC202CS native resolution is 1600×1200.
- * 800×600 mode uses full sensor (1600×1200) with 2×2 binning and no ROI offset.
+ * SC202CS does NOT support hardware binning!
+ * 800×600 mode uses a CENTERED CROP on the 1600×1200 sensor.
  */
 
 #pragma once
@@ -172,23 +173,19 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_1600x1200_30fps[] = 
 };
 
 /* --------------------------------------------------------------------------
- *  Nouveau mode 800x600 @ 30fps (binning 2×2 sans offset, plein capteur 1600x1200)
+ *  Mode 800x600 @ 30fps (CROP centré, PAS de binning)
  *
- *  Logique :
- *  - Capteur plein : 1600x1200 (indices 0..1599, 0..1199)
- *  - Binning 2×2 → sortie 800x600
- *  - ROI = full frame, sans offset :
- *      startX = 0       = 0x0000
- *      endX   = 1599    = 0x063F
- *      startY = 0       = 0x0000
- *      endY   = 1199    = 0x04AF
- *  - Largeur / hauteur de sortie :
- *      width  = 800  = 0x0320
- *      height = 600  = 0x0258
+ *  Le SC202CS n'a PAS de binning hardware !
+ *  Ce mode utilise un CROP centré sur le capteur 1600x1200.
  *
- *  Remarque :
- *  - On réutilise la même base d'analog / timing / ISP que le mode 1600x1200.
- *  - Le binning 2×2 est géré par les registres déjà en place (même pipeline).
+ *  Calculs (basés sur le mode 1280x720 fonctionnel):
+ *  - Capteur plein : 1600×1200
+ *  - Zone de crop centrée pour 800x600 + 8 pixels de blanking:
+ *      startX = 396    = 0x018C  (centre - 404)
+ *      endX   = 1203   = 0x04B3  (centre + 403)
+ *      startY = 296    = 0x0128  (centre - 304)
+ *      endY   = 903    = 0x0387  (centre + 303)
+ *  - Zone = 808×608, Sortie = 800×600 avec offset 4
  * --------------------------------------------------------------------------*/
 
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
@@ -199,27 +196,27 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x301f, 0x18},          {0x3031, 0x08},
     {0x3037, 0x00},
 
-    /* ROI plein capteur 1600x1200, sans offset */
-    {0x3200, 0x00},          // x_start MSB = 0 (0x0000)
-    {0x3201, 0x00},          // x_start LSB
-    {0x3202, 0x00},          // y_start MSB = 0 (0x0000)
-    {0x3203, 0x00},          // y_start LSB
-    {0x3204, 0x06},          // x_end MSB = 1599 (0x063F)
-    {0x3205, 0x3f},          // x_end LSB
-    {0x3206, 0x04},          // y_end MSB = 1199 (0x04AF)
-    {0x3207, 0xaf},          // y_end LSB
+    /* ROI centré 808x608 sur capteur 1600x1200 */
+    {0x3200, 0x01},          // x_start MSB = 396 (0x018C)
+    {0x3201, 0x8c},          // x_start LSB
+    {0x3202, 0x01},          // y_start MSB = 296 (0x0128)
+    {0x3203, 0x28},          // y_start LSB
+    {0x3204, 0x04},          // x_end MSB = 1203 (0x04B3)
+    {0x3205, 0xb3},          // x_end LSB
+    {0x3206, 0x03},          // y_end MSB = 903 (0x0387)
+    {0x3207, 0x87},          // y_end LSB
 
     {0x3208, 0x03},          // output width MSB = 800 (0x0320)
     {0x3209, 0x20},          // output width LSB
     {0x320a, 0x02},          // output height MSB = 600 (0x0258)
     {0x320b, 0x58},          // output height LSB
 
-    {0x3210, 0x00},          // offsets identiques au style 1280x720 (petit blanking)
+    {0x3210, 0x00},          // x offset = 4 (comme mode 1280x720)
     {0x3211, 0x04},
-    {0x3212, 0x00},
+    {0x3212, 0x00},          // y offset = 4
     {0x3213, 0x04},
 
-    /* Reste identique au mode 1600x1200 */
+    /* Analog/Timing/ISP identiques au mode 1280x720 fonctionnel */
     {0x3301, 0xff},
     {0x3304, 0x68},          {0x3306, 0x40},
     {0x3308, 0x08},          {0x3309, 0xa8},
