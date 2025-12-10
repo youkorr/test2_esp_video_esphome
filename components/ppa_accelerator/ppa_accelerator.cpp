@@ -342,10 +342,9 @@ PPAResult PPAAccelerator::blend(const PPABuffer& foreground, const PPABuffer& ba
   blend_config.in_bg = bg_config;
   blend_config.out = out_config;
   blend_config.fg_alpha_update_mode = PPA_ALPHA_FIX_VALUE;
+  blend_config.fg_alpha_fix_val = fg_alpha;
   blend_config.bg_alpha_update_mode = PPA_ALPHA_FIX_VALUE;
-  // Set fixed alpha values via the rgb_val union (contains alpha)
-  blend_config.fg_fix_rgb_val.val = (fg_alpha << 24) | 0x00FFFFFF;
-  blend_config.bg_fix_rgb_val.val = (255 << 24) | 0x00FFFFFF;
+  blend_config.bg_alpha_fix_val = 255;
   blend_config.mode = PPA_TRANS_MODE_BLOCKING;
 
   // Execute blend operation
