@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
+#include "yuv_rgb_lut.h"      // Lookup table YUV→RGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
 
 #ifdef USE_WIFI
@@ -1272,6 +1273,10 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
     this->yuv_converter_ = new YuvRgbConverterSIMD(YuvRgbConverterSIMD::Colorspace::BT601);
   }
 
+  // Initialize lookup tables for alternative YUV→RGB method (test comparison)
+  init_yuv_lut_tables();
+  ESP_LOGI(TAG, "💡 TEST: Lookup table YUV→RGB available as alternative to SIMD");
+
   // Note: PPA YUV420 not available in this build - SIMD converter provides best performance
   // Expected: SIMD 3-5ms @ 480x272 (vs 10-15ms software fallback)
   // FPS targets: 640×480 → 35+ FPS, 480×272 → 100+ FPS (GitHub issue #5)
@@ -2156,8 +2161,20 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
-    this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
-                                   this->actual_width_, this->actual_height_);
+
+    // TEST: Switch between SIMD and lookup table
+    #define USE_LUT_YUV_RGB 1  // Set to 1 to test lookup tables, 0 for SIMD
+
+    #if USE_LUT_YUV_RGB
+      // LOOKUP TABLE method (test)
+      yuv420_to_rgb565_lut(out_frame.outbuf, this->rgb_buffer_,
+                           this->actual_width_, this->actual_height_);
+    #else
+      // SIMD method (current)
+      this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
+                                     this->actual_width_, this->actual_height_);
+    #endif
+
     uint32_t yuv_convert_time = (esp_timer_get_time() / 1000) - yuv_convert_start;
 
     // Log breakdown every 30 frames
