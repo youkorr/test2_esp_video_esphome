@@ -75,12 +75,6 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x3212, 0x00},          /* y offset = 4 */
     {0x3213, 0x04},
 
-    /* HTS/VTS timing for 30fps: FPS = pclk / (HTS * VTS) = 72MHz / (1920 * 1250) = 30 */
-    {0x320c, 0x07},          /* HTS MSB = 1920 (0x0780) */
-    {0x320d, 0x80},          /* HTS LSB */
-    {0x320e, 0x04},          /* VTS MSB = 1250 (0x04E2) - M5Stack Tab5 value */
-    {0x320f, 0xe2},          /* VTS LSB */
-
     /* Analog/Timing/ISP identiques au mode 1280x720 fonctionnel */
     {0x3301, 0xff},
     {0x3304, 0x68},          {0x3306, 0x40},
@@ -134,6 +128,11 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x3e00, 0x00},          {0x3e01, 0x4d},
     {0x3e02, 0xc0},          {0x3e09, 0x00},
     {0x4509, 0x28},          {0x450d, 0x61},
+    /* HTS/VTS timing MUST be at the end for 30fps (same as official 1600x900 format) */
+    {0x320C, 0x07},          /* HTS MSB = 1920 (0x0780) */
+    {0x320D, 0x80},          /* HTS LSB */
+    {0x320E, 0x04},          /* VTS MSB = 1250 (0x04E2) - 30fps */
+    {0x320F, 0xE2},          /* VTS LSB */
     {SC202CS_REG_END, 0x00},
 };
 
