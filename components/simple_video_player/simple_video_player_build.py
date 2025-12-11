@@ -74,16 +74,18 @@ if os.path.exists(esp_h264_dir):
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
 
-    # Compile esp_h264_dec_sw.c with dual-task flags into a static library
-    # This wrapper code configures the tinyh264 decoder
-    # We create a library that will be linked BEFORE the pre-compiled library
-    # to ensure our version with DUAL_TASK flags takes precedence
-    esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
+    # NOTE: esp_h264_dec_sw.c is now compiled in esp_video_build.py with DUAL_TASK flags
+    # This follows Espressif's official approach (CMakeLists.txt)
+    # No need to compile a separate wrapper here!
+    print("[Simple Video Player] ℹ️  esp_h264_dec_sw.c compiled by esp_video_build.py with DUAL_TASK")
+
+    # DEPRECATED: Old wrapper approach (now handled by esp_video_build.py)
+    # esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
     h264_wrapper_sources = []
 
-    if os.path.exists(esp_h264_dec_sw_c):
-        h264_wrapper_sources.append(esp_h264_dec_sw_c)
-        print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
+    if False:  # Disabled: wrapper compilation now in esp_video_build.py
+        pass
+        # print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
 
     # Create static library from wrapper sources
     if h264_wrapper_sources:
