@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_h264_dec.h"
 #include "h264bsd_decoder.h"
 #include "esp_h264_check.h"
