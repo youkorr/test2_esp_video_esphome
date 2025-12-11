@@ -161,15 +161,21 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link both libraries: tinyh264 (decoder) + openh264 (encoder)
-            env.Append(LINKFLAGS=[
-                "-Wl,--allow-multiple-definition",
-                "-Wl,--whole-archive",
-                tinyh264_lib,
-                openh264_lib,
-                "-Wl,--no-whole-archive"
-            ])
-            print(f"[ESP-Video Build] ✓ Linked libtinyh264.a (H.264 decoder) + libopenh264.a (H.264 encoder)")
+            # CRITICAL: Do NOT link H.264 libraries here!
+            # simple_video_player_build.py will link them with proper DUAL_TASK configuration
+            # Linking here with --whole-archive would override the dual-task wrapper
+            print(f"[ESP-Video Build] ℹ️  H.264 libraries found (linking handled by simple_video_player_build.py)")
+            print(f"[ESP-Video Build]     TinyH264: {tinyh264_lib}")
+            print(f"[ESP-Video Build]     OpenH264: {openh264_lib}")
+
+            # env.Append(LINKFLAGS=[
+            #     "-Wl,--allow-multiple-definition",
+            #     "-Wl,--whole-archive",
+            #     tinyh264_lib,
+            #     openh264_lib,
+            #     "-Wl,--no-whole-archive"
+            # ])
+            # print(f"[ESP-Video Build] ✓ Linked libtinyh264.a (H.264 decoder) + libopenh264.a (H.264 encoder)")
         else:
             if not os.path.exists(tinyh264_lib):
                 print(f"[ESP-Video Build] ⚠️  libtinyh264.a not found in {h264_static_libs_dir}")
