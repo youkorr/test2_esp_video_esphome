@@ -101,6 +101,7 @@ async def to_code(config):
         # Enable dual-core H.264 decoding on ESP32-P4
         cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
         cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
+        cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
 
         # Add H.264 include paths for decoder headers
         h264_inc_paths = [
