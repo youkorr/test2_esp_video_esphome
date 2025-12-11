@@ -103,6 +103,8 @@ async def to_code(config):
         cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
         cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
 
+        cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
+
         # Add H.264 include paths for decoder headers
         h264_inc_paths = [
             os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),

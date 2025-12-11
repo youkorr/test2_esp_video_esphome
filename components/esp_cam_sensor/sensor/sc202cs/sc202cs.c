@@ -94,7 +94,7 @@ struct sc202cs_cam {
 #define SC202CS_SUPPORT_NUM CONFIG_CAMERA_SC202CS_MAX_SUPPORT
 
 #ifndef CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT
-#define CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT 0
+#define CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT 1  // 1280x720 as default (index 0 is 800x600)
 #endif
 
 static const uint32_t s_limited_abs_gain = CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT;
@@ -908,58 +908,74 @@ static const sc202cs_gain_t sc202cs_gain_map[] = {
 #endif  // end CONFIG_ANA_GAIN_PRIORITY
 
 static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
+    // [0] 800x600 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,      // M5Stack value
+             .exp_def  = 0x4dc,  // M5Stack value (1244)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
+    // [1] 1280x720 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,      // M5Stack value (was 32, caused overexposure)
+             .exp_def  = 0x4dc,  // M5Stack value (1244) - proper exposure
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
+    // [2] 1600x1200 RAW8 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,      // M5Stack value
+             .exp_def  = 0x4dc,  // M5Stack value
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
+    // [3] 1600x1200 RAW10 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,  // gain index = 32 (2x analog gain) - was 0 which caused green tint
-             .exp_def    = 0x4dc,  // 384 (31% of max) - reduced from 0x250 (still too bright)
+             .gain_def = 0,      // M5Stack value
+             .exp_def  = 0x4dc,  // M5Stack value
+             .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
+         }},
+    // [4] 1600x900 RAW10 @ 30fps
+    {.isp_v1_info =
+         {
+             .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
+             .pclk     = 72000000,
+             .vts      = 1250,
+             .hts      = 1920,
+             .gain_def = 0,      // M5Stack value
+             .exp_def  = 0x4dc,  // M5Stack value
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
 };
 
 static const esp_cam_sensor_format_t sc202cs_format_info[] = {
+    // Index 0: 800x600 - Native centered crop mode (NO binning - SC202CS doesn't support it)
     {
-        .name      = "MIPI_1lane_24Minput_RAW8_1280x720_30fps",
+        .name      = "MIPI_1lane_24Minput_RAW8_800x600_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
         .port      = ESP_CAM_SENSOR_MIPI_CSI,
         .xclk      = 24000000,
-        .width     = 1280,
-        .height    = 720,
-        .regs      = init_reglist_MIPI_1lane_raw8_1280x720_30fps,
-        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1280x720_30fps),
+        .width     = 800,
+        .height    = 600,
+        .regs      = init_reglist_MIPI_1lane_raw8_800x600_30fps,
+        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_800x600_30fps),
         .fps       = 30,
         .isp_info  = &sc202cs_isp_info[0],
         .mipi_info =
@@ -970,15 +986,16 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
+    // Index 1: 1280x720 - Standard M5Stack Tab5 mode
     {
-        .name      = "MIPI_1lane_24Minput_RAW8_1600x1200_30fps",
+        .name      = "MIPI_1lane_24Minput_RAW8_1280x720_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
         .port      = ESP_CAM_SENSOR_MIPI_CSI,
         .xclk      = 24000000,
-        .width     = 1600,
-        .height    = 1200,
-        .regs      = init_reglist_MIPI_1lane_raw8_1600x1200_30fps,
-        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1600x1200_30fps),
+        .width     = 1280,
+        .height    = 720,
+        .regs      = init_reglist_MIPI_1lane_raw8_1280x720_30fps,
+        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1280x720_30fps),
         .fps       = 30,
         .isp_info  = &sc202cs_isp_info[1],
         .mipi_info =
@@ -989,6 +1006,27 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
+    // Index 2: 1600x1200 RAW8
+    {
+        .name      = "MIPI_1lane_24Minput_RAW8_1600x1200_30fps",
+        .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
+        .port      = ESP_CAM_SENSOR_MIPI_CSI,
+        .xclk      = 24000000,
+        .width     = 1600,
+        .height    = 1200,
+        .regs      = init_reglist_MIPI_1lane_raw8_1600x1200_30fps,
+        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1600x1200_30fps),
+        .fps       = 30,
+        .isp_info  = &sc202cs_isp_info[2],
+        .mipi_info =
+            {
+                .mipi_clk     = 576000000,
+                .lane_num     = 1,
+                .line_sync_en = false,
+            },
+        .reserved = NULL,
+    },
+    // Index 3: 1600x1200 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x1200_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -999,7 +1037,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw10_1600x1200_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw10_1600x1200_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[2],
+        .isp_info  = &sc202cs_isp_info[3],
         .mipi_info =
             {
                 .mipi_clk     = 720000000,
@@ -1008,6 +1046,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
+    // Index 4: 1600x900 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x900_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1018,7 +1057,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw10_1600x900_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw10_1600x900_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[3],
+        .isp_info  = &sc202cs_isp_info[4],
         .mipi_info =
             {
                 .mipi_clk     = 720000000,
