@@ -156,14 +156,20 @@ if os.path.exists(esp_h264_dir):
 
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
-    # Try openh264 first (more optimized but larger)
-    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
-    h264_lib_name = "openh264"
+
+    # CRITICAL: Use tinyh264 for ESP32 dual-task support!
+    # OpenH264 uses generic C++ threading (WelsTaskThread) which is SLOWER
+    # TinyH264 uses ESP32-optimized dual-task (espCreateFilterTask) which is FASTER
+    h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+    h264_lib_name = "tinyh264"
 
     if not os.path.exists(h264_lib):
-        # Fallback to tinyh264
-        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
-        h264_lib_name = "tinyh264"
+        # Fallback to openh264 if tinyh264 not available
+        # NOTE: OpenH264 does NOT support ESP32 dual-task optimization!
+        h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+        h264_lib_name = "openh264"
+        print("[Simple Video Player] ⚠️  WARNING: Using openh264 (no ESP32 dual-task support)")
+        print("[Simple Video Player]     TinyH264 not found - performance will be degraded")
 
     if os.path.exists(h264_lib):
         print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")
