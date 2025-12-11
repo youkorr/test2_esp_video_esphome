@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_h264_dec.h"
 #include "h264bsd_decoder.h"
 #include "esp_h264_check.h"
@@ -108,25 +110,76 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     esp_h264_err_t ret = ESP_H264_ERR_OK;
     h264bsd_cfg_t tinyh264_cfg = H264BSD_CFG_DEFAULT();
 
-    // HARDCODED TEST: Force dual-task mode ON regardless of preprocessor flags
-    // This is a TEST to determine if the issue is compilation or linking
-    tinyh264_cfg.dualTaskEnable = 1;
-    tinyh264_cfg.dualTaskCore = 1;
-    tinyh264_cfg.dualTaskPriority = 5;
-    ESP_H264_LOGI(TAG, "✓ HARDCODED Dual-task decoding FORCED ON: core=1, priority=5 (TEST)");
+    // CRITICAL DEBUG: Use printf() which CANNOT be filtered by logging system
+    printf("\n\n");
+    printf("========================================\n");
+    printf(">>> CUSTOM DECODER CALLED <<<\n");
+    printf(">>> esp_h264_dec_sw_new() executing from CUSTOM compiled file\n");
+    printf("========================================\n");
+    printf("\n");
+    ESP_H264_LOGI(TAG, "🔍 esp_h264_dec_sw_new() called - checking DUAL_TASK defines...");
 
-// Debug: Show preprocessor values at compile time
+    // COMPILE-TIME VERIFICATION: Force build error if CONFIG_ESP_H264_DUAL_TASK not defined
+    #ifndef CONFIG_ESP_H264_DUAL_TASK
+        #error "CRITICAL BUILD ERROR: CONFIG_ESP_H264_DUAL_TASK is NOT DEFINED! Check build script CPPDEFINES."
+    #endif
+
+    // Configure dual-task decoder based on preprocessor flags
+    // This enables parallel decoding on two CPU cores for better performance
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-  #pragma message "H.264: CONFIG_ESP_H264_DUAL_TASK is ENABLED (optimized dual-core decoder)"
+    printf(">>> DUAL-TASK CONFIG DEFINED <<<\n");
+    ESP_H264_LOGI(TAG, "🔍 CONFIG_ESP_H264_DUAL_TASK is DEFINED!");
+    tinyh264_cfg.dualTaskEnable = 1;
+    #ifdef CONFIG_ESP_H264_DUAL_TASK_CORE
+        tinyh264_cfg.dualTaskCore = CONFIG_ESP_H264_DUAL_TASK_CORE;
+    #else
+        tinyh264_cfg.dualTaskCore = 1;  // Default to core 1
+    #endif
+    #ifdef CONFIG_ESP_H264_DUAL_TASK_PRIORITY
+        tinyh264_cfg.dualTaskPriority = CONFIG_ESP_H264_DUAL_TASK_PRIORITY;
+    #else
+        tinyh264_cfg.dualTaskPriority = 5;  // Default priority
+    #endif
+    printf(">>> Dual-task enabled: dualTaskEnable=%u, core=%lu, priority=%lu\n",
+           tinyh264_cfg.dualTaskEnable, tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
+
+    // Check TinyH264 library version
+    const char *version = esp_tinyh264_get_version();
+    printf(">>> TinyH264 library version: %s\n", version ? version : "unknown");
+
+    ESP_H264_LOGI(TAG, "✓ Dual-task H.264 decoder enabled: core=%lu, priority=%lu",
+                  tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
 #else
-  #pragma message "H.264: CONFIG_ESP_H264_DUAL_TASK is NOT defined (software single-core decoder)"
+    printf(">>> WARNING: DUAL-TASK NOT DEFINED - SINGLE TASK MODE <<<\n");
+    ESP_H264_LOGI(TAG, "❌ CONFIG_ESP_H264_DUAL_TASK is NOT DEFINED - using single-task!");
+    ESP_H264_LOGI(TAG, "Single-task H.264 decoder (CONFIG_ESP_H264_DUAL_TASK not defined)");
 #endif
     /* Note: Using tinyh264 library (h264bsd decoder) which supports H.264 Baseline profile.
      * For Main/High profile support, consider using edge264 or a full OpenH264 decoder.
      * The profile_idc parameter in cfg is kept for API compatibility. */
     ESP_H264_LOGI(TAG, "H.264 Decoder initialized (tinyh264/h264bsd supports Baseline profile)");
+
+    printf(">>> Calling h264bsdAlloc() with config...\n");
+
+    // Get task count BEFORE allocation
+    UBaseType_t tasks_before = uxTaskGetNumberOfTasks();
+    printf(">>> FreeRTOS tasks BEFORE h264bsdAlloc(): %u\n", tasks_before);
+
     sw_hd->dec_hd = h264bsdAlloc(&tinyh264_cfg);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret, __dec_exit__, TAG, "No memory for decoder handle");
+
+    // Get task count AFTER allocation
+    UBaseType_t tasks_after = uxTaskGetNumberOfTasks();
+    printf(">>> FreeRTOS tasks AFTER h264bsdAlloc(): %u\n", tasks_after);
+
+    if (tasks_after > tasks_before) {
+        printf(">>> ✅ NEW TASK CREATED! Dual-task decoder is ACTIVE (%u new tasks)\n", tasks_after - tasks_before);
+    } else {
+        printf(">>> ❌ NO NEW TASK! Dual-task decoder NOT active (library might not support it)\n");
+    }
+
+    printf(">>> h264bsdAlloc() SUCCESS - decoder handle created\n");
+    printf("========================================\n\n");
 
     /** Decoder handle configure */
     sw_hd->base.open = dec_open;

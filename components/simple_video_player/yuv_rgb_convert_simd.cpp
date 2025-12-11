@@ -1,6 +1,7 @@
 #include "yuv_rgb_convert_simd.h"
 #include "yuv_rgb_convert.h"  // Fallback software converter
 #include <cstring>
+#include "esp_timer.h"  // For timing measurements
 
 // Try to include esp_image_effects headers
 // Note: HAVE_ESP_IMGFX_H may be defined by build script
@@ -115,14 +116,21 @@ void YuvRgbConverterSIMD::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rg
     };
 
     // Execute SIMD color conversion
+    uint32_t simd_start = esp_timer_get_time() / 1000;
     esp_imgfx_err_t ret = esp_imgfx_color_convert_process(
         (esp_imgfx_color_convert_handle_t)this->image_effects_handle_,
         &in,
         &out
     );
+    uint32_t simd_time = (esp_timer_get_time() / 1000) - simd_start;
 
     if (ret == ESP_IMGFX_ERR_OK) {
-      // SIMD conversion succeeded - return without fallback
+      // SIMD conversion succeeded - log timing every 30 frames
+      static int simd_log_counter = 0;
+      if (++simd_log_counter >= 30) {
+        ESP_LOGI(TAG, "    └─ esp_imgfx SIMD actual time: %lums (expected 3-5ms)", (unsigned long)simd_time);
+        simd_log_counter = 0;
+      }
       return;
     }
 

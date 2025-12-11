@@ -16,6 +16,12 @@ print("[Simple Video Player] Build script running...")
 # No need for manual StaticLibrary compilation
 print("[Simple Video Player] Note: yuv_rgb_convert*.cpp files auto-compiled by ESPHome")
 
+# Explicitly compile yuv_rgb_lut.cpp to ensure it's included
+yuv_lut_src = os.path.join(component_dir, "yuv_rgb_lut.cpp")
+if os.path.exists(yuv_lut_src):
+    print("[Simple Video Player] Compiling yuv_rgb_lut.cpp (lookup table YUV→RGB)")
+    env.StaticObject(yuv_lut_src)
+
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
 # ========================================================================
@@ -23,12 +29,43 @@ esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
     # Configure H.264 decoder for dual-core ESP32-P4 processing
     # Use core 1 for decoding (core 0 for main app)
+    # CRITICAL: These flags MUST be set for esp_h264_dec_sw.c compilation
     env.Append(CPPDEFINES=[
         ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
         ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
-        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority
+        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority (default 5-10)
+        ("CONFIG_ESP_H264_DECODER_IRAM", "1"),        # Place decoder in IRAM for faster execution
     ])
-    print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1)")
+
+    # Also add as compiler flags to ensure they reach GCC
+    env.Append(CCFLAGS=[
+        "-DCONFIG_ESP_H264_DUAL_TASK=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
+    ])
+    env.Append(CXXFLAGS=[
+        "-DCONFIG_ESP_H264_DUAL_TASK=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
+    ])
+
+    print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1, priority 5)")
+    print("[Simple Video Player] ✓ Enabled IRAM placement for decoder (faster execution)")
+
+    # ESP32-P4 specific optimizations for video decoding performance
+    # Use -Os (optimize for size) instead of -O3 to reduce flash usage
+    # Still enable critical performance flags for video decoding
+    env.Append(CCFLAGS=[
+        "-ffast-math",                  # Fast floating-point math (safe for video)
+        "-ftree-vectorize",             # Enable auto-vectorization (use SIMD)
+    ])
+    env.Append(CXXFLAGS=[
+        "-ffast-math",
+        "-ftree-vectorize",
+    ])
+    print("[Simple Video Player] ✓ Enabled ESP32-P4 performance optimizations (vectorization, fast-math)")
 
     # Add esp_h264 include paths for compiling wrapper code
     esp_h264_includes = [
@@ -43,16 +80,18 @@ if os.path.exists(esp_h264_dir):
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
 
-    # Compile esp_h264_dec_sw.c with dual-task flags into a static library
-    # This wrapper code configures the tinyh264 decoder
-    # We create a library that will be linked BEFORE the pre-compiled library
-    # to ensure our version with DUAL_TASK flags takes precedence
-    esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
+    # NOTE: esp_h264_dec_sw.c is now compiled in esp_video_build.py with DUAL_TASK flags
+    # This follows Espressif's official approach (CMakeLists.txt)
+    # No need to compile a separate wrapper here!
+    print("[Simple Video Player] ℹ️  esp_h264_dec_sw.c compiled by esp_video_build.py with DUAL_TASK")
+
+    # DEPRECATED: Old wrapper approach (now handled by esp_video_build.py)
+    # esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
     h264_wrapper_sources = []
 
-    if os.path.exists(esp_h264_dec_sw_c):
-        h264_wrapper_sources.append(esp_h264_dec_sw_c)
-        print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
+    if False:  # Disabled: wrapper compilation now in esp_video_build.py
+        pass
+        # print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
 
     # Create static library from wrapper sources
     if h264_wrapper_sources:
@@ -77,11 +116,12 @@ if os.path.exists(esp_h264_dir):
             obj = env.Object(
                 target=target_path,
                 source=src,
-                CPPDEFINES=dual_task_defines,
+                CPPDEFINES=dual_task_defines + [("CONFIG_ESP_H264_DECODER_IRAM", "1")],
                 CCFLAGS=env.get('CCFLAGS', []) + [
                     "-DCONFIG_ESP_H264_DUAL_TASK=1",
                     "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
-                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5"
+                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+                    "-DCONFIG_ESP_H264_DECODER_IRAM=1"
                 ]
             )
 
@@ -124,14 +164,20 @@ if os.path.exists(esp_h264_dir):
 
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
-    # Try openh264 first (more optimized but larger)
-    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
-    h264_lib_name = "openh264"
+
+    # CRITICAL: Use tinyh264 for ESP32 dual-task support!
+    # OpenH264 uses generic C++ threading (WelsTaskThread) which is SLOWER
+    # TinyH264 uses ESP32-optimized dual-task (espCreateFilterTask) which is FASTER
+    h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+    h264_lib_name = "tinyh264"
 
     if not os.path.exists(h264_lib):
-        # Fallback to tinyh264
-        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
-        h264_lib_name = "tinyh264"
+        # Fallback to openh264 if tinyh264 not available
+        # NOTE: OpenH264 does NOT support ESP32 dual-task optimization!
+        h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+        h264_lib_name = "openh264"
+        print("[Simple Video Player] ⚠️  WARNING: Using openh264 (no ESP32 dual-task support)")
+        print("[Simple Video Player]     TinyH264 not found - performance will be degraded")
 
     if os.path.exists(h264_lib):
         print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")

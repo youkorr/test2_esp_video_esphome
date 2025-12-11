@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
+#include "yuv_rgb_lut.h"      // Lookup table YUV→RGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
 
 #ifdef USE_WIFI
@@ -18,6 +19,13 @@ namespace esphome {
 namespace simple_video_player {
 
 static const char *const TAG = "simple_video_player";
+
+// Memory allocation caps for SPIRAM buffers (matches Espressif video subsystem)
+// MALLOC_CAP_CACHE_ALIGNED is CRITICAL for optimal PSRAM bandwidth
+#define VIDEO_BUFFER_CAPS (MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED)
+
+// Buffer size alignment macro (from esp_video_internal.h)
+#define ALIGN_SIZE(s, a) (((s) + ((a) - 1)) / (a) * (a))
 
 // Helper to read big-endian values
 static uint32_t read_be32(FILE *f) {
@@ -105,10 +113,10 @@ void SimpleVideoPlayer::setup() {
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
 
-  // Allocate RGB buffer with aligned dimensions
-  this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
+  // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
+  this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                          VIDEO_BUFFER_CAPS);
   if (this->rgb_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
@@ -143,9 +151,9 @@ void SimpleVideoPlayer::setup() {
 
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
-        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                                VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -203,9 +211,9 @@ void SimpleVideoPlayer::setup() {
 
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
-        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                                VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -297,10 +305,10 @@ void SimpleVideoPlayer::complete_video_initialization_() {
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
 
-  // Allocate RGB buffer with aligned dimensions
-  this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
+  // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
+  this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                          VIDEO_BUFFER_CAPS);
   if (this->rgb_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
@@ -335,9 +343,9 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
-        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                                VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -395,9 +403,9 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
-        this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                                VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -1272,6 +1280,10 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
     this->yuv_converter_ = new YuvRgbConverterSIMD(YuvRgbConverterSIMD::Colorspace::BT601);
   }
 
+  // Initialize lookup tables for alternative YUV→RGB method (test comparison)
+  init_yuv_lut_tables();
+  ESP_LOGI(TAG, "💡 TEST: Lookup table YUV→RGB available as alternative to SIMD");
+
   // Note: PPA YUV420 not available in this build - SIMD converter provides best performance
   // Expected: SIMD 3-5ms @ 480x272 (vs 10-15ms software fallback)
   // FPS targets: 640×480 → 35+ FPS, 480×272 → 100+ FPS (GitHub issue #5)
@@ -2144,7 +2156,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   esp_h264_dec_out_frame_t out_frame = {};
 
+  uint32_t h264_only_start = esp_timer_get_time() / 1000;
   esp_h264_err_t err = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
+  uint32_t h264_only_time = (esp_timer_get_time() / 1000) - h264_only_start;
 
   if (err != ESP_H264_ERR_OK) {
     ESP_LOGW(TAG, "H.264 decode error: %d", err);
@@ -2153,8 +2167,31 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
-    this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
-                                   this->actual_width_, this->actual_height_);
+    uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
+
+    // TEST: Switch between SIMD and lookup table
+    #define USE_LUT_YUV_RGB 0  // Set to 1 to test lookup tables, 0 for SIMD (SIMD is 40% faster!)
+
+    #if USE_LUT_YUV_RGB
+      // LOOKUP TABLE method (test)
+      yuv420_to_rgb565_lut(out_frame.outbuf, this->rgb_buffer_,
+                           this->actual_width_, this->actual_height_);
+    #else
+      // SIMD method (current)
+      this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
+                                     this->actual_width_, this->actual_height_);
+    #endif
+
+    uint32_t yuv_convert_time = (esp_timer_get_time() / 1000) - yuv_convert_start;
+
+    // Log breakdown every 30 frames
+    static int log_counter = 0;
+    if (++log_counter >= 30) {
+      ESP_LOGI(TAG, "  └─ Breakdown: H.264 only=%lums, YUV→RGB=%lums",
+               (unsigned long)h264_only_time, (unsigned long)yuv_convert_time);
+      log_counter = 0;
+    }
+
     return true;
   }
 
@@ -2976,9 +3013,9 @@ void SimpleVideoPlayer::play() {
 
     // Re-allocate RGB buffer
     if (this->rgb_buffer_ == nullptr) {
-      this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
+      this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
       this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+                                                              VIDEO_BUFFER_CAPS);
       if (this->rgb_buffer_ == nullptr) {
         ESP_LOGE(TAG, "Failed to re-allocate RGB buffer");
         return;
@@ -3309,28 +3346,42 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
       end_of_stream = true;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
-    uint32_t decode_start = esp_timer_get_time() / 1000;
+    uint32_t total_start = esp_timer_get_time() / 1000;
 
+    uint32_t read_start = esp_timer_get_time() / 1000;
     if (player->read_next_mp4_sample_()) {
+      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
       // Sample read successfully, try to decode
+      uint32_t decode_start = esp_timer_get_time() / 1000;
       if (player->decode_h264_frame_()) {
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
         // Update current time from video sample timestamp
         if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
           player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
         }
+
+        uint32_t display_start = esp_timer_get_time() / 1000;
         player->update_display_();
+        uint32_t display_time = (esp_timer_get_time() / 1000) - display_start;
+
         got_frame = true;
 
         // Reset error counter on success
         static int consecutive_decode_errors = 0;
         consecutive_decode_errors = 0;
 
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
+          ESP_LOGI(TAG, "⏱️ Frame timing (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   (unsigned long)total_time, (unsigned long)read_time,
+                   (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
+          ESP_LOGI(TAG, "⏱️ Frame timing (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   (unsigned long)total_time, (unsigned long)read_time,
+                   (unsigned long)decode_time, (unsigned long)display_time);
 #endif
         }
       } else {

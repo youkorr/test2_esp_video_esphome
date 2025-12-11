@@ -27,8 +27,5 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Add required ESP-IDF component dependency
-    cg.add_platformio_option("lib_deps", ["esp_driver_ppa"])
-
     # Add build flag to enable PPA
     cg.add_define("USE_PPA_ACCELERATOR")
