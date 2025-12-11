@@ -2163,7 +2163,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
     // TEST: Switch between SIMD and lookup table
-    #define USE_LUT_YUV_RGB 1  // Set to 1 to test lookup tables, 0 for SIMD
+    #define USE_LUT_YUV_RGB 0  // Set to 1 to test lookup tables, 0 for SIMD (SIMD is 40% faster!)
 
     #if USE_LUT_YUV_RGB
       // LOOKUP TABLE method (test)
