@@ -29,6 +29,3 @@ async def to_code(config):
 
     # Add build flag to enable PPA
     cg.add_define("USE_PPA_ACCELERATOR")
-
-    # Enable ESP32-P4 target check
-    cg.add_define("CONFIG_IDF_TARGET_ESP32P4")
