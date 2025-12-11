@@ -3309,28 +3309,42 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
       end_of_stream = true;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
-    uint32_t decode_start = esp_timer_get_time() / 1000;
+    uint32_t total_start = esp_timer_get_time() / 1000;
 
+    uint32_t read_start = esp_timer_get_time() / 1000;
     if (player->read_next_mp4_sample_()) {
+      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
       // Sample read successfully, try to decode
+      uint32_t decode_start = esp_timer_get_time() / 1000;
       if (player->decode_h264_frame_()) {
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
         // Update current time from video sample timestamp
         if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
           player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
         }
+
+        uint32_t display_start = esp_timer_get_time() / 1000;
         player->update_display_();
+        uint32_t display_time = (esp_timer_get_time() / 1000) - display_start;
+
         got_frame = true;
 
         // Reset error counter on success
         static int consecutive_decode_errors = 0;
         consecutive_decode_errors = 0;
 
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
+          ESP_LOGI(TAG, "⏱️ Frame timing (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   (unsigned long)total_time, (unsigned long)read_time,
+                   (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
+          ESP_LOGI(TAG, "⏱️ Frame timing (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   (unsigned long)total_time, (unsigned long)read_time,
+                   (unsigned long)decode_time, (unsigned long)display_time);
 #endif
         }
       } else {
