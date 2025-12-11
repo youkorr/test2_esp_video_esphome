@@ -128,11 +128,8 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x3e00, 0x00},          {0x3e01, 0x4d},
     {0x3e02, 0xc0},          {0x3e09, 0x00},
     {0x4509, 0x28},          {0x450d, 0x61},
-    /* HTS/VTS timing MUST be at the end for 30fps (same as official 1600x900 format) */
-    {0x320C, 0x07},          /* HTS MSB = 1920 (0x0780) */
-    {0x320D, 0x80},          /* HTS LSB */
-    {0x320E, 0x04},          /* VTS MSB = 1250 (0x04E2) - 30fps */
-    {0x320F, 0xE2},          /* VTS LSB */
+    /* Note: 1280x720 mode works at 30fps WITHOUT explicit VTS/HTS registers */
+    /* The sensor uses built-in defaults. Try same approach for 800x600 crop. */
     {SC202CS_REG_END, 0x00},
 };
 
