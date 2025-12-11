@@ -2,7 +2,7 @@
 // Only includes the dotprod functions needed for detection (int8_t, int16_t, float)
 // Float version uses manual implementation instead of dsps_dotprod_f32
 
-//#include "dl_base_dotprod.hpp"
+#include "dl_base_dotprod.hpp"
 #include "dl_base_isa.hpp"
 #include "dl_tool.hpp"
 
