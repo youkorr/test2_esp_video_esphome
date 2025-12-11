@@ -161,18 +161,17 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link BOTH libraries with --whole-archive to force inclusion of all symbols
-            # This ensures the encoder (esp_h264_enc_single_sw.c) finds OpenH264 symbols
-            # and the decoder wrapper from simple_video_player can override TinyH264 symbols
+            # Link OpenH264 with --whole-archive (encoder needs all symbols)
+            # Link TinyH264 WITHOUT --whole-archive (decoder wrapper will override it)
             env.Append(LINKFLAGS=[
                 "-Wl,--allow-multiple-definition",
                 "-Wl,--whole-archive",
-                tinyh264_lib,   # Decoder library (will be overridden by wrapper)
-                openh264_lib,   # Encoder library (needed by esp_h264_enc_single_sw.c)
-                "-Wl,--no-whole-archive"
+                openh264_lib,   # Encoder library (needs all symbols)
+                "-Wl,--no-whole-archive",
+                tinyh264_lib,   # Decoder library (wrapper will override)
             ])
-            print(f"[ESP-Video Build] ✓ Linked libtinyh264.a + libopenh264.a (with --whole-archive)")
-            print(f"[ESP-Video Build] ℹ️  Decoder wrapper from simple_video_player_build.py will override TinyH264")
+            print(f"[ESP-Video Build] ✓ Linked libopenh264.a (--whole-archive) + libtinyh264.a (normal)")
+            print(f"[ESP-Video Build] ℹ️  TinyH264 linked WITHOUT --whole-archive to allow wrapper override")
         else:
             if not os.path.exists(tinyh264_lib):
                 print(f"[ESP-Video Build] ⚠️  libtinyh264.a not found in {h264_static_libs_dir}")
