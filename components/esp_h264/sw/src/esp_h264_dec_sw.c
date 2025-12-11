@@ -158,8 +158,24 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     ESP_H264_LOGI(TAG, "H.264 Decoder initialized (tinyh264/h264bsd supports Baseline profile)");
 
     printf(">>> Calling h264bsdAlloc() with config...\n");
+
+    // Get task count BEFORE allocation
+    UBaseType_t tasks_before = uxTaskGetNumberOfTasks();
+    printf(">>> FreeRTOS tasks BEFORE h264bsdAlloc(): %u\n", tasks_before);
+
     sw_hd->dec_hd = h264bsdAlloc(&tinyh264_cfg);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret, __dec_exit__, TAG, "No memory for decoder handle");
+
+    // Get task count AFTER allocation
+    UBaseType_t tasks_after = uxTaskGetNumberOfTasks();
+    printf(">>> FreeRTOS tasks AFTER h264bsdAlloc(): %u\n", tasks_after);
+
+    if (tasks_after > tasks_before) {
+        printf(">>> ✅ NEW TASK CREATED! Dual-task decoder is ACTIVE (%u new tasks)\n", tasks_after - tasks_before);
+    } else {
+        printf(">>> ❌ NO NEW TASK! Dual-task decoder NOT active (library might not support it)\n");
+    }
+
     printf(">>> h264bsdAlloc() SUCCESS - decoder handle created\n");
     printf("========================================\n\n");
 
