@@ -161,9 +161,10 @@ if os.path.exists(esp_h264_dir):
             # Add library path
             env.Append(LIBPATH=[h264_static_libs_dir])
 
-            # Link ONLY OpenH264 (for H.264 encoder)
-            # TinyH264 (decoder) is linked by simple_video_player_build.py with DUAL_TASK wrapper
-            env.Append(LINKFLAGS=[
+            # Link OpenH264 for H.264 encoder (esp_h264_enc_single_sw.c needs it)
+            # Use Prepend to ensure it's linked BEFORE simple_video_player links TinyH264
+            env.Prepend(LINKFLAGS=[
+                "-Wl,--allow-multiple-definition",
                 openh264_lib,  # H.264 encoder needs OpenH264
             ])
             print(f"[ESP-Video Build] ✓ Linked libopenh264.a (H.264 encoder)")
