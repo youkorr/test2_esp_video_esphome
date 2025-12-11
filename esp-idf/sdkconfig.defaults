@@ -2,14 +2,18 @@
 # Ce fichier est utilisé par ESPHome lors de la compilation avec framework: esp-idf
 
 #
-# PSRAM Cache Optimization (fix 16.5 MB/s → 40-50 MB/s bandwidth)
+# CRITICAL: Compiler Performance Optimization (FOUND THE BOTTLENECK!)
 #
-# Write-Back cache mode provides significantly better SPIRAM bandwidth
-# than Write-Through mode by reducing memory bus contention during
-# simultaneous READ+WRITE operations (YUV→RGB conversion)
-CONFIG_SPIRAM_WRITEBACK=y
+# Espressif's esp_imgfx benchmarks use this flag
+# WITHOUT IT: YUV→RGB is 5× slower (16-20ms vs 3-5ms expected)
+# Benchmarks show 1920×1080 I420→RGB565 at 131.6 MB/s with this flag
+# User's setup without it: only 24.8 MB/s (5.3× slower!)
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
-# L2 Cache optimization for SPIRAM access
+#
+# PSRAM Cache Optimization
+#
+CONFIG_SPIRAM_WRITEBACK=y
 CONFIG_CACHE_L2_CACHE_128KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 
