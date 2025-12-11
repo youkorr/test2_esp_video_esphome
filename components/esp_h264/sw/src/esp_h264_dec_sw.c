@@ -140,6 +140,11 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     #endif
     printf(">>> Dual-task enabled: dualTaskEnable=%u, core=%lu, priority=%lu\n",
            tinyh264_cfg.dualTaskEnable, tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
+
+    // Check TinyH264 library version
+    const char *version = esp_tinyh264_get_version();
+    printf(">>> TinyH264 library version: %s\n", version ? version : "unknown");
+
     ESP_H264_LOGI(TAG, "✓ Dual-task H.264 decoder enabled: core=%lu, priority=%lu",
                   tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
 #else
@@ -151,8 +156,12 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
      * For Main/High profile support, consider using edge264 or a full OpenH264 decoder.
      * The profile_idc parameter in cfg is kept for API compatibility. */
     ESP_H264_LOGI(TAG, "H.264 Decoder initialized (tinyh264/h264bsd supports Baseline profile)");
+
+    printf(">>> Calling h264bsdAlloc() with config...\n");
     sw_hd->dec_hd = h264bsdAlloc(&tinyh264_cfg);
     ESP_H264_GOTO_ON_FALSE(sw_hd->dec_hd != NULL, ret, __dec_exit__, TAG, "No memory for decoder handle");
+    printf(">>> h264bsdAlloc() SUCCESS - decoder handle created\n");
+    printf("========================================\n\n");
 
     /** Decoder handle configure */
     sw_hd->base.open = dec_open;
