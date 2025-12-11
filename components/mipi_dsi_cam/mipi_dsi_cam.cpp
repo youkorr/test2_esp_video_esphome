@@ -35,8 +35,8 @@ extern "C" {
 #include "ov02c10_custom_formats.h"
 // OV5647 custom format configurations (VGA 640x480 et 1024x600)
 #include "ov5647_custom_formats.h"
-// SC202CS custom format configurations (VGA 640x480)
-#include "sc202cs_custom_formats.h"
+// NOTE: SC202CS 800x600 is now a NATIVE format in sc202cs.c driver
+// sc202cs_custom_formats.h is no longer needed
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -757,29 +757,9 @@ bool MipiDSICamComponent::start_streaming() {
   }
   // ============================================================================
 
-  // ============================================================================
-  // Custom Format Support (SC202CS @  800x6à0)
-  // ============================================================================
-  if (this->sensor_name_ == "sc202cs") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-  
-    if (width == 800 && height == 600) {
-      custom_format = &sc202cs_custom_format_800x600;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 30fps (SC202CS)");
-    }
-  
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-      } else {
-        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for 800x600");
-      }
-    }
-  }
-
-  // ============================================================================
+  // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
+  // No custom format handling needed - the driver will automatically select it
+  // when VIDIOC_S_FMT requests 800x600
 
   // RGB565 natif du CSI (pas de conversion, pas de copie)
   // Note: Si custom format RAW10 appliqué, ISP convertira RAW10→RGB565
@@ -923,31 +903,8 @@ bool MipiDSICamComponent::start_streaming() {
            this->image_width_, this->image_height_,
            this->image_buffer_size_, this->image_buffer_size_ / 1024);
 
-  // ============================================================================
-  // RE-APPLY custom format AFTER VIDIOC_S_FMT to ensure timing registers stick
-  // VIDIOC_S_FMT may have reset sensor configuration to defaults
-  // ============================================================================
-  if (this->sensor_name_ == "sc202cs" && width == 800 && height == 600) {
-    ESP_LOGI(TAG, "🔄 Re-applying SC202CS custom format after S_FMT...");
-    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sc202cs_custom_format_800x600) == 0) {
-      ESP_LOGI(TAG, "✅ Custom timing registers re-applied (VTS/HTS for 30fps)");
-    } else {
-      ESP_LOGW(TAG, "⚠️ Failed to re-apply custom format: %s", strerror(errno));
-    }
-
-    // Also try to set frame rate via V4L2_S_PARM
-    struct v4l2_streamparm parm;
-    memset(&parm, 0, sizeof(parm));
-    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    parm.parm.capture.timeperframe.numerator = 1;
-    parm.parm.capture.timeperframe.denominator = 30;  // 30 fps
-    parm.parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
-    if (ioctl(this->video_fd_, VIDIOC_S_PARM, &parm) == 0) {
-      ESP_LOGI(TAG, "✅ V4L2 frame rate set to 30fps");
-    } else {
-      ESP_LOGW(TAG, "⚠️ VIDIOC_S_PARM not supported: %s", strerror(errno));
-    }
-  }
+  // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
+  // No re-application needed - timing registers are set by driver's native format
 
   // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
