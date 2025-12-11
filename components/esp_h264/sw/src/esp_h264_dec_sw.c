@@ -111,6 +111,11 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     // CRITICAL DEBUG: Test if logs from this file appear at all
     ESP_H264_LOGI(TAG, "🔍 esp_h264_dec_sw_new() called - checking DUAL_TASK defines...");
 
+    // COMPILE-TIME VERIFICATION: Force build error if CONFIG_ESP_H264_DUAL_TASK not defined
+    #ifndef CONFIG_ESP_H264_DUAL_TASK
+        #error "CRITICAL BUILD ERROR: CONFIG_ESP_H264_DUAL_TASK is NOT DEFINED! Check build script CPPDEFINES."
+    #endif
+
     // Configure dual-task decoder based on preprocessor flags
     // This enables parallel decoding on two CPU cores for better performance
 #ifdef CONFIG_ESP_H264_DUAL_TASK
