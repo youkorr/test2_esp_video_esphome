@@ -16,6 +16,12 @@ print("[Simple Video Player] Build script running...")
 # No need for manual StaticLibrary compilation
 print("[Simple Video Player] Note: yuv_rgb_convert*.cpp files auto-compiled by ESPHome")
 
+# Explicitly compile yuv_rgb_lut.cpp to ensure it's included
+yuv_lut_src = os.path.join(component_dir, "yuv_rgb_lut.cpp")
+if os.path.exists(yuv_lut_src):
+    print("[Simple Video Player] Compiling yuv_rgb_lut.cpp (lookup table YUV→RGB)")
+    env.StaticObject(yuv_lut_src)
+
 # ========================================================================
 # Link optimized H.264 decoder library (tinyh264)
 # ========================================================================
