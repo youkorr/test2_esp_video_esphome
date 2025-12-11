@@ -934,6 +934,19 @@ bool MipiDSICamComponent::start_streaming() {
     } else {
       ESP_LOGW(TAG, "⚠️ Failed to re-apply custom format: %s", strerror(errno));
     }
+
+    // Also try to set frame rate via V4L2_S_PARM
+    struct v4l2_streamparm parm;
+    memset(&parm, 0, sizeof(parm));
+    parm.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    parm.parm.capture.timeperframe.numerator = 1;
+    parm.parm.capture.timeperframe.denominator = 30;  // 30 fps
+    parm.parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
+    if (ioctl(this->video_fd_, VIDIOC_S_PARM, &parm) == 0) {
+      ESP_LOGI(TAG, "✅ V4L2 frame rate set to 30fps");
+    } else {
+      ESP_LOGW(TAG, "⚠️ VIDIOC_S_PARM not supported: %s", strerror(errno));
+    }
   }
 
   // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
