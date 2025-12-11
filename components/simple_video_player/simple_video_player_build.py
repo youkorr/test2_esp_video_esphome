@@ -23,12 +23,46 @@ esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
     # Configure H.264 decoder for dual-core ESP32-P4 processing
     # Use core 1 for decoding (core 0 for main app)
+    # CRITICAL: These flags MUST be set for esp_h264_dec_sw.c compilation
     env.Append(CPPDEFINES=[
         ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
         ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
-        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority
+        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),  # Task priority (default 5-10)
+        ("CONFIG_ESP_H264_DECODER_IRAM", "1"),        # Place decoder in IRAM for faster execution
     ])
-    print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1)")
+
+    # Also add as compiler flags to ensure they reach GCC
+    env.Append(CCFLAGS=[
+        "-DCONFIG_ESP_H264_DUAL_TASK=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
+    ])
+    env.Append(CXXFLAGS=[
+        "-DCONFIG_ESP_H264_DUAL_TASK=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
+        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
+    ])
+
+    print("[Simple Video Player] ✓ Enabled dual-core H.264 decoding (core 1, priority 5)")
+    print("[Simple Video Player] ✓ Enabled IRAM placement for decoder (faster execution)")
+
+    # ESP32-P4 specific optimizations for video decoding performance
+    # These flags improve H.264 decode speed and overall video playback
+    env.Append(CCFLAGS=[
+        "-O3",                          # Maximum optimization level
+        "-ffast-math",                  # Fast floating-point math (safe for video)
+        "-funroll-loops",               # Unroll loops for better performance
+        "-ftree-vectorize",             # Enable auto-vectorization (use SIMD)
+    ])
+    env.Append(CXXFLAGS=[
+        "-O3",
+        "-ffast-math",
+        "-funroll-loops",
+        "-ftree-vectorize",
+    ])
+    print("[Simple Video Player] ✓ Enabled ESP32-P4 performance optimizations (-O3, vectorization)")
 
     # Add esp_h264 include paths for compiling wrapper code
     esp_h264_includes = [
