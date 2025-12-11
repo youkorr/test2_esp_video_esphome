@@ -452,6 +452,7 @@ for src_file in force_rebuild_files:
 if sources_to_add:
     # Compiler chaque fichier source en objet
     objects = []
+    h264_dec_obj = None  # Will hold the custom decoder object to link separately
 
     # First, compile esp_h264_dec_sw.c with custom environment if it exists
     if hasattr(env, 'h264_dec_custom_compile'):
@@ -459,8 +460,10 @@ if sources_to_add:
             src_file = custom['path']
             custom_env = custom['env']
             obj = custom_env.Object(src_file)
-            objects.extend(obj)
+            # CRITICAL: Don't add to objects[] - we'll link it directly later
+            h264_dec_obj = obj[0] if isinstance(obj, list) else obj
             print(f"[ESP-Video Build] ⚡ Compiled {os.path.basename(src_file)} with DUAL_TASK environment")
+            print(f"[ESP-Video Build] ℹ️  This object will be linked DIRECTLY (not in archive) to force precedence")
 
     for src_file in sources_to_add:
         # Skip if this file was already compiled with custom environment
@@ -495,6 +498,12 @@ if sources_to_add:
 
     # Ajouter la bibliothèque au linkage (PREPEND = avant les autres libs)
     env.Prepend(LIBS=[lib])
+
+    # CRITICAL: Link custom H.264 decoder object FIRST (before any library)
+    # This ensures our DUAL_TASK version overrides the one in libtinyh264.a
+    if h264_dec_obj is not None:
+        env.Prepend(LINKFLAGS=[h264_dec_obj])
+        print(f"[ESP-Video Build] ✓ Custom esp_h264_dec_sw.o will be linked FIRST (highest precedence)")
 
     # print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
     # print(f"[ESP-Video Build] ✓ libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
