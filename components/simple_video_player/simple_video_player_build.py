@@ -49,20 +49,17 @@ if os.path.exists(esp_h264_dir):
     print("[Simple Video Player] ✓ Enabled IRAM placement for decoder (faster execution)")
 
     # ESP32-P4 specific optimizations for video decoding performance
-    # These flags improve H.264 decode speed and overall video playback
+    # Use -Os (optimize for size) instead of -O3 to reduce flash usage
+    # Still enable critical performance flags for video decoding
     env.Append(CCFLAGS=[
-        "-O3",                          # Maximum optimization level
         "-ffast-math",                  # Fast floating-point math (safe for video)
-        "-funroll-loops",               # Unroll loops for better performance
         "-ftree-vectorize",             # Enable auto-vectorization (use SIMD)
     ])
     env.Append(CXXFLAGS=[
-        "-O3",
         "-ffast-math",
-        "-funroll-loops",
         "-ftree-vectorize",
     ])
-    print("[Simple Video Player] ✓ Enabled ESP32-P4 performance optimizations (-O3, vectorization)")
+    print("[Simple Video Player] ✓ Enabled ESP32-P4 performance optimizations (vectorization, fast-math)")
 
     # Add esp_h264 include paths for compiling wrapper code
     esp_h264_includes = [
@@ -111,11 +108,12 @@ if os.path.exists(esp_h264_dir):
             obj = env.Object(
                 target=target_path,
                 source=src,
-                CPPDEFINES=dual_task_defines,
+                CPPDEFINES=dual_task_defines + [("CONFIG_ESP_H264_DECODER_IRAM", "1")],
                 CCFLAGS=env.get('CCFLAGS', []) + [
                     "-DCONFIG_ESP_H264_DUAL_TASK=1",
                     "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
-                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5"
+                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
+                    "-DCONFIG_ESP_H264_DECODER_IRAM=1"
                 ]
             )
 
