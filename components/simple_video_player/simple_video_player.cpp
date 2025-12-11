@@ -107,23 +107,14 @@ void SimpleVideoPlayer::setup() {
 
   // Allocate RGB buffer with aligned dimensions
   this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
-  // Try to allocate RGB buffer in fast Internal RAM first (for YUV→RGB performance)
-  // Fallback to PSRAM if not enough internal memory
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (this->rgb_buffer_ != nullptr) {
-    ESP_LOGI(TAG, "✓ RGB buffer in INTERNAL RAM: %u bytes (10x faster YUV→RGB!)", this->rgb_buffer_size_);
-  } else {
-    ESP_LOGW(TAG, "⚠ Not enough Internal RAM, using PSRAM (slower)");
-    this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  }
-
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->rgb_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
     return;
   }
+  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
@@ -153,13 +144,8 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        // Try Internal RAM first for faster YUV→RGB, fallback to PSRAM
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (this->rgb_buffer_ == nullptr) {
-          this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -218,13 +204,8 @@ void SimpleVideoPlayer::setup() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        // Try Internal RAM first for faster YUV→RGB, fallback to PSRAM
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (this->rgb_buffer_ == nullptr) {
-          this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -318,23 +299,14 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
   // Allocate RGB buffer with aligned dimensions
   this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;  // RGB565
-  // Try to allocate RGB buffer in fast Internal RAM first (for YUV→RGB performance)
-  // Fallback to PSRAM if not enough internal memory
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  if (this->rgb_buffer_ != nullptr) {
-    ESP_LOGI(TAG, "✓ RGB buffer in INTERNAL RAM: %u bytes (10x faster YUV→RGB!)", this->rgb_buffer_size_);
-  } else {
-    ESP_LOGW(TAG, "⚠ Not enough Internal RAM, using PSRAM (slower)");
-    this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
-                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  }
-
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (this->rgb_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
     return;
   }
+  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
@@ -364,13 +336,8 @@ void SimpleVideoPlayer::complete_video_initialization_() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        // Try Internal RAM first for faster YUV→RGB, fallback to PSRAM
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (this->rgb_buffer_ == nullptr) {
-          this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
@@ -429,13 +396,8 @@ void SimpleVideoPlayer::complete_video_initialization_() {
         // Re-allocate RGB buffer with correct size
         heap_caps_free(this->rgb_buffer_);
         this->rgb_buffer_size_ = this->aligned_width_ * this->aligned_height_ * 2;
-        // Try Internal RAM first for faster YUV→RGB, fallback to PSRAM
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-        if (this->rgb_buffer_ == nullptr) {
-          this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                  MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        }
+                                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (this->rgb_buffer_ == nullptr) {
           ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
