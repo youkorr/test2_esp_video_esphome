@@ -101,7 +101,7 @@ esp_h264_sources = [
     "sw/src/h264_color_convert.c",
     # Sources logicielles
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264 encoder)
-    "sw/src/esp_h264_dec_sw.c",            # H.264 decoder wrapper (will be compiled with DUAL_TASK flags below)
+    # NOTE: esp_h264_dec_sw.c is compiled SEPARATELY below with explicit DUAL_TASK flags
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264 encoder)
     # Sources matérielles (encodeur H.264 hardware ESP32-P4)
     "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
@@ -121,15 +121,55 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
-    # Configure H.264 decoder for dual-task mode (like Espressif does in CMakeLists.txt)
-    # These flags are applied to ALL H.264 source files
+    # ========================================================================
+    # CRITICAL: Compile esp_h264_dec_sw.c with explicit DUAL_TASK flags
+    # ========================================================================
+    # This must be done BEFORE adding other sources to ensure the flags are applied
+    esp_h264_dec_sw_path = os.path.join(esp_h264_dir, "sw/src/esp_h264_dec_sw.c")
+    if os.path.exists(esp_h264_dec_sw_path):
+        # Clone environment to avoid affecting other files
+        dec_env = env.Clone()
+
+        # Add DUAL_TASK flags explicitly for THIS file
+        dec_env.Append(CPPDEFINES=[
+            ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+            ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+            ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
+            ("CONFIG_ESP_H264_DECODER_IRAM", "1"),
+        ])
+
+        # Add required include paths for decoder
+        dec_includes = [
+            os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc"),
+            os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),
+            os.path.join(esp_h264_dir, "port", "inc"),
+            os.path.join(esp_h264_dir, "sw", "inc"),
+        ]
+        for inc in dec_includes:
+            if os.path.exists(inc):
+                dec_env.Append(CPPPATH=[inc])
+
+        # Create a special marker to compile this file separately later
+        # We'll handle it in the compilation loop with dec_env
+        # Store the path and environment for later use
+        if not hasattr(env, 'h264_dec_custom_compile'):
+            env.h264_dec_custom_compile = []
+        env.h264_dec_custom_compile.append({
+            'path': esp_h264_dec_sw_path,
+            'env': dec_env
+        })
+        print("[ESP-Video Build] ✓ Will compile esp_h264_dec_sw.c with DUAL_TASK flags (core=1, priority=5, IRAM=1)")
+    else:
+        print("[ESP-Video Build] ⚠️  esp_h264_dec_sw.c not found!")
+
+    # These flags are now for reference only (main dual-task compile is above)
     env.Append(CPPDEFINES=[
         ("CONFIG_ESP_H264_DUAL_TASK", "1"),
         ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
         ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
         ("CONFIG_ESP_H264_DECODER_IRAM", "1"),
     ])
-    print("[ESP-Video Build] ✓ Enabled H.264 DUAL_TASK mode (core 1, priority 5) + IRAM")
+    print("[ESP-Video Build] ✓ H.264 DUAL_TASK flags added to global environment")
 
     # Ajouter les chemins d'include pour les bibliothèques H.264
     h264_lib_includes = [
@@ -407,7 +447,22 @@ for src_file in force_rebuild_files:
 if sources_to_add:
     # Compiler chaque fichier source en objet
     objects = []
+
+    # First, compile esp_h264_dec_sw.c with custom environment if it exists
+    if hasattr(env, 'h264_dec_custom_compile'):
+        for custom in env.h264_dec_custom_compile:
+            src_file = custom['path']
+            custom_env = custom['env']
+            obj = custom_env.Object(src_file)
+            objects.extend(obj)
+            print(f"[ESP-Video Build] ⚡ Compiled {os.path.basename(src_file)} with DUAL_TASK environment")
+
     for src_file in sources_to_add:
+        # Skip if this file was already compiled with custom environment
+        if hasattr(env, 'h264_dec_custom_compile'):
+            if any(src_file == custom['path'] for custom in env.h264_dec_custom_compile):
+                continue
+
         # Vérifier si c'est un fichier critique qui doit être forcé à recompiler
         is_critical = any(
             src_file.endswith(os.path.basename(critical_file))
