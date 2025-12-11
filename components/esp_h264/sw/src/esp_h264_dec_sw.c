@@ -108,7 +108,13 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     esp_h264_err_t ret = ESP_H264_ERR_OK;
     h264bsd_cfg_t tinyh264_cfg = H264BSD_CFG_DEFAULT();
 
-    // CRITICAL DEBUG: Test if logs from this file appear at all
+    // CRITICAL DEBUG: Use printf() which CANNOT be filtered by logging system
+    printf("\n\n");
+    printf("========================================\n");
+    printf(">>> CUSTOM DECODER CALLED <<<\n");
+    printf(">>> esp_h264_dec_sw_new() executing from CUSTOM compiled file\n");
+    printf("========================================\n");
+    printf("\n");
     ESP_H264_LOGI(TAG, "🔍 esp_h264_dec_sw_new() called - checking DUAL_TASK defines...");
 
     // COMPILE-TIME VERIFICATION: Force build error if CONFIG_ESP_H264_DUAL_TASK not defined
@@ -119,6 +125,7 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     // Configure dual-task decoder based on preprocessor flags
     // This enables parallel decoding on two CPU cores for better performance
 #ifdef CONFIG_ESP_H264_DUAL_TASK
+    printf(">>> DUAL-TASK CONFIG DEFINED <<<\n");
     ESP_H264_LOGI(TAG, "🔍 CONFIG_ESP_H264_DUAL_TASK is DEFINED!");
     tinyh264_cfg.dualTaskEnable = 1;
     #ifdef CONFIG_ESP_H264_DUAL_TASK_CORE
@@ -131,9 +138,12 @@ esp_h264_err_t esp_h264_dec_sw_new(const esp_h264_dec_cfg_sw_t *cfg, esp_h264_de
     #else
         tinyh264_cfg.dualTaskPriority = 5;  // Default priority
     #endif
+    printf(">>> Dual-task enabled: dualTaskEnable=%u, core=%lu, priority=%lu\n",
+           tinyh264_cfg.dualTaskEnable, tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
     ESP_H264_LOGI(TAG, "✓ Dual-task H.264 decoder enabled: core=%lu, priority=%lu",
                   tinyh264_cfg.dualTaskCore, tinyh264_cfg.dualTaskPriority);
 #else
+    printf(">>> WARNING: DUAL-TASK NOT DEFINED - SINGLE TASK MODE <<<\n");
     ESP_H264_LOGI(TAG, "❌ CONFIG_ESP_H264_DUAL_TASK is NOT DEFINED - using single-task!");
     ESP_H264_LOGI(TAG, "Single-task H.264 decoder (CONFIG_ESP_H264_DUAL_TASK not defined)");
 #endif
