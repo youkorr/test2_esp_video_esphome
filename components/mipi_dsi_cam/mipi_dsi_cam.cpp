@@ -923,6 +923,19 @@ bool MipiDSICamComponent::start_streaming() {
            this->image_width_, this->image_height_,
            this->image_buffer_size_, this->image_buffer_size_ / 1024);
 
+  // ============================================================================
+  // RE-APPLY custom format AFTER VIDIOC_S_FMT to ensure timing registers stick
+  // VIDIOC_S_FMT may have reset sensor configuration to defaults
+  // ============================================================================
+  if (this->sensor_name_ == "sc202cs" && width == 800 && height == 600) {
+    ESP_LOGI(TAG, "🔄 Re-applying SC202CS custom format after S_FMT...");
+    if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, &sc202cs_custom_format_800x600) == 0) {
+      ESP_LOGI(TAG, "✅ Custom timing registers re-applied (VTS/HTS for 30fps)");
+    } else {
+      ESP_LOGW(TAG, "⚠️ Failed to re-apply custom format: %s", strerror(errno));
+    }
+  }
+
   // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
   // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
