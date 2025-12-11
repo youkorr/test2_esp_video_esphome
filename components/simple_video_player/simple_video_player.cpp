@@ -2144,7 +2144,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   esp_h264_dec_out_frame_t out_frame = {};
 
+  uint32_t h264_only_start = esp_timer_get_time() / 1000;
   esp_h264_err_t err = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
+  uint32_t h264_only_time = (esp_timer_get_time() / 1000) - h264_only_start;
 
   if (err != ESP_H264_ERR_OK) {
     ESP_LOGW(TAG, "H.264 decode error: %d", err);
@@ -2153,8 +2155,19 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
+    uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
     this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
                                    this->actual_width_, this->actual_height_);
+    uint32_t yuv_convert_time = (esp_timer_get_time() / 1000) - yuv_convert_start;
+
+    // Log breakdown every 30 frames
+    static int log_counter = 0;
+    if (++log_counter >= 30) {
+      ESP_LOGI(TAG, "  └─ Breakdown: H.264 only=%lums, YUV→RGB=%lums",
+               (unsigned long)h264_only_time, (unsigned long)yuv_convert_time);
+      log_counter = 0;
+    }
+
     return true;
   }
 
