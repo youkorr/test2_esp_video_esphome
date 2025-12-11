@@ -101,7 +101,7 @@ esp_h264_sources = [
     "sw/src/h264_color_convert.c",
     # Sources logicielles
     "sw/src/esp_h264_enc_sw_param.c",      # Nécessite codec_api.h (OpenH264 encoder)
-    # "sw/src/esp_h264_dec_sw.c",          # EXCLUDED: Compiled by simple_video_player_build.py with CONFIG_ESP_H264_DUAL_TASK flags
+    "sw/src/esp_h264_dec_sw.c",            # H.264 decoder wrapper (will be compiled with DUAL_TASK flags below)
     "sw/src/esp_h264_enc_single_sw.c",     # Nécessite codec_api.h (OpenH264 encoder)
     # Sources matérielles (encodeur H.264 hardware ESP32-P4)
     "hw/src/esp_h264_enc_single_hw.c",     # Encodeur hardware single-stream
@@ -121,6 +121,16 @@ esp_h264_sources = [
 ]
 
 if os.path.exists(esp_h264_dir):
+    # Configure H.264 decoder for dual-task mode (like Espressif does in CMakeLists.txt)
+    # These flags are applied to ALL H.264 source files
+    env.Append(CPPDEFINES=[
+        ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+        ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
+        ("CONFIG_ESP_H264_DECODER_IRAM", "1"),
+    ])
+    print("[ESP-Video Build] ✓ Enabled H.264 DUAL_TASK mode (core 1, priority 5) + IRAM")
+
     # Ajouter les chemins d'include pour les bibliothèques H.264
     h264_lib_includes = [
         "sw/libs/openh264_inc",   # codec_api.h (OpenH264 encoder + decoder)
