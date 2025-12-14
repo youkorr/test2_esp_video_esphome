@@ -1081,6 +1081,14 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     // AVI format: Read chunks with FourCC headers
     // OPTIMIZED: Use buffered reading to reduce SD card seeks
 
+    // 🔍 DIAGNOSTICS: Track I/O operations to identify bottleneck
+    static uint32_t total_chunks_read = 0;
+    static uint32_t total_fseek_calls = 0;
+    static uint32_t total_fread_skip_calls = 0;
+    static uint32_t total_bytes_seeked = 0;
+    static uint32_t total_bytes_read_skip = 0;
+    uint32_t chunks_this_frame = 0;
+
     // First frame: seek to movi offset
     if (this->frame_count_ == 0 && this->avi_movi_offset_ > 0) {
       fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
@@ -1107,6 +1115,9 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
       // FourCC format: stream_id (2 digits) + 'dc' for video
       bool is_video_chunk = (chunk_header[2] == 'd' && chunk_header[3] == 'c');
 
+      chunks_this_frame++;
+      total_chunks_read++;
+
       if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
         // Read JPEG data directly (already buffered by setvbuf)
         size_t bytes_read = fread(this->input_buffer_, 1, chunk_size, this->file_);
@@ -1125,6 +1136,15 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
           fread(&padding, 1, 1, this->file_);
         }
 
+        // 🔍 DIAGNOSTICS: Log I/O stats every 30 frames
+        if (this->frame_count_ % 30 == 0) {
+          float avg_chunks_per_frame = (float)total_chunks_read / this->frame_count_;
+          float seek_ratio = (float)total_fseek_calls / total_chunks_read * 100.0f;
+          ESP_LOGI(TAG, "📊 AVI I/O stats: chunks/frame=%.1f, fseek=%lu (%.1f%%), fread_skip=%lu, seeked=%luKB, read_skip=%luKB",
+                   avg_chunks_per_frame, total_fseek_calls, seek_ratio, total_fread_skip_calls,
+                   total_bytes_seeked / 1024, total_bytes_read_skip / 1024);
+        }
+
         return true;
       } else {
         // Skip this chunk (audio, index, or too large)
@@ -1132,11 +1152,15 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         if (chunk_size > 4096) {
           // Large chunk: use fseek
           fseek(this->file_, chunk_size + (chunk_size % 2), SEEK_CUR);
+          total_fseek_calls++;
+          total_bytes_seeked += chunk_size + (chunk_size % 2);
         } else {
           // Small chunk: read and discard (avoids seek overhead)
           static uint8_t skip_buf[4096];
           size_t to_skip = chunk_size + (chunk_size % 2);
           fread(skip_buf, 1, to_skip, this->file_);
+          total_fread_skip_calls++;
+          total_bytes_read_skip += to_skip;
         }
       }
     }
