@@ -1216,7 +1216,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 bool SimpleVideoPlayer::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t cfg = {
     .intr_priority = 0,   // Default priority (Waveshare recommendation)
-    .timeout_ms = 0,      // No timeout - decode as fast as possible (Waveshare uses -1/infinite)
+    .timeout_ms = 100,    // 100ms timeout - enough for 1024x600 frames
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_);
@@ -1225,7 +1225,7 @@ bool SimpleVideoPlayer::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=unlimited, Waveshare-optimized)");
+  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for 1024x600)");
   return true;
 }
 
