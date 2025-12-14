@@ -1079,6 +1079,8 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
   if (this->is_avi_format_) {
     // AVI format: Read chunks with FourCC headers
+    // OPTIMIZED: Use buffered reading to reduce SD card seeks
+
     // First frame: seek to movi offset
     if (this->frame_count_ == 0 && this->avi_movi_offset_ > 0) {
       fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
@@ -1106,7 +1108,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
       bool is_video_chunk = (chunk_header[2] == 'd' && chunk_header[3] == 'c');
 
       if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
-        // Read JPEG data
+        // Read JPEG data directly (already buffered by setvbuf)
         size_t bytes_read = fread(this->input_buffer_, 1, chunk_size, this->file_);
         if (bytes_read != chunk_size) {
           ESP_LOGW(TAG, "AVI: Failed to read video chunk: got %u, expected %u", bytes_read, chunk_size);
@@ -1117,14 +1119,25 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         this->frame_count_++;
 
         // AVI chunks are word-aligned (2 bytes), skip padding byte if needed
+        // OPTIMIZED: Use fread instead of fgetc for better buffering
         if (chunk_size % 2 != 0) {
-          fgetc(this->file_);
+          uint8_t padding;
+          fread(&padding, 1, 1, this->file_);
         }
 
         return true;
       } else {
         // Skip this chunk (audio, index, or too large)
-        fseek(this->file_, chunk_size + (chunk_size % 2), SEEK_CUR);
+        // OPTIMIZED: For large skips, use fseek; for small, read into temp buffer
+        if (chunk_size > 4096) {
+          // Large chunk: use fseek
+          fseek(this->file_, chunk_size + (chunk_size % 2), SEEK_CUR);
+        } else {
+          // Small chunk: read and discard (avoids seek overhead)
+          static uint8_t skip_buf[4096];
+          size_t to_skip = chunk_size + (chunk_size % 2);
+          fread(skip_buf, 1, to_skip, this->file_);
+        }
       }
     }
 
