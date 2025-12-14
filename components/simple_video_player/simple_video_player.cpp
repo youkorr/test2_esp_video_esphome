@@ -2868,13 +2868,16 @@ void SimpleVideoPlayer::update_display_() {
     return;
   }
 
-  // OPTIMIZED: Invalidate only the canvas area for faster refresh
-  // This is more efficient than full object invalidation with style recalculation
-  // Mark the canvas area as dirty without reconfiguring the buffer pointer
+  // CRITICAL for ESP32-P4 with PSRAM: Reset canvas buffer pointer EVERY frame
+  // Without this, LVGL caches the buffer address and doesn't see PSRAM updates
+  // This is essential for 1024x600 resolution (1.2MB framebuffer)
+  lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
+                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+
+  // Force immediate invalidation and rendering
   lv_obj_invalidate(this->canvas_);
 
   // Update UI controls only every 30 frames (~1 second at 30fps) to minimize overhead
-  // This optimization significantly improves video playback performance on ESP32-P4
   if (this->frame_count_ % 30 == 0) {
     // Update slider position
     if (this->slider_ != nullptr && this->total_frames_ > 0) {
@@ -3344,12 +3347,18 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
   bool end_of_stream = false;  // True only when we've exhausted all samples
 
   if (player->format_ == MediaFormat::MJPEG) {
-    uint32_t decode_start = esp_timer_get_time() / 1000;
+    uint32_t total_start = esp_timer_get_time() / 1000;
 
-    // For MJPEG, process ONE frame per callback for precise timing
-    // The multi-frame approach was causing timing issues
+    // Measure file read time
+    uint32_t read_start = esp_timer_get_time() / 1000;
     if (player->read_next_mjpeg_frame_()) {
+      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
+      // Measure JPEG decode time
+      uint32_t decode_start = esp_timer_get_time() / 1000;
       if (player->decode_mjpeg_frame_()) {
+        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
         // Update current time (estimate based on frames and frame interval)
         player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
 
@@ -3361,12 +3370,22 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
         }
 
+        // Measure LVGL display update time
+        uint32_t display_start = esp_timer_get_time() / 1000;
         player->update_display_();
+        uint32_t display_time = (esp_timer_get_time() / 1000) - display_start;
+
         got_frame = true;
 
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
+
+        // Detailed performance logging every 30 frames
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "MJPEG decode time: %lu ms", (unsigned long)decode_time);
+          ESP_LOGI(TAG, "⏱️ MJPEG timing (1024x600): TOTAL=%lums [File read=%lums, JPEG decode=%lums, LVGL display=%lums]",
+                   (unsigned long)total_time, (unsigned long)read_time,
+                   (unsigned long)decode_time, (unsigned long)display_time);
+          ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
+                   100.0f * display_time / total_time);
         }
       }
       // If decode fails, we just skip this frame and try next one
