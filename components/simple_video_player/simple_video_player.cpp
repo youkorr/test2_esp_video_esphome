@@ -1184,9 +1184,10 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
   auto cache_fseek = [this](long offset, int whence) -> int {
     if (this->file_cache_loaded_) {
       if (whence == SEEK_SET) {
-        this->file_cache_pos_ = std::min((size_t)offset, this->file_cache_size_);
+        this->file_cache_pos_ = std::min((size_t)std::max(0L, offset), this->file_cache_size_);
       } else if (whence == SEEK_CUR) {
-        this->file_cache_pos_ = std::min(this->file_cache_pos_ + offset, this->file_cache_size_);
+        long new_pos = (long)this->file_cache_pos_ + offset;
+        this->file_cache_pos_ = (size_t)std::max(0L, std::min((long)this->file_cache_size_, new_pos));
       } else if (whence == SEEK_END) {
         this->file_cache_pos_ = this->file_cache_size_;
       }
