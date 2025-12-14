@@ -128,6 +128,67 @@ class SimpleVideoPlayer : public Component {
   // 🚀 PSRAM File Cache - Load entire file to memory to eliminate SD overhead
   bool load_file_to_cache_();
 
+  // 🚀 Cache-aware file I/O methods (work with both PSRAM cache and SD card)
+  inline size_t cached_fread_(void* ptr, size_t size, size_t count) {
+    if (file_cache_loaded_) {
+      size_t bytes = size * count;
+      size_t available = file_cache_size_ - file_cache_pos_;
+      size_t to_read = std::min(bytes, available);
+      if (to_read > 0) {
+        memcpy(ptr, file_cache_buffer_ + file_cache_pos_, to_read);
+        file_cache_pos_ += to_read;
+      }
+      return to_read / size;
+    } else {
+      return fread(ptr, size, count, file_);
+    }
+  }
+
+  inline int cached_fseek_(long offset, int whence) {
+    if (file_cache_loaded_) {
+      if (whence == SEEK_SET) {
+        file_cache_pos_ = std::min((size_t)std::max(0L, offset), file_cache_size_);
+      } else if (whence == SEEK_CUR) {
+        long new_pos = (long)file_cache_pos_ + offset;
+        file_cache_pos_ = (size_t)std::max(0L, std::min((long)file_cache_size_, new_pos));
+      } else if (whence == SEEK_END) {
+        file_cache_pos_ = file_cache_size_;
+      }
+      return 0;
+    } else {
+      return fseek(file_, offset, whence);
+    }
+  }
+
+  inline long cached_ftell_() {
+    if (file_cache_loaded_) {
+      return (long)file_cache_pos_;
+    } else {
+      return ftell(file_);
+    }
+  }
+
+  inline int cached_feof_() {
+    if (file_cache_loaded_) {
+      return file_cache_pos_ >= file_cache_size_ ? 1 : 0;
+    } else {
+      return feof(file_);
+    }
+  }
+
+  // Helper functions for reading big-endian values (cache-aware)
+  inline uint32_t read_be32_() {
+    uint8_t buf[4];
+    if (cached_fread_(buf, 1, 4) != 4) return 0;
+    return (buf[0] << 24) | (buf[1] << 16) | (buf[2] << 8) | buf[3];
+  }
+
+  inline uint16_t read_be16_() {
+    uint8_t buf[2];
+    if (cached_fread_(buf, 1, 2) != 2) return 0;
+    return (buf[0] << 8) | buf[1];
+  }
+
   bool init_gif_decoder_();
   bool parse_gif_header_();
   bool read_next_gif_frame_();
