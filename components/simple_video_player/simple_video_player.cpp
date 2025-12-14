@@ -796,9 +796,9 @@ bool SimpleVideoPlayer::open_video_file_() {
     setvbuf(this->file_, (char *)file_buffer, _IOFBF, sizeof(file_buffer));
 
     // Get file size
-    fseek(this->file_, 0, SEEK_END);
-    this->file_size_ = ftell(this->file_);
-    fseek(this->file_, 0, SEEK_SET);
+    this->cached_fseek_(0, SEEK_END);
+    this->file_size_ = this->cached_ftell_();
+    this->cached_fseek_(0, SEEK_SET);
 
     ESP_LOGI(TAG, "✓ Local video file opened: %ld bytes", this->file_size_);
   }
@@ -846,18 +846,18 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
   // Load file in 64KB chunks for progress feedback
   const size_t CHUNK_SIZE = 65536;
   size_t bytes_loaded = 0;
-  fseek(this->file_, 0, SEEK_SET);
+  this->cached_fseek_(0, SEEK_SET);
 
   while (bytes_loaded < (size_t)this->file_size_) {
     size_t to_read = std::min(CHUNK_SIZE, (size_t)this->file_size_ - bytes_loaded);
-    size_t read = fread(this->file_cache_buffer_ + bytes_loaded, 1, to_read, this->file_);
+    size_t read = this->cached_fread_(this->file_cache_buffer_ + bytes_loaded, 1, to_read);
 
     if (read != to_read) {
       ESP_LOGE(TAG, "Failed to read file chunk: got %u, expected %u", read, to_read);
       heap_caps_free(this->file_cache_buffer_);
       this->file_cache_buffer_ = nullptr;
       this->use_file_cache_ = false;
-      fseek(this->file_, 0, SEEK_SET);
+      this->cached_fseek_(0, SEEK_SET);
       return true;  // Continue without cache
     }
 
@@ -882,7 +882,7 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
   ESP_LOGI(TAG, "   All video reads will now use RAM instead of SD card!");
 
   // Reset file position for cached reading
-  fseek(this->file_, 0, SEEK_SET);
+  this->cached_fseek_(0, SEEK_SET);
 
   return true;
 }
@@ -891,12 +891,12 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
   if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
 
   uint8_t header[12];
-  size_t read_size = fread(header, 1, 12, this->file_);
+  size_t read_size = this->cached_fread_(header, 1, 12);
   if (read_size < 8) {
-    fseek(this->file_, 0, SEEK_SET);
+    this->cached_fseek_(0, SEEK_SET);
     return MediaFormat::UNKNOWN;
   }
-  fseek(this->file_, 0, SEEK_SET);
+  this->cached_fseek_(0, SEEK_SET);
 
   // Check for AVI/RIFF header (RIFF....AVI )
   // AVI format: "RIFF" [4 bytes size] "AVI " [rest of file]
@@ -933,8 +933,8 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
   if (this->file_ == nullptr) return false;
 
   // Save current file position
-  long original_pos = ftell(this->file_);
-  fseek(this->file_, 0, SEEK_SET);
+  long original_pos = this->cached_ftell_();
+  this->cached_fseek_(0, SEEK_SET);
 
   // Read first frame to get dimensions
   // Search for JPEG start marker (FFD8)
@@ -949,7 +949,7 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
   }
 
   if (c1 == EOF) {
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
@@ -971,13 +971,13 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
     if ((c2 >= 0xC0 && c2 <= 0xC3) || (c2 >= 0xC5 && c2 <= 0xC7) ||
         (c2 >= 0xC9 && c2 <= 0xCB) || (c2 >= 0xCD && c2 <= 0xCF)) {
       // SOF marker found - read dimensions
-      uint16_t length = read_be16(this->file_);
+      uint16_t length = this->read_be16_();
       uint8_t precision = fgetc(this->file_);
-      height = read_be16(this->file_);
-      width = read_be16(this->file_);
+      height = this->read_be16_();
+      width = this->read_be16_();
 
       // Restore file position
-      fseek(this->file_, original_pos, SEEK_SET);
+      this->cached_fseek_(original_pos, SEEK_SET);
       return true;
     }
 
@@ -988,17 +988,17 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
     }
 
     // Read marker length and skip
-    uint16_t marker_len = read_be16(this->file_);
+    uint16_t marker_len = this->read_be16_();
     if (marker_len >= 2) {
-      fseek(this->file_, marker_len - 2, SEEK_CUR);
+      this->cached_fseek_(marker_len - 2, SEEK_CUR);
     }
 
     // Safety check - don't parse too far
-    if (ftell(this->file_) > 100000) break;
+    if (this->cached_ftell_() > 100000) break;
   }
 
   // Restore file position
-  fseek(this->file_, original_pos, SEEK_SET);
+  this->cached_fseek_(original_pos, SEEK_SET);
   return false;
 }
 
@@ -1011,13 +1011,13 @@ bool SimpleVideoPlayer::parse_avi_header_() {
   if (this->file_ == nullptr) return false;
 
   // Save current file position
-  long original_pos = ftell(this->file_);
-  fseek(this->file_, 0, SEEK_SET);
+  long original_pos = this->cached_ftell_();
+  this->cached_fseek_(0, SEEK_SET);
 
   // Read AVI header
   uint8_t header[12];
-  if (fread(header, 1, 12, this->file_) != 12) {
-    fseek(this->file_, original_pos, SEEK_SET);
+  if (this->cached_fread_(header, 1, 12) != 12) {
+    this->cached_fseek_(original_pos, SEEK_SET);
     this->is_avi_format_ = false;
     return false;
   }
@@ -1025,7 +1025,7 @@ bool SimpleVideoPlayer::parse_avi_header_() {
   // Check for RIFF header
   if (header[0] != 'R' || header[1] != 'I' || header[2] != 'F' || header[3] != 'F') {
     // Not an AVI file, might be raw MJPEG stream
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     this->is_avi_format_ = false;
     ESP_LOGI(TAG, "Not an AVI file, treating as raw MJPEG stream");
     return false;
@@ -1033,7 +1033,7 @@ bool SimpleVideoPlayer::parse_avi_header_() {
 
   // Check for AVI marker
   if (header[8] != 'A' || header[9] != 'V' || header[10] != 'I' || header[11] != ' ') {
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     this->is_avi_format_ = false;
     return false;
   }
@@ -1043,19 +1043,19 @@ bool SimpleVideoPlayer::parse_avi_header_() {
 
   // Parse LIST hdrl to find avih (AVI main header)
   uint8_t list_header[12];
-  if (fread(list_header, 1, 12, this->file_) != 12) {
-    fseek(this->file_, original_pos, SEEK_SET);
+  if (this->cached_fread_(list_header, 1, 12) != 12) {
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
   // Check for LIST hdrl
   if (list_header[0] != 'L' || list_header[1] != 'I' || list_header[2] != 'S' || list_header[3] != 'T') {
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
   if (list_header[8] != 'h' || list_header[9] != 'd' || list_header[10] != 'r' || list_header[11] != 'l') {
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
@@ -1065,21 +1065,21 @@ bool SimpleVideoPlayer::parse_avi_header_() {
 
   // Read avih chunk header
   uint8_t avih_header[8];
-  if (fread(avih_header, 1, 8, this->file_) != 8) {
-    fseek(this->file_, original_pos, SEEK_SET);
+  if (this->cached_fread_(avih_header, 1, 8) != 8) {
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
   // Check for avih marker
   if (avih_header[0] != 'a' || avih_header[1] != 'v' || avih_header[2] != 'i' || avih_header[3] != 'h') {
-    fseek(this->file_, original_pos, SEEK_SET);
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
   // Read avih data (56 bytes total)
   uint8_t avih_data[56];
-  if (fread(avih_data, 1, 56, this->file_) != 56) {
-    fseek(this->file_, original_pos, SEEK_SET);
+  if (this->cached_fread_(avih_data, 1, 56) != 56) {
+    this->cached_fseek_(original_pos, SEEK_SET);
     return false;
   }
 
@@ -1106,12 +1106,12 @@ bool SimpleVideoPlayer::parse_avi_header_() {
   // Current position: 12 (RIFF+AVI) + 12 (LIST hdrl) + 8 (avih header) + 56 (avih data) = 88
   // hdrl ends at: 12 (RIFF+AVI) + 8 (LIST header) + hdrl_size
   long hdrl_end = 12 + 8 + hdrl_size;
-  fseek(this->file_, hdrl_end, SEEK_SET);
+  this->cached_fseek_(hdrl_end, SEEK_SET);
 
   // Search for LIST movi
-  while (!feof(this->file_)) {
+  while (!this->cached_feof_()) {
     uint8_t chunk_header[8];
-    if (fread(chunk_header, 1, 8, this->file_) != 8) break;
+    if (this->cached_fread_(chunk_header, 1, 8) != 8) break;
 
     // Check for LIST
     if (chunk_header[0] == 'L' && chunk_header[1] == 'I' &&
@@ -1119,31 +1119,31 @@ bool SimpleVideoPlayer::parse_avi_header_() {
 
       // Read list type (4 bytes after size)
       uint8_t list_type[4];
-      if (fread(list_type, 1, 4, this->file_) != 4) break;
+      if (this->cached_fread_(list_type, 1, 4) != 4) break;
 
       // Check for movi
       if (list_type[0] == 'm' && list_type[1] == 'o' &&
           list_type[2] == 'v' && list_type[3] == 'i') {
-        this->avi_movi_offset_ = ftell(this->file_);
+        this->avi_movi_offset_ = this->cached_ftell_();
         ESP_LOGI(TAG, "AVI: movi list found at offset %ld", this->avi_movi_offset_);
-        fseek(this->file_, original_pos, SEEK_SET);
+        this->cached_fseek_(original_pos, SEEK_SET);
         return true;
       }
 
       // Not movi, skip this list
       uint32_t list_size = chunk_header[4] | (chunk_header[5] << 8) |
                            (chunk_header[6] << 16) | (chunk_header[7] << 24);
-      fseek(this->file_, list_size - 4, SEEK_CUR);  // -4 because we already read list type
+      this->cached_fseek_(list_size - 4, SEEK_CUR);  // -4 because we already read list type
     } else {
       // Not a LIST chunk, skip it
       uint32_t chunk_size = chunk_header[4] | (chunk_header[5] << 8) |
                             (chunk_header[6] << 16) | (chunk_header[7] << 24);
-      fseek(this->file_, chunk_size, SEEK_CUR);
+      this->cached_fseek_(chunk_size, SEEK_CUR);
     }
   }
 
   ESP_LOGW(TAG, "AVI: movi list not found!");
-  fseek(this->file_, original_pos, SEEK_SET);
+  this->cached_fseek_(original_pos, SEEK_SET);
   return false;
 }
 
@@ -1165,54 +1165,6 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     return false;
   }
 
-  // 🚀 Cache-aware file I/O wrappers - Use PSRAM cache if loaded, otherwise use SD card
-  auto cache_fread = [this](void* ptr, size_t size, size_t count) -> size_t {
-    if (this->file_cache_loaded_) {
-      size_t bytes = size * count;
-      size_t available = this->file_cache_size_ - this->file_cache_pos_;
-      size_t to_read = std::min(bytes, available);
-      if (to_read > 0) {
-        memcpy(ptr, this->file_cache_buffer_ + this->file_cache_pos_, to_read);
-        this->file_cache_pos_ += to_read;
-      }
-      return to_read / size;  // Return number of items read
-    } else {
-      return fread(ptr, size, count, this->file_);
-    }
-  };
-
-  auto cache_fseek = [this](long offset, int whence) -> int {
-    if (this->file_cache_loaded_) {
-      if (whence == SEEK_SET) {
-        this->file_cache_pos_ = std::min((size_t)std::max(0L, offset), this->file_cache_size_);
-      } else if (whence == SEEK_CUR) {
-        long new_pos = (long)this->file_cache_pos_ + offset;
-        this->file_cache_pos_ = (size_t)std::max(0L, std::min((long)this->file_cache_size_, new_pos));
-      } else if (whence == SEEK_END) {
-        this->file_cache_pos_ = this->file_cache_size_;
-      }
-      return 0;  // Success
-    } else {
-      return fseek(this->file_, offset, whence);
-    }
-  };
-
-  auto cache_ftell = [this]() -> long {
-    if (this->file_cache_loaded_) {
-      return (long)this->file_cache_pos_;
-    } else {
-      return ftell(this->file_);
-    }
-  };
-
-  auto cache_feof = [this]() -> int {
-    if (this->file_cache_loaded_) {
-      return this->file_cache_pos_ >= this->file_cache_size_ ? 1 : 0;
-    } else {
-      return feof(this->file_);
-    }
-  };
-
   if (this->is_avi_format_) {
     // AVI format: Read chunks with FourCC headers
     // OPTIMIZED: Use buffered reading to reduce SD card seeks
@@ -1227,16 +1179,16 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
     // First frame: seek to movi offset
     if (this->frame_count_ == 0 && this->avi_movi_offset_ > 0) {
-      cache_fseek(this->avi_movi_offset_, SEEK_SET);
+      this->cached_fseek_(this->avi_movi_offset_, SEEK_SET);
     }
 
     // Read chunk header (8 bytes: 4-byte FourCC + 4-byte size)
-    while (!cache_feof()) {
+    while (!this->cached_feof_()) {
       uint8_t chunk_header[8];
-      if (cache_fread(chunk_header, 1, 8) != 8) {
+      if (this->cached_fread_(chunk_header, 1, 8) != 8) {
         // End of file
         if (this->loop_) {
-          cache_fseek(this->avi_movi_offset_, SEEK_SET);
+          this->cached_fseek_(this->avi_movi_offset_, SEEK_SET);
           this->frame_count_ = 0;
           return this->read_next_mjpeg_frame_();
         }
@@ -1256,7 +1208,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
       if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
         // Read JPEG data directly (from cache or SD card via wrapper)
-        size_t bytes_read = cache_fread(this->input_buffer_, 1, chunk_size);
+        size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, chunk_size);
         if (bytes_read != chunk_size) {
           ESP_LOGW(TAG, "AVI: Failed to read video chunk: got %u, expected %u", bytes_read, chunk_size);
           return false;
@@ -1268,7 +1220,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         // AVI chunks are word-aligned (2 bytes), skip padding byte if needed
         if (chunk_size % 2 != 0) {
           uint8_t padding;
-          cache_fread(&padding, 1, 1);
+          this->cached_fread_(&padding, 1, 1);
         }
 
         // 🔍 DIAGNOSTICS: Log I/O stats every 30 frames
@@ -1287,14 +1239,14 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         // NOTE: With PSRAM cache, both operations are equally fast (just pointer math)
         if (chunk_size > 4096) {
           // Large chunk: use seek
-          cache_fseek(chunk_size + (chunk_size % 2), SEEK_CUR);
+          this->cached_fseek_(chunk_size + (chunk_size % 2), SEEK_CUR);
           total_fseek_calls++;
           total_bytes_seeked += chunk_size + (chunk_size % 2);
         } else {
           // Small chunk: read and discard
           static uint8_t skip_buf[4096];
           size_t to_skip = chunk_size + (chunk_size % 2);
-          cache_fread(skip_buf, 1, to_skip);
+          this->cached_fread_(skip_buf, 1, to_skip);
           total_fread_skip_calls++;
           total_bytes_read_skip += to_skip;
         }
@@ -1303,7 +1255,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
     // EOF reached
     if (this->loop_) {
-      cache_fseek(this->avi_movi_offset_, SEEK_SET);
+      this->cached_fseek_(this->avi_movi_offset_, SEEK_SET);
       this->frame_count_ = 0;
       return this->read_next_mjpeg_frame_();
     }
@@ -1321,12 +1273,12 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     while (!found_start) {
       if (buf_pos >= buf_size) {
         // Refill buffer
-        buf_size = cache_fread(read_buf, 1, sizeof(read_buf));
+        buf_size = this->cached_fread_(read_buf, 1, sizeof(read_buf));
         buf_pos = 0;
         if (buf_size == 0) {
           // End of file
           if (this->loop_) {
-            cache_fseek(0, SEEK_SET);
+            this->cached_fseek_(0, SEEK_SET);
             this->frame_count_ = 0;
             return this->read_next_mjpeg_frame_();
           }
@@ -1355,7 +1307,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     while (this->input_size_ < this->buffer_size_ - 1) {
       if (buf_pos >= buf_size) {
         // Refill buffer
-        buf_size = cache_fread(read_buf, 1, sizeof(read_buf));
+        buf_size = this->cached_fread_(read_buf, 1, sizeof(read_buf));
         buf_pos = 0;
         if (buf_size == 0) break;  // EOF
       }
@@ -1376,10 +1328,10 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     }
 
     // Adjust file position (we may have read ahead in buffer)
-    long current_file_pos = cache_ftell();
-    cache_fseek(current_file_pos - (buf_size - buf_pos), SEEK_SET);
+    long current_file_pos = this->cached_ftell_();
+    this->cached_fseek_(current_file_pos - (buf_size - buf_pos), SEEK_SET);
 
-    this->current_pos_ = cache_ftell();
+    this->current_pos_ = this->cached_ftell_();
     this->frame_count_++;
 
     return this->input_size_ > 2;
@@ -1498,9 +1450,9 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
 bool SimpleVideoPlayer::parse_mp4_() {
   if (this->file_ == nullptr) return false;
 
-  fseek(this->file_, 0, SEEK_SET);
+  this->cached_fseek_(0, SEEK_SET);
 
-  while (!feof(this->file_)) {
+  while (!this->cached_feof_()) {
     uint32_t size, type;
     if (!this->read_mp4_box_(size, type)) break;
 
@@ -1509,7 +1461,7 @@ bool SimpleVideoPlayer::parse_mp4_() {
     } else {
       // Skip other boxes
       if (size > 8) {
-        fseek(this->file_, size - 8, SEEK_CUR);
+        this->cached_fseek_(size - 8, SEEK_CUR);
       }
     }
   }
@@ -1518,12 +1470,12 @@ bool SimpleVideoPlayer::parse_mp4_() {
 }
 
 bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
-  long pos = ftell(this->file_);
-  size = read_be32(this->file_);
-  type = read_be32(this->file_);
+  long pos = this->cached_ftell_();
+  size = this->read_be32_();
+  type = this->read_be32_();
 
-  if (size == 0 || feof(this->file_)) {
-    ESP_LOGD(TAG, "read_mp4_box_ failed at pos=%ld: size=%u, eof=%d", pos, size, feof(this->file_));
+  if (size == 0 || this->cached_feof_()) {
+    ESP_LOGD(TAG, "read_mp4_box_ failed at pos=%ld: size=%u, eof=%d", pos, size, this->cached_feof_());
     return false;
   }
 
@@ -1531,20 +1483,20 @@ bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
 }
 
 bool SimpleVideoPlayer::parse_moov_(uint32_t size) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
     if (box_type == make_fourcc('t', 'r', 'a', 'k')) {
       // We'll determine if it's video or audio inside parse_trak_
-      long trak_start = ftell(this->file_);
+      long trak_start = this->cached_ftell_();
       this->parse_trak_(box_size - 8, true);  // Try as video first
-      fseek(this->file_, trak_start + box_size - 8, SEEK_SET);
+      this->cached_fseek_(trak_start + box_size - 8, SEEK_SET);
     } else {
       if (box_size > 8) {
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        this->cached_fseek_(box_size - 8, SEEK_CUR);
       }
     }
   }
@@ -1554,9 +1506,9 @@ bool SimpleVideoPlayer::parse_moov_(uint32_t size) {
 
 bool SimpleVideoPlayer::parse_trak_(uint32_t size, bool is_video) {
   ESP_LOGD(TAG, "Parsing trak (is_video=%d)", is_video);
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
@@ -1564,7 +1516,7 @@ bool SimpleVideoPlayer::parse_trak_(uint32_t size, bool is_video) {
       if (!this->parse_mdia_(box_size - 8, is_video)) return false;
     } else {
       if (box_size > 8) {
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        this->cached_fseek_(box_size - 8, SEEK_CUR);
       }
     }
   }
@@ -1573,9 +1525,9 @@ bool SimpleVideoPlayer::parse_trak_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_mdia_(uint32_t size, bool is_video) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
@@ -1583,17 +1535,17 @@ bool SimpleVideoPlayer::parse_mdia_(uint32_t size, bool is_video) {
       if (!this->parse_minf_(box_size - 8, is_video)) return false;
     } else if (box_type == make_fourcc('m', 'd', 'h', 'd')) {
       // Media header - get timescale
-      fseek(this->file_, 12, SEEK_CUR);  // Skip version/flags and times
-      uint32_t timescale = read_be32(this->file_);
+      this->cached_fseek_(12, SEEK_CUR);  // Skip version/flags and times
+      uint32_t timescale = this->read_be32_();
       if (is_video) {
         this->video_timescale_ = timescale;
       } else {
         this->audio_timescale_ = timescale;
       }
-      fseek(this->file_, box_size - 8 - 16, SEEK_CUR);
+      this->cached_fseek_(box_size - 8 - 16, SEEK_CUR);
     } else {
       if (box_size > 8) {
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        this->cached_fseek_(box_size - 8, SEEK_CUR);
       }
     }
   }
@@ -1602,9 +1554,9 @@ bool SimpleVideoPlayer::parse_mdia_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_minf_(uint32_t size, bool is_video) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
@@ -1612,7 +1564,7 @@ bool SimpleVideoPlayer::parse_minf_(uint32_t size, bool is_video) {
       if (!this->parse_stbl_(box_size - 8, is_video)) return false;
     } else {
       if (box_size > 8) {
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        this->cached_fseek_(box_size - 8, SEEK_CUR);
       }
     }
   }
@@ -1622,7 +1574,7 @@ bool SimpleVideoPlayer::parse_minf_(uint32_t size, bool is_video) {
 
 bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   ESP_LOGD(TAG, "Parsing stbl (is_video=%d, size=%u)", is_video, size);
-  long start_pos = ftell(this->file_);
+  long start_pos = this->cached_ftell_();
   long end_pos = start_pos + size;
 
   // First pass - collect sample info
@@ -1642,8 +1594,8 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   // CRITICAL FIX: Track if this is actually a video track (not audio)
   bool is_actual_video_track = true;  // Will be set to false if audio track detected
 
-  while (ftell(this->file_) < end_pos) {
-    long current_pos = ftell(this->file_);
+  while (this->cached_ftell_() < end_pos) {
+    long current_pos = this->cached_ftell_();
 
     // Safety check - don't go past end
     if (current_pos >= end_pos) {
@@ -1682,14 +1634,14 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
       ESP_LOGD(TAG, "  Reading stsz...");
-      fseek(this->file_, 4, SEEK_CUR);  // version/flags
-      uint32_t sample_size = read_be32(this->file_);
-      uint32_t count = read_be32(this->file_);
+      this->cached_fseek_(4, SEEK_CUR);  // version/flags
+      uint32_t sample_size = this->read_be32_();
+      uint32_t count = this->read_be32_();
 
       if (sample_size == 0) {
         sample_sizes.reserve(count);
         for (uint32_t i = 0; i < count; i++) {
-          sample_sizes.push_back(read_be32(this->file_));
+          sample_sizes.push_back(this->read_be32_());
         }
       } else {
         sample_sizes.assign(count, sample_size);
@@ -1698,21 +1650,21 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     } else if (box_type == make_fourcc('s', 't', 'c', 'o')) {
       // Chunk offsets
       ESP_LOGD(TAG, "  Reading stco...");
-      fseek(this->file_, 4, SEEK_CUR);  // version/flags
-      uint32_t count = read_be32(this->file_);
+      this->cached_fseek_(4, SEEK_CUR);  // version/flags
+      uint32_t count = this->read_be32_();
       chunk_offsets.reserve(count);
       for (uint32_t i = 0; i < count; i++) {
-        chunk_offsets.push_back(read_be32(this->file_));
+        chunk_offsets.push_back(this->read_be32_());
       }
       ESP_LOGD(TAG, "  stco: %u offsets", chunk_offsets.size());
     } else if (box_type == make_fourcc('s', 't', 't', 's')) {
       // Sample durations
       ESP_LOGD(TAG, "  Reading stts...");
-      fseek(this->file_, 4, SEEK_CUR);  // version/flags
-      uint32_t count = read_be32(this->file_);
+      this->cached_fseek_(4, SEEK_CUR);  // version/flags
+      uint32_t count = this->read_be32_();
       for (uint32_t i = 0; i < count; i++) {
-        uint32_t sample_count = read_be32(this->file_);
-        uint32_t duration = read_be32(this->file_);
+        uint32_t sample_count = this->read_be32_();
+        uint32_t duration = this->read_be32_();
         for (uint32_t j = 0; j < sample_count; j++) {
           sample_durations.push_back(duration);
         }
@@ -1721,25 +1673,25 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     } else if (box_type == make_fourcc('s', 't', 's', 's')) {
       // Sync samples (keyframes)
       ESP_LOGD(TAG, "  Reading stss...");
-      fseek(this->file_, 4, SEEK_CUR);  // version/flags
-      uint32_t count = read_be32(this->file_);
+      this->cached_fseek_(4, SEEK_CUR);  // version/flags
+      uint32_t count = this->read_be32_();
       keyframes.reserve(count);
       for (uint32_t i = 0; i < count; i++) {
-        keyframes.push_back(read_be32(this->file_));
+        keyframes.push_back(this->read_be32_());
       }
       ESP_LOGD(TAG, "  stss: %u keyframes", keyframes.size());
     } else if (box_type == make_fourcc('s', 't', 's', 'c')) {
       // Sample-to-Chunk table
       ESP_LOGI(TAG, "  Reading stsc (Sample-to-Chunk)...");
-      fseek(this->file_, 4, SEEK_CUR);  // version/flags
-      uint32_t count = read_be32(this->file_);
+      this->cached_fseek_(4, SEEK_CUR);  // version/flags
+      uint32_t count = this->read_be32_();
       sample_to_chunk.reserve(count);
       ESP_LOGI(TAG, "  stsc has %u entries:", count);
       for (uint32_t i = 0; i < count; i++) {
         SampleToChunk entry;
-        entry.first_chunk = read_be32(this->file_);
-        entry.samples_per_chunk = read_be32(this->file_);
-        entry.sample_description_index = read_be32(this->file_);
+        entry.first_chunk = this->read_be32_();
+        entry.samples_per_chunk = this->read_be32_();
+        entry.sample_description_index = this->read_be32_();
         sample_to_chunk.push_back(entry);
         ESP_LOGI(TAG, "    Entry %u: first_chunk=%u, samples_per_chunk=%u",
                  i, entry.first_chunk, entry.samples_per_chunk);
@@ -1748,7 +1700,7 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
     // Position to next box
     long next_box_pos = current_pos + box_size;
-    fseek(this->file_, next_box_pos, SEEK_SET);
+    this->cached_fseek_(next_box_pos, SEEK_SET);
     ESP_LOGD(TAG, "  Positioned to next box at %ld", next_box_pos);
   }
 
@@ -1870,16 +1822,16 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
-  fseek(this->file_, 4, SEEK_CUR);  // version/flags
-  uint32_t entry_count = read_be32(this->file_);
+  this->cached_fseek_(4, SEEK_CUR);  // version/flags
+  uint32_t entry_count = this->read_be32_();
 
   // CRITICAL FIX: Track whether this is actually a video or audio track
   bool found_video_codec = false;
   bool found_audio_codec = false;
 
   for (uint32_t i = 0; i < entry_count; i++) {
-    uint32_t entry_size = read_be32(this->file_);
-    uint32_t format = read_be32(this->file_);
+    uint32_t entry_size = this->read_be32_();
+    uint32_t format = this->read_be32_();
 
     if (format == make_fourcc('a', 'v', 'c', '1')) {
       this->parse_avc1_(entry_size - 8);
@@ -1889,7 +1841,7 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
       found_audio_codec = true;
     } else {
       if (entry_size > 8) {
-        fseek(this->file_, entry_size - 8, SEEK_CUR);
+        this->cached_fseek_(entry_size - 8, SEEK_CUR);
       }
     }
   }
@@ -1905,15 +1857,15 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
 }
 
 bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
-  long start_pos = ftell(this->file_);
+  long start_pos = this->cached_ftell_();
   long end_pos = start_pos + size;
 
   // Skip: 6 bytes reserved + 2 bytes data_reference_index + 16 bytes video pre-defined
-  fseek(this->file_, 24, SEEK_CUR);
+  this->cached_fseek_(24, SEEK_CUR);
 
   // Read width and height (2 bytes each, big-endian)
-  uint16_t vid_width = read_be16(this->file_);
-  uint16_t vid_height = read_be16(this->file_);
+  uint16_t vid_width = this->read_be16_();
+  uint16_t vid_height = this->read_be16_();
 
   // Update actual dimensions if not already set
   if (this->actual_width_ == 0 || this->actual_width_ == this->width_) {
@@ -1923,12 +1875,12 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   }
 
   // Skip remaining fields to get to child boxes (78 - 24 - 4 = 50 bytes)
-  fseek(this->file_, 50, SEEK_CUR);
+  this->cached_fseek_(50, SEEK_CUR);
   clearerr(this->file_);  // Clear any flags from previous operations
 
   // Parse child boxes to find avcC
-  while (ftell(this->file_) < end_pos && !feof(this->file_)) {
-    long current_pos = ftell(this->file_);
+  while (this->cached_ftell_() < end_pos && !this->cached_feof_()) {
+    long current_pos = this->cached_ftell_();
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) {
       clearerr(this->file_);  // Clear EOF flag immediately
@@ -1942,7 +1894,7 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
       if (box_size > 8 && box_size < 1000000) {  // Sanity check
         long next_pos = current_pos + box_size;
         if (next_pos <= end_pos) {
-          fseek(this->file_, next_pos, SEEK_SET);
+          this->cached_fseek_(next_pos, SEEK_SET);
         } else {
           break;
         }
@@ -1953,38 +1905,38 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   }
 
   // Ensure we're at the end of this box
-  fseek(this->file_, end_pos, SEEK_SET);
+  this->cached_fseek_(end_pos, SEEK_SET);
   clearerr(this->file_);  // Clear any EOF/error flags
 
   return true;
 }
 
 bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
-  fseek(this->file_, 4, SEEK_CUR);  // configurationVersion, profile, compatibility, level
+  this->cached_fseek_(4, SEEK_CUR);  // configurationVersion, profile, compatibility, level
 
   uint8_t len_size_minus_one;
-  fread(&len_size_minus_one, 1, 1, this->file_);
+  this->cached_fread_(&len_size_minus_one, 1, 1);
   this->nal_length_size_ = (len_size_minus_one & 0x03) + 1;
 
   // Read SPS
   uint8_t num_sps;
-  fread(&num_sps, 1, 1, this->file_);
+  this->cached_fread_(&num_sps, 1, 1);
   num_sps &= 0x1F;
 
   for (int i = 0; i < num_sps; i++) {
-    uint16_t sps_len = read_be16(this->file_);
+    uint16_t sps_len = this->read_be16_();
     this->sps_.resize(sps_len);
-    fread(this->sps_.data(), 1, sps_len, this->file_);
+    this->cached_fread_(this->sps_.data(), 1, sps_len);
   }
 
   // Read PPS
   uint8_t num_pps;
-  fread(&num_pps, 1, 1, this->file_);
+  this->cached_fread_(&num_pps, 1, 1);
 
   for (int i = 0; i < num_pps; i++) {
-    uint16_t pps_len = read_be16(this->file_);
+    uint16_t pps_len = this->read_be16_();
     this->pps_.resize(pps_len);
-    fread(this->pps_.data(), 1, pps_len, this->file_);
+    this->cached_fread_(this->pps_.data(), 1, pps_len);
   }
 
   ESP_LOGI(TAG, "avcC: NAL length size=%d, SPS=%d bytes, PPS=%d bytes",
@@ -1994,14 +1946,14 @@ bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
-  long start_pos = ftell(this->file_);
+  long start_pos = this->cached_ftell_();
   long end_pos = start_pos + size;
 
   // Skip to esds
-  fseek(this->file_, 28, SEEK_CUR);  // Skip fixed mp4a header
+  this->cached_fseek_(28, SEEK_CUR);  // Skip fixed mp4a header
   clearerr(this->file_);  // Clear any flags from previous operations
 
-  while (ftell(this->file_) < end_pos && !feof(this->file_)) {
+  while (this->cached_ftell_() < end_pos && !this->cached_feof_()) {
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) {
       clearerr(this->file_);  // Clear EOF flag immediately
@@ -2013,42 +1965,42 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
       break;  // We found esds, no need to continue
     } else {
       if (box_size > 8 && box_size < 1000000) {  // Sanity check
-        fseek(this->file_, box_size - 8, SEEK_CUR);
+        this->cached_fseek_(box_size - 8, SEEK_CUR);
       }
     }
   }
 
   // Ensure we're at the end of this box
-  fseek(this->file_, end_pos, SEEK_SET);
+  this->cached_fseek_(end_pos, SEEK_SET);
   clearerr(this->file_);  // Clear any EOF/error flags
 
   return true;
 }
 
 bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
-  long start_pos = ftell(this->file_);
+  long start_pos = this->cached_ftell_();
   long end_pos = start_pos + size;
 
   // Skip version/flags
-  fseek(this->file_, 4, SEEK_CUR);
+  this->cached_fseek_(4, SEEK_CUR);
 
   // Parse ES descriptor
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint8_t tag;
-    if (fread(&tag, 1, 1, this->file_) != 1) break;
+    if (this->cached_fread_(&tag, 1, 1) != 1) break;
 
     // Read descriptor length (variable length encoding)
     uint32_t len = 0;
     uint8_t b;
     do {
-      if (fread(&b, 1, 1, this->file_) != 1) break;
+      if (this->cached_fread_(&b, 1, 1) != 1) break;
       len = (len << 7) | (b & 0x7F);
     } while (b & 0x80);
 
     if (tag == 0x05) {  // DecoderSpecificInfo
       // This is the AAC config
       this->audio_config_.resize(len);
-      fread(this->audio_config_.data(), 1, len, this->file_);
+      this->cached_fread_(this->audio_config_.data(), 1, len);
       this->has_audio_ = true;
       ESP_LOGI(TAG, "Found AAC config: %d bytes", len);
       break;
@@ -2057,17 +2009,17 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
       if (tag == 0x03 || tag == 0x04) {
         // ES_Descriptor or DecoderConfigDescriptor - continue parsing
         if (tag == 0x03) {
-          fseek(this->file_, 3, SEEK_CUR);  // Skip ES_ID and flags
+          this->cached_fseek_(3, SEEK_CUR);  // Skip ES_ID and flags
         } else if (tag == 0x04) {
-          fseek(this->file_, 13, SEEK_CUR);  // Skip decoder config
+          this->cached_fseek_(13, SEEK_CUR);  // Skip decoder config
         }
       } else {
-        fseek(this->file_, len, SEEK_CUR);
+        this->cached_fseek_(len, SEEK_CUR);
       }
     }
   }
 
-  fseek(this->file_, end_pos, SEEK_SET);
+  this->cached_fseek_(end_pos, SEEK_SET);
   return true;
 }
 
@@ -2134,7 +2086,7 @@ bool SimpleVideoPlayer::read_next_audio_sample_() {
   AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
 
   // Seek to sample position
-  fseek(this->file_, sample.offset, SEEK_SET);
+  this->cached_fseek_(sample.offset, SEEK_SET);
 
   // Read sample data
   if (sample.size > 8192) {
@@ -2143,7 +2095,7 @@ bool SimpleVideoPlayer::read_next_audio_sample_() {
     return false;
   }
 
-  size_t bytes_read = fread(this->audio_input_buffer_, 1, sample.size, this->file_);
+  size_t bytes_read = this->cached_fread_(this->audio_input_buffer_, 1, sample.size);
   if (bytes_read != sample.size) {
     return false;
   }
@@ -2240,7 +2192,7 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   }
 
   // Seek to sample position
-  fseek(this->file_, sample.offset, SEEK_SET);
+  this->cached_fseek_(sample.offset, SEEK_SET);
 
   // Read sample data
   if (sample.size > this->buffer_size_) {
@@ -2249,7 +2201,7 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
     return false;
   }
 
-  size_t bytes_read = fread(this->input_buffer_, 1, sample.size, this->file_);
+  size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, sample.size);
   if (bytes_read != sample.size) {
     ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
     return false;
@@ -2539,7 +2491,7 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
 
 uint64_t SimpleVideoPlayer::read_ebml_id_() {
   uint8_t first_byte;
-  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+  if (this->cached_fread_(&first_byte, 1, 1) != 1) {
     return 0;
   }
 
@@ -2554,7 +2506,7 @@ uint64_t SimpleVideoPlayer::read_ebml_id_() {
   uint64_t id = first_byte;
   for (int i = 1; i < len; i++) {
     uint8_t byte;
-    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    if (this->cached_fread_(&byte, 1, 1) != 1) return 0;
     id = (id << 8) | byte;
   }
 
@@ -2563,7 +2515,7 @@ uint64_t SimpleVideoPlayer::read_ebml_id_() {
 
 uint64_t SimpleVideoPlayer::read_ebml_size_() {
   uint8_t first_byte;
-  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+  if (this->cached_fread_(&first_byte, 1, 1) != 1) {
     return 0;
   }
 
@@ -2583,7 +2535,7 @@ uint64_t SimpleVideoPlayer::read_ebml_size_() {
   uint64_t size = first_byte & mask;
   for (int i = 1; i < len; i++) {
     uint8_t byte;
-    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    if (this->cached_fread_(&byte, 1, 1) != 1) return 0;
     size = (size << 8) | byte;
   }
 
@@ -2592,7 +2544,7 @@ uint64_t SimpleVideoPlayer::read_ebml_size_() {
 
 uint64_t SimpleVideoPlayer::read_ebml_vint_() {
   uint8_t first_byte;
-  if (fread(&first_byte, 1, 1, this->file_) != 1) {
+  if (this->cached_fread_(&first_byte, 1, 1) != 1) {
     return 0;
   }
 
@@ -2612,7 +2564,7 @@ uint64_t SimpleVideoPlayer::read_ebml_vint_() {
   uint64_t value = first_byte & mask;
   for (int i = 1; i < len; i++) {
     uint8_t byte;
-    if (fread(&byte, 1, 1, this->file_) != 1) return 0;
+    if (this->cached_fread_(&byte, 1, 1) != 1) return 0;
     value = (value << 8) | byte;
   }
 
@@ -2623,7 +2575,7 @@ bool SimpleVideoPlayer::read_ebml_uint_(uint64_t size, uint64_t &value) {
   value = 0;
   for (uint64_t i = 0; i < size && i < 8; i++) {
     uint8_t byte;
-    if (fread(&byte, 1, 1, this->file_) != 1) return false;
+    if (this->cached_fread_(&byte, 1, 1) != 1) return false;
     value = (value << 8) | byte;
   }
   return true;
@@ -2632,7 +2584,7 @@ bool SimpleVideoPlayer::read_ebml_uint_(uint64_t size, uint64_t &value) {
 bool SimpleVideoPlayer::read_ebml_string_(uint64_t size, std::string &value) {
   if (size > 1024) return false;  // Sanity check
   value.resize(size);
-  return fread(&value[0], 1, size, this->file_) == size;
+  return this->cached_fread_(&value[0], 1, size) == size;
 }
 
 bool SimpleVideoPlayer::parse_mkv_() {
@@ -2646,7 +2598,7 @@ bool SimpleVideoPlayer::parse_mkv_() {
   }
 
   uint64_t header_size = read_ebml_size_();
-  fseek(this->file_, header_size, SEEK_CUR);  // Skip EBML header content
+  this->cached_fseek_(header_size, SEEK_CUR);  // Skip EBML header content
 
   // Read Segment
   id = read_ebml_id_();
@@ -2656,7 +2608,7 @@ bool SimpleVideoPlayer::parse_mkv_() {
   }
 
   uint64_t segment_size = read_ebml_size_();
-  this->mkv_segment_start_ = ftell(this->file_);
+  this->mkv_segment_start_ = this->cached_ftell_();
 
   return parse_mkv_segment_(segment_size);
 }
@@ -2664,12 +2616,12 @@ bool SimpleVideoPlayer::parse_mkv_() {
 bool SimpleVideoPlayer::parse_mkv_segment_(uint64_t size) {
   uint64_t end_pos = this->mkv_segment_start_ + size;
 
-  while (ftell(this->file_) < (long)end_pos) {
+  while (this->cached_ftell_() < (long)end_pos) {
     uint64_t id = read_ebml_id_();
     if (id == 0) break;
 
     uint64_t elem_size = read_ebml_size_();
-    long elem_start = ftell(this->file_);
+    long elem_start = this->cached_ftell_();
 
     if (id == EBML_ID_INFO) {
       if (!parse_mkv_info_(elem_size)) {
@@ -2686,7 +2638,7 @@ bool SimpleVideoPlayer::parse_mkv_segment_(uint64_t size) {
       break;
     } else {
       // Skip unknown elements
-      fseek(this->file_, elem_start + elem_size, SEEK_SET);
+      this->cached_fseek_(elem_start + elem_size, SEEK_SET);
     }
   }
 
@@ -2694,9 +2646,9 @@ bool SimpleVideoPlayer::parse_mkv_segment_(uint64_t size) {
 }
 
 bool SimpleVideoPlayer::parse_mkv_info_(uint64_t size) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint64_t id = read_ebml_id_();
     if (id == 0) break;
 
@@ -2708,9 +2660,9 @@ bool SimpleVideoPlayer::parse_mkv_info_(uint64_t size) {
     } else if (id == EBML_ID_DURATION) {
       // Duration is a float in Matroska timecode units
       // For simplicity, we'll skip it and calculate from samples
-      fseek(this->file_, elem_size, SEEK_CUR);
+      this->cached_fseek_(elem_size, SEEK_CUR);
     } else {
-      fseek(this->file_, elem_size, SEEK_CUR);
+      this->cached_fseek_(elem_size, SEEK_CUR);
     }
   }
 
@@ -2718,9 +2670,9 @@ bool SimpleVideoPlayer::parse_mkv_info_(uint64_t size) {
 }
 
 bool SimpleVideoPlayer::parse_mkv_tracks_(uint64_t size) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint64_t id = read_ebml_id_();
     if (id == 0) break;
 
@@ -2731,7 +2683,7 @@ bool SimpleVideoPlayer::parse_mkv_tracks_(uint64_t size) {
         ESP_LOGW(TAG, "Failed to parse TrackEntry");
       }
     } else {
-      fseek(this->file_, elem_size, SEEK_CUR);
+      this->cached_fseek_(elem_size, SEEK_CUR);
     }
   }
 
@@ -2740,18 +2692,18 @@ bool SimpleVideoPlayer::parse_mkv_tracks_(uint64_t size) {
 }
 
 bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
-  long end_pos = ftell(this->file_) + size;
+  long end_pos = this->cached_ftell_() + size;
   uint16_t track_number = 0;
   uint64_t track_type = 0;
   std::string codec_id;
   int width = 0, height = 0;
 
-  while (ftell(this->file_) < end_pos) {
+  while (this->cached_ftell_() < end_pos) {
     uint64_t id = read_ebml_id_();
     if (id == 0) break;
 
     uint64_t elem_size = read_ebml_size_();
-    long elem_start = ftell(this->file_);
+    long elem_start = this->cached_ftell_();
 
     if (id == EBML_ID_TRACK_NUMBER) {
       uint64_t num;
@@ -2764,7 +2716,7 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
     } else if (id == EBML_ID_VIDEO) {
       // Parse video dimensions
       long video_end = elem_start + elem_size;
-      while (ftell(this->file_) < video_end) {
+      while (this->cached_ftell_() < video_end) {
         uint64_t vid_id = read_ebml_id_();
         uint64_t vid_size = read_ebml_size_();
         if (vid_id == EBML_ID_PIXEL_WIDTH) {
@@ -2776,14 +2728,14 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
           read_ebml_uint_(vid_size, h);
           height = (int)h;
         } else {
-          fseek(this->file_, vid_size, SEEK_CUR);
+          this->cached_fseek_(vid_size, SEEK_CUR);
         }
       }
     } else if (id == EBML_ID_CODEC_PRIVATE) {
       // For H.264, this contains SPS/PPS in AVCC format (same as MP4 avcC box)
       if (codec_id == "V_MPEG4/ISO/AVC" || codec_id == "V_AVC") {
         std::vector<uint8_t> codec_private(elem_size);
-        fread(codec_private.data(), 1, elem_size, this->file_);
+        this->cached_fread_(codec_private.data(), 1, elem_size);
 
         // Parse AVCC format to extract SPS/PPS
         if (elem_size > 7) {
@@ -2826,10 +2778,10 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
                    this->nal_length_size_, this->sps_.size(), this->pps_.size());
         }
       } else {
-        fseek(this->file_, elem_size, SEEK_CUR);
+        this->cached_fseek_(elem_size, SEEK_CUR);
       }
     } else {
-      fseek(this->file_, elem_start + elem_size, SEEK_SET);
+      this->cached_fseek_(elem_start + elem_size, SEEK_SET);
     }
   }
 
@@ -2854,7 +2806,7 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
 
 bool SimpleVideoPlayer::parse_mkv_clusters_() {
   // Seek to first cluster
-  fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+  this->cached_fseek_(this->mkv_cluster_start_, SEEK_SET);
 
   uint64_t cluster_timecode = 0;
   int sample_count = 0;
@@ -2862,24 +2814,24 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
 
   ESP_LOGI(TAG, "Pre-parsing MKV clusters (max %d samples)...", max_samples);
 
-  while (sample_count < max_samples && !feof(this->file_)) {
+  while (sample_count < max_samples && !this->cached_feof_()) {
     uint64_t id = read_ebml_id_();
     if (id == 0) break;
 
     uint64_t elem_size = read_ebml_size_();
-    long elem_start = ftell(this->file_);
+    long elem_start = this->cached_ftell_();
     long elem_end = elem_start + elem_size;
 
     if (id == EBML_ID_CLUSTER) {
       // Parse cluster
       cluster_timecode = 0;
 
-      while (ftell(this->file_) < elem_end && sample_count < max_samples) {
+      while (this->cached_ftell_() < elem_end && sample_count < max_samples) {
         uint64_t cid = read_ebml_id_();
         if (cid == 0) break;
 
         uint64_t csize = read_ebml_size_();
-        long cstart = ftell(this->file_);
+        long cstart = this->cached_ftell_();
 
         if (cid == EBML_ID_TIMECODE) {
           read_ebml_uint_(csize, cluster_timecode);
@@ -2895,12 +2847,12 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
 
           // Read relative timecode (int16 big-endian)
           int16_t relative_tc;
-          fread(&relative_tc, 2, 1, this->file_);
+          this->cached_fread_(&relative_tc, 2, 1);
           relative_tc = (relative_tc >> 8) | ((relative_tc & 0xFF) << 8);
 
           // Read flags
           uint8_t flags;
-          fread(&flags, 1, 1, this->file_);
+          this->cached_fread_(&flags, 1, 1);
           sample.is_keyframe = (flags & 0x80) != 0;
 
           // Calculate absolute timestamp
@@ -2917,15 +2869,15 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
             sample_count++;
           }
 
-          fseek(this->file_, cstart + csize, SEEK_SET);
+          this->cached_fseek_(cstart + csize, SEEK_SET);
         } else {
-          fseek(this->file_, cstart + csize, SEEK_SET);
+          this->cached_fseek_(cstart + csize, SEEK_SET);
         }
       }
 
-      fseek(this->file_, elem_end, SEEK_SET);
+      this->cached_fseek_(elem_end, SEEK_SET);
     } else {
-      fseek(this->file_, elem_end, SEEK_SET);
+      this->cached_fseek_(elem_end, SEEK_SET);
     }
   }
 
@@ -2955,7 +2907,7 @@ bool SimpleVideoPlayer::parse_mkv_clusters_() {
            this->total_frames_, (unsigned long)this->total_duration_ms_, keyframe_count);
 
   // Reset to first cluster for playback
-  fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+  this->cached_fseek_(this->mkv_cluster_start_, SEEK_SET);
   return this->total_frames_ > 0;
 }
 
@@ -2965,7 +2917,7 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
       this->current_mkv_sample_ = 0;
       this->frame_count_ = 0;
       this->sps_pps_sent_ = false;
-      fseek(this->file_, this->mkv_cluster_start_, SEEK_SET);
+      this->cached_fseek_(this->mkv_cluster_start_, SEEK_SET);
     } else {
       return false;
     }
@@ -2979,23 +2931,23 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
   }
 
   // Seek to sample
-  fseek(this->file_, sample.offset, SEEK_SET);
+  this->cached_fseek_(sample.offset, SEEK_SET);
 
   // Save position before reading header
-  long header_start = ftell(this->file_);
+  long header_start = this->cached_ftell_();
 
   // Skip SimpleBlock header (track number, timecode, flags)
   // Track number is EBML variable-length integer (1-8 bytes)
   uint64_t track_num = this->read_ebml_vint_();
 
   // Skip relative timecode (2 bytes)
-  fseek(this->file_, 2, SEEK_CUR);
+  this->cached_fseek_(2, SEEK_CUR);
 
   // Skip flags (1 byte)
-  fseek(this->file_, 1, SEEK_CUR);
+  this->cached_fseek_(1, SEEK_CUR);
 
   // Calculate header size and frame size
-  long frame_start = ftell(this->file_);
+  long frame_start = this->cached_ftell_();
   uint32_t header_size = frame_start - header_start;
   uint32_t frame_size = sample.size - header_size;
 
@@ -3011,7 +2963,7 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
     return false;
   }
 
-  size_t bytes_read = fread(this->input_buffer_, 1, frame_size, this->file_);
+  size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, frame_size);
   if (bytes_read != frame_size) {
     ESP_LOGW(TAG, "Failed to read MKV sample: expected %u bytes, got %zu", frame_size, bytes_read);
     return false;
@@ -3251,7 +3203,7 @@ void SimpleVideoPlayer::play() {
 
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
-      fseek(this->file_, 0, SEEK_SET);
+      this->cached_fseek_(0, SEEK_SET);
     } else if (this->format_ == MediaFormat::MP4_H264) {
       this->current_video_sample_ = 0;
       this->sps_pps_sent_ = false;
@@ -3335,7 +3287,7 @@ void SimpleVideoPlayer::stop() {
   }
 
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
-    fseek(this->file_, 0, SEEK_SET);
+    this->cached_fseek_(0, SEEK_SET);
   } else if (this->format_ == MediaFormat::MP4_H264) {
     this->current_video_sample_ = 0;
     this->sps_pps_sent_ = false;
@@ -3473,7 +3425,7 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
   if (player->format_ == MediaFormat::MJPEG) {
     long new_pos = (player->file_size_ * value) / 100;
     if (player->file_ != nullptr) {
-      fseek(player->file_, new_pos, SEEK_SET);
+      player->cached_fseek_(new_pos, SEEK_SET);
       player->current_pos_ = new_pos;
     }
   } else if (player->format_ == MediaFormat::MP4_H264) {
