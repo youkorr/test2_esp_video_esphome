@@ -69,6 +69,13 @@ void SimpleVideoPlayer::setup() {
     return;  // Exit setup early, complete initialization in loop()
   }
 
+  // 🚀 Load file to PSRAM cache if enabled (eliminates SD card overhead)
+  if (this->use_file_cache_) {
+    if (!this->load_file_to_cache_()) {
+      ESP_LOGW(TAG, "Failed to load file to cache, continuing with normal SD access");
+    }
+  }
+
   // Detect format
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
@@ -799,6 +806,87 @@ bool SimpleVideoPlayer::open_video_file_() {
   return true;
 }
 
+// ============================================================================
+// 🚀 PSRAM File Cache - Load entire file to memory (eliminates SD overhead)
+// ============================================================================
+bool SimpleVideoPlayer::load_file_to_cache_() {
+  if (!this->use_file_cache_ || this->file_cache_loaded_) {
+    return true;  // Already loaded or not enabled
+  }
+
+  if (this->file_ == nullptr) {
+    ESP_LOGE(TAG, "Cannot load to cache: file not opened");
+    return false;
+  }
+
+  // Check file size
+  if (this->file_size_ <= 0 || this->file_size_ > 32 * 1024 * 1024) {
+    ESP_LOGW(TAG, "File too large for PSRAM cache: %ld bytes (max 32MB)", this->file_size_);
+    this->use_file_cache_ = false;  // Disable cache for this file
+    return true;  // Continue without cache
+  }
+
+  ESP_LOGI(TAG, "🚀 Loading file to PSRAM cache: %ld bytes (%.2f MB)...",
+           this->file_size_, this->file_size_ / (1024.0f * 1024.0f));
+
+  uint32_t start_time = esp_timer_get_time() / 1000;
+
+  // Allocate PSRAM buffer with cache alignment for optimal access
+  this->file_cache_buffer_ = (uint8_t *)heap_caps_aligned_alloc(
+      128,  // 128-byte alignment for cache optimization
+      this->file_size_,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+  if (this->file_cache_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate %ld bytes PSRAM for file cache", this->file_size_);
+    this->use_file_cache_ = false;
+    return true;  // Continue without cache
+  }
+
+  // Load file in 64KB chunks for progress feedback
+  const size_t CHUNK_SIZE = 65536;
+  size_t bytes_loaded = 0;
+  fseek(this->file_, 0, SEEK_SET);
+
+  while (bytes_loaded < (size_t)this->file_size_) {
+    size_t to_read = std::min(CHUNK_SIZE, (size_t)this->file_size_ - bytes_loaded);
+    size_t read = fread(this->file_cache_buffer_ + bytes_loaded, 1, to_read, this->file_);
+
+    if (read != to_read) {
+      ESP_LOGE(TAG, "Failed to read file chunk: got %u, expected %u", read, to_read);
+      heap_caps_free(this->file_cache_buffer_);
+      this->file_cache_buffer_ = nullptr;
+      this->use_file_cache_ = false;
+      fseek(this->file_, 0, SEEK_SET);
+      return true;  // Continue without cache
+    }
+
+    bytes_loaded += read;
+
+    // Progress every 1MB
+    if (bytes_loaded % (1024 * 1024) == 0) {
+      ESP_LOGI(TAG, "   Loading... %.1f MB / %.1f MB",
+               bytes_loaded / (1024.0f * 1024.0f),
+               this->file_size_ / (1024.0f * 1024.0f));
+    }
+  }
+
+  this->file_cache_size_ = bytes_loaded;
+  this->file_cache_pos_ = 0;
+  this->file_cache_loaded_ = true;
+
+  uint32_t load_time = (esp_timer_get_time() / 1000) - start_time;
+  float speed_mbps = (this->file_size_ / 1024.0f / 1024.0f) / (load_time / 1000.0f);
+
+  ESP_LOGI(TAG, "✅ File cached to PSRAM in %lu ms (%.2f MB/s)", load_time, speed_mbps);
+  ESP_LOGI(TAG, "   All video reads will now use RAM instead of SD card!");
+
+  // Reset file position for cached reading
+  fseek(this->file_, 0, SEEK_SET);
+
+  return true;
+}
+
 MediaFormat SimpleVideoPlayer::detect_format_() {
   if (this->file_ == nullptr) return MediaFormat::UNKNOWN;
 
@@ -1077,6 +1165,53 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     return false;
   }
 
+  // 🚀 Cache-aware file I/O wrappers - Use PSRAM cache if loaded, otherwise use SD card
+  auto cache_fread = [this](void* ptr, size_t size, size_t count) -> size_t {
+    if (this->file_cache_loaded_) {
+      size_t bytes = size * count;
+      size_t available = this->file_cache_size_ - this->file_cache_pos_;
+      size_t to_read = std::min(bytes, available);
+      if (to_read > 0) {
+        memcpy(ptr, this->file_cache_buffer_ + this->file_cache_pos_, to_read);
+        this->file_cache_pos_ += to_read;
+      }
+      return to_read / size;  // Return number of items read
+    } else {
+      return fread(ptr, size, count, this->file_);
+    }
+  };
+
+  auto cache_fseek = [this](long offset, int whence) -> int {
+    if (this->file_cache_loaded_) {
+      if (whence == SEEK_SET) {
+        this->file_cache_pos_ = std::min((size_t)offset, this->file_cache_size_);
+      } else if (whence == SEEK_CUR) {
+        this->file_cache_pos_ = std::min(this->file_cache_pos_ + offset, this->file_cache_size_);
+      } else if (whence == SEEK_END) {
+        this->file_cache_pos_ = this->file_cache_size_;
+      }
+      return 0;  // Success
+    } else {
+      return fseek(this->file_, offset, whence);
+    }
+  };
+
+  auto cache_ftell = [this]() -> long {
+    if (this->file_cache_loaded_) {
+      return (long)this->file_cache_pos_;
+    } else {
+      return ftell(this->file_);
+    }
+  };
+
+  auto cache_feof = [this]() -> int {
+    if (this->file_cache_loaded_) {
+      return this->file_cache_pos_ >= this->file_cache_size_ ? 1 : 0;
+    } else {
+      return feof(this->file_);
+    }
+  };
+
   if (this->is_avi_format_) {
     // AVI format: Read chunks with FourCC headers
     // OPTIMIZED: Use buffered reading to reduce SD card seeks
@@ -1091,16 +1226,16 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
     // First frame: seek to movi offset
     if (this->frame_count_ == 0 && this->avi_movi_offset_ > 0) {
-      fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
+      cache_fseek(this->avi_movi_offset_, SEEK_SET);
     }
 
     // Read chunk header (8 bytes: 4-byte FourCC + 4-byte size)
-    while (!feof(this->file_)) {
+    while (!cache_feof()) {
       uint8_t chunk_header[8];
-      if (fread(chunk_header, 1, 8, this->file_) != 8) {
+      if (cache_fread(chunk_header, 1, 8) != 8) {
         // End of file
         if (this->loop_) {
-          fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
+          cache_fseek(this->avi_movi_offset_, SEEK_SET);
           this->frame_count_ = 0;
           return this->read_next_mjpeg_frame_();
         }
@@ -1119,8 +1254,8 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
       total_chunks_read++;
 
       if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
-        // Read JPEG data directly (already buffered by setvbuf)
-        size_t bytes_read = fread(this->input_buffer_, 1, chunk_size, this->file_);
+        // Read JPEG data directly (from cache or SD card via wrapper)
+        size_t bytes_read = cache_fread(this->input_buffer_, 1, chunk_size);
         if (bytes_read != chunk_size) {
           ESP_LOGW(TAG, "AVI: Failed to read video chunk: got %u, expected %u", bytes_read, chunk_size);
           return false;
@@ -1130,10 +1265,9 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         this->frame_count_++;
 
         // AVI chunks are word-aligned (2 bytes), skip padding byte if needed
-        // OPTIMIZED: Use fread instead of fgetc for better buffering
         if (chunk_size % 2 != 0) {
           uint8_t padding;
-          fread(&padding, 1, 1, this->file_);
+          cache_fread(&padding, 1, 1);
         }
 
         // 🔍 DIAGNOSTICS: Log I/O stats every 30 frames
@@ -1148,17 +1282,18 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
         return true;
       } else {
         // Skip this chunk (audio, index, or too large)
-        // OPTIMIZED: For large skips, use fseek; for small, read into temp buffer
+        // OPTIMIZED: For large skips, use seek; for small, read into temp buffer
+        // NOTE: With PSRAM cache, both operations are equally fast (just pointer math)
         if (chunk_size > 4096) {
-          // Large chunk: use fseek
-          fseek(this->file_, chunk_size + (chunk_size % 2), SEEK_CUR);
+          // Large chunk: use seek
+          cache_fseek(chunk_size + (chunk_size % 2), SEEK_CUR);
           total_fseek_calls++;
           total_bytes_seeked += chunk_size + (chunk_size % 2);
         } else {
-          // Small chunk: read and discard (avoids seek overhead)
+          // Small chunk: read and discard
           static uint8_t skip_buf[4096];
           size_t to_skip = chunk_size + (chunk_size % 2);
-          fread(skip_buf, 1, to_skip, this->file_);
+          cache_fread(skip_buf, 1, to_skip);
           total_fread_skip_calls++;
           total_bytes_read_skip += to_skip;
         }
@@ -1167,7 +1302,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
     // EOF reached
     if (this->loop_) {
-      fseek(this->file_, this->avi_movi_offset_, SEEK_SET);
+      cache_fseek(this->avi_movi_offset_, SEEK_SET);
       this->frame_count_ = 0;
       return this->read_next_mjpeg_frame_();
     }
@@ -1185,12 +1320,12 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     while (!found_start) {
       if (buf_pos >= buf_size) {
         // Refill buffer
-        buf_size = fread(read_buf, 1, sizeof(read_buf), this->file_);
+        buf_size = cache_fread(read_buf, 1, sizeof(read_buf));
         buf_pos = 0;
         if (buf_size == 0) {
           // End of file
           if (this->loop_) {
-            fseek(this->file_, 0, SEEK_SET);
+            cache_fseek(0, SEEK_SET);
             this->frame_count_ = 0;
             return this->read_next_mjpeg_frame_();
           }
@@ -1219,7 +1354,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     while (this->input_size_ < this->buffer_size_ - 1) {
       if (buf_pos >= buf_size) {
         // Refill buffer
-        buf_size = fread(read_buf, 1, sizeof(read_buf), this->file_);
+        buf_size = cache_fread(read_buf, 1, sizeof(read_buf));
         buf_pos = 0;
         if (buf_size == 0) break;  // EOF
       }
@@ -1240,10 +1375,10 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     }
 
     // Adjust file position (we may have read ahead in buffer)
-    long current_file_pos = ftell(this->file_);
-    fseek(this->file_, current_file_pos - (buf_size - buf_pos), SEEK_SET);
+    long current_file_pos = cache_ftell();
+    cache_fseek(current_file_pos - (buf_size - buf_pos), SEEK_SET);
 
-    this->current_pos_ = ftell(this->file_);
+    this->current_pos_ = cache_ftell();
     this->frame_count_++;
 
     return this->input_size_ > 2;
