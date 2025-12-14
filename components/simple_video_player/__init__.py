@@ -28,6 +28,7 @@ CONF_SPEAKER = "speaker"
 CONF_MEDIA_PLAYER_ENTITY = "media_player_entity"
 CONF_FPS = "fps"
 CONF_MAX_HTTP_FILE_SIZE = "max_http_file_size"
+CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -43,6 +44,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MEDIA_PLAYER_ENTITY): cv.string,
     cv.Optional(CONF_FPS): cv.positive_float,
     cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=40 * 1024 * 1024): cv.positive_int,  # 40MB default
+    cv.Optional(CONF_PRELOAD_TO_MEMORY, default=False): cv.boolean,  # 🚀 PSRAM cache for fast SD-free playback
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -62,6 +64,7 @@ async def to_code(config):
         cg.add(var.set_fps(config[CONF_FPS]))
 
     cg.add(var.set_max_http_file_size(config[CONF_MAX_HTTP_FILE_SIZE]))
+    cg.add(var.set_preload_to_memory(config[CONF_PRELOAD_TO_MEMORY]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

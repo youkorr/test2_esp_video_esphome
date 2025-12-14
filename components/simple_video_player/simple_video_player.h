@@ -99,6 +99,7 @@ class SimpleVideoPlayer : public Component {
     }
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
+  void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
 
   void setup() override;
   void loop() override;
@@ -123,6 +124,9 @@ class SimpleVideoPlayer : public Component {
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
+
+  // 🚀 PSRAM File Cache - Load entire file to memory to eliminate SD overhead
+  bool load_file_to_cache_();
 
   bool init_gif_decoder_();
   bool parse_gif_header_();
@@ -223,6 +227,13 @@ class SimpleVideoPlayer : public Component {
   bool http_download_pending_{false};  // true if HTTP download needs to happen in loop()
   bool initialization_complete_{false};  // true if video player is fully initialized
   bool auto_play_after_download_{false};  // true if should auto-play after re-downloading
+
+  // 🚀 PSRAM File Cache - Eliminate SD card overhead by loading entire file to RAM
+  uint8_t *file_cache_buffer_{nullptr};  // Entire file loaded into PSRAM
+  size_t file_cache_size_{0};            // Actual file size in cache
+  size_t file_cache_pos_{0};             // Current read position in cache
+  bool use_file_cache_{false};           // Enable PSRAM caching (for small files <32MB)
+  bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};
