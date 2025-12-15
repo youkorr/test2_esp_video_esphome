@@ -1,4 +1,4 @@
-#include "mipi_dsi_cam.h"
+#include "esp_cam_sensor_camera.h"
 #include "esphome/core/hal.h"
 #include "esp_err.h"
 #include "esp_log.h"
