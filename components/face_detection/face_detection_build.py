@@ -211,7 +211,7 @@ if os.path.exists(esp_dl_dir):
 
     print("[Face Detection] ESP-DL includes added")
 
-    # ESP-DL source files - specific directories
+    # ESP-DL source files - ONLY essential for face detection
     esp_dl_source_dirs = [
         "dl/tensor/src",
         "dl/model/src",
@@ -219,19 +219,30 @@ if os.path.exists(esp_dl_dir):
         "dl/tool/src",
         "dl/math/src",
         "fbs_loader/src",
-        "vision/image",
-        "vision/detect",
-        "vision/recognition",
+        "vision/image",          # Image processing (required)
+        "vision/recognition",    # Face recognition (required)
+        # NOTE: vision/detect NOT included (YOLO11, pose detection, etc. - not needed)
     ]
 
-    # Files to exclude
+    # Files to exclude (not needed for face detection)
     esp_dl_exclude = [
-        "dl_base_dotprod.cpp",  # Use custom implementation
-        "dl_image_jpeg.cpp",
-        "dl_image_bmp.cpp",
+        "dl_base_dotprod.cpp",       # Use custom implementation
+        "dl_image_jpeg.cpp",         # JPEG not used
+        "dl_image_bmp.cpp",          # BMP not used
+        # Exclude detection files (YOLO, pose, etc.)
+        "dl_detect_yolo11_postprocessor.cpp",
+        "dl_pose_yolo11_postprocessor.cpp",
+        "dl_detect_espdet_postprocessor.cpp",
+        "dl_detect_msr_postprocessor.cpp",
+        "dl_detect_pico_postprocessor.cpp",
+        "dl_detect_mnp_postprocessor.cpp",
+        "dl_detect_postprocessor.cpp",
+        "dl_detect_base.cpp",
     ]
 
-    esp_dl_count = 0
+    # Count files by category for better visibility
+    sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
+
     # Add sources from specific directories
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
@@ -239,7 +250,10 @@ if os.path.exists(esp_dl_dir):
             for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                 if os.path.basename(src_file) not in esp_dl_exclude:
                     sources_to_add.append(src_file)
-                    esp_dl_count += 1
+                    if "vision" in src_dir:
+                        sources_count["vision"] += 1
+                    else:
+                        sources_count["core"] += 1
 
     # Add ALL dl/base/*.cpp files (required for neural network operations)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
@@ -247,30 +261,25 @@ if os.path.exists(esp_dl_dir):
         for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
             if os.path.basename(src_file) not in esp_dl_exclude:
                 sources_to_add.append(src_file)
-                esp_dl_count += 1
+                sources_count["base"] += 1
 
-    # Add ESP32P4 assembly files (required for low-level operations)
-    esp32p4_isa_dir = os.path.join(esp_dl_dir, "dl", "base", "isa", "esp32p4")
-    if os.path.exists(esp32p4_isa_dir):
-        for asm_file in glob.glob(os.path.join(esp32p4_isa_dir, "*.S")):
-            sources_to_add.append(asm_file)
-            esp_dl_count += 1
+    # Add ESP32P4 ISA files (optimized assembly for ESP32P4)
+    isa_dirs = [
+        ("dl/base/isa/esp32p4", "*.S"),
+        ("dl/base/isa/esp32p4", "*.cpp"),
+        ("dl/tool/isa/esp32p4", "*.S"),
+        ("vision/image/isa/esp32p4", "*.S"),
+    ]
 
-    # Add ESP32P4 tool assembly files (dl_esp32p4_memcpy, dl_esp32p4_cfg_round)
-    esp32p4_tool_isa_dir = os.path.join(esp_dl_dir, "dl", "tool", "isa", "esp32p4")
-    if os.path.exists(esp32p4_tool_isa_dir):
-        for asm_file in glob.glob(os.path.join(esp32p4_tool_isa_dir, "*.S")):
-            sources_to_add.append(asm_file)
-            esp_dl_count += 1
+    for isa_dir, pattern in isa_dirs:
+        isa_path = os.path.join(esp_dl_dir, isa_dir)
+        if os.path.exists(isa_path):
+            for asm_file in glob.glob(os.path.join(isa_path, pattern)):
+                sources_to_add.append(asm_file)
+                sources_count["isa"] += 1
 
-    # Add ESP32P4 vision/image assembly files (color conversion, resize)
-    esp32p4_vision_isa_dir = os.path.join(esp_dl_dir, "vision", "image", "isa", "esp32p4")
-    if os.path.exists(esp32p4_vision_isa_dir):
-        for asm_file in glob.glob(os.path.join(esp32p4_vision_isa_dir, "*.S")):
-            sources_to_add.append(asm_file)
-            esp_dl_count += 1
-
-    print(f"[Face Detection] ESP-DL: {esp_dl_count} source files")
+    esp_dl_total = sum(sources_count.values())
+    print(f"[Face Detection] ESP-DL: {esp_dl_total} files (base:{sources_count['base']} isa:{sources_count['isa']} core:{sources_count['core']} vision:{sources_count['vision']})")
 
     # Add prebuilt FBS library
     fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
@@ -281,36 +290,19 @@ if os.path.exists(esp_dl_dir):
         print("[Face Detection] Added libfbs_model.a")
 
 # ========================================================================
-# Copy stub files from lvgl_camera_display
+# Add local stub files (already in face_detection component)
 # ========================================================================
-lvgl_cam_dir = os.path.join(parent_components_dir, "lvgl_camera_display")
-
-# Custom dotprod implementation
-dotprod_src = os.path.join(lvgl_cam_dir, "dl_base_dotprod_no_dsp.cpp")
-dotprod_dst = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
-if os.path.exists(dotprod_src) and not os.path.exists(dotprod_dst):
-    import shutil
-    shutil.copy(dotprod_src, dotprod_dst)
-if os.path.exists(dotprod_dst):
-    sources_to_add.append(dotprod_dst)
+# Custom dotprod implementation (no DSP version)
+dotprod_file = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
+if os.path.exists(dotprod_file):
+    sources_to_add.append(dotprod_file)
     print("[Face Detection] + dl_base_dotprod_no_dsp.cpp")
 
-# mbedTLS stub
-mbedtls_stub_src = os.path.join(lvgl_cam_dir, "mbedtls_aes_stub.c")
-mbedtls_stub_dst = os.path.join(component_dir, "mbedtls_aes_stub.c")
-if os.path.exists(mbedtls_stub_src) and not os.path.exists(mbedtls_stub_dst):
-    import shutil
-    shutil.copy(mbedtls_stub_src, mbedtls_stub_dst)
-if os.path.exists(mbedtls_stub_dst):
-    sources_to_add.append(mbedtls_stub_dst)
+# mbedTLS stub (if exists)
+mbedtls_stub = os.path.join(component_dir, "mbedtls_aes_stub.c")
+if os.path.exists(mbedtls_stub):
+    sources_to_add.append(mbedtls_stub)
     print("[Face Detection] + mbedtls_aes_stub.c")
-
-# mbedTLS header directory
-mbedtls_header_src = os.path.join(lvgl_cam_dir, "mbedtls")
-mbedtls_header_dst = os.path.join(component_dir, "mbedtls")
-if os.path.exists(mbedtls_header_src) and not os.path.exists(mbedtls_header_dst):
-    import shutil
-    shutil.copytree(mbedtls_header_src, mbedtls_header_dst)
 
 env.Append(CPPPATH=[component_dir])
 
