@@ -294,8 +294,8 @@ if os.path.exists(esp_dl_dir):
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
         if os.path.exists(src_dir_path):
-            # Use recursive glob for vision/recognition to get files in subdirectories
-            if src_dir == "vision/recognition":
+            # Use recursive glob for ALL vision/* directories to get files in subdirectories
+            if src_dir.startswith("vision/"):
                 pattern = os.path.join(src_dir_path, "**", "*.cpp")
                 for src_file in glob.glob(pattern, recursive=True):
                     if os.path.basename(src_file) not in esp_dl_exclude:
@@ -305,10 +305,7 @@ if os.path.exists(esp_dl_dir):
                 for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
-                        if "vision" in src_dir:
-                            sources_count["vision"] += 1
-                        else:
-                            sources_count["core"] += 1
+                        sources_count["core"] += 1
 
     # Add ALL dl/base/*.cpp files (required for neural network operations)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
