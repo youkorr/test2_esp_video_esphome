@@ -1369,8 +1369,10 @@ bool SimpleVideoPlayer::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for %dx%d)",
-           this->width_, this->height_);
+  const char *format_name = (this->format_ == MediaFormat::MP4_H264) ? "MP4/H.264" :
+                            (this->format_ == MediaFormat::MKV_H264) ? "MKV/H.264" : "MJPEG";
+  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized for %s (%dx%d) (intr_priority=0, timeout=100ms)",
+           format_name, this->width_, this->height_);
   return true;
 }
 
@@ -3526,8 +3528,10 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
         // Detailed performance logging every 30 frames
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "⏱️ MJPEG timing (%dx%d): TOTAL=%lums [File read=%lums, JPEG decode=%lums, LVGL display=%lums]",
-                   this->width_, this->height_,
+          const char *codec_name = (this->format_ == MediaFormat::MP4_H264) ? "H264" :
+                                   (this->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
+          ESP_LOGI(TAG, "⏱️ %s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+                   codec_name, this->width_, this->height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
           ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
