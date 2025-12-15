@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
-#include "esphome/components/esp_cam_sensor/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/include/mipi_dsi_cam.h"
 
 // Forward declaration
 namespace esphome {
