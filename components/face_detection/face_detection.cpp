@@ -112,8 +112,10 @@ void FaceDetectionComponent::process_frame_() {
 
   if (img_data != nullptr) {
     this->detect_faces_(img_data, width, height);
-    // NOTE: Drawing is now done externally via draw_on_frame()
-    // called by lvgl_camera_display on its buffer
+    // Draw detection results directly on camera buffer
+    if (this->draw_enabled_) {
+      this->draw_results_(img_data, width, height);
+    }
   }
 
   this->camera_->release_buffer(buffer);
