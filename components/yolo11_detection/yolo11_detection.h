@@ -9,7 +9,6 @@
 // ESP-DL forward declarations
 namespace dl {
 namespace detect {
-struct result_t;
 class DetectWrapper;
 }
 }
