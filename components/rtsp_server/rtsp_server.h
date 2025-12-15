@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 
 #ifdef USE_ESP_IDF
 #include <lwip/sockets.h>
@@ -76,7 +76,7 @@ class RTSPServer : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
   // Configuration setters
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { camera_ = camera; }
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { camera_ = camera; }
   void set_port(uint16_t port) { rtsp_port_ = port; }
   void set_stream_path(const std::string &path) { stream_path_ = path; }
   void set_rtp_port(uint16_t port) { rtp_port_ = port; }
@@ -91,7 +91,7 @@ class RTSPServer : public Component {
   void set_enabled(bool enabled) { enabled_ = enabled; }
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
   uint16_t rtsp_port_{554};
   std::string stream_path_{"/stream"};
   uint16_t rtp_port_{5004};

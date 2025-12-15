@@ -1,9 +1,9 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import mipi_dsi_cam
+from esphome.components import esp_cam_sensor
 from esphome.const import CONF_ID, CONF_PORT
 
-DEPENDENCIES = ["mipi_dsi_cam", "network"]
+DEPENDENCIES = ["esp_cam_sensor", "network"]
 AUTO_LOAD = []
 CODEOWNERS = ["@youkorr"]
 
@@ -20,7 +20,7 @@ CONF_QP_MAX = "qp_max"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(WebRTCCamera),
-    cv.Required(CONF_CAMERA_ID): cv.use_id(mipi_dsi_cam.MipiDSICamComponent),
+    cv.Required(CONF_CAMERA_ID): cv.use_id(esp_cam_sensor.MipiDSICamComponent),
     cv.Optional(CONF_SIGNALING_PORT, default=8443): cv.port,
     cv.Optional(CONF_RTP_PORT, default=5004): cv.port,
     cv.Optional(CONF_BITRATE, default=2000000): cv.int_range(min=100000, max=10000000),

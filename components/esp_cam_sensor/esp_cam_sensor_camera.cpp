@@ -1,4 +1,4 @@
-#include "mipi_dsi_cam.h"
+#include "esp_cam_sensor_camera.h"
 #include "esphome/core/hal.h"
 #include "esp_err.h"
 #include "esp_log.h"
@@ -50,9 +50,9 @@ extern "C" {
 #endif
 
 namespace esphome {
-namespace mipi_dsi_cam {
+namespace esp_cam_sensor {
 
-static const char *const TAG = "mipi_dsi_cam";
+static const char *const TAG = "esp_cam_sensor";
 
 static constexpr uint32_t HEALTH_CHECK_INTERVAL_MS = 30000;
 static constexpr size_t MAX_FRAME_SIZE = 512 * 1024;
@@ -1946,7 +1946,7 @@ bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out
   return true;
 }
 
-}  // namespace mipi_dsi_cam
+}  // namespace esp_cam_sensor
 }  // namespace esphome
 
 

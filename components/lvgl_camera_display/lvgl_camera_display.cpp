@@ -144,7 +144,7 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   // Acquerir le nouveau buffer depuis le pool
-  mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
+  esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
     // Pas de buffer disponible - garder l'affichage precedent
     return;
@@ -158,6 +158,11 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
+  // Optional: draw face detection results if configured
+  if (this->face_detection_ != nullptr) {
+    this->face_detection_->draw_on_frame(img_data, width, height);
+  }
+
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
@@ -165,11 +170,6 @@ void LVGLCameraDisplay::update_canvas_() {
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
     this->first_update_ = false;
-  }
-
-  // Draw face detection results on the buffer before displaying
-  if (this->face_detection_ != nullptr) {
-    this->face_detection_->draw_on_frame(img_data, width, height);
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);

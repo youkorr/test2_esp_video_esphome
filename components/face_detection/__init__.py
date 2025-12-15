@@ -4,11 +4,12 @@ from esphome.const import CONF_ID
 from esphome import automation
 import os
 
-DEPENDENCIES = ["mipi_dsi_cam"]
-AUTO_LOAD = ["mipi_dsi_cam"]
+DEPENDENCIES = ["esp_cam_sensor"]
+AUTO_LOAD = ["esp_cam_sensor"]
 
 CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
+CONF_MODEL_TYPE = "model_type"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_RECOGNITION_ENABLED = "recognition_enabled"
@@ -18,6 +19,11 @@ CONF_ON_FACE_DETECTED = "on_face_detected"
 CONF_ON_FACE_RECOGNIZED = "on_face_recognized"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
+
+# Available model types
+MODEL_TYPE_FACE = "face_recognition"
+MODEL_TYPE_YOLO11 = "yolo11"
+MODEL_TYPE_POSE = "pose_detection"
 
 face_detection_ns = cg.esphome_ns.namespace("face_detection")
 FaceDetectionComponent = face_detection_ns.class_("FaceDetectionComponent", cg.Component)
@@ -33,13 +39,16 @@ SetFaceNameAction = face_detection_ns.class_("SetFaceNameAction", automation.Act
 DeleteFaceAction = face_detection_ns.class_("DeleteFaceAction", automation.Action)
 ClearAllFacesAction = face_detection_ns.class_("ClearAllFacesAction", automation.Action)
 
-mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
-MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
+esp_cam_sensor_ns = cg.esphome_ns.namespace("esp_cam_sensor")
+MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(FaceDetectionComponent),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
     cv.Optional(CONF_CANVAS_ID): cv.string,
+    cv.Optional(CONF_MODEL_TYPE, default=MODEL_TYPE_FACE): cv.one_of(
+        MODEL_TYPE_FACE, MODEL_TYPE_YOLO11, MODEL_TYPE_POSE, lower=True
+    ),
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
@@ -62,6 +71,15 @@ async def to_code(config):
 
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
+
+    # Set model type build flag for conditional compilation
+    model_type = config[CONF_MODEL_TYPE]
+    if model_type == MODEL_TYPE_FACE:
+        cg.add_build_flag("-DESP_DL_MODEL_FACE_RECOGNITION=1")
+    elif model_type == MODEL_TYPE_YOLO11:
+        cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
+    elif model_type == MODEL_TYPE_POSE:
+        cg.add_build_flag("-DESP_DL_MODEL_POSE_DETECTION=1")
 
     if CONF_CANVAS_ID in config:
         cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))

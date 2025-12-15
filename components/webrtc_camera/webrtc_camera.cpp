@@ -369,7 +369,7 @@ esp_err_t WebRTCCamera::encode_and_send_frame_() {
   }
 
   // Get current RGB565 frame (must be released after use)
-  mipi_dsi_cam::SimpleBufferElement* buffer = nullptr;
+  esp_cam_sensor::SimpleBufferElement* buffer = nullptr;
   uint8_t* frame_data = nullptr;
   int width, height;
 

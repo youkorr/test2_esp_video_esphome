@@ -22,7 +22,7 @@ typedef struct {
 #endif
 
 namespace esphome {
-namespace mipi_dsi_cam {
+namespace esp_cam_sensor {
 
 // Simple buffer element pour triple buffering (remplace esp_video_buffer)
 struct SimpleBufferElement {
@@ -252,7 +252,7 @@ class StopStreamingAction : public Action<Ts...>, public Parented<MipiDSICamComp
   }
 };
 
-}  // namespace mipi_dsi_cam
+}  // namespace esp_cam_sensor
 }  // namespace esphome
 
 

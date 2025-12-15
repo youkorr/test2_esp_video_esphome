@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
-#include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 
 // Forward declaration
 namespace esphome {
@@ -20,7 +20,7 @@ class LVGLCameraDisplay : public Component {
   void loop() override;
   void dump_config() override;
 
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
@@ -34,8 +34,8 @@ class LVGLCameraDisplay : public Component {
   static void lvgl_timer_callback_(lv_timer_t *timer);
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
-  face_detection::FaceDetectionComponent *face_detection_{nullptr};
+  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
+  face_detection::FaceDetectionComponent *face_detection_{nullptr};  // Optional
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
 
@@ -52,7 +52,7 @@ class LVGLCameraDisplay : public Component {
   lv_timer_t *lvgl_timer_{nullptr};
 
   // Buffer pool tracking (pour release apres affichage)
-  mipi_dsi_cam::SimpleBufferElement *displayed_buffer_{nullptr};
+  esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();
