@@ -24,7 +24,9 @@ class LVGLCameraDisplay : public Component {
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
+#ifdef USE_FACE_DETECTION
   void set_face_detection(face_detection::FaceDetectionComponent *face_detect) { this->face_detection_ = face_detect; }
+#endif
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -35,7 +37,9 @@ class LVGLCameraDisplay : public Component {
 
  protected:
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
+#ifdef USE_FACE_DETECTION
   face_detection::FaceDetectionComponent *face_detection_{nullptr};  // Optional
+#endif
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
 

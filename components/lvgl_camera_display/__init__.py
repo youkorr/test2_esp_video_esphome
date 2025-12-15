@@ -35,10 +35,13 @@ async def to_code(config):
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
 
+    cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
+
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
 
     if CONF_FACE_DETECTION_ID in config:
+        cg.add_define("USE_FACE_DETECTION")
         face_detect = await cg.get_variable(config[CONF_FACE_DETECTION_ID])
         cg.add(var.set_face_detection(face_detect))
 

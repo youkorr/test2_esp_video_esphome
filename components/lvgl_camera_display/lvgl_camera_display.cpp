@@ -162,9 +162,11 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   // Optional: draw face detection results if configured
+#ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
     this->face_detection_->draw_on_frame(img_data, width, height);
   }
+#endif
 
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
