@@ -242,17 +242,16 @@ if os.path.exists(esp_dl_dir):
         "dl/math/src",
         "fbs_loader/src",
         "vision/image",          # Image processing (required)
+        "vision/detect",         # Detection base (always needed, even for face recognition)
     ]
 
     # Add model-specific directories
     if model_type == "face_recognition":
         esp_dl_source_dirs.append("vision/recognition")  # Face recognition
-        print("[Face Detection] Including: vision/recognition (face recognition)")
+        print("[Face Detection] Including: vision/recognition + vision/detect (face recognition)")
     elif model_type == "yolo11":
-        esp_dl_source_dirs.append("vision/detect")  # YOLO11, object detection
         print("[Face Detection] Including: vision/detect (YOLO11)")
     elif model_type == "pose_detection":
-        esp_dl_source_dirs.append("vision/detect")  # Pose detection
         print("[Face Detection] Including: vision/detect (pose detection)")
 
     # Files to exclude (conditionally based on model type)
@@ -262,28 +261,31 @@ if os.path.exists(esp_dl_dir):
         "dl_image_bmp.cpp",          # BMP not used
     ]
 
-    # Exclude detection files if not using YOLO/pose models
+    # Exclude ONLY YOLO/pose-specific files if not needed
+    # NOTE: MSR/MNP postprocessors are needed for face detection!
     if model_type == "face_recognition":
         esp_dl_exclude.extend([
-            "dl_detect_yolo11_postprocessor.cpp",
-            "dl_pose_yolo11_postprocessor.cpp",
-            "dl_detect_espdet_postprocessor.cpp",
-            "dl_detect_msr_postprocessor.cpp",
-            "dl_detect_pico_postprocessor.cpp",
-            "dl_detect_mnp_postprocessor.cpp",
-            "dl_detect_postprocessor.cpp",
-            "dl_detect_base.cpp",
+            "dl_detect_yolo11_postprocessor.cpp",   # YOLO11 only
+            "dl_pose_yolo11_postprocessor.cpp",     # Pose only
+            "dl_detect_espdet_postprocessor.cpp",   # EspDet only
+            "dl_detect_pico_postprocessor.cpp",     # Pico only
         ])
-        print("[Face Detection] Excluding: YOLO/pose detection files (not needed)")
+        print("[Face Detection] Excluding: YOLO11/EspDet/Pico postprocessors (keeping MSR/MNP for face detection)")
     elif model_type == "yolo11":
         # Exclude pose-specific files when using YOLO11
         esp_dl_exclude.extend([
             "dl_pose_yolo11_postprocessor.cpp",
+            "dl_detect_msr_postprocessor.cpp",      # Face detection specific
+            "dl_detect_mnp_postprocessor.cpp",      # Face detection specific
         ])
-        print("[Face Detection] Excluding: pose detection files (using YOLO11)")
+        print("[Face Detection] Excluding: pose/face detection postprocessors (using YOLO11)")
     elif model_type == "pose_detection":
-        # Keep all detection files for pose detection
-        print("[Face Detection] Including: all detection files (pose detection)")
+        # Exclude face detection postprocessors for pose
+        esp_dl_exclude.extend([
+            "dl_detect_msr_postprocessor.cpp",      # Face detection specific
+            "dl_detect_mnp_postprocessor.cpp",      # Face detection specific
+        ])
+        print("[Face Detection] Excluding: face detection postprocessors (using pose detection)")
 
     # Count files by category for better visibility
     sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
