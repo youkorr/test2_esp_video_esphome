@@ -1369,7 +1369,8 @@ bool SimpleVideoPlayer::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for 1024x600)");
+  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for %dx%d)",
+           this->width_, this->height_);
   return true;
 }
 
@@ -3525,7 +3526,8 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
         // Detailed performance logging every 30 frames
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "⏱️ MJPEG timing (1024x600): TOTAL=%lums [File read=%lums, JPEG decode=%lums, LVGL display=%lums]",
+          ESP_LOGI(TAG, "⏱️ MJPEG timing (%dx%d): TOTAL=%lums [File read=%lums, JPEG decode=%lums, LVGL display=%lums]",
+                   this->width_, this->height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
           ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
