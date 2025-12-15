@@ -1,7 +1,10 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+// Conditionally include face_detection only if it exists
+#ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
+#endif
 
 namespace esphome {
 namespace lvgl_camera_display {
