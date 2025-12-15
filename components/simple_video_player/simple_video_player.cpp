@@ -1203,6 +1203,15 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
       // FourCC format: stream_id (2 digits) + 'dc' for video
       bool is_video_chunk = (chunk_header[2] == 'd' && chunk_header[3] == 'c');
 
+      // 🔍 DIAGNOSTICS: Log chunk info for first 10 chunks to debug format issues
+      if (total_chunks_read < 10 || (total_chunks_read % 100 == 0 && this->frame_count_ < 5)) {
+        ESP_LOGI(TAG, "AVI chunk #%lu: FourCC='%c%c%c%c' (0x%02X%02X%02X%02X), size=%u, is_video=%d",
+                 total_chunks_read,
+                 chunk_header[0], chunk_header[1], chunk_header[2], chunk_header[3],
+                 chunk_header[0], chunk_header[1], chunk_header[2], chunk_header[3],
+                 chunk_size, is_video_chunk);
+      }
+
       chunks_this_frame++;
       total_chunks_read++;
 
@@ -1216,6 +1225,16 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
 
         this->input_size_ = chunk_size;
         this->frame_count_++;
+
+        // 🔍 DIAGNOSTICS: Log first bytes of JPEG data for first 3 frames
+        if (this->frame_count_ <= 3) {
+          ESP_LOGI(TAG, "Frame #%u JPEG data (first 16 bytes): %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X",
+                   this->frame_count_,
+                   this->input_buffer_[0], this->input_buffer_[1], this->input_buffer_[2], this->input_buffer_[3],
+                   this->input_buffer_[4], this->input_buffer_[5], this->input_buffer_[6], this->input_buffer_[7],
+                   this->input_buffer_[8], this->input_buffer_[9], this->input_buffer_[10], this->input_buffer_[11],
+                   this->input_buffer_[12], this->input_buffer_[13], this->input_buffer_[14], this->input_buffer_[15]);
+        }
 
         // AVI chunks are word-aligned (2 bytes), skip padding byte if needed
         if (chunk_size % 2 != 0) {
