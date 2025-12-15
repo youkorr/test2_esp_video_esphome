@@ -2,9 +2,12 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// ESP-DL detection components
+// ESP-DL detection components (only for face_recognition model)
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
 #include "human_face_detect.hpp"
 #include "human_face_recognition.hpp"
+#endif
+
 #include "dl_image.hpp"
 
 // File I/O for name persistence
@@ -19,6 +22,13 @@ static const char *const TAG = "face_detection";
 
 void FaceDetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Face Detection...");
+
+#ifndef ESP_DL_MODEL_FACE_RECOGNITION
+  ESP_LOGE(TAG, "Face Detection component requires model_type: face_recognition");
+  ESP_LOGE(TAG, "Current model_type does not support face detection");
+  this->mark_failed();
+  return;
+#else
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not configured");
@@ -79,6 +89,7 @@ void FaceDetectionComponent::setup() {
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Recognition: %s", this->recognition_enabled_ ? "ENABLED" : "DISABLED");
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
+#endif
 }
 
 void FaceDetectionComponent::loop() {
@@ -126,6 +137,7 @@ void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, ui
 }
 
 void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (this->face_detector_ == nullptr) {
     return;
   }
@@ -213,9 +225,11 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       }
     }
   }
+#endif
 }
 
 void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (img_data == nullptr || this->face_results_mutex_ == nullptr) {
     return;
   }
@@ -281,6 +295,7 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
 
     xSemaphoreGive(this->face_results_mutex_);
   }
+#endif
 }
 
 void FaceDetectionComponent::dump_config() {
@@ -315,6 +330,7 @@ std::vector<FaceBox> FaceDetectionComponent::get_detected_faces() {
 }
 
 int FaceDetectionComponent::enroll_face() {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
     ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
     return -1;
@@ -323,9 +339,14 @@ int FaceDetectionComponent::enroll_face() {
   ESP_LOGI(TAG, "Enrollment requested - will capture on next face detection");
   this->enroll_pending_ = true;
   return 0;
+#else
+  ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
+  return -1;
+#endif
 }
 
 bool FaceDetectionComponent::delete_face(int id) {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
     ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
     return false;
@@ -342,9 +363,14 @@ bool FaceDetectionComponent::delete_face(int id) {
     }
   }
   return success;
+#else
+  ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
+  return false;
+#endif
 }
 
 void FaceDetectionComponent::clear_all_faces() {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
     ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
     return;
@@ -374,13 +400,20 @@ void FaceDetectionComponent::clear_all_faces() {
   );
 
   ESP_LOGI(TAG, "All faces and names cleared, database reset");
+#else
+  ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
+#endif
 }
 
 int FaceDetectionComponent::get_enrolled_count() {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
     return 0;
   }
   return this->face_recognizer_->get_num_feats();
+#else
+  return 0;
+#endif
 }
 
 RecognitionResult FaceDetectionComponent::get_last_recognition() {
@@ -395,6 +428,7 @@ void FaceDetectionComponent::reset_last_recognition() {
 }
 
 int FaceDetectionComponent::enroll_face_with_name(const std::string &name) {
+#ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (!this->recognition_enabled_ || this->face_recognizer_ == nullptr) {
     ESP_LOGE(TAG, "Face recognition not enabled or not initialized");
     return -1;
@@ -404,6 +438,10 @@ int FaceDetectionComponent::enroll_face_with_name(const std::string &name) {
   this->pending_enroll_name_ = name;
   this->enroll_pending_ = true;
   return 0;
+#else
+  ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
+  return -1;
+#endif
 }
 
 void FaceDetectionComponent::set_face_name(int id, const std::string &name) {
