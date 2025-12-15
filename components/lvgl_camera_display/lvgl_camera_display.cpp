@@ -1,6 +1,7 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esphome/components/face_detection/face_detection.h"
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -155,6 +156,11 @@ void LVGLCameraDisplay::update_canvas_() {
 
   if (img_data == nullptr) {
     return;
+  }
+
+  // Optional: draw face detection results if configured
+  if (this->face_detection_ != nullptr) {
+    this->face_detection_->draw_on_frame(img_data, width, height);
   }
 
   if (this->first_update_) {
