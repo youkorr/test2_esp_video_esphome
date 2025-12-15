@@ -13,6 +13,27 @@ parent_components_dir = os.path.dirname(component_dir)
 
 print("[Face Detection] Build script running...")
 
+# Detect model type from build flags
+model_type = "face_recognition"  # default
+cpp_defines = env.get('CPPDEFINES', [])
+for define in cpp_defines:
+    if isinstance(define, tuple):
+        key, val = define
+    else:
+        key = define
+        val = None
+
+    if key == "ESP_DL_MODEL_YOLO11":
+        model_type = "yolo11"
+        break
+    elif key == "ESP_DL_MODEL_POSE_DETECTION":
+        model_type = "pose_detection"
+        break
+    elif key == "ESP_DL_MODEL_FACE_RECOGNITION":
+        model_type = "face_recognition"
+
+print(f"[Face Detection] Model type: {model_type}")
+
 # ========================================================================
 # Add CONFIG defines for detection models
 # ========================================================================
@@ -211,7 +232,8 @@ if os.path.exists(esp_dl_dir):
 
     print("[Face Detection] ESP-DL includes added")
 
-    # ESP-DL source files - ONLY essential for face detection
+    # ESP-DL source files - based on selected model type
+    # Core directories (always needed)
     esp_dl_source_dirs = [
         "dl/tensor/src",
         "dl/model/src",
@@ -220,25 +242,48 @@ if os.path.exists(esp_dl_dir):
         "dl/math/src",
         "fbs_loader/src",
         "vision/image",          # Image processing (required)
-        "vision/recognition",    # Face recognition (required)
-        # NOTE: vision/detect NOT included (YOLO11, pose detection, etc. - not needed)
     ]
 
-    # Files to exclude (not needed for face detection)
+    # Add model-specific directories
+    if model_type == "face_recognition":
+        esp_dl_source_dirs.append("vision/recognition")  # Face recognition
+        print("[Face Detection] Including: vision/recognition (face recognition)")
+    elif model_type == "yolo11":
+        esp_dl_source_dirs.append("vision/detect")  # YOLO11, object detection
+        print("[Face Detection] Including: vision/detect (YOLO11)")
+    elif model_type == "pose_detection":
+        esp_dl_source_dirs.append("vision/detect")  # Pose detection
+        print("[Face Detection] Including: vision/detect (pose detection)")
+
+    # Files to exclude (conditionally based on model type)
     esp_dl_exclude = [
         "dl_base_dotprod.cpp",       # Use custom implementation
         "dl_image_jpeg.cpp",         # JPEG not used
         "dl_image_bmp.cpp",          # BMP not used
-        # Exclude detection files (YOLO, pose, etc.)
-        "dl_detect_yolo11_postprocessor.cpp",
-        "dl_pose_yolo11_postprocessor.cpp",
-        "dl_detect_espdet_postprocessor.cpp",
-        "dl_detect_msr_postprocessor.cpp",
-        "dl_detect_pico_postprocessor.cpp",
-        "dl_detect_mnp_postprocessor.cpp",
-        "dl_detect_postprocessor.cpp",
-        "dl_detect_base.cpp",
     ]
+
+    # Exclude detection files if not using YOLO/pose models
+    if model_type == "face_recognition":
+        esp_dl_exclude.extend([
+            "dl_detect_yolo11_postprocessor.cpp",
+            "dl_pose_yolo11_postprocessor.cpp",
+            "dl_detect_espdet_postprocessor.cpp",
+            "dl_detect_msr_postprocessor.cpp",
+            "dl_detect_pico_postprocessor.cpp",
+            "dl_detect_mnp_postprocessor.cpp",
+            "dl_detect_postprocessor.cpp",
+            "dl_detect_base.cpp",
+        ])
+        print("[Face Detection] Excluding: YOLO/pose detection files (not needed)")
+    elif model_type == "yolo11":
+        # Exclude pose-specific files when using YOLO11
+        esp_dl_exclude.extend([
+            "dl_pose_yolo11_postprocessor.cpp",
+        ])
+        print("[Face Detection] Excluding: pose detection files (using YOLO11)")
+    elif model_type == "pose_detection":
+        # Keep all detection files for pose detection
+        print("[Face Detection] Including: all detection files (pose detection)")
 
     # Count files by category for better visibility
     sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
