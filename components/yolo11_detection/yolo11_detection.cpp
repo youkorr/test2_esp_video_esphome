@@ -4,7 +4,8 @@
 
 // ESP-DL detection components (only for YOLO11 model)
 #ifdef ESP_DL_MODEL_YOLO11
-#include "dl_detect.hpp"
+#include "dl_detect_base.hpp"
+#include "dl_detect_yolo11_postprocessor.hpp"
 #include "dl_image.hpp"
 #endif
 
