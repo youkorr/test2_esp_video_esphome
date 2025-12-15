@@ -79,134 +79,137 @@ def needs_rebuild(output_file, input_files):
     return False
 
 # ========================================================================
-# Pack and Embed Face Detection Models
+# Pack and Embed Face Detection Models (ONLY for face_recognition model)
 # ========================================================================
-human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
-if os.path.exists(human_face_detect_dir):
-    models_dir = os.path.join(human_face_detect_dir, "models", "p4")
-    pack_script = os.path.join(human_face_detect_dir, "pack_model.py")
+if model_type == "face_recognition":
+    human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
+    if os.path.exists(human_face_detect_dir):
+        models_dir = os.path.join(human_face_detect_dir, "models", "p4")
+        pack_script = os.path.join(human_face_detect_dir, "pack_model.py")
 
-    if os.path.exists(models_dir) and os.path.exists(pack_script):
-        msr_model = os.path.join(models_dir, "human_face_detect_msr_s8_v1.espdl")
-        mnp_model = os.path.join(models_dir, "human_face_detect_mnp_s8_v1.espdl")
+        if os.path.exists(models_dir) and os.path.exists(pack_script):
+            msr_model = os.path.join(models_dir, "human_face_detect_msr_s8_v1.espdl")
+            mnp_model = os.path.join(models_dir, "human_face_detect_mnp_s8_v1.espdl")
 
-        if os.path.exists(msr_model) and os.path.exists(mnp_model):
-            packed_model = os.path.join(component_dir, "human_face_detect.espdl")
-            embed_c_file = os.path.join(component_dir, "human_face_detect_espdl_embed.c")
+            if os.path.exists(msr_model) and os.path.exists(mnp_model):
+                packed_model = os.path.join(component_dir, "human_face_detect.espdl")
+                embed_c_file = os.path.join(component_dir, "human_face_detect_espdl_embed.c")
 
-            if needs_rebuild(embed_c_file, [msr_model, mnp_model, pack_script]):
-                print("[Face Detection] Packing human_face_detect models...")
-                try:
-                    cmd = [
-                        "python3", pack_script,
-                        "--model_path", msr_model, mnp_model,
-                        "--out_file", packed_model
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                    if result.returncode == 0 and os.path.exists(packed_model):
-                        with open(packed_model, 'rb') as f:
-                            model_data = f.read()
+                if needs_rebuild(embed_c_file, [msr_model, mnp_model, pack_script]):
+                    print("[Face Detection] Packing human_face_detect models...")
+                    try:
+                        cmd = [
+                            "python3", pack_script,
+                            "--model_path", msr_model, mnp_model,
+                            "--out_file", packed_model
+                        ]
+                        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                        if result.returncode == 0 and os.path.exists(packed_model):
+                            with open(packed_model, 'rb') as f:
+                                model_data = f.read()
 
-                        c_content = '''// Auto-generated - embedded human_face_detect model
+                            c_content = '''// Auto-generated - embedded human_face_detect model
 #include <stddef.h>
 #include <stdint.h>
 
 __attribute__((aligned(16)))
 const uint8_t _binary_human_face_detect_espdl_start[] = {
 '''
-                        for i in range(0, len(model_data), 16):
-                            chunk = model_data[i:i+16]
-                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                            c_content += f'    {hex_bytes},\n'
+                            for i in range(0, len(model_data), 16):
+                                chunk = model_data[i:i+16]
+                                hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                                c_content += f'    {hex_bytes},\n'
 
-                        c_content += f'''}};
+                            c_content += f'''}};
 
 const uint8_t *_binary_human_face_detect_espdl_end = _binary_human_face_detect_espdl_start + {len(model_data)};
 const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
 '''
-                        with open(embed_c_file, 'w') as f:
-                            f.write(c_content)
-                        print(f"[Face Detection] Model embedded: {len(model_data)} bytes")
-                except Exception as e:
-                    print(f"[Face Detection] Error packing models: {e}")
-            else:
-                print("[Face Detection] human_face_detect models cached (skip)")
+                            with open(embed_c_file, 'w') as f:
+                                f.write(c_content)
+                            print(f"[Face Detection] Model embedded: {len(model_data)} bytes")
+                    except Exception as e:
+                        print(f"[Face Detection] Error packing models: {e}")
+                else:
+                    print("[Face Detection] human_face_detect models cached (skip)")
 
-            if os.path.exists(embed_c_file):
-                sources_to_add.append(embed_c_file)
+                if os.path.exists(embed_c_file):
+                    sources_to_add.append(embed_c_file)
 
-    env.Append(CPPPATH=[human_face_detect_dir])
-    human_face_sources = ["human_face_detect.cpp"]
-    for src in human_face_sources:
-        src_path = os.path.join(human_face_detect_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
-            print(f"[Face Detection] + {src}")
+        env.Append(CPPPATH=[human_face_detect_dir])
+        human_face_sources = ["human_face_detect.cpp"]
+        for src in human_face_sources:
+            src_path = os.path.join(human_face_detect_dir, src)
+            if os.path.exists(src_path):
+                sources_to_add.append(src_path)
+                print(f"[Face Detection] + {src}")
 
-# ========================================================================
-# Pack and Embed Face Recognition Model
-# ========================================================================
-human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
-if os.path.exists(human_face_recognition_dir):
-    env.Append(CPPPATH=[human_face_recognition_dir])
+    # ========================================================================
+    # Pack and Embed Face Recognition Model (ONLY for face_recognition model)
+    # ========================================================================
+    human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
+    if os.path.exists(human_face_recognition_dir):
+        env.Append(CPPPATH=[human_face_recognition_dir])
 
-    models_dir = os.path.join(human_face_recognition_dir, "models", "p4")
-    pack_script = os.path.join(human_face_recognition_dir, "pack_model.py")
+        models_dir = os.path.join(human_face_recognition_dir, "models", "p4")
+        pack_script = os.path.join(human_face_recognition_dir, "pack_model.py")
 
-    if os.path.exists(models_dir) and os.path.exists(pack_script):
-        mfn_model = os.path.join(models_dir, "human_face_feat_mfn_s8_v1.espdl")
+        if os.path.exists(models_dir) and os.path.exists(pack_script):
+            mfn_model = os.path.join(models_dir, "human_face_feat_mfn_s8_v1.espdl")
 
-        if os.path.exists(mfn_model):
-            packed_model = os.path.join(component_dir, "human_face_feat.espdl")
-            embed_c_file = os.path.join(component_dir, "human_face_feat_espdl_embed.c")
+            if os.path.exists(mfn_model):
+                packed_model = os.path.join(component_dir, "human_face_feat.espdl")
+                embed_c_file = os.path.join(component_dir, "human_face_feat_espdl_embed.c")
 
-            if needs_rebuild(embed_c_file, [mfn_model, pack_script]):
-                print("[Face Detection] Packing human_face_recognition model...")
-                try:
-                    cmd = [
-                        "python3", pack_script,
-                        "--model_path", mfn_model,
-                        "--out_file", packed_model
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                    if result.returncode == 0 and os.path.exists(packed_model):
-                        with open(packed_model, 'rb') as f:
-                            model_data = f.read()
+                if needs_rebuild(embed_c_file, [mfn_model, pack_script]):
+                    print("[Face Detection] Packing human_face_recognition model...")
+                    try:
+                        cmd = [
+                            "python3", pack_script,
+                            "--model_path", mfn_model,
+                            "--out_file", packed_model
+                        ]
+                        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                        if result.returncode == 0 and os.path.exists(packed_model):
+                            with open(packed_model, 'rb') as f:
+                                model_data = f.read()
 
-                        c_content = '''// Auto-generated - embedded human_face_feat model
+                            c_content = '''// Auto-generated - embedded human_face_feat model
 #include <stddef.h>
 #include <stdint.h>
 
 __attribute__((aligned(16)))
 const uint8_t _binary_human_face_feat_mfn_s8_v1_espdl_start[] = {
 '''
-                        for i in range(0, len(model_data), 16):
-                            chunk = model_data[i:i+16]
-                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                            c_content += f'    {hex_bytes},\n'
+                            for i in range(0, len(model_data), 16):
+                                chunk = model_data[i:i+16]
+                                hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
+                                c_content += f'    {hex_bytes},\n'
 
-                        c_content += f'''}};
+                            c_content += f'''}};
 
 const uint8_t *_binary_human_face_feat_mfn_s8_v1_espdl_end = _binary_human_face_feat_mfn_s8_v1_espdl_start + {len(model_data)};
 const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
 '''
-                        with open(embed_c_file, 'w') as f:
-                            f.write(c_content)
-                        print(f"[Face Detection] Recognition model embedded: {len(model_data)} bytes")
-                except Exception as e:
-                    print(f"[Face Detection] Error packing recognition model: {e}")
-            else:
-                print("[Face Detection] human_face_recognition model cached (skip)")
+                            with open(embed_c_file, 'w') as f:
+                                f.write(c_content)
+                            print(f"[Face Detection] Recognition model embedded: {len(model_data)} bytes")
+                    except Exception as e:
+                        print(f"[Face Detection] Error packing recognition model: {e}")
+                else:
+                    print("[Face Detection] human_face_recognition model cached (skip)")
 
-            if os.path.exists(embed_c_file):
-                sources_to_add.append(embed_c_file)
+                if os.path.exists(embed_c_file):
+                    sources_to_add.append(embed_c_file)
 
-    recognition_sources = ["human_face_recognition.cpp"]
-    for src in recognition_sources:
-        src_path = os.path.join(human_face_recognition_dir, src)
-        if os.path.exists(src_path):
-            sources_to_add.append(src_path)
-            print(f"[Face Detection] + {src}")
+        recognition_sources = ["human_face_recognition.cpp"]
+        for src in recognition_sources:
+            src_path = os.path.join(human_face_recognition_dir, src)
+            if os.path.exists(src_path):
+                sources_to_add.append(src_path)
+                print(f"[Face Detection] + {src}")
+else:
+    print(f"[Face Detection] Skipping human_face_detect and human_face_recognition (model_type={model_type})")
 
 # ========================================================================
 # ESP-DL Sources - Optimized: only essential files
