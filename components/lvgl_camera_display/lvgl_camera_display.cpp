@@ -144,7 +144,7 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   // Acquerir le nouveau buffer depuis le pool
-  mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
+  esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
     // Pas de buffer disponible - garder l'affichage precedent
     return;

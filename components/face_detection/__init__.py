@@ -4,8 +4,8 @@ from esphome.const import CONF_ID
 from esphome import automation
 import os
 
-DEPENDENCIES = ["mipi_dsi_cam"]
-AUTO_LOAD = ["mipi_dsi_cam"]
+DEPENDENCIES = ["esp_cam_sensor"]
+AUTO_LOAD = ["esp_cam_sensor"]
 
 CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
@@ -33,8 +33,8 @@ SetFaceNameAction = face_detection_ns.class_("SetFaceNameAction", automation.Act
 DeleteFaceAction = face_detection_ns.class_("DeleteFaceAction", automation.Action)
 ClearAllFacesAction = face_detection_ns.class_("ClearAllFacesAction", automation.Action)
 
-mipi_dsi_cam_ns = cg.esphome_ns.namespace("mipi_dsi_cam")
-MipiDsiCam = mipi_dsi_cam_ns.class_("MipiDSICamComponent", cg.Component)
+esp_cam_sensor_ns = cg.esphome_ns.namespace("esp_cam_sensor")
+MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(FaceDetectionComponent),

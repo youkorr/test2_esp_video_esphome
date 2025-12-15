@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/mipi_dsi_cam.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_http_server.h>
@@ -55,7 +55,7 @@ class WebRTCCamera : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { camera_ = camera; }
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { camera_ = camera; }
   void set_signaling_port(uint16_t port) { signaling_port_ = port; }
   void set_rtp_port(uint16_t port) { rtp_port_ = port; }
   void set_bitrate(uint32_t bitrate) { bitrate_ = bitrate; }
@@ -64,7 +64,7 @@ class WebRTCCamera : public Component {
   void set_qp_max(uint8_t qp_max) { qp_max_ = qp_max; }
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
   uint16_t signaling_port_{8443};
   uint16_t rtp_port_{5004};
   uint32_t bitrate_{2000000};

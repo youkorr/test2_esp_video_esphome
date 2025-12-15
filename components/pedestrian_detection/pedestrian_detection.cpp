@@ -67,7 +67,7 @@ void PedestrianDetectionComponent::process_frame_() {
   this->frame_counter_ = 0;
 
   // Acquire buffer from camera
-  mipi_dsi_cam::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
+  esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
     return;
   }

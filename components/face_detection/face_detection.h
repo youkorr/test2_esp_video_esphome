@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/mipi_dsi_cam.h"
 #include <vector>
 #include <functional>
 #include <map>
@@ -38,7 +38,7 @@ class FaceDetectionComponent : public Component {
   void dump_config() override;
 
   // Configuration setters
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
@@ -83,7 +83,7 @@ class FaceDetectionComponent : public Component {
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
   std::string canvas_id_{};  // Canvas ID for LVGL integration
   bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 

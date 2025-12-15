@@ -2,7 +2,7 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
-#include "esphome/components/mipi_dsi_cam/mipi_dsi_cam.h"
+#include "esphome/components/esp_cam_sensor/mipi_dsi_cam.h"
 
 #ifdef USE_ESP_IDF
 #include <esp_http_server.h>
@@ -18,14 +18,14 @@ class CameraWebServer : public Component {
   void loop() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
-  void set_camera(mipi_dsi_cam::MipiDSICamComponent *camera) { camera_ = camera; }
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { camera_ = camera; }
   void set_port(uint16_t port) { port_ = port; }
   void set_enable_stream(bool enable) { enable_stream_ = enable; }
   void set_enable_snapshot(bool enable) { enable_snapshot_ = enable; }
   void set_enabled(bool enabled) { enabled_ = enabled; }
 
  protected:
-  mipi_dsi_cam::MipiDSICamComponent *camera_{nullptr};
+  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
   uint16_t port_{8080};
   bool enable_stream_{true};
   bool enable_snapshot_{true};

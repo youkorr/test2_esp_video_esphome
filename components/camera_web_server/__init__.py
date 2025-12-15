@@ -1,9 +1,9 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import mipi_dsi_cam
+from esphome.components import esp_cam_sensor
 from esphome.const import CONF_ID, CONF_PORT
 
-DEPENDENCIES = ["mipi_dsi_cam"]
+DEPENDENCIES = ["esp_cam_sensor"]
 AUTO_LOAD = []
 CODEOWNERS = ["@youkorr"]
 
@@ -16,7 +16,7 @@ CONF_ENABLE_SNAPSHOT = "enable_snapshot"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(CameraWebServer),
-    cv.Required(CONF_CAMERA_ID): cv.use_id(mipi_dsi_cam.MipiDSICamComponent),
+    cv.Required(CONF_CAMERA_ID): cv.use_id(esp_cam_sensor.MipiDSICamComponent),
     cv.Optional(CONF_PORT, default=8080): cv.port,
     cv.Optional(CONF_ENABLE_STREAM, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_SNAPSHOT, default=True): cv.boolean,
