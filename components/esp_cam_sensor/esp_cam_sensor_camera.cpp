@@ -35,8 +35,8 @@ extern "C" {
 #include "ov02c10_custom_formats.h"
 // OV5647 custom format configurations (VGA 640x480 et 1024x600)
 #include "ov5647_custom_formats.h"
-// NOTE: SC202CS 800x600 is now a NATIVE format in sc202cs.c driver
-// sc202cs_custom_formats.h is no longer needed
+// SC202CS custom format configurations (800x600)
+#include "sc202cs_custom_formats.h"
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -757,9 +757,34 @@ bool MipiDSICamComponent::start_streaming() {
   }
   // ============================================================================
 
-  // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
-  // No custom format handling needed - the driver will automatically select it
-  // when VIDIOC_S_FMT requests 800x600
+  // ============================================================================
+  // Custom Format Support (SC202CS @ 800x600)
+  // ============================================================================
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
+    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
+    if (width == 800 && height == 600) {
+      custom_format = &sc202cs_custom_format_800x600;
+      ESP_LOGI(TAG, "✅ Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
+    }
+
+    // Apply custom format via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
+        ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
+      } else {
+        ESP_LOGI(TAG, "✅ SC202CS 800x600 format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
+      }
+    }
+  }
+  // ============================================================================
+
+  // NOTE: Custom formats are now applied above for all sensors (OV02C10, OV5647, SC202CS)
+  // The driver will use these sensor register configurations
 
   // RGB565 natif du CSI (pas de conversion, pas de copie)
   // Note: Si custom format RAW10 appliqué, ISP convertira RAW10→RGB565
