@@ -862,9 +862,9 @@ bool MipiDSICamComponent::start_streaming() {
       }
       if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
         ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
-        if (frmsize.discrete.width == target_width && frmsize.discrete.height == target_height) {
+        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
           size_found = true;
-          ESP_LOGI(TAG, "✓ Found RAW8 %ux%u - ISP will convert to RGB565", target_width, target_height);
+          ESP_LOGI(TAG, "✓ Found RAW8 %ux%u - ISP will convert to RGB565", width, height);
         }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
@@ -887,9 +887,9 @@ bool MipiDSICamComponent::start_streaming() {
       }
       if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
         ESP_LOGI(TAG, "  RAW10 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
-        if (frmsize.discrete.width == target_width && frmsize.discrete.height == target_height) {
+        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
           size_found = true;
-          ESP_LOGI(TAG, "✓ Found RAW10 %ux%u - ISP will convert to RGB565", target_width, target_height);
+          ESP_LOGI(TAG, "✓ Found RAW10 %ux%u - ISP will convert to RGB565", width, height);
         }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW10 Stepwise: %ux%u to %ux%u (step %ux%u)",
