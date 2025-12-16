@@ -31,11 +31,10 @@ extern "C" {
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
 
-// NOTE: OV02C10 formats (640x480, 800x600) are now in the driver (ov02c10.c)
-// OV5647 custom format configurations (VGA 640x480 et 1024x600)
-#include "ov5647_custom_formats.h"
-// SC202CS custom format configurations (800x600)
-#include "sc202cs_custom_formats.h"
+// Custom format configurations for all sensors
+#include "ov02c10_custom_formats.h"  // OV02C10: 640x480, 800x600, 800x480
+#include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
+#include "sc202cs_custom_formats.h"  // SC202CS: 800x600
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -730,15 +729,40 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // ============================================================================
-  // NOTE: OV02C10 formats (640x480, 800x600) are now NATIVE in the driver
-  // No custom format handling needed - they are in ov02c10_format_info[] array
-  // The driver will automatically select the correct format for the requested resolution
+  // Custom Format Support (OV02C10) - 640x480, 800x600, 800x480
   // ============================================================================
+  bool custom_format_applied = false;
+  if (this->sensor_name_ == "ov02c10") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Select format based on requested resolution
+    if (width == 640 && height == 480) {
+      custom_format = &ov02c10_format_640x480_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using OV02C10 CUSTOM format: 640x480 RAW10 @ 30fps");
+    } else if (width == 800 && height == 600) {
+      custom_format = &ov02c10_format_800x600_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using OV02C10 CUSTOM format: 800x600 RAW10 @ 30fps");
+    } else if (width == 800 && height == 480) {
+      custom_format = &ov02c10_format_800x480_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using OV02C10 CUSTOM format: 800x480 RAW10 @ 30fps");
+    }
+
+    // Apply custom format via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed for OV02C10: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ OV02C10 custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
+        custom_format_applied = true;
+      }
+    }
+  }
 
   // ============================================================================
   // Custom Format Support (OV5647) - All resolutions supported
   // ============================================================================
-  bool custom_format_applied = false;
   if (this->sensor_name_ == "ov5647") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 

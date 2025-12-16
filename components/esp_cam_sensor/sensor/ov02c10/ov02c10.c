@@ -1144,7 +1144,12 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .reserved = NULL,
      },
  };
- 
+
+ // Export custom formats for external use (ESPHome component)
+ const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = ov02c10_format_info[3];
+ const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = ov02c10_format_info[4];
+ const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = ov02c10_format_info[5];
+
  static esp_err_t ov02c10_read(esp_sccb_io_handle_t sccb_handle, uint16_t reg, uint8_t *read_buf)
  {
      return esp_sccb_transmit_receive_reg_a16v8(sccb_handle, reg, read_buf);
