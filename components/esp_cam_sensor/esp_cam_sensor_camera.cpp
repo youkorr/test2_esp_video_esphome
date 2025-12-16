@@ -728,10 +728,10 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // ============================================================================
-  // Custom Format Support (OV02C10) - 640x480, 800x600, 800x480
+  // Custom Format Support (OV5647, SC202CS) - Native resolutions via VIDIOC_S_SENSOR_FMT
   // ============================================================================
-  // Custom Format Support (OV5647) - All resolutions supported
-  // ============================================================================
+  bool custom_format_applied = false;
+
   if (this->sensor_name_ == "ov5647") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
