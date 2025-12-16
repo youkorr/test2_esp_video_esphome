@@ -1,13 +1,15 @@
 /*
  * OV02C10 Custom Format Configurations
  * Support for VGA and SVGA resolutions: 640x480 and 800x600
+ *
+ * NOTE: This file is included by ov02c10.c which already defines ov02c10_reginfo_t
+ * Do not include ov02c10_types.h here to avoid path issues
  */
 
 #pragma once
 
 #include <stdint.h>
 #include "esp_cam_sensor_types.h"
-#include "sensor/ov02c10/include/ov02c10_types.h"  // Use official ov02c10_reginfo_t type
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +17,16 @@ extern "C" {
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
+#endif
+
+// Forward declaration - actual type is defined in ov02c10_types.h
+// This file is only included by ov02c10.c which already has the full definition
+#ifndef OV02C10_REGINFO_T_DEFINED
+typedef struct {
+    uint16_t reg;
+    uint8_t val;
+} ov02c10_reginfo_t;
+#define OV02C10_REGINFO_T_DEFINED
 #endif
 
 // ============================================================================
