@@ -1020,42 +1020,7 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  };
 
  static const esp_cam_sensor_format_t ov02c10_format_info[] = {
-     {
-         .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
-         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-         .port = ESP_CAM_SENSOR_MIPI_CSI,
-         .xclk = 24000000,
-         .width = 640,
-         .height = 480,
-         .regs = ov02c10_640x480_raw10_30fps,
-         .regs_size = ARRAY_SIZE(ov02c10_640x480_raw10_30fps),
-         .fps = 30,
-         .isp_info = &ov02c10_640x480_isp_info,
-         .mipi_info = {
-             .mipi_clk = 62500000,  // 62.5 MHz - calculated from pclk × 10 / 2
-             .lane_num = 1,
-             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-         },
-         .reserved = NULL,
-     },
-     {
-         .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
-         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-         .port = ESP_CAM_SENSOR_MIPI_CSI,
-         .xclk = 24000000,
-         .width = 800,
-         .height = 600,
-         .regs = ov02c10_800x600_raw10_30fps,
-         .regs_size = ARRAY_SIZE(ov02c10_800x600_raw10_30fps),
-         .fps = 30,
-         .isp_info = &ov02c10_800x600_isp_info,
-         .mipi_info = {
-             .mipi_clk = 96000000,  // 96 MHz - calculated from pclk × 10 / 2
-             .lane_num = 1,
-             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-         },
-         .reserved = NULL,
-     },
+     // NATIVE FORMATS FIRST - preserve original indexes for CONFIG defaults
      {
          .name = "MIPI_1lane_24Minput_RAW10_1288x728_30fps",
          .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1106,6 +1071,43 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .mipi_info = {
              .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_1920x1080_30FPS,
              .lane_num = 2,
+             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+         },
+         .reserved = NULL,
+     },
+     // CUSTOM FORMATS LAST - new additions don't break existing indexes
+     {
+         .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
+         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+         .port = ESP_CAM_SENSOR_MIPI_CSI,
+         .xclk = 24000000,
+         .width = 640,
+         .height = 480,
+         .regs = ov02c10_640x480_raw10_30fps,
+         .regs_size = ARRAY_SIZE(ov02c10_640x480_raw10_30fps),
+         .fps = 30,
+         .isp_info = &ov02c10_640x480_isp_info,
+         .mipi_info = {
+             .mipi_clk = 62500000,  // 62.5 MHz - calculated from pclk × 10 / 2
+             .lane_num = 1,
+             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+         },
+         .reserved = NULL,
+     },
+     {
+         .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
+         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+         .port = ESP_CAM_SENSOR_MIPI_CSI,
+         .xclk = 24000000,
+         .width = 800,
+         .height = 600,
+         .regs = ov02c10_800x600_raw10_30fps,
+         .regs_size = ARRAY_SIZE(ov02c10_800x600_raw10_30fps),
+         .fps = 30,
+         .isp_info = &ov02c10_800x600_isp_info,
+         .mipi_info = {
+             .mipi_clk = 96000000,  // 96 MHz - calculated from pclk × 10 / 2
+             .lane_num = 1,
              .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
          },
          .reserved = NULL,
