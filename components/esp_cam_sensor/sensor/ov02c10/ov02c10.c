@@ -1035,14 +1035,14 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  static const esp_cam_sensor_format_t ov02c10_format_info[] = {
      // NATIVE FORMATS FIRST - preserve original indexes for CONFIG defaults
      {
-         .name = "MIPI_1lane_24Minput_RAW10_1288x728_30fps",
+         .name = "MIPI_1lane_24Minput_RAW10_1280x800_30fps",
          .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
          .port = ESP_CAM_SENSOR_MIPI_CSI,
          .xclk = 24000000,
-         .width = 1288,
-         .height = 728,
-         .regs = ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps,
-         .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps),
+         .width = 1280,
+         .height = 800,
+         .regs = ov02c10_input_24M_MIPI_1lane_raw10_1280x800_30fps,
+         .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1280x800_30fps),
          .fps = 30,
          .isp_info = &ov02c10_isp_info[0],
          .mipi_info = {
@@ -1146,6 +1146,7 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  };
 
  // Export custom formats for external use (ESPHome component)
+const esp_cam_sensor_format_t ov02c10_format_1280x800_raw10_30fps = ov02c10_format_info[0];
  const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = ov02c10_format_info[3];
  const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = ov02c10_format_info[4];
  const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = ov02c10_format_info[5];

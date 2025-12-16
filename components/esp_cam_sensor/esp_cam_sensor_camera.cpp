@@ -32,7 +32,7 @@ extern "C" {
 }
 
 // Custom format configurations for all sensors
-#include "ov02c10_custom_formats.h"  // OV02C10: 640x480, 800x600, 800x480
+#include "ov02c10_custom_formats.h"  // OV02C10: 1280x800, 640x480, 800x600, 800x480
 #include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
 #include "sc202cs_custom_formats.h"  // SC202CS: 800x600
 
@@ -736,7 +736,10 @@ bool MipiDSICamComponent::start_streaming() {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
     // Select format based on requested resolution
-    if (width == 640 && height == 480) {
+    if (width == 1280 && height == 800) {
+      custom_format = &ov02c10_format_1280x800_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using OV02C10 CUSTOM format: 1280x800 RAW10 @ 30fps");
+    } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using OV02C10 CUSTOM format: 640x480 RAW10 @ 30fps");
     } else if (width == 800 && height == 600) {
