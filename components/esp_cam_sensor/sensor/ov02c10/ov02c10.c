@@ -1019,6 +1019,19 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
      }
  };
 
+ // ISP info for custom WVGA format (800x480)
+ static const esp_cam_sensor_isp_info_t ov02c10_800x480_isp_info = {
+     .isp_v1_info = {
+         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+         .pclk = 15974400,     // HTS × VTS × FPS = 1024 × 520 × 30
+         .hts = 1024,
+         .vts = 520,
+         .exp_def = 0x1FE,     // 510 - within range for VTS=520 (max ~505)
+         .gain_def = 0x01,     // Match native driver
+         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
+     }
+ };
+
  static const esp_cam_sensor_format_t ov02c10_format_info[] = {
      // NATIVE FORMATS FIRST - preserve original indexes for CONFIG defaults
      {
@@ -1107,6 +1120,24 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .isp_info = &ov02c10_800x600_isp_info,
          .mipi_info = {
              .mipi_clk = 96000000,  // 96 MHz - calculated from pclk × 10 / 2
+             .lane_num = 1,
+             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+         },
+         .reserved = NULL,
+     },
+     {
+         .name = "MIPI_1lane_24Minput_RAW10_800x480_30fps",
+         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+         .port = ESP_CAM_SENSOR_MIPI_CSI,
+         .xclk = 24000000,
+         .width = 800,
+         .height = 480,
+         .regs = ov02c10_800x480_raw10_30fps,
+         .regs_size = ARRAY_SIZE(ov02c10_800x480_raw10_30fps),
+         .fps = 30,
+         .isp_info = &ov02c10_800x480_isp_info,
+         .mipi_info = {
+             .mipi_clk = 79872000,  // 79.87 MHz - calculated from pclk × 10 / 2
              .lane_num = 1,
              .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
          },

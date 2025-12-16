@@ -797,6 +797,31 @@
      {OV02C10_REG_END, 0x00},
  };
 
+ // Custom format: 800x480 @ 30fps for 480x800 displays (WVGA)
+ static const ov02c10_reginfo_t ov02c10_800x480_raw10_30fps[] = {
+     {0x0103, 0x01},  // Software reset
+     {0x0100, 0x00},  // Standby
+     {0x0302, 0x32},  // PLL multiplier
+     {0x030e, 0x02},  // PLL divider
+     {0x3808, 0x03},  // H output size MSB (800 = 0x0320)
+     {0x3809, 0x20},  // H output size LSB
+     {0x380a, 0x01},  // V output size MSB (480 = 0x01E0)
+     {0x380b, 0xE0},  // V output size LSB
+     {0x380c, 0x04},  // HTS MSB (1024 = 0x0400)
+     {0x380d, 0x00},  // HTS LSB
+     {0x380e, 0x02},  // VTS MSB (520 = 0x0208)
+     {0x380f, 0x08},  // VTS LSB
+     {0x3810, 0x02},  // H offset MSB
+     {0x3811, 0x30},  // H offset LSB (same as 800x600)
+     {0x3812, 0x00},  // V offset MSB
+     {0x3813, 0x70},  // V offset LSB (adjusted for 480 height)
+     {0x3820, 0x00},  // No flip
+     {0x3821, 0x00},  // No mirror
+     {0x4837, 0x1c},  // MIPI timing
+     {0x0100, 0x01},  // Start streaming
+     {OV02C10_REG_END, 0x00},
+ };
+
  #ifdef __cplusplus
  }
  #endif
