@@ -24,13 +24,13 @@ if CAMERA_OV02C10
 
     choice CAMERA_OV02C10_MIPI_DEFAULT_FMT
         prompt "Default format select"
-        default CAMERA_OV02C10_MIPI_RAW10_1280x800_30FPS
+        default CAMERA_OV02C10_MIPI_RAW10_1288x728_30FPS
         help
             Select the default format to load when the sensor is detected.
             When the sensor is in stream off state, the format can be changed.
 
-        config CAMERA_OV02C10_MIPI_RAW10_1280x800_30FPS
-            bool "RAW10 1280x800 30fps, MIPI 1lane 24M input"
+        config CAMERA_OV02C10_MIPI_RAW10_1288x728_30FPS
+            bool "RAW10 1288x728 30fps, MIPI 1lane 24M input"
         config CAMERA_OV02C10_MIPI_RAW10_1920x1080_30FPS
             bool "RAW10 1920x1080 30fps, MIPI 1lane 24M input"
         config CAMERA_OV02C10_MIPI_RAW10_1920x1080_2LAN_30FPS
@@ -39,7 +39,7 @@ if CAMERA_OV02C10
 
     config CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DAFAULT
         int
-        default 0 if CAMERA_OV02C10_MIPI_RAW10_1280x800_30FPS
+        default 0 if CAMERA_OV02C10_MIPI_RAW10_1288x728_30FPS
         default 1 if CAMERA_OV02C10_MIPI_RAW10_1920x1080_30FPS
         default 2 if CAMERA_OV02C10_MIPI_RAW10_1920x1080_2LAN_30FPS
         help

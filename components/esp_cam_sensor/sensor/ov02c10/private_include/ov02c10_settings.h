@@ -43,7 +43,7 @@
      {OV02C10_REG_END, 0x00},
  };
  
- static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_1280x800_30fps[] = {
+ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps[] = {
      {0x0301, 0x08},
      {0x0303, 0x06},
      {0x0304, 0x01},
@@ -126,18 +126,18 @@
      {0x3805, 0x4f},
      {0x3806, 0x03},
      {0x3807, 0x8F},
-     {0x3808, 0x05},  // H output size MSB (1280 = 0x0500)
-     {0x3809, 0x00},  // H output size LSB
-     {0x380a, 0x03},  // V output size MSB (800 = 0x0320)
-     {0x380b, 0x20},  // V output size LSB
-     {0x380c, 0x05},  // HTS MSB (1500 = 0x05DC)
-     {0x380d, 0xDC},  // HTS LSB
-     {0x380e, 0x03},  // VTS MSB (850 = 0x0352)
-     {0x380f, 0x52},  // VTS LSB
-     {0x3810, 0x01},  // H offset MSB (320 = 0x0140)
-     {0x3811, 0x40},  // H offset LSB - crop from 1920: (1920-1280)/2
-     {0x3812, 0x00},  // V offset MSB (140 = 0x008C)
-     {0x3813, 0x8C},  // V offset LSB - crop from 1080: (1080-800)/2
+     {0x3808, 0x05},  // H output size MSB (1288 = 0x0508)
+     {0x3809, 0x08},  // H output size LSB
+     {0x380a, 0x02},  // V output size MSB (728 = 0x02D8)
+     {0x380b, 0xd8},  // V output size LSB
+     {0x380c, 0x08},  // HTS MSB (2280 = 0x08E8)
+     {0x380d, 0xe8},  // HTS LSB
+     {0x380e, 0x04},  // VTS MSB (1164 = 0x048C)
+     {0x380f, 0x8c},  // VTS LSB
+     {0x3810, 0x00},  // H offset MSB
+     {0x3811, 0x07},  // H offset LSB
+     {0x3812, 0x00},  // V offset MSB
+     {0x3813, 0x04},  // V offset LSB
      {0x3814, 0x01},
      {0x3815, 0x01},
      {0x3816, 0x01},
@@ -244,7 +244,7 @@
      {0x4815, 0x40},
      {0x4816, 0x12},
      {0x481f, 0x30},
-     {0x4837, 0x14},  // MIPI timing for 1280x800
+     {0x4837, 0x15},
      {0x4857, 0x05},
      {0x4884, 0x04},
      {0x4900, 0x00},
@@ -800,30 +800,6 @@
  };
 
  // Custom format: 800x480 @ 30fps for 480x800 displays (WVGA)
- static const ov02c10_reginfo_t ov02c10_800x480_raw10_30fps[] = {
-     {0x0103, 0x01},  // Software reset
-     {0x0100, 0x00},  // Standby
-     {0x0302, 0x32},  // PLL multiplier
-     {0x030e, 0x02},  // PLL divider
-     {0x3808, 0x03},  // H output size MSB (800 = 0x0320)
-     {0x3809, 0x20},  // H output size LSB
-     {0x380a, 0x01},  // V output size MSB (480 = 0x01E0)
-     {0x380b, 0xE0},  // V output size LSB
-     {0x380c, 0x04},  // HTS MSB (1050 = 0x041A)
-     {0x380d, 0x1A},  // HTS LSB
-     {0x380e, 0x02},  // VTS MSB (526 = 0x020E)
-     {0x380f, 0x0E},  // VTS LSB
-     {0x3810, 0x02},  // H offset MSB (560 = 0x0230)
-     {0x3811, 0x30},  // H offset LSB - crop from 1920: (1920-800)/2
-     {0x3812, 0x01},  // V offset MSB (300 = 0x012C)
-     {0x3813, 0x2C},  // V offset LSB - crop from 1080: (1080-480)/2
-     {0x3820, 0x00},  // No flip
-     {0x3821, 0x00},  // No mirror
-     {0x4837, 0x1c},  // MIPI timing
-     {0x0100, 0x01},  // Start streaming
-     {OV02C10_REG_END, 0x00},
- };
-
  #ifdef __cplusplus
  }
  #endif
