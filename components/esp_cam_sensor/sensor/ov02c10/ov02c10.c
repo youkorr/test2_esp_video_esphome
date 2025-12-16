@@ -1014,7 +1014,6 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .reserved = NULL,
      },
 
- static const esp_cam_sensor_format_t ov02c10_format_info[] = {
      {
          .name = "MIPI_1lane_24Minput_RAW10_1288x728_30fps",
          .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
