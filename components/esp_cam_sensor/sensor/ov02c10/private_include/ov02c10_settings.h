@@ -745,61 +745,6 @@
 
  // ============================================================================
  // Custom Format: 640x480 (VGA) @ 30fps RAW10
- // ============================================================================
- // Centered crop from 1920x1080 sensor area
- static const ov02c10_reginfo_t ov02c10_640x480_raw10_30fps[] = {
-     {0x0103, 0x01},  // Software reset
-     {0x0100, 0x00},  // Standby
-     {0x0302, 0x32},  // PLL multiplier
-     {0x030e, 0x02},  // PLL divider
-     {0x3808, 0x02},  // H output size MSB (640)
-     {0x3809, 0x80},  // H output size LSB
-     {0x380a, 0x01},  // V output size MSB (480)
-     {0x380b, 0xe0},  // V output size LSB
-     {0x380c, 0x03},  // HTS MSB
-     {0x380d, 0x20},  // HTS LSB (800)
-     {0x380e, 0x02},  // VTS MSB
-     {0x380f, 0x08},  // VTS LSB (520)
-     {0x3810, 0x02},  // H offset MSB
-     {0x3811, 0x80},  // H offset LSB
-     {0x3812, 0x01},  // V offset MSB
-     {0x3813, 0x2c},  // V offset LSB
-     {0x3820, 0x00},  // No flip
-     {0x3821, 0x00},  // No mirror
-     {0x4837, 0x20},  // MIPI timing
-     {0x0100, 0x01},  // Start streaming
-     {OV02C10_REG_END, 0x00},
- };
-
- // ============================================================================
- // Custom Format: 800x600 (SVGA) @ 30fps RAW10
- // ============================================================================
- // Centered crop from 1920x1080 sensor area
- static const ov02c10_reginfo_t ov02c10_800x600_raw10_30fps[] = {
-     {0x0103, 0x01},  // Software reset
-     {0x0100, 0x00},  // Standby
-     {0x0302, 0x32},  // PLL multiplier
-     {0x030e, 0x02},  // PLL divider
-     {0x3808, 0x03},  // H output size MSB (800)
-     {0x3809, 0x20},  // H output size LSB
-     {0x380a, 0x02},  // V output size MSB (600)
-     {0x380b, 0x58},  // V output size LSB
-     {0x380c, 0x04},  // HTS MSB
-     {0x380d, 0x00},  // HTS LSB (1024)
-     {0x380e, 0x02},  // VTS MSB
-     {0x380f, 0x70},  // VTS LSB (624)
-     {0x3810, 0x02},  // H offset MSB
-     {0x3811, 0x30},  // H offset LSB
-     {0x3812, 0x00},  // V offset MSB
-     {0x3813, 0xf0},  // V offset LSB
-     {0x3820, 0x00},  // No flip
-     {0x3821, 0x00},  // No mirror
-     {0x4837, 0x1c},  // MIPI timing
-     {0x0100, 0x01},  // Start streaming
-     {OV02C10_REG_END, 0x00},
- };
-
- // Custom format: 800x480 @ 30fps for 480x800 displays (WVGA)
  #ifdef __cplusplus
  }
  #endif
