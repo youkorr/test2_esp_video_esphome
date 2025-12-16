@@ -788,6 +788,33 @@ bool MipiDSICamComponent::start_streaming() {
       }
     }
   }
+
+    // ============================================================================
+  // Custom Format Support (OV02C10 @ 800x480 ou 1280x800)
+  // ============================================================================
+  if (this->sensor_name_ == "ov02c10") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom selon la résolution
+    if (width == 1288 && height == 728) {
+      custom_format = &ov02c10_format_1280x800_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1288x728 RAW10 @ 30fps");
+    } else if (width == 800 && height == 600) {
+      custom_format = &ov02c10_format_800x600_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+      }
+    }
+  }
   // ============================================================================
 
   // NOTE: Custom formats are now applied above for all sensors (OV02C10, OV5647, SC202CS)
@@ -895,7 +922,6 @@ bool MipiDSICamComponent::start_streaming() {
 
   if (!size_found) {
     ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
     ESP_LOGW(TAG, "💡 Use RAW8/RAW10 resolutions above with pixel_format: RAW8/RAW10");
     ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
