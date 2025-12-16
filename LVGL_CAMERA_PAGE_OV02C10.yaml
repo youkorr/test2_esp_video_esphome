@@ -164,7 +164,7 @@ lvgl:
             height: 45
             x: 680
             y: 230
-            bg_color: 0xFF6600  # Orange
+            bg_color: 0xFF6600  # Orange (ON par défaut)
             radius: 8
             on_click:
               then:
@@ -176,20 +176,16 @@ lvgl:
                     // Update YOLO11 component
                     id(yolo11_detector).set_draw_enabled(yolo11_enabled);
 
-                    // Update button label
+                    // Log status change
                     if (yolo11_enabled) {
                       ESP_LOGI("yolo11", "✅ YOLO11 detection boxes ENABLED");
-                      lv_label_set_text(id(btn_yolo11_label), "YOLO\nON");
-                      lv_obj_set_style_bg_color(id(btn_yolo11_toggle), lv_color_hex(0xFF6600), 0);  // Orange
                     } else {
                       ESP_LOGI("yolo11", "❌ YOLO11 detection boxes DISABLED");
-                      lv_label_set_text(id(btn_yolo11_label), "YOLO\nOFF");
-                      lv_obj_set_style_bg_color(id(btn_yolo11_toggle), lv_color_hex(0x666666), 0);  // Gray
                     }
             widgets:
               - label:
                   id: btn_yolo11_label
-                  text: "YOLO\nON"
+                  text: "YOLO"
                   text_color: 0xFFFFFF
                   text_font: nunito_20
                   text_align: CENTER
