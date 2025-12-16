@@ -862,6 +862,10 @@ bool MipiDSICamComponent::start_streaming() {
       }
       if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
         ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+        if (frmsize.discrete.width == target_width && frmsize.discrete.height == target_height) {
+          size_found = true;
+          ESP_LOGI(TAG, "✓ Found RAW8 %ux%u - ISP will convert to RGB565", target_width, target_height);
+        }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
                  frmsize.stepwise.min_width, frmsize.stepwise.min_height,
@@ -869,9 +873,37 @@ bool MipiDSICamComponent::start_streaming() {
                  frmsize.stepwise.step_width, frmsize.stepwise.step_height);
       }
     }
+  }
+
+  // Si toujours pas trouvé, vérifier RAW10 (OV02C10 custom formats)
+  if (!size_found) {
+    ESP_LOGW(TAG, "⚠️  No sizes found for RAW8 - checking native RAW10 formats...");
+    for (int i = 0; i < 20; i++) {
+      memset(&frmsize, 0, sizeof(frmsize));
+      frmsize.index = i;
+      frmsize.pixel_format = V4L2_PIX_FMT_SBGGR10;  // RAW10 BGGR (OV02C10 native)
+      if (ioctl(this->video_fd_, VIDIOC_ENUM_FRAMESIZES, &frmsize) < 0) {
+        break;
+      }
+      if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+        ESP_LOGI(TAG, "  RAW10 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+        if (frmsize.discrete.width == target_width && frmsize.discrete.height == target_height) {
+          size_found = true;
+          ESP_LOGI(TAG, "✓ Found RAW10 %ux%u - ISP will convert to RGB565", target_width, target_height);
+        }
+      } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
+        ESP_LOGI(TAG, "  RAW10 Stepwise: %ux%u to %ux%u (step %ux%u)",
+                 frmsize.stepwise.min_width, frmsize.stepwise.min_height,
+                 frmsize.stepwise.max_width, frmsize.stepwise.max_height,
+                 frmsize.stepwise.step_width, frmsize.stepwise.step_height);
+      }
+    }
+  }
+
+  if (!size_found) {
     ESP_LOGW(TAG, "");
     ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
-    ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
+    ESP_LOGW(TAG, "💡 Use RAW8/RAW10 resolutions above with pixel_format: RAW8/RAW10");
     ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
 
