@@ -54,7 +54,7 @@ static const esp_cam_sensor_isp_info_t ov02c10_640x480_isp_info = {
         .vts = 520,
         .exp_def = 0x200,
         .gain_def = 0x100,
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Match OV02C10 driver
     }
 };
 
@@ -114,7 +114,7 @@ static const esp_cam_sensor_isp_info_t ov02c10_800x600_isp_info = {
         .vts = 624,
         .exp_def = 0x250,
         .gain_def = 0x100,
-        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
+        .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Match OV02C10 driver
     }
 };
 
