@@ -264,6 +264,25 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int out_width = (this->output_width_ > 0) ? this->output_width_ : crop_width;
   int out_height = (this->output_height_ > 0) ? this->output_height_ : crop_height;
 
+  // PPA constraints: dimensions must be multiples of 8 (ideally 16)
+  // Adjust if necessary to avoid "scale does not fit" error
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    // Ensure dimensions are multiples of 16
+    out_width = (out_width + 15) & ~15;
+    out_height = (out_height + 15) & ~15;
+
+    // PPA prefers uniform scale ratios - adjust height to match width's scale
+    float scale_x_target = (float)out_width / (float)crop_width;
+    int adjusted_height = (int)((float)crop_height * scale_x_target);
+    adjusted_height = (adjusted_height + 15) & ~15;  // Align to 16
+
+    if (abs(adjusted_height - out_height) > 16) {
+      ESP_LOGW(TAG, "PPA: Adjusting height %d→%d to match scale_x=%.3f (keeping aspect ratio)",
+               out_height, adjusted_height, scale_x_target);
+      out_height = adjusted_height;
+    }
+  }
+
   // Calculate scale factors for PPA hardware resize
   float scale_x = (this->output_width_ > 0) ? (float)out_width / (float)crop_width : 1.0f;
   float scale_y = (this->output_height_ > 0) ? (float)out_height / (float)crop_height : 1.0f;
