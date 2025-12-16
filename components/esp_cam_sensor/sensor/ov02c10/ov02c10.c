@@ -8,7 +8,6 @@
  #include <freertos/FreeRTOS.h>
  #include <freertos/task.h>
  #include "driver/gpio.h"
- #include "../../ov02c10_custom_formats.h"  // Custom VGA and SVGA formats
  #include "esp_err.h"
  #include "esp_log.h"
  
@@ -16,6 +15,7 @@
  #include "esp_cam_sensor_detect.h"
  #include "ov02c10_settings.h"
  #include "ov02c10.h"
+ #include "../../ov02c10_custom_formats.h"  // Custom VGA and SVGA formats (MUST be after ov02c10_types.h)
 
  typedef struct {
     uint8_t dgain_fine; // digital gain fine

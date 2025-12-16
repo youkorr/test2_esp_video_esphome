@@ -19,15 +19,8 @@ extern "C" {
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
-// Forward declaration - actual type is defined in ov02c10_types.h
-// This file is only included by ov02c10.c which already has the full definition
-#ifndef OV02C10_REGINFO_T_DEFINED
-typedef struct {
-    uint16_t reg;
-    uint8_t val;
-} ov02c10_reginfo_t;
-#define OV02C10_REGINFO_T_DEFINED
-#endif
+// NOTE: ov02c10_reginfo_t is defined in ov02c10_types.h
+// This file MUST be included after ov02c10_settings.h in ov02c10.c
 
 // ============================================================================
 // Configuration 1 : 640x480 (VGA) @ 30fps RAW10
