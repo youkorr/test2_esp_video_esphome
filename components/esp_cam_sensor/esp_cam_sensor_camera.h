@@ -64,6 +64,8 @@ class MipiDSICamComponent : public Component {
   void set_mirror_y(bool enable) { mirror_y_ = enable; }
   void set_rotation(int degrees) { rotation_ = degrees; }  // 0, 90, 180, 270
   void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset (pixels)
+  void set_output_width(int width) { output_width_ = width; }      // PPA resize output (0 = no resize)
+  void set_output_height(int height) { output_height_ = height; }  // PPA resize output
 
   // Configuration des gains RGB CCM depuis YAML
   void set_rgb_gains_config(float red, float green, float blue) {
@@ -165,6 +167,10 @@ class MipiDSICamComponent : public Component {
   bool mirror_y_{false};
   int rotation_{0};  // 0, 90, 180, 270 degrees
   int crop_offset_x_{0};  // PPA crop offset in pixels (from left)
+
+  // PPA resize (optional - downscale only)
+  int output_width_{0};   // 0 = no resize (keep capture resolution)
+  int output_height_{0};  // 0 = no resize
 
   // PPA (Pixel-Processing Accelerator) hardware handles
   void *ppa_client_handle_{nullptr};

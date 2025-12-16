@@ -216,9 +216,10 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Enable PPA if crop offset, mirror, or rotation is configured
-  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 && this->crop_offset_x_ == 0) {
-    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop configured)");
+  // Enable PPA if crop offset, mirror, rotation, or resize is configured
+  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
+      this->crop_offset_x_ == 0 && this->output_width_ == 0 && this->output_height_ == 0) {
+    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop/resize configured)");
     this->ppa_enabled_ = false;
     return true;
   }
@@ -234,8 +235,17 @@ bool MipiDSICamComponent::init_ppa_() {
   }
 
   this->ppa_enabled_ = true;
-  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
-           this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+
+  // Log PPA configuration
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d, resize=%dx%d)",
+             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_,
+             this->output_width_, this->output_height_);
+  } else {
+    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
+             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+  }
+
   return true;
 }
 
@@ -250,6 +260,14 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int crop_width = this->image_width_ - this->crop_offset_x_;
   int crop_height = this->image_height_;
 
+  // Determine output dimensions (resize if configured, otherwise keep cropped size)
+  int out_width = (this->output_width_ > 0) ? this->output_width_ : crop_width;
+  int out_height = (this->output_height_ > 0) ? this->output_height_ : crop_height;
+
+  // Calculate scale factors for PPA hardware resize
+  float scale_x = (this->output_width_ > 0) ? (float)out_width / (float)crop_width : 1.0f;
+  float scale_y = (this->output_height_ > 0) ? (float)out_height / (float)crop_height : 1.0f;
+
   // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = this->image_width_;
@@ -260,11 +278,11 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output configuration (keep cropped size, NO upscaling)
+  // Output configuration (with optional resize)
   srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = crop_width * crop_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.pic_w = crop_width;  // Output cropped width (no upscale)
-  srm_config.out.pic_h = crop_height;
+  srm_config.out.buffer_size = out_width * out_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = out_width;   // Output width (resized if configured)
+  srm_config.out.pic_h = out_height;  // Output height (resized if configured)
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -279,8 +297,8 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = 1.0f;  // No scale (keep original aspect)
-  srm_config.scale_y = 1.0f;  // No vertical scale
+  srm_config.scale_x = scale_x;  // Hardware downscale if output_width configured
+  srm_config.scale_y = scale_y;  // Hardware downscale if output_height configured
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
@@ -898,6 +916,15 @@ bool MipiDSICamComponent::start_streaming() {
 
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
+
+  // If PPA resize is configured, update dimensions to match output
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    ESP_LOGI(TAG, "Capture: %ux%u → PPA resize → Output: %ux%u",
+             this->image_width_, this->image_height_,
+             this->output_width_, this->output_height_);
+    this->image_width_ = this->output_width_;
+    this->image_height_ = this->output_height_;
+  }
 
   // Calculer la taille du buffer (RGB565 = 2 bytes/pixel)
   this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
