@@ -24,8 +24,6 @@
  #define OV02C10_MIPI_CSI_LINE_RATE_800x1280_50FPS   (OV02C10_IDI_CLOCK_RATE_800x1280_50FPS * 4)
  #define OV02C10_IDI_CLOCK_RATE_1920x1080_30FPS      (81666700ULL)
  #define OV02C10_MIPI_CSI_LINE_RATE_1920x1080_30FPS  (OV02C10_IDI_CLOCK_RATE_1920x1080_30FPS * 5)
- #define OV02C10_IDI_CLOCK_RATE_1280x800_30FPS       (76500000ULL)
- #define OV02C10_MIPI_CSI_LINE_RATE_1280x800_30FPS   (OV02C10_IDI_CLOCK_RATE_1280x800_30FPS * 5)
  #define OV02C10_IDI_CLOCK_RATE_1280x960_45FPS        (88333333ULL)
  #define OV02C10_MIPI_CSI_LINE_RATE_1280x960_45FPS    (OV02C10_IDI_CLOCK_RATE_1280x960_45FPS * 5)
  #define OV02C10_8BIT_MODE                           (0x18)
@@ -126,18 +124,18 @@
      {0x3805, 0x4f},
      {0x3806, 0x03},
      {0x3807, 0x8F},
-     {0x3808, 0x05},  // H output size MSB (1288 = 0x0508)
-     {0x3809, 0x08},  // H output size LSB
-     {0x380a, 0x02},  // V output size MSB (728 = 0x02D8)
-     {0x380b, 0xd8},  // V output size LSB
-     {0x380c, 0x08},  // HTS MSB (2280 = 0x08E8)
-     {0x380d, 0xe8},  // HTS LSB
-     {0x380e, 0x04},  // VTS MSB (1164 = 0x048C)
-     {0x380f, 0x8c},  // VTS LSB
-     {0x3810, 0x00},  // H offset MSB
-     {0x3811, 0x07},  // H offset LSB
-     {0x3812, 0x00},  // V offset MSB
-     {0x3813, 0x04},  // V offset LSB
+     {0x3808, 0x05},
+     {0x3809, 0x08},
+     {0x380a, 0x02},
+     {0x380b, 0xd8},
+     {0x380c, 0x08},
+     {0x380d, 0xe8},
+     {0x380e, 0x04},
+     {0x380f, 0x8c},
+     {0x3810, 0x00},
+     {0x3811, 0x07},
+     {0x3812, 0x00},
+     {0x3813, 0x04},
      {0x3814, 0x01},
      {0x3815, 0x01},
      {0x3816, 0x01},
@@ -742,10 +740,10 @@
      {0X0100, 0X01},
      {OV02C10_REG_END, 0x00},
  };
-
- // ============================================================================
- // Custom Format: 640x480 (VGA) @ 30fps RAW10
+ 
  #ifdef __cplusplus
  }
  #endif
+ 
+
  
