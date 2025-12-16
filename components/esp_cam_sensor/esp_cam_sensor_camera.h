@@ -118,9 +118,19 @@ class MipiDSICamComponent : public Component {
 
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
-  uint16_t get_image_width() const { return image_width_; }
-  uint16_t get_image_height() const { return image_height_; }
-  size_t get_image_size() const { return image_buffer_size_; }
+  // Return PPA output size if resize configured, otherwise capture size
+  uint16_t get_image_width() const {
+    return (output_width_ > 0) ? output_width_ : image_width_;
+  }
+  uint16_t get_image_height() const {
+    return (output_height_ > 0) ? output_height_ : image_height_;
+  }
+  size_t get_image_size() const {
+    if (output_width_ > 0 && output_height_ > 0) {
+      return output_width_ * output_height_ * 2;  // RGB565 after PPA resize
+    }
+    return image_buffer_size_;
+  }
 
   // Contrôles manuels d'exposition et couleur (pour corriger surexposition et blanc→vert)
   bool set_exposure(int value);     // Contrôle manuel de l'exposition (0-65535, défaut: auto)

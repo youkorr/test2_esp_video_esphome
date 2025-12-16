@@ -917,20 +917,21 @@ bool MipiDSICamComponent::start_streaming() {
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
 
-  // If PPA resize is configured, update dimensions to match output
-  if (this->output_width_ > 0 && this->output_height_ > 0) {
-    ESP_LOGI(TAG, "Capture: %ux%u → PPA resize → Output: %ux%u",
-             this->image_width_, this->image_height_,
-             this->output_width_, this->output_height_);
-    this->image_width_ = this->output_width_;
-    this->image_height_ = this->output_height_;
-  }
-
-  // Calculer la taille du buffer (RGB565 = 2 bytes/pixel)
+  // Calculer la taille du buffer pour CAPTURE (RGB565 = 2 bytes/pixel)
+  // NOTE: Buffers must be allocated at CAPTURE size, not PPA output size
   this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
-  ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
-           this->image_width_, this->image_height_,
-           this->image_buffer_size_, this->image_buffer_size_ / 1024);
+
+  // Log PPA resize if configured (but keep buffer size at capture dimensions)
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    ESP_LOGI(TAG, "Format: %ux%u RGB565 → PPA resize → %ux%u, buffer size: %u bytes (%u KB)",
+             this->image_width_, this->image_height_,
+             this->output_width_, this->output_height_,
+             this->image_buffer_size_, this->image_buffer_size_ / 1024);
+  } else {
+    ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
+             this->image_width_, this->image_height_,
+             this->image_buffer_size_, this->image_buffer_size_ / 1024);
+  }
 
   // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
   // No re-application needed - timing registers are set by driver's native format
