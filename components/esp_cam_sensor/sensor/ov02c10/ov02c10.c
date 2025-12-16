@@ -1000,8 +1000,8 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .pclk = 12480000,     // HTS × VTS × FPS = 800 × 520 × 30
          .hts = 800,
          .vts = 520,
-         .exp_def = 0x200,
-         .gain_def = 0x100,
+         .exp_def = 0x46c,     // Match native driver
+         .gain_def = 0x01,     // Match native driver (NOT 0x100 - causes out of range error!)
          .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
      }
  };
@@ -1013,8 +1013,8 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .pclk = 19161600,     // HTS × VTS × FPS = 1024 × 624 × 30
          .hts = 1024,
          .vts = 624,
-         .exp_def = 0x250,
-         .gain_def = 0x100,
+         .exp_def = 0x46c,     // Match native driver
+         .gain_def = 0x01,     // Match native driver (NOT 0x100 - causes out of range error!)
          .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
      }
  };
