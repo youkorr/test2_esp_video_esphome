@@ -807,14 +807,14 @@
      {0x3809, 0x20},  // H output size LSB
      {0x380a, 0x01},  // V output size MSB (480 = 0x01E0)
      {0x380b, 0xE0},  // V output size LSB
-     {0x380c, 0x04},  // HTS MSB (1024 = 0x0400)
-     {0x380d, 0x00},  // HTS LSB
-     {0x380e, 0x02},  // VTS MSB (520 = 0x0208)
-     {0x380f, 0x08},  // VTS LSB
-     {0x3810, 0x02},  // H offset MSB
-     {0x3811, 0x30},  // H offset LSB (same as 800x600)
-     {0x3812, 0x00},  // V offset MSB
-     {0x3813, 0x70},  // V offset LSB (adjusted for 480 height)
+     {0x380c, 0x04},  // HTS MSB (1050 = 0x041A)
+     {0x380d, 0x1A},  // HTS LSB
+     {0x380e, 0x02},  // VTS MSB (526 = 0x020E)
+     {0x380f, 0x0E},  // VTS LSB
+     {0x3810, 0x02},  // H offset MSB (560 = 0x0230)
+     {0x3811, 0x30},  // H offset LSB - crop from 1920: (1920-800)/2
+     {0x3812, 0x01},  // V offset MSB (300 = 0x012C)
+     {0x3813, 0x2C},  // V offset LSB - crop from 1080: (1080-480)/2
      {0x3820, 0x00},  // No flip
      {0x3821, 0x00},  // No mirror
      {0x4837, 0x1c},  // MIPI timing
