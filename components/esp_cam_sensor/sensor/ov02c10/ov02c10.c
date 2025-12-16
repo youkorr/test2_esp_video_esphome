@@ -1046,7 +1046,7 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .fps = 30,
          .isp_info = &ov02c10_isp_info[0],
          .mipi_info = {
-             .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+             .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_1280x800_30FPS,
              .lane_num = 1,
              .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
          },
