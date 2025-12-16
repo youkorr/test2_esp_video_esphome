@@ -995,7 +995,6 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
 
 
  static const esp_cam_sensor_format_t ov02c10_format_info[] = {
-     // NATIVE FORMATS FIRST - preserve original indexes for CONFIG defaults
      {
          .name = "MIPI_1lane_24Minput_RAW10_1288x728_30fps",
          .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1003,6 +1002,26 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          .xclk = 24000000,
          .width = 1288,
          .height = 728,
+         .regs = ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps,
+         .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps),
+         .fps = 30,
+         .isp_info = &ov02c10_isp_info[0],
+         .mipi_info = {
+             .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+             .lane_num = 1,
+             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+         },
+         .reserved = NULL,
+     },
+
+ static const esp_cam_sensor_format_t ov02c10_format_info[] = {
+     {
+         .name = "MIPI_1lane_24Minput_RAW10_1288x728_30fps",
+         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+         .port = ESP_CAM_SENSOR_MIPI_CSI,
+         .xclk = 24000000,
+         .width = 800,
+         .height = 600,
          .regs = ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps,
          .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1288x728_30fps),
          .fps = 30,
@@ -1180,30 +1199,6 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
      return ov02c10_set_reg_bits(dev->sccb_handle, 0x3820, 1, 1, enable ? 0x01 : 0x00);
  }
  
-//  static esp_err_t ov02c10_set_AE_target(esp_cam_sensor_device_t *dev, int target)
-//  {
-//      esp_err_t ret = ESP_OK;
-//      /* stable in high */
-//      int fast_high, fast_low;
-//      int AE_low = target * 23 / 25;  /* 0.92 */
-//      int AE_high = target * 27 / 25; /* 1.08 */
- 
-//      fast_high = AE_high << 1;
-//      if (fast_high > 255) {
-//          fast_high = 255;
-//      }
- 
-//      fast_low = AE_low >> 1;
- 
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a0f, AE_high);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a10, AE_low);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a1b, AE_high);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a1e, AE_low);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a11, fast_high);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a1f, fast_low);
- 
-//      return ret;
-//  }
 
  static esp_err_t ov02c10_set_exp_val(esp_cam_sensor_device_t *dev, uint32_t u32_val)
 {
@@ -1319,77 +1314,7 @@ static esp_err_t ov02c10_get_para_value(esp_cam_sensor_device_t *dev, uint32_t i
     return ret;
 }
  
- 
-//  static esp_err_t ov02c10_query_para_desc(esp_cam_sensor_device_t *dev, esp_cam_sensor_param_desc_t *qdesc)
-//  {
-//      esp_err_t ret = ESP_OK;
-//      switch (qdesc->id) {
-//      case ESP_CAM_SENSOR_VFLIP:
-//      case ESP_CAM_SENSOR_HMIRROR:
-//          qdesc->type = ESP_CAM_SENSOR_PARAM_TYPE_NUMBER;
-//          qdesc->number.minimum = 0;
-//          qdesc->number.maximum = 1;
-//          qdesc->number.step = 1;
-//          qdesc->default_value = 0;
-//          break;
-//      case ESP_CAM_SENSOR_EXPOSURE_VAL:
-//          qdesc->type = ESP_CAM_SENSOR_PARAM_TYPE_NUMBER;
-//          qdesc->number.minimum = 2;
-//          qdesc->number.maximum = 235;
-//          qdesc->number.step = 1;
-//          qdesc->default_value = 0;
-//          break;
-//      default: {
-//          ESP_LOGI(TAG, "id=%"PRIx32" is not supported", qdesc->id);
-//          ret = ESP_ERR_INVALID_ARG;
-//          break;
-//      }
-//      }
-//      return ret;
-//  }
- 
-//  static esp_err_t ov02c10_get_para_value(esp_cam_sensor_device_t *dev, uint32_t id, void *arg, size_t size)
-//  {
-//      return ESP_ERR_NOT_SUPPORTED;
-//  }
- 
-//  static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t id, const void *arg, size_t size)
-//  {
-//      esp_err_t ret = ESP_OK;
- 
-//      switch (id) {
-//      case ESP_CAM_SENSOR_VFLIP: {
-//          int *value = (int *)arg;
- 
-//          ret = ov02c10_set_vflip(dev, *value);
-//          break;
-//      }
-//      case ESP_CAM_SENSOR_HMIRROR: {
-//          int *value = (int *)arg;
- 
-//          ret = ov02c10_set_mirror(dev, *value);
-//          break;
-//      }
-//      case ESP_CAM_SENSOR_EXPOSURE_VAL: {
-//          int *value = (int *)arg;
- 
-//          ret = ov02c10_set_AE_target(dev, *value);
-//          break;
-//      }
-//      case ESP_CAM_SENSOR_GAIN: {
-//         uint32_t u32_val = *(uint32_t *)arg;
-//         ret = ov02c10_set_total_gain_val(dev, u32_val);
-//         break;
-//     }
-//      default: {
-//          ESP_LOGE(TAG, "set id=%" PRIx32 " is not supported", id);
-//          ret = ESP_ERR_INVALID_ARG;
-//          break;
-//      }
-//      }
- 
-//      return ret;
-//  }
+
 
 
 static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t id, const void *arg, size_t size)
@@ -1526,69 +1451,6 @@ static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t i
      return vts;
  }
  
-//  static int ov02c10_get_light_freq(esp_cam_sensor_device_t *dev)
-//  {
-//      /* get banding filter value */
-//      uint8_t temp, temp1;
-//      int light_freq = 0;
- 
-//      ov02c10_read(dev->sccb_handle, 0x3c01, &temp);
- 
-//      if (temp & 0x80) {
-//          /* manual */
-//          ov02c10_read(dev->sccb_handle, 0x3c00, &temp1);
-//          if (temp1 & 0x04) {
-//              /* 50Hz */
-//              light_freq = 50;
-//          } else {
-//              /* 60Hz */
-//              light_freq = 60;
-//          }
-//      } else {
-//          /* auto */
-//          ov02c10_read(dev->sccb_handle, 0x3c0c, &temp1);
-//          if (temp1 & 0x01) {
-//              /* 50Hz */
-//              light_freq = 50;
-//          } else {
-//              light_freq = 60;
-//          }
-//      }
-//      return light_freq;
-//  }
- 
-//  static esp_err_t ov02c10_set_bandingfilter(esp_cam_sensor_device_t *dev)
-//  {
-//      esp_err_t ret = ESP_OK;
-//      int prev_sysclk, prev_VTS, prev_HTS;
-//      int band_step60, max_band60, band_step50, max_band50;
- 
-//      /* read preview PCLK */
-//      prev_sysclk = ov02c10_get_sysclk(dev);
-//      /* read preview HTS */
-//      prev_HTS = ov02c10_get_hts(dev);
- 
-//      /* read preview VTS */
-//      prev_VTS = ov02c10_get_vts(dev);
- 
-//      /* calculate banding filter */
-//      /* 60Hz */
-//      band_step60 = prev_sysclk * 100 / prev_HTS * 100 / 120;
-//      ret = ov02c10_write(dev->sccb_handle, 0x3a0a, (uint8_t)(band_step60 >> 8));
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a0b, (uint8_t)(band_step60 & 0xff));
- 
-//      max_band60 = (int)((prev_VTS - 4) / band_step60);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a0d, (uint8_t)max_band60);
- 
-//      /* 50Hz */
-//      band_step50 = prev_sysclk * 100 / prev_HTS;
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a08, (uint8_t)(band_step50 >> 8));
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a09, (uint8_t)(band_step50 & 0xff));
- 
-//      max_band50 = (int)((prev_VTS - 4) / band_step50);
-//      ret |= ov02c10_write(dev->sccb_handle, 0x3a0e, (uint8_t)max_band50);
-//      return ret;
-//  }
  
  static esp_err_t ov02c10_set_format(esp_cam_sensor_device_t *dev, const esp_cam_sensor_format_t *format)
  {
