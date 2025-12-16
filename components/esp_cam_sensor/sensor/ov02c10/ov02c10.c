@@ -15,7 +15,6 @@
  #include "esp_cam_sensor_detect.h"
  #include "ov02c10_settings.h"
  #include "ov02c10.h"
- #include "../../ov02c10_custom_formats.h"  // Custom VGA and SVGA formats (MUST be after ov02c10_types.h)
 
  typedef struct {
     uint8_t dgain_fine; // digital gain fine
@@ -993,7 +992,33 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          }
      },
  };
- 
+
+ // ISP info for custom VGA format (640x480)
+ static const esp_cam_sensor_isp_info_t ov02c10_640x480_isp_info = {
+     .isp_v1_info = {
+         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+         .pclk = 12480000,     // HTS × VTS × FPS = 800 × 520 × 30
+         .hts = 800,
+         .vts = 520,
+         .exp_def = 0x200,
+         .gain_def = 0x100,
+         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
+     }
+ };
+
+ // ISP info for custom SVGA format (800x600)
+ static const esp_cam_sensor_isp_info_t ov02c10_800x600_isp_info = {
+     .isp_v1_info = {
+         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+         .pclk = 19161600,     // HTS × VTS × FPS = 1024 × 624 × 30
+         .hts = 1024,
+         .vts = 624,
+         .exp_def = 0x250,
+         .gain_def = 0x100,
+         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
+     }
+ };
+
  static const esp_cam_sensor_format_t ov02c10_format_info[] = {
      {
          .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
