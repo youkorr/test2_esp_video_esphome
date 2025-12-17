@@ -596,7 +596,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   // 5. DÉMARRER LE STREAMING ★★★
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (ioctl(fd, VIDIOC_STREAMON, &type) < 0) {
-    ESP_LOGE(TAG, "❌ VIDIOC_STREAMON a échoué: %s", strerror(errno));
+    ESP_LOGE(TAG, "VIDIOC_STREAMON a échoué: %s", strerror(errno));
     // Nettoyer tous les buffers
     for (unsigned int i = 0; i < req.count; i++) {
       munmap(buffers[i].start, buffers[i].length);
@@ -606,10 +606,10 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ STREAMING DÉMARRÉ - Le sensor stream maintenant !");
+  ESP_LOGI(TAG, "STREAMING DÉMARRÉ - Le sensor stream maintenant !");
   ESP_LOGI(TAG, "   → CSI controller actif");
   ESP_LOGI(TAG, "   → ISP actif");
-  ESP_LOGI(TAG, "   → Sensor SC202CS streaming MIPI data");
+  
 
   // 6. Attendre et récupérer une frame
   struct v4l2_buffer buf;
@@ -683,7 +683,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   close(fd);
 
   this->snapshot_count_++;
-  ESP_LOGI(TAG, "✅ Snapshot #%u enregistré: %s (%u octets)",
+  ESP_LOGI(TAG, "Snapshot #%u enregistré: %s (%u octets)",
            (unsigned)this->snapshot_count_, path.c_str(), (unsigned)written);
 
   return (written == buf.bytesused);
