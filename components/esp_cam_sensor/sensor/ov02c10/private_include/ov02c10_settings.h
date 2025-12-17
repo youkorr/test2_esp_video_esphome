@@ -1217,10 +1217,11 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
 };
 
 // ============================================================================
-// Custom format: 480x640 @ 30fps RAW10 (VGA rotated 270°)
+// Custom format: 480x640 @ 30fps RAW10 (Portrait VGA)
 // ============================================================================
-// VGA resolution rotated 270 degrees
-// Strategy: Same as 640x480 but with rotation enabled and dimensions swapped
+// Portrait VGA resolution (480 wide x 640 tall)
+// Strategy: Adjust crop window to maintain 3:4 aspect ratio, use ISP downscaling
+// Note: Rotation should be handled in software/display layer if needed
 
 static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270[] = {
     // PLL configuration (IDENTICAL to native)
@@ -1325,9 +1326,9 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3815, 0x01},  // No vertical binning
     {0x3816, 0x01},
     {0x3817, 0x01},
-    // Rotation configuration: 270° = vflip + hmirror
-    {0x3820, 0xa2},  // Enable vflip (bit 1 = 1)
-    {0x3821, 0x02},  // Enable hmirror (bit 1 = 1)
+    // No rotation - let software handle it
+    {0x3820, 0xa0},  // Same as standard (no vflip)
+    {0x3821, 0x00},  // Same as standard (no hmirror)
     {0x3822, 0x80},
     {0x3823, 0x08},
     {0x3824, 0x00},
