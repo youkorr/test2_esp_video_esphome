@@ -1329,10 +1329,10 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3815, 0x01},  // No vertical binning
     {0x3816, 0x01},
     {0x3817, 0x01},
-    // Hardware rotation: 90° (hmirror enabled)
-    // This rotates the portrait 480x640 image to landscape 640x480
-    {0x3820, 0xa0},  // No vflip
-    {0x3821, 0x02},  // Enable hmirror (bit 1 = 1) for 90° rotation
+    // Hardware rotation: 90° clockwise (vflip + hmirror)
+    // vflip (bit 2 of 0x3820) + hmirror (bit 1 of 0x3821) = 90° rotation
+    {0x3820, 0xa4},  // Enable vflip (0xa0 | 0x04 = 0xa4)
+    {0x3821, 0x03},  // Enable hmirror (0x01 | 0x02 = 0x03)
     {0x3822, 0x80},
     {0x3823, 0x08},
     {0x3824, 0x00},
