@@ -1299,16 +1299,19 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE (320-1615 x 180-911)
-    {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
-    {0x3802, 0x00},  // Y start high
-    {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
-    {0x3806, 0x03},  // Y end high
-    {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 480x640 (dimensions swapped for 270° rotation)
+    // Crop window: Adjusted for 3:4 aspect ratio (portrait)
+    // Native sensor active area: 1936 x 1096 pixels
+    // For 3:4 ratio, need 732 width x 976 height
+    // Center crop: X_start = (1936-732)/2 = 602, Y_start = (1096-976)/2 = 60
+    {0x3800, 0x02},  // X start high (602 >> 8 = 2)
+    {0x3801, 0x5a},  // X start low (602 & 0xFF = 0x5a = 90)
+    {0x3802, 0x00},  // Y start high (60 >> 8 = 0)
+    {0x3803, 0x3c},  // Y start low (60 & 0xFF = 0x3c = 60)
+    {0x3804, 0x05},  // X end high ((602+732-1=1333) >> 8 = 5)
+    {0x3805, 0x35},  // X end low (1333 & 0xFF = 0x35 = 53)
+    {0x3806, 0x04},  // Y end high ((60+976-1=1035) >> 8 = 4)
+    {0x3807, 0x0b},  // Y end low (1035 & 0xFF = 0x0b = 11)
+    // Output size: 480x640 (portrait orientation)
     {0x3808, 0x01},  // width high
     {0x3809, 0xe0},  // width low = 480
     {0x380a, 0x02},  // height high
