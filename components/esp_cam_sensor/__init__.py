@@ -35,6 +35,7 @@ CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
 CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset (pixels from left)
 CONF_OUTPUT_WIDTH = "output_width"    # Hardware PPA resize output (0 = no resize)
 CONF_OUTPUT_HEIGHT = "output_height"  # Hardware PPA resize output
+CONF_PPA_ENABLED = "ppa_enabled"      # Explicit PPA enable/disable (overrides auto-detection)
 CONF_FILENAME = "filename"
 CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
@@ -92,6 +93,8 @@ CONFIG_SCHEMA = cv.All(
         # PPA resize (hardware downscale - 0 = no resize, keep capture resolution)
         cv.Optional(CONF_OUTPUT_WIDTH, default=0): cv.int_range(min=0, max=1920),
         cv.Optional(CONF_OUTPUT_HEIGHT, default=0): cv.int_range(min=0, max=1080),
+        # PPA explicit enable/disable (overrides auto-detection based on transforms)
+        cv.Optional(CONF_PPA_ENABLED): cv.boolean,
         # Contrôles ISP avancés (CCM RGB gains pour correction couleur)
         cv.Optional(CONF_RGB_GAINS): cv.Schema({
             cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
@@ -137,6 +140,10 @@ async def to_code(config):
     # Configuration PPA resize (hardware downscale)
     cg.add(var.set_output_width(config[CONF_OUTPUT_WIDTH]))
     cg.add(var.set_output_height(config[CONF_OUTPUT_HEIGHT]))
+
+    # Configuration PPA explicit enable/disable
+    if CONF_PPA_ENABLED in config:
+        cg.add(var.set_ppa_enabled(config[CONF_PPA_ENABLED]))
 
     # Configuration des gains RGB CCM si présents
     if CONF_RGB_GAINS in config:

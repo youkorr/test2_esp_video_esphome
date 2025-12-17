@@ -216,12 +216,20 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Enable PPA if crop offset, mirror, rotation, or resize is configured
-  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
-      this->crop_offset_x_ == 0 && this->output_width_ == 0 && this->output_height_ == 0) {
-    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop/resize configured)");
-    this->ppa_enabled_ = false;
+  // Check if user explicitly disabled PPA via YAML
+  if (this->ppa_user_override_ && !this->ppa_enabled_) {
+    ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false) - hardware rotation only");
     return true;
+  }
+
+  // Auto-detect: Enable PPA if crop offset, mirror, rotation, or resize is configured
+  if (!this->ppa_user_override_) {
+    if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
+        this->crop_offset_x_ == 0 && this->output_width_ == 0 && this->output_height_ == 0) {
+      ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop/resize configured)");
+      this->ppa_enabled_ = false;
+      return true;
+    }
   }
 
   ppa_client_config_t ppa_config = {};
