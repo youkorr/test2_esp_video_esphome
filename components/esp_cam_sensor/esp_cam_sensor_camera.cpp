@@ -792,18 +792,19 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
     // ============================================================================
-  // Custom Format Support (OV02C10 @ 800x480 ou 1280x800)
+  // Custom Format Support (OV02C10 @ 640x480 or 800x600)
   // ============================================================================
   if (this->sensor_name_ == "ov02c10") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
     // Sélectionner le format custom selon la résolution
-    if (width == 1288 && height == 728) {
-      custom_format = &ov02c10_format_1280x800_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1288x728 RAW10 @ 30fps");
+    // Note: 1288x728 is the native resolution (no custom format needed)
+    if (width == 640 && height == 480) {
+      custom_format = &ov02c10_format_640x480_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT

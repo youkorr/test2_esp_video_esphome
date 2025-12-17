@@ -1071,24 +1071,8 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  };
 
 // Custom format definitions (exposed via ov02c10_custom_formats.h)
-const esp_cam_sensor_format_t ov02c10_format_1280x800_raw10_30fps = {
-    .name = "MIPI_1lane_24Minput_RAW10_1280x800_30fps",
-    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .xclk = 24000000,
-    .width = 1280,
-    .height = 800,
-    .regs = ov02c10_input_24M_MIPI_1lane_raw10_1280x800_30fps,
-    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1280x800_30fps),
-    .fps = 30,
-    .isp_info = &ov02c10_isp_info[0],
-    .mipi_info = {
-        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
-        .lane_num = 1,
-        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-    },
-    .reserved = NULL,
-};
+// Only 640x480 (VGA) and 800x600 (SVGA) are supported
+// These use centered crop windows from the native sensor active area
 
 const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
@@ -1118,25 +1102,6 @@ const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
     .height = 600,
     .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps,
     .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps),
-    .fps = 30,
-    .isp_info = &ov02c10_isp_info[0],
-    .mipi_info = {
-        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
-        .lane_num = 1,
-        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-    },
-    .reserved = NULL,
-};
-
-const esp_cam_sensor_format_t ov02c10_format_800x480_raw10_30fps = {
-    .name = "MIPI_1lane_24Minput_RAW10_800x480_30fps",
-    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .xclk = 24000000,
-    .width = 800,
-    .height = 480,
-    .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x480_30fps,
-    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x480_30fps),
     .fps = 30,
     .isp_info = &ov02c10_isp_info[0],
     .mipi_info = {
