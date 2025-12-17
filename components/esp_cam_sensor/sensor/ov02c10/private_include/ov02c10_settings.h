@@ -1311,11 +1311,13 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3805, 0x35},  // X end low (1333 & 0xFF = 0x35 = 53)
     {0x3806, 0x04},  // Y end high ((60+976-1=1035) >> 8 = 4)
     {0x3807, 0x0b},  // Y end low (1035 & 0xFF = 0x0b = 11)
-    // Output size: 480x640 (portrait orientation)
-    {0x3808, 0x01},  // width high
-    {0x3809, 0xe0},  // width low = 480
-    {0x380a, 0x02},  // height high
-    {0x380b, 0x80},  // height low = 640
+    // Output size: 640x480 (landscape after 90° rotation)
+    // Note: Crop is portrait (732×976), but output is declared as landscape
+    // because rotation happens BEFORE output dimensions
+    {0x3808, 0x02},  // width high
+    {0x3809, 0x80},  // width low = 640
+    {0x380a, 0x01},  // height high
+    {0x380b, 0xe0},  // height low = 480
     // Timing: SAME AS NATIVE
     {0x380c, 0x08},  // HTS high = 2280
     {0x380d, 0xe8},  // HTS low
