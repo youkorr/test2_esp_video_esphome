@@ -827,6 +827,11 @@ bool MipiDSICamComponent::start_streaming() {
       } else {
         ESP_LOGI(TAG, "Custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+        // Update width/height to match format's actual output dimensions
+        // (important for rotated formats where output != input)
+        width = custom_format->width;
+        height = custom_format->height;
+        ESP_LOGI(TAG, "   Actual output dimensions after rotation: %ux%u", width, height);
       }
     }
   }
