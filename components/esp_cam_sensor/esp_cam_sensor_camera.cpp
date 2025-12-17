@@ -272,6 +272,16 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int out_width = (this->output_width_ > 0) ? this->output_width_ : crop_width;
   int out_height = (this->output_height_ > 0) ? this->output_height_ : crop_height;
 
+  // IMPORTANT: Swap dimensions for 90° and 270° rotations
+  // When rotating 90° or 270°, width becomes height and vice versa
+  bool swap_dimensions = (this->rotation_ == 90 || this->rotation_ == 270);
+  if (swap_dimensions && this->output_width_ == 0 && this->output_height_ == 0) {
+    // Only swap if user hasn't explicitly set output dimensions
+    std::swap(out_width, out_height);
+    ESP_LOGI(TAG, "PPA: Swapping dimensions for %d° rotation: %dx%d → %dx%d",
+             this->rotation_, crop_width, crop_height, out_width, out_height);
+  }
+
   // PPA constraints: dimensions must be multiples of 8 (ideally 16)
   // Adjust if necessary to avoid "scale does not fit" error
   if (this->output_width_ > 0 && this->output_height_ > 0) {
