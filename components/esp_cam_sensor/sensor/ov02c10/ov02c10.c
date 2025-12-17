@@ -1112,6 +1112,25 @@ const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
     .reserved = NULL,
 };
 
+const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
+    .name = "MIPI_1lane_24Minput_RAW10_480x640_30fps_rot270",
+    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk = 24000000,
+    .width = 480,
+    .height = 640,
+    .regs = ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270,
+    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270),
+    .fps = 30,
+    .isp_info = &ov02c10_isp_info[0],
+    .mipi_info = {
+        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+        .lane_num = 1,
+        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+    },
+    .reserved = NULL,
+};
+
 
  static esp_err_t ov02c10_read(esp_sccb_io_handle_t sccb_handle, uint16_t reg, uint8_t *read_buf)
  {
