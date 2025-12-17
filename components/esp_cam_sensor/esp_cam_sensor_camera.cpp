@@ -596,7 +596,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   // 5. DÉMARRER LE STREAMING ★★★
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   if (ioctl(fd, VIDIOC_STREAMON, &type) < 0) {
-    ESP_LOGE(TAG, "❌ VIDIOC_STREAMON a échoué: %s", strerror(errno));
+    ESP_LOGE(TAG, "VIDIOC_STREAMON a échoué: %s", strerror(errno));
     // Nettoyer tous les buffers
     for (unsigned int i = 0; i < req.count; i++) {
       munmap(buffers[i].start, buffers[i].length);
@@ -606,10 +606,10 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ STREAMING DÉMARRÉ - Le sensor stream maintenant !");
+  ESP_LOGI(TAG, "STREAMING DÉMARRÉ - Le sensor stream maintenant !");
   ESP_LOGI(TAG, "   → CSI controller actif");
   ESP_LOGI(TAG, "   → ISP actif");
-  ESP_LOGI(TAG, "   → Sensor SC202CS streaming MIPI data");
+  
 
   // 6. Attendre et récupérer une frame
   struct v4l2_buffer buf;
@@ -630,7 +630,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ Frame capturée: %u octets (buffer index=%u, sequence=%u)",
+  ESP_LOGI(TAG, "Frame capturée: %u octets (buffer index=%u, sequence=%u)",
            buf.bytesused, buf.index, buf.sequence);
 
   // 7. Créer le répertoire si nécessaire
@@ -683,7 +683,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   close(fd);
 
   this->snapshot_count_++;
-  ESP_LOGI(TAG, "✅ Snapshot #%u enregistré: %s (%u octets)",
+  ESP_LOGI(TAG, "Snapshot #%u enregistré: %s (%u octets)",
            (unsigned)this->snapshot_count_, path.c_str(), (unsigned)written);
 
   return (written == buf.bytesused);
@@ -740,25 +740,25 @@ bool MipiDSICamComponent::start_streaming() {
     // Sélectionner le format selon la résolution demandée
     if (width == 640 && height == 480) {
       custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
+      ESP_LOGI(TAG, "Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
     } else if (width == 800 && height == 600) {
       custom_format = &ov5647_format_800x600_raw8_50fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
     } else if (width == 800 && height == 640) {
       custom_format = &ov5647_format_800x640_raw8_50fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
     } else if (width == 1024 && height == 600) {
       custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
     if (custom_format != nullptr) {
       if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
         ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
       } else {
-        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "Custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
         custom_format_applied = true;
       }
@@ -776,16 +776,16 @@ bool MipiDSICamComponent::start_streaming() {
     // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
     if (width == 800 && height == 600) {
       custom_format = &sc202cs_custom_format_800x600;
-      ESP_LOGI(TAG, "✅ Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
+      ESP_LOGI(TAG, "Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
     }
 
     // Apply custom format via VIDIOC_S_SENSOR_FMT
     if (custom_format != nullptr) {
       if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
         ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
       } else {
-        ESP_LOGI(TAG, "✅ SC202CS 800x600 format applied successfully!");
+        ESP_LOGI(TAG, "SC202CS 800x600 format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
       }
     }
@@ -801,22 +801,22 @@ bool MipiDSICamComponent::start_streaming() {
     // Note: 1288x728 is the native resolution (no custom format needed)
     if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
     } else if (width == 480 && height == 640) {
       custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 480x640 RAW10 @ 30fps (Portrait VGA)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 480x640 RAW10 @ 30fps (Portrait VGA)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
     if (custom_format != nullptr) {
       if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
         ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
       } else {
-        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "Custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
       }
     }
@@ -878,7 +878,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Si RGB565 n'a aucune résolution, vérifier RAW8 (conversion ISP possible)
   if (!size_found) {
-    ESP_LOGW(TAG, "⚠️  No sizes found for RGB565 - checking native RAW8 formats...");
+    ESP_LOGW(TAG, "No sizes found for RGB565 - checking native RAW8 formats...");
     for (int i = 0; i < 20; i++) {
       memset(&frmsize, 0, sizeof(frmsize));
       frmsize.index = i;
@@ -903,7 +903,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Si toujours pas trouvé, vérifier RAW10 (OV02C10 custom formats)
   if (!size_found) {
-    ESP_LOGW(TAG, "⚠️  No sizes found for RAW8 - checking native RAW10 formats...");
+    ESP_LOGW(TAG, "No sizes found for RAW8 - checking native RAW10 formats...");
     for (int i = 0; i < 20; i++) {
       memset(&frmsize, 0, sizeof(frmsize));
       frmsize.index = i;
@@ -926,15 +926,10 @@ bool MipiDSICamComponent::start_streaming() {
     }
   }
 
-  if (!size_found) {
-    ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 Use RAW8/RAW10 resolutions above with pixel_format: RAW8/RAW10");
-    ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
-  }
 
   if (!size_found) {
-    ESP_LOGW(TAG, "⚠️  Requested size %ux%u not found in supported list", width, height);
-    ESP_LOGW(TAG, "⚠️  Trying to set anyway (driver may adjust)...");
+    ESP_LOGW(TAG, "Requested size %ux%u not found in supported list", width, height);
+    ESP_LOGW(TAG, "Trying to set anyway (driver may adjust)...");
   }
 
   struct v4l2_format fmt;
@@ -1124,51 +1119,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
-  // Logs détaillés commentés pour réduire verbosité
-  // ESP_LOGI(TAG, "   → CSI controller active");
-  // ESP_LOGI(TAG, "   → ISP active");
-  // ESP_LOGI(TAG, "   → Sensor streaming MIPI data");
-  // ESP_LOGI(TAG, "   → Zero-copy: LVGL uses V4L2 buffers directly (no PPA, no copy)");
-  //
-  // // Test 2: Memory zone analysis (PPA performance investigation)
-  // ESP_LOGI(TAG, "");
-  // ESP_LOGI(TAG, "📍 Memory Zone Analysis (Test 2):");
-  //
-  // // Analyze V4L2 buffers
-  // for (int i = 0; i < 2; i++) {
-  //   uintptr_t addr = (uintptr_t)this->v4l2_buffers_[i].start;
-  //   const char* zone = "UNKNOWN";
-  //   if (addr >= 0x48000000 && addr < 0x4C000000) {
-  //     zone = "SPIRAM (0x48000000-0x4C000000)";
-  //   } else if (addr >= 0x40800000 && addr < 0x40900000) {
-  //     zone = "SRAM (0x40800000-0x40900000)";
-  //   } else if (addr >= 0x40000000 && addr < 0x40800000) {
-  //     zone = "IRAM/DRAM";
-  //   }
-  //   ESP_LOGI(TAG, "   V4L2 buffer[%d]: %p → %s", i, this->v4l2_buffers_[i].start, zone);
-  // }
-  //
-  // // Analyze image_buffer_
-  // uintptr_t img_addr = (uintptr_t)this->image_buffer_;
-  // const char* img_zone = "UNKNOWN";
-  // if (img_addr >= 0x48000000 && img_addr < 0x4C000000) {
-  //   img_zone = "SPIRAM (0x48000000-0x4C000000)";
-  // } else if (img_addr >= 0x40800000 && img_addr < 0x40900000) {
-  //   img_zone = "SRAM (0x40800000-0x40900000)";
-  // } else if (img_addr >= 0x40000000 && addr < 0x40800000) {
-  //   img_zone = "IRAM/DRAM";
-  // }
-  // ESP_LOGI(TAG, "   image_buffer_: %p → %s", this->image_buffer_, img_zone);
-  //
-  // ESP_LOGI(TAG, "");
-  // ESP_LOGI(TAG, "💡 PPA Performance Notes:");
-  // ESP_LOGI(TAG, "   - PPA DMA should work efficiently on SPIRAM with DMA capability");
-  // ESP_LOGI(TAG, "   - Expected PPA bandwidth: >100 MB/s");
-  // ESP_LOGI(TAG, "   - Current observed: ~42 MB/s (investigating why)");
-  // ESP_LOGI(TAG, "   - All buffers allocated with MALLOC_CAP_DMA flag");
 
-  // Ouvrir le device ISP pour les contrôles V4L2 (brightness, contrast, saturation, AWB, WB)
-  // Note: /dev/video0 (CSI) est utilisé pour capture, /dev/video20 (ISP) pour contrôles
   this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
   if (this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Failed to open ISP device %s for V4L2 controls: %s",
@@ -1188,7 +1139,7 @@ bool MipiDSICamComponent::start_streaming() {
       // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
       //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
     } else {
-      ESP_LOGW(TAG, "⚠️  Failed to auto-apply CCM RGB gains");
+      ESP_LOGW(TAG, "Failed to auto-apply CCM RGB gains");
     }
   }
 
@@ -1199,7 +1150,7 @@ bool MipiDSICamComponent::start_streaming() {
     if (this->set_white_balance_mode(true)) {
       ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
     } else {
-      ESP_LOGW(TAG, "⚠️  Failed to enable AWB, trying manual white balance temperature");
+      ESP_LOGW(TAG, "Failed to enable AWB, trying manual white balance temperature");
       // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
       this->set_white_balance_temp(5500);
     }
@@ -1277,7 +1228,7 @@ bool MipiDSICamComponent::capture_frame() {
 
   // Log uniquement la première frame
   if (this->frame_sequence_ == 1) {
-    ESP_LOGI(TAG, "✅ First frame captured (V4L2 USERPTR - zero-copy to SPIRAM):");
+    ESP_LOGI(TAG, "First frame captured (V4L2 USERPTR - zero-copy to SPIRAM):");
     ESP_LOGI(TAG, "   Buffer size: %u bytes (%ux%u × 2 = RGB565)",
              this->image_buffer_size_, this->image_width_, this->image_height_);
     ESP_LOGI(TAG, "   SPIRAM buffer: %p (index=%d)", frame_data, buffer_idx);
@@ -1307,19 +1258,7 @@ bool MipiDSICamComponent::capture_frame() {
   total_qbuf_us += (t6 - t5);
 
   if (profile_count == 100) {
-    // Logs de profiling commentés pour réduire verbosité
-    // uint32_t avg_dqbuf = total_dqbuf_us / 100;
-    // uint32_t avg_pointer = total_copy_us / 100;
-    // uint32_t avg_qbuf = total_qbuf_us / 100;
-    // uint32_t avg_total = (total_dqbuf_us + total_copy_us + total_qbuf_us) / 100;
-    // float fps = 1000000.0f / avg_total;  // Calcul FPS
-    //
-    // ESP_LOGI(TAG, "📊 Zero-Copy Profiling (avg over 100 frames):");
-    // ESP_LOGI(TAG, "   DQBUF: %u us (%.1f ms)", avg_dqbuf, avg_dqbuf / 1000.0f);
-    // ESP_LOGI(TAG, "   Pointer assignment: %u us (%.1f ms) ← Zero-copy", avg_pointer, avg_pointer / 1000.0f);
-    // ESP_LOGI(TAG, "   QBUF: %u us (%.1f ms)", avg_qbuf, avg_qbuf / 1000.0f);
-    // ESP_LOGI(TAG, "   TOTAL: %u us (%.1f ms) → %.1f FPS ← Should be 30+ FPS!",
-    //          avg_total, avg_total / 1000.0f, fps);
+
 
     profile_count = 0;
     total_dqbuf_us = 0;
@@ -1395,24 +1334,7 @@ void MipiDSICamComponent::stop_streaming() {
   // ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
 }
 
-// ============================================================================
-// Contrôles Manuels d'Exposition et Balance des Blancs
-// ============================================================================
 
-/**
- * @brief Définir l'exposition manuelle du capteur
- *
- * Permet de contrôler manuellement l'exposition pour corriger la surexposition.
- * Désactive temporairement l'AEC automatique.
- *
- * @param value Valeur d'exposition (0-65535). Valeurs typiques:
- *              - 1000-5000: Très faible exposition (scènes très lumineuses)
- *              - 5000-15000: Faible exposition (scènes lumineuses)
- *              - 15000-30000: Exposition normale (défaut)
- *              - 30000-50000: Haute exposition (scènes sombres)
- *              - 0: Réactiver AEC automatique
- * @return true si succès, false si erreur
- */
 bool MipiDSICamComponent::set_exposure(int value) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set exposure: ISP device not open");
@@ -1457,19 +1379,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
   return true;
 }
 
-/**
- * @brief Définir le gain manuel du capteur
- *
- * Contrôle le gain analogique/numérique du capteur.
- *
- * @param value Valeur de gain (1000-16000):
- *              - 1000: 1x (gain minimum, image la plus sombre)
- *              - 2000: 2x
- *              - 4000: 4x
- *              - 8000: 8x (défaut recommandé)
- *              - 16000: 16x (gain maximum, image la plus claire mais bruitée)
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_gain(int value) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set gain: ISP device not open");
@@ -1491,12 +1401,7 @@ bool MipiDSICamComponent::set_gain(int value) {
   return true;
 }
 
-/**
- * @brief Activer/désactiver la balance des blancs automatique
- *
- * @param auto_mode true pour AWB automatique, false pour manuel
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set white balance mode: ISP device not open");
@@ -1517,21 +1422,7 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
   return true;
 }
 
-/**
- * @brief Définir la température de couleur manuelle (balance des blancs)
- *
- * Permet de corriger la dominante de couleur (ex: blanc → vert).
- * Nécessite que AWB soit désactivé (set_white_balance_mode(false)).
- *
- * @param kelvin Température de couleur en Kelvin:
- *               - 2800K: Lampe incandescente (jaune/orange)
- *               - 3200K: Lampe halogène
- *               - 4000K: Fluorescent blanc froid
- *               - 5000K: Lumière du jour (neutre)
- *               - 5500K: Flash électronique (défaut recommandé)
- *               - 6500K: Ciel nuageux (bleuté)
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set white balance temperature: ISP device not open");
@@ -1552,31 +1443,7 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
   return true;
 }
 
-/**
- * @brief Définir la matrice CCM (Color Correction Matrix) complète 3x3
- *
- * Permet une correction couleur avancée en configurant directement la matrice
- * de correction couleur de l'ISP. Chaque élément peut être dans [-4.0, 4.0].
- *
- * Formule: [R_out, G_out, B_out] = matrix × [R_in, G_in, B_in]
- *
- * @param matrix Matrice 3x3 float (row-major order):
- *               matrix[0][0..2]: Coefficients pour R_out
- *               matrix[1][0..2]: Coefficients pour G_out
- *               matrix[2][0..2]: Coefficients pour B_out
- *
- * Exemple d'identité (aucune correction):
- *   {{1.0, 0.0, 0.0},
- *    {0.0, 1.0, 0.0},
- *    {0.0, 0.0, 1.0}}
- *
- * Exemple correction blanc→vert (M5Stack):
- *   {{1.5, 0.0, 0.0},   // Booster rouge
- *    {0.0, 1.0, 0.0},   // Vert normal
- *    {0.0, 0.0, 1.6}}   // Booster bleu
- *
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set CCM matrix: ISP device not open");
@@ -1619,27 +1486,7 @@ bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
   return true;
 }
 
-/**
- * @brief Définir les gains RGB de manière simplifiée (matrice diagonale)
- *
- * Wrapper simplifié de set_ccm_matrix() pour ajuster les gains par canal.
- * Crée une matrice CCM diagonale: seuls les gains R, G, B sont modifiés.
- *
- * C'est l'approche utilisée par ESPHome PR#7639 pour corriger blanc→vert.
- *
- * Formule résultante: R_out = R_in × red, G_out = G_in × green, B_out = B_in × blue
- *
- * @param red   Gain canal rouge (ex: 1.3 = +30% rouge)
- * @param green Gain canal vert (ex: 0.85 = -15% vert, corrige blanc→vert)
- * @param blue  Gain canal bleu (ex: 1.25 = +25% bleu)
- *
- * Valeurs typiques pour corriger blanc→vert avec SC202CS:
- *   - Correction légère: (1.2, 0.9, 1.15)
- *   - Correction moyenne: (1.3, 0.85, 1.25) ← RECOMMANDÉ
- *   - Correction M5Stack: (1.5, 1.0, 1.6)
- *
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
   // Créer matrice diagonale
   float matrix[3][3] = {
@@ -1656,25 +1503,7 @@ bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
   return true;
 }
 
-/**
- * @brief Définir les gains White Balance de l'ISP (rouge et bleu)
- *
- * Contrôle les gains hardware de white balance de l'ISP (avant CCM).
- * Le gain vert est fixe à 1.0 (référence).
- *
- * Note: Différent de set_rgb_gains() qui modifie la CCM (après demosaic).
- *       L'ordre du pipeline est: Sensor → Demosaic → WB gains → CCM → Output
- *
- * @param red_gain  Gain du canal rouge (typiquement 0.5 - 4.0)
- * @param blue_gain Gain du canal bleu (typiquement 0.5 - 4.0)
- *
- * Valeurs typiques:
- *   - Lumière du jour: red=1.0, blue=1.0 (neutre)
- *   - Incandescent: red=0.7, blue=1.8 (compenser jaune)
- *   - Fluorescent: red=1.3, blue=0.9 (compenser vert)
- *
- * @return true si succès, false si erreur
- */
+
 bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set WB gains: ISP device not open");
@@ -1709,14 +1538,7 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
   return true;
 }
 
-// ============================================================================
-// Contrôles V4L2 Standards (pour ESPHome number components)
-// ============================================================================
 
-/**
- * @brief Régler la luminosité de l'image
- * @param value Valeur de luminosité (-128 à 127, défaut: 0)
- */
 bool MipiDSICamComponent::set_brightness(int value) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Cannot set brightness: ISP device not open");
@@ -1937,20 +1759,7 @@ void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
 
 #endif  // IMLIB_AVAILABLE
 
-// ============================================================================
-// Buffer Pool APIs (pour lvgl_camera_display)
-// ============================================================================
 
-/**
- * @brief Acquiert un buffer du pool pour affichage
- *
- * Cette fonction retourne le buffer actuellement capturé (current_buffer_).
- * Le buffer reste marqué "allocated" jusqu'à ce que release_buffer() soit appelé.
- *
- * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
- *
- * @return Pointeur vers buffer element, ou nullptr si aucun buffer disponible
- */
 SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
   if (!this->streaming_active_) {
     return nullptr;
@@ -1966,16 +1775,7 @@ SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
   return buffer;
 }
 
-/**
- * @brief Libère un buffer après affichage
- *
- * Marque le buffer comme "free" pour qu'il puisse être réutilisé par capture_frame().
- * Ne PAS libérer current_buffer_index_ - seulement les anciens buffers dont l'affichage est terminé.
- *
- * Thread-safe: utilise un spinlock pour protéger l'accès au buffer pool.
- *
- * @param element Buffer element à libérer
- */
+
 void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
   if (element == nullptr) {
     return;
@@ -1989,12 +1789,7 @@ void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
   portEXIT_CRITICAL(&this->buffer_mutex_);
 }
 
-/**
- * @brief Retourne le pointeur vers les données du buffer element
- *
- * @param element Buffer element
- * @return Pointeur vers les données RGB565, ou nullptr si element invalide
- */
+
 uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
   if (element == nullptr) {
     return nullptr;
@@ -2002,12 +1797,7 @@ uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
   return element->data;
 }
 
-/**
- * @brief Retourne l'index du buffer element dans le pool
- *
- * @param element Buffer element
- * @return Index du buffer (0-2 pour triple buffering), ou 0 si element invalide
- */
+
 uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
   if (element == nullptr) {
     return 0;
@@ -2015,18 +1805,7 @@ uint32_t MipiDSICamComponent::get_buffer_index(SimpleBufferElement *element) {
   return element->index;
 }
 
-/**
- * @brief Get current RGB565 frame for face detection or image processing
- *
- * Convenience method that combines acquire_buffer() with data/dimensions extraction.
- * IMPORTANT: Caller MUST call release_buffer(buffer_out) when done processing!
- *
- * @param[out] buffer_out Pointer to acquired buffer element (must be released)
- * @param[out] data Pointer to RGB565 data
- * @param[out] width Frame width in pixels
- * @param[out] height Frame height in pixels
- * @return true if frame available, false if not streaming or no buffer available
- */
+
 bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out, uint8_t **data, int *width,
                                                  int *height) {
   if (buffer_out == nullptr || data == nullptr || width == nullptr || height == nullptr) {
