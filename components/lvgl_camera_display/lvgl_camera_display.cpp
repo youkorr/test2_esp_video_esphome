@@ -1,6 +1,7 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esp_task_wdt.h"
 // Conditionally include face_detection only if it exists
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -38,6 +39,9 @@ void LVGLCameraDisplay::setup() {
 }
 
 void LVGLCameraDisplay::loop() {
+  // Feed watchdog
+  esp_task_wdt_reset();
+
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     ESP_LOGI(TAG, "Starting LVGL Camera Display...");
@@ -68,6 +72,9 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
 
 // Mise a jour de la frame camera (appelee par le timer LVGL)
 void LVGLCameraDisplay::update_camera_frame_() {
+  // Feed watchdog to prevent timeout during camera operations
+  esp_task_wdt_reset();
+
   // Si la camera est en streaming, capturer ET mettre a jour le canvas
   if (!this->camera_->is_streaming()) {
     return;
