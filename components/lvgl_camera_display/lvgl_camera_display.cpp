@@ -1,7 +1,6 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-#include "esp_task_wdt.h"
 // Conditionally include face_detection only if it exists
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -25,6 +24,8 @@ void LVGLCameraDisplay::setup() {
   // Verifier que la camera est operationnelle
   if (!this->camera_->is_pipeline_ready()) {
     ESP_LOGE(TAG, "Camera non operationnelle - pipeline non demarre");
+    ESP_LOGE(TAG, "   Le composant mipi_dsi_cam a echoue a s'initialiser");
+    ESP_LOGE(TAG, "   Verifiez les logs de mipi_dsi_cam pour plus de details");
     this->mark_failed();
     return;
   }
@@ -36,6 +37,26 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
 }
 
+void LVGLCameraDisplay::loop() {
+  // Start timer when enabled
+  if (this->enabled_ && this->lvgl_timer_ == nullptr) {
+    ESP_LOGI(TAG, "Starting LVGL Camera Display...");
+    this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
+    if (this->lvgl_timer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to create LVGL timer");
+    } else {
+      ESP_LOGI(TAG, "LVGL Camera Display started");
+    }
+  }
+
+  // Stop timer when disabled
+  if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
+    ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
+    lv_timer_del(this->lvgl_timer_);
+    this->lvgl_timer_ = nullptr;
+    ESP_LOGI(TAG, "LVGL Camera Display stopped");
+  }
+}
 
 // Callback du timer LVGL (appele periodiquement par LVGL)
 void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
@@ -47,16 +68,6 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
 
 // Mise a jour de la frame camera (appelee par le timer LVGL)
 void LVGLCameraDisplay::update_camera_frame_() {
-  // Feed watchdog to prevent timeout during camera operations
-  esp_task_wdt_reset();
-
-  // Debug: log every 30th call to verify this function is being called
-  static uint32_t call_count = 0;
-  call_count++;
-  if (call_count % 30 == 0) {
-    ESP_LOGD(TAG, "update_camera_frame_() called %u times, watchdog reset", call_count);
-  }
-
   // Si la camera est en streaming, capturer ET mettre a jour le canvas
   if (!this->camera_->is_streaming()) {
     return;
@@ -79,9 +90,6 @@ void LVGLCameraDisplay::update_camera_frame_() {
   this->update_canvas_();
   uint32_t t3 = millis();
   this->frame_count_++;
-
-  // Yield to allow other tasks (including watchdog) to run
-  delay(1);
 
   // Accumuler les temps pour statistiques
   static uint32_t last_time = 0;
