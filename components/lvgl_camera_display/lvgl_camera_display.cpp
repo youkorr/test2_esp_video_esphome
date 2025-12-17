@@ -38,36 +38,6 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
 }
 
-void LVGLCameraDisplay::loop() {
-  // Feed watchdog
-  esp_task_wdt_reset();
-
-  // Debug: log every 100th call to verify loop is running
-  static uint32_t loop_count = 0;
-  loop_count++;
-  if (loop_count % 100 == 0) {
-    ESP_LOGD(TAG, "loop() called %u times, watchdog reset", loop_count);
-  }
-
-  // Start timer when enabled
-  if (this->enabled_ && this->lvgl_timer_ == nullptr) {
-    ESP_LOGI(TAG, "Starting LVGL Camera Display...");
-    this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
-    if (this->lvgl_timer_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to create LVGL timer");
-    } else {
-      ESP_LOGI(TAG, "LVGL Camera Display started");
-    }
-  }
-
-  // Stop timer when disabled
-  if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
-    ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
-    lv_timer_del(this->lvgl_timer_);
-    this->lvgl_timer_ = nullptr;
-    ESP_LOGI(TAG, "LVGL Camera Display stopped");
-  }
-}
 
 // Callback du timer LVGL (appele periodiquement par LVGL)
 void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
