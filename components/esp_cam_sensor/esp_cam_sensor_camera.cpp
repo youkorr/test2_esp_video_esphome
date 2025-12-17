@@ -792,7 +792,7 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
     // ============================================================================
-  // Custom Format Support (OV02C10 @ 640x480 or 800x600)
+  // Custom Format Support (OV02C10 @ 640x480, 800x600, or 480x640)
   // ============================================================================
   if (this->sensor_name_ == "ov02c10") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
@@ -805,6 +805,9 @@ bool MipiDSICamComponent::start_streaming() {
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
+    } else if (width == 480 && height == 640) {
+      custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 480x640 RAW10 @ 30fps (Portrait VGA)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
