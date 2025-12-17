@@ -25,8 +25,6 @@ void LVGLCameraDisplay::setup() {
   // Verifier que la camera est operationnelle
   if (!this->camera_->is_pipeline_ready()) {
     ESP_LOGE(TAG, "Camera non operationnelle - pipeline non demarre");
-    ESP_LOGE(TAG, "   Le composant mipi_dsi_cam a echoue a s'initialiser");
-    ESP_LOGE(TAG, "   Verifiez les logs de mipi_dsi_cam pour plus de details");
     this->mark_failed();
     return;
   }
