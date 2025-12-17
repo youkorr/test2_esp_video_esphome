@@ -157,6 +157,39 @@ lvgl:
                   text_font: nunito_20
                   text_align: CENTER
 
+        # Bouton YOLO11 Toggle
+        - button:
+            id: btn_yolo11_toggle
+            width: 100
+            height: 45
+            x: 680
+            y: 230
+            bg_color: 0xFF6600  # Orange (ON par défaut)
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    // Toggle YOLO11 detection drawing
+                    static bool yolo11_enabled = true;
+                    yolo11_enabled = !yolo11_enabled;
+
+                    // Update YOLO11 component
+                    id(yolo11_detector).set_draw_enabled(yolo11_enabled);
+
+                    // Log status change
+                    if (yolo11_enabled) {
+                      ESP_LOGI("yolo11", "✅ YOLO11 detection boxes ENABLED");
+                    } else {
+                      ESP_LOGI("yolo11", "❌ YOLO11 detection boxes DISABLED");
+                    }
+            widgets:
+              - label:
+                  id: btn_yolo11_label
+                  text: "YOLO"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
         # ============================================
         # LABEL DE STATUS - EN BAS À DROITE
         # ============================================
@@ -185,12 +218,26 @@ lvgl:
 #   resolution: "800x480"      # Custom format
 #   pixel_format: RGB565
 #   framerate: 30
+#
+#   # Optional: PPA hardware resize to reduce processing load
+#   output_width: 640
+#   output_height: 360         # Maintains 16:9 aspect ratio
 
 # lvgl_camera_display:
 #   id: camera_display
 #   camera_id: tab5_cam
 #   canvas_id: camera_canvas
 #   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
+
+# # YOLO11 Object Detection (PLACEHOLDER MODE)
+# yolo11_detection:
+#   id: yolo11_detector
+#   camera_id: tab5_cam
+#   canvas_id: camera_canvas
+#   score_threshold: 0.3
+#   nms_threshold: 0.5
+#   detection_interval: 8      # Run detection every 8 frames
+#   draw_enabled: true         # Draw detection boxes on frame
 
 # display:
 #   - platform: ili9xxx

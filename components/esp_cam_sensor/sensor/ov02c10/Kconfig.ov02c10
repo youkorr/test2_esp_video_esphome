@@ -28,7 +28,7 @@ if CAMERA_OV02C10
         help
             Select the default format to load when the sensor is detected.
             When the sensor is in stream off state, the format can be changed.
-    
+
         config CAMERA_OV02C10_MIPI_RAW10_1288x728_30FPS
             bool "RAW10 1288x728 30fps, MIPI 1lane 24M input"
         config CAMERA_OV02C10_MIPI_RAW10_1920x1080_30FPS

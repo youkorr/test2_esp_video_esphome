@@ -31,12 +31,9 @@ extern "C" {
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
 
-// OV02C10 custom format configurations (800x480 et 1280x800)
-#include "ov02c10_custom_formats.h"
-// OV5647 custom format configurations (VGA 640x480 et 1024x600)
-#include "ov5647_custom_formats.h"
-// NOTE: SC202CS 800x600 is now a NATIVE format in sc202cs.c driver
-// sc202cs_custom_formats.h is no longer needed
+// Custom format configurations for all sensors
+#include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
+#include "sc202cs_custom_formats.h"  // SC202CS: 800x600
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
@@ -217,9 +214,10 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Enable PPA if crop offset, mirror, or rotation is configured
-  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 && this->crop_offset_x_ == 0) {
-    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop configured)");
+  // Enable PPA if crop offset, mirror, rotation, or resize is configured
+  if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
+      this->crop_offset_x_ == 0 && this->output_width_ == 0 && this->output_height_ == 0) {
+    ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop/resize configured)");
     this->ppa_enabled_ = false;
     return true;
   }
@@ -235,8 +233,17 @@ bool MipiDSICamComponent::init_ppa_() {
   }
 
   this->ppa_enabled_ = true;
-  ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
-           this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+
+  // Log PPA configuration
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d, resize=%dx%d)",
+             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_,
+             this->output_width_, this->output_height_);
+  } else {
+    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
+             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
+  }
+
   return true;
 }
 
@@ -251,6 +258,33 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int crop_width = this->image_width_ - this->crop_offset_x_;
   int crop_height = this->image_height_;
 
+  // Determine output dimensions (resize if configured, otherwise keep cropped size)
+  int out_width = (this->output_width_ > 0) ? this->output_width_ : crop_width;
+  int out_height = (this->output_height_ > 0) ? this->output_height_ : crop_height;
+
+  // PPA constraints: dimensions must be multiples of 8 (ideally 16)
+  // Adjust if necessary to avoid "scale does not fit" error
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    // Ensure dimensions are multiples of 16
+    out_width = (out_width + 15) & ~15;
+    out_height = (out_height + 15) & ~15;
+
+    // PPA prefers uniform scale ratios - adjust height to match width's scale
+    float scale_x_target = (float)out_width / (float)crop_width;
+    int adjusted_height = (int)((float)crop_height * scale_x_target);
+    adjusted_height = (adjusted_height + 15) & ~15;  // Align to 16
+
+    if (abs(adjusted_height - out_height) > 16) {
+      ESP_LOGW(TAG, "PPA: Adjusting height %d→%d to match scale_x=%.3f (keeping aspect ratio)",
+               out_height, adjusted_height, scale_x_target);
+      out_height = adjusted_height;
+    }
+  }
+
+  // Calculate scale factors for PPA hardware resize
+  float scale_x = (this->output_width_ > 0) ? (float)out_width / (float)crop_width : 1.0f;
+  float scale_y = (this->output_height_ > 0) ? (float)out_height / (float)crop_height : 1.0f;
+
   // Input configuration (with crop offset)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = this->image_width_;
@@ -261,11 +295,11 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output configuration (keep cropped size, NO upscaling)
+  // Output configuration (with optional resize)
   srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = crop_width * crop_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.pic_w = crop_width;  // Output cropped width (no upscale)
-  srm_config.out.pic_h = crop_height;
+  srm_config.out.buffer_size = out_width * out_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = out_width;   // Output width (resized if configured)
+  srm_config.out.pic_h = out_height;  // Output height (resized if configured)
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -280,8 +314,8 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = 1.0f;  // No scale (keep original aspect)
-  srm_config.scale_y = 1.0f;  // No vertical scale
+  srm_config.scale_x = scale_x;  // Hardware downscale if output_width configured
+  srm_config.scale_y = scale_y;  // Hardware downscale if output_height configured
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
@@ -694,37 +728,10 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
   // ============================================================================
-  // Custom Format Support (OV02C10 @ 800x480 ou 1280x800)
-  // ============================================================================
-  if (this->sensor_name_ == "ov02c10") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    // Sélectionner le format custom selon la résolution
-    if (width == 1280 && height == 800) {
-      custom_format = &ov02c10_format_1280x800_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1280x800 RAW10 @ 30fps");
-    } else if (width == 800 && height == 480) {
-      custom_format = &ov02c10_format_800x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x480 RAW10 @ 30fps");
-    }
-
-    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-      } else {
-        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
-      }
-    }
-  }
-  // ============================================================================
-
-  // ============================================================================
-  // Custom Format Support (OV5647) - All resolutions supported
+  // Custom Format Support (OV5647, SC202CS) - Native resolutions via VIDIOC_S_SENSOR_FMT
   // ============================================================================
   bool custom_format_applied = false;
+
   if (this->sensor_name_ == "ov5647") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
@@ -757,9 +764,61 @@ bool MipiDSICamComponent::start_streaming() {
   }
   // ============================================================================
 
-  // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
-  // No custom format handling needed - the driver will automatically select it
-  // when VIDIOC_S_FMT requests 800x600
+  // ============================================================================
+  // Custom Format Support (SC202CS @ 800x600)
+  // ============================================================================
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
+    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
+    if (width == 800 && height == 600) {
+      custom_format = &sc202cs_custom_format_800x600;
+      ESP_LOGI(TAG, "✅ Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
+    }
+
+    // Apply custom format via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
+        ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
+      } else {
+        ESP_LOGI(TAG, "✅ SC202CS 800x600 format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
+      }
+    }
+  }
+
+    // ============================================================================
+  // Custom Format Support (OV02C10 @ 800x480 ou 1280x800)
+  // ============================================================================
+  if (this->sensor_name_ == "ov02c10") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // Sélectionner le format custom selon la résolution
+    if (width == 1288 && height == 728) {
+      custom_format = &ov02c10_format_1280x800_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1288x728 RAW10 @ 30fps");
+    } else if (width == 800 && height == 600) {
+      custom_format = &ov02c10_format_800x600_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps");
+    }
+
+    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "❌ VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+      } else {
+        ESP_LOGI(TAG, "✅ Custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for native %ux%u", width, height);
+      }
+    }
+  }
+  // ============================================================================
+
+  // NOTE: Custom formats are now applied above for all sensors (OV02C10, OV5647, SC202CS)
+  // The driver will use these sensor register configurations
 
   // RGB565 natif du CSI (pas de conversion, pas de copie)
   // Note: Si custom format RAW10 appliqué, ISP convertira RAW10→RGB565
@@ -823,6 +882,10 @@ bool MipiDSICamComponent::start_streaming() {
       }
       if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
         ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
+          size_found = true;
+          ESP_LOGI(TAG, "✓ Found RAW8 %ux%u - ISP will convert to RGB565", width, height);
+        }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
                  frmsize.stepwise.min_width, frmsize.stepwise.min_height,
@@ -830,9 +893,36 @@ bool MipiDSICamComponent::start_streaming() {
                  frmsize.stepwise.step_width, frmsize.stepwise.step_height);
       }
     }
+  }
+
+  // Si toujours pas trouvé, vérifier RAW10 (OV02C10 custom formats)
+  if (!size_found) {
+    ESP_LOGW(TAG, "⚠️  No sizes found for RAW8 - checking native RAW10 formats...");
+    for (int i = 0; i < 20; i++) {
+      memset(&frmsize, 0, sizeof(frmsize));
+      frmsize.index = i;
+      frmsize.pixel_format = V4L2_PIX_FMT_SBGGR10;  // RAW10 BGGR (OV02C10 native)
+      if (ioctl(this->video_fd_, VIDIOC_ENUM_FRAMESIZES, &frmsize) < 0) {
+        break;
+      }
+      if (frmsize.type == V4L2_FRMSIZE_TYPE_DISCRETE) {
+        ESP_LOGI(TAG, "  RAW10 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
+        if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
+          size_found = true;
+          ESP_LOGI(TAG, "✓ Found RAW10 %ux%u - ISP will convert to RGB565", width, height);
+        }
+      } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
+        ESP_LOGI(TAG, "  RAW10 Stepwise: %ux%u to %ux%u (step %ux%u)",
+                 frmsize.stepwise.min_width, frmsize.stepwise.min_height,
+                 frmsize.stepwise.max_width, frmsize.stepwise.max_height,
+                 frmsize.stepwise.step_width, frmsize.stepwise.step_height);
+      }
+    }
+  }
+
+  if (!size_found) {
     ESP_LOGW(TAG, "");
-    ESP_LOGW(TAG, "💡 ESP-IDF 5.4.2+: RGB565 requires ISP conversion from RAW");
-    ESP_LOGW(TAG, "💡 Use RAW8 resolutions above with pixel_format: RAW8");
+    ESP_LOGW(TAG, "💡 Use RAW8/RAW10 resolutions above with pixel_format: RAW8/RAW10");
     ESP_LOGW(TAG, "💡 Or use 1080P (1920x1080) which often works");
   }
 
@@ -897,11 +987,21 @@ bool MipiDSICamComponent::start_streaming() {
   this->image_width_ = fmt.fmt.pix.width;
   this->image_height_ = fmt.fmt.pix.height;
 
-  // Calculer la taille du buffer (RGB565 = 2 bytes/pixel)
+  // Calculer la taille du buffer pour CAPTURE (RGB565 = 2 bytes/pixel)
+  // NOTE: Buffers must be allocated at CAPTURE size, not PPA output size
   this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
-  ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
-           this->image_width_, this->image_height_,
-           this->image_buffer_size_, this->image_buffer_size_ / 1024);
+
+  // Log PPA resize if configured (but keep buffer size at capture dimensions)
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    ESP_LOGI(TAG, "Format: %ux%u RGB565 → PPA resize → %ux%u, buffer size: %u bytes (%u KB)",
+             this->image_width_, this->image_height_,
+             this->output_width_, this->output_height_,
+             this->image_buffer_size_, this->image_buffer_size_ / 1024);
+  } else {
+    ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
+             this->image_width_, this->image_height_,
+             this->image_buffer_size_, this->image_buffer_size_ / 1024);
+  }
 
   // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
   // No re-application needed - timing registers are set by driver's native format

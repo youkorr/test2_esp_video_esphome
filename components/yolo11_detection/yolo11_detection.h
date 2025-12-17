@@ -9,7 +9,6 @@
 // ESP-DL forward declarations
 namespace dl {
 namespace detect {
-struct result_t;
 class DetectWrapper;
 }
 }
@@ -31,6 +30,7 @@ class YOLO11DetectionComponent : public Component {
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
@@ -58,6 +58,7 @@ class YOLO11DetectionComponent : public Component {
   dl::detect::DetectWrapper *object_detector_{nullptr};
 
   // Configuration
+  std::string canvas_id_{};
   float score_threshold_{0.3};
   float nms_threshold_{0.5};
   int detection_interval_{8};

@@ -3506,7 +3506,10 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 
         // Detailed performance logging every 30 frames
         if (callback_count % 30 == 0) {
-          ESP_LOGI(TAG, "⏱️ MJPEG timing (1024x600): TOTAL=%lums [File read=%lums, JPEG decode=%lums, LVGL display=%lums]",
+          const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
+                                   (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
+          ESP_LOGI(TAG, "⏱️ %s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+                   codec_name, player->width_, player->height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
           ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",

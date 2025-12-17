@@ -33,6 +33,8 @@ CONF_MIRROR_X = "mirror_x"  # Hardware PPA transform (M5Stack-style)
 CONF_MIRROR_Y = "mirror_y"  # Hardware PPA transform
 CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
 CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset (pixels from left)
+CONF_OUTPUT_WIDTH = "output_width"    # Hardware PPA resize output (0 = no resize)
+CONF_OUTPUT_HEIGHT = "output_height"  # Hardware PPA resize output
 CONF_FILENAME = "filename"
 CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
@@ -87,6 +89,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ROTATION): cv.int_,
         # PPA crop offset (hardware crop via block_offset_x)
         cv.Optional(CONF_CROP_OFFSET_X, default=0): cv.int_range(min=0, max=800),
+        # PPA resize (hardware downscale - 0 = no resize, keep capture resolution)
+        cv.Optional(CONF_OUTPUT_WIDTH, default=0): cv.int_range(min=0, max=1920),
+        cv.Optional(CONF_OUTPUT_HEIGHT, default=0): cv.int_range(min=0, max=1080),
         # Contrôles ISP avancés (CCM RGB gains pour correction couleur)
         cv.Optional(CONF_RGB_GAINS): cv.Schema({
             cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
@@ -128,6 +133,10 @@ async def to_code(config):
 
     # Configuration crop offset (PPA hardware crop)
     cg.add(var.set_crop_offset_x(config[CONF_CROP_OFFSET_X]))
+
+    # Configuration PPA resize (hardware downscale)
+    cg.add(var.set_output_width(config[CONF_OUTPUT_WIDTH]))
+    cg.add(var.set_output_height(config[CONF_OUTPUT_HEIGHT]))
 
     # Configuration des gains RGB CCM si présents
     if CONF_RGB_GAINS in config:

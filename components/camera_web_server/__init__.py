@@ -16,7 +16,7 @@ CONF_ENABLE_SNAPSHOT = "enable_snapshot"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(CameraWebServer),
-    cv.Required(CONF_CAMERA_ID): cv.use_id(esp_cam_sensor.MipiDSICamComponent),
+    cv.Required(CONF_CAMERA_ID): cv.use_id(esp_cam_sensor.EspCamSensorComponent),
     cv.Optional(CONF_PORT, default=8080): cv.port,
     cv.Optional(CONF_ENABLE_STREAM, default=True): cv.boolean,
     cv.Optional(CONF_ENABLE_SNAPSHOT, default=True): cv.boolean,
