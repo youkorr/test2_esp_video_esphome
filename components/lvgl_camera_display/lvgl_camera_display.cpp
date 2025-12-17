@@ -42,6 +42,13 @@ void LVGLCameraDisplay::loop() {
   // Feed watchdog
   esp_task_wdt_reset();
 
+  // Debug: log every 100th call to verify loop is running
+  static uint32_t loop_count = 0;
+  loop_count++;
+  if (loop_count % 100 == 0) {
+    ESP_LOGD(TAG, "loop() called %u times, watchdog reset", loop_count);
+  }
+
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
     ESP_LOGI(TAG, "Starting LVGL Camera Display...");
@@ -75,6 +82,13 @@ void LVGLCameraDisplay::update_camera_frame_() {
   // Feed watchdog to prevent timeout during camera operations
   esp_task_wdt_reset();
 
+  // Debug: log every 30th call to verify this function is being called
+  static uint32_t call_count = 0;
+  call_count++;
+  if (call_count % 30 == 0) {
+    ESP_LOGD(TAG, "update_camera_frame_() called %u times, watchdog reset", call_count);
+  }
+
   // Si la camera est en streaming, capturer ET mettre a jour le canvas
   if (!this->camera_->is_streaming()) {
     return;
@@ -97,6 +111,9 @@ void LVGLCameraDisplay::update_camera_frame_() {
   this->update_canvas_();
   uint32_t t3 = millis();
   this->frame_count_++;
+
+  // Yield to allow other tasks (including watchdog) to run
+  delay(1);
 
   // Accumuler les temps pour statistiques
   static uint32_t last_time = 0;

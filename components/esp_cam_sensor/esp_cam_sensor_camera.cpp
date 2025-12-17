@@ -28,6 +28,7 @@ extern "C" {
 #include "esp_ipa_types.h"
 #include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
 }
 
@@ -1216,6 +1217,9 @@ bool MipiDSICamComponent::capture_frame() {
   if (!this->streaming_active_) {
     return false;
   }
+
+  // Feed watchdog at start of capture
+  esp_task_wdt_reset();
 
   static uint32_t profile_count = 0;
   static uint32_t total_dqbuf_us = 0;
