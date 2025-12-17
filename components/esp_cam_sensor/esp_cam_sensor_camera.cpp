@@ -34,6 +34,7 @@ extern "C" {
 // Custom format configurations for all sensors
 #include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
 #include "sc202cs_custom_formats.h"  // SC202CS: 800x600
+#include "ov02c10_custom_formats.h"  // OV02C10: 1280x800, 800x600
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
 // Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
