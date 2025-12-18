@@ -78,9 +78,8 @@ void PedestrianDetectionComponent::process_frame_() {
 
   if (img_data != nullptr) {
     this->detect_pedestrians_(img_data, width, height);
-    if (this->draw_enabled_) {
-      this->draw_results_(img_data, width, height);
-    }
+    // NOTE: Don't draw here to avoid flickering!
+    // Drawing is done by lvgl_camera_display via draw_on_frame()
   }
 
   this->camera_->release_buffer(buffer);
@@ -125,6 +124,12 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
     for (auto &callback : this->on_pedestrian_detected_callbacks_) {
       callback(ped_results.size());
     }
+  }
+}
+
+void PedestrianDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
+  if (this->draw_enabled_ && img_data != nullptr) {
+    this->draw_results_(img_data, width, height);
   }
 }
 

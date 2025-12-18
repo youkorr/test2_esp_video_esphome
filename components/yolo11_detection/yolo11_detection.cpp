@@ -4,8 +4,7 @@
 
 // ESP-DL detection components (only for YOLO11 model)
 #ifdef ESP_DL_MODEL_YOLO11
-#include "dl_detect_base.hpp"
-#include "dl_detect_yolo11_postprocessor.hpp"
+#include "yolo11_detect.hpp"
 #include "dl_image.hpp"
 #endif
 
@@ -31,16 +30,34 @@ void YOLO11DetectionComponent::setup() {
     return;
   }
 
-  // PLACEHOLDER: Using test detection boxes instead of real YOLO11 model
-  ESP_LOGI(TAG, "Initializing YOLO11 object detector (PLACEHOLDER MODE)...");
-  ESP_LOGI(TAG, "  Using test rectangles for demonstration");
-  ESP_LOGI(TAG, "  Real YOLO11 model integration pending");
+#ifndef ESP_DL_MODEL_YOLO11
+  ESP_LOGE(TAG, "YOLO11 Detection component requires ESP_DL_MODEL_YOLO11 flag");
+  ESP_LOGE(TAG, "YOLO11 model is not available or not compiled");
+  ESP_LOGE(TAG, "Please ensure a YOLO11 model file (.espdl) is available and properly configured");
+  this->mark_failed();
+  return;
+#else
+  // Initialize YOLO11 object detector
+  ESP_LOGI(TAG, "Initializing YOLO11 object detector...");
+
+  this->object_detector_ = new YOLO11Detect();
+  if (this->object_detector_ != nullptr) {
+    this->object_detector_->set_score_thr(this->score_threshold_);
+    this->object_detector_->set_nms_thr(this->nms_threshold_);
+    ESP_LOGI(TAG, "YOLO11 detector initialized (score_thr=%.2f, nms_thr=%.2f)",
+             this->score_threshold_, this->nms_threshold_);
+  } else {
+    ESP_LOGE(TAG, "Failed to initialize YOLO11 detector");
+    this->mark_failed();
+    return;
+  }
 
   ESP_LOGI(TAG, "YOLO11 Object Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
-  ESP_LOGI(TAG, "  Score threshold: %.2f (not used in placeholder)", this->score_threshold_);
-  ESP_LOGI(TAG, "  NMS threshold: %.2f (not used in placeholder)", this->nms_threshold_);
+  ESP_LOGI(TAG, "  Score threshold: %.2f", this->score_threshold_);
+  ESP_LOGI(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
+#endif
 }
 
 void YOLO11DetectionComponent::loop() {
@@ -81,56 +98,48 @@ void YOLO11DetectionComponent::process_frame_() {
 }
 
 void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height) {
-  // PLACEHOLDER IMPLEMENTATION: Create fake detection boxes for testing
-  // This simulates YOLO11 object detection with test rectangles
+#ifdef ESP_DL_MODEL_YOLO11
+  if (this->object_detector_ == nullptr) {
+    return;
+  }
+
+  // Create image structure for ESP-DL
+  dl::image::img_t img = {
+    .data = img_data,
+    .width = width,
+    .height = height,
+    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+  };
+
+  // Run YOLO11 object detection
+  std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
 
-    // Create 3 test detection boxes at different positions
-    // Box 1: Top-left (simulates "person" detection)
-    DetectionBox box1;
-    box1.x1 = width * 0.1f;   // 10% from left
-    box1.y1 = height * 0.1f;  // 10% from top
-    box1.x2 = width * 0.35f;  // 35% from left
-    box1.y2 = height * 0.5f;  // 50% from top
-    box1.score = 0.85f;
-    box1.category = 0;  // Category 0 = person
-    this->cached_detections_.push_back(box1);
+    for (auto &result : detection_results) {
+      DetectionBox box;
+      box.x1 = result.box[0];
+      box.y1 = result.box[1];
+      box.x2 = result.box[2];
+      box.y2 = result.box[3];
+      box.score = result.score;
+      box.category = result.category;
 
-    // Box 2: Center (simulates "car" detection)
-    DetectionBox box2;
-    box2.x1 = width * 0.4f;   // 40% from left
-    box2.y1 = height * 0.3f;  // 30% from top
-    box2.x2 = width * 0.7f;   // 70% from left
-    box2.y2 = height * 0.7f;  // 70% from top
-    box2.score = 0.92f;
-    box2.category = 2;  // Category 2 = car
-    this->cached_detections_.push_back(box2);
-
-    // Box 3: Bottom-right (simulates "dog" detection)
-    DetectionBox box3;
-    box3.x1 = width * 0.6f;   // 60% from left
-    box3.y1 = height * 0.6f;  // 60% from top
-    box3.x2 = width * 0.9f;   // 90% from left
-    box3.y2 = height * 0.9f;  // 90% from top
-    box3.score = 0.78f;
-    box3.category = 16;  // Category 16 = dog
-    this->cached_detections_.push_back(box3);
-
-    ESP_LOGI(TAG, "PLACEHOLDER: Generated %d test detection boxes", this->cached_detections_.size());
+      this->cached_detections_.push_back(box);
+    }
 
     xSemaphoreGive(this->detections_mutex_);
   }
 
   // Trigger callbacks
-  int detection_count = this->cached_detections_.size();
-  if (detection_count > 0) {
+  if (detection_results.size() > 0) {
     for (auto &callback : this->on_object_detected_callbacks_) {
-      callback(detection_count);
+      callback(detection_results.size());
     }
   }
+#endif
 }
 
 void YOLO11DetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -141,6 +150,7 @@ void YOLO11DetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, 
 }
 
 void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_YOLO11
   if (img_data == nullptr || this->detections_mutex_ == nullptr) {
     return;
   }
@@ -209,6 +219,7 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
     ESP_LOGD(TAG, "Drew %d detection boxes on frame", this->cached_detections_.size());
     xSemaphoreGive(this->detections_mutex_);
   }
+#endif
 }
 
 void YOLO11DetectionComponent::dump_config() {

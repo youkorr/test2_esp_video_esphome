@@ -62,9 +62,20 @@ async def to_code(config):
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
+    # YOLO11 detection configuration
+    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_TYPE=0")
+    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1")
+    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0")
+
     # Add include paths
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
+
+    # Add yolo11_detect include path
+    yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
+    if os.path.exists(yolo11_detect_dir):
+        cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
     # Add ESP-DL include paths
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
