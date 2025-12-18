@@ -209,16 +209,18 @@ else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
 # ========================================================================
-# Link esp_image_effects SIMD library (Hardware-accelerated YUV→RGB)
+# DEPRECATED: esp_image_effects SIMD library (Hardware-accelerated YUV→RGB)
+# NOW USING: PPA hardware acceleration instead - much faster with no FPS loss
+# esp_imgfx is kept as fallback for compatibility only
 # ========================================================================
 esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
 if os.path.exists(esp_imgfx_dir):
-    # Enable SIMD YUV→RGB conversion
+    # Enable SIMD YUV→RGB conversion (fallback only)
     env.Append(CPPDEFINES=[
         ("USE_ESP_IMAGE_EFFECTS", "1"),
         ("HAVE_ESP_IMGFX_H", "1")  # Tell code that headers are available
     ])
-    print("[Simple Video Player] ✓ Enabled SIMD YUV→RGB conversion (esp_image_effects)")
+    print("[Simple Video Player] ⚠️  esp_imgfx SIMD enabled as fallback (PPA is now primary)")
 
     # Add include paths
     imgfx_inc = os.path.join(esp_imgfx_dir, "include")

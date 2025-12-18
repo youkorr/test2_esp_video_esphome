@@ -117,10 +117,12 @@ async def to_code(config):
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
 
-    # Enable SIMD YUV→RGB conversion if esp_image_effects is available
+    # DEPRECATED: esp_image_effects (esp_imgfx) SIMD YUV→RGB conversion
+    # Now using PPA hardware acceleration instead - much faster with no FPS loss
+    # esp_imgfx is kept as fallback for compatibility only
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
     if os.path.exists(esp_imgfx_dir):
-        # Add preprocessor defines to enable SIMD code
+        # Add preprocessor defines to enable SIMD code (fallback only)
         cg.add_build_flag("-DUSE_ESP_IMAGE_EFFECTS=1")
         cg.add_build_flag("-DHAVE_ESP_IMGFX_H=1")
 

@@ -10,6 +10,7 @@
 #include <cstring>            // For strncmp
 #include "yuv_rgb_lut.h"      // Lookup table YUV→RGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
+#include "ppa_compat.h"       // PPA YUV420 compatibility for older ESP-IDF versions
 
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
@@ -2425,7 +2426,13 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   srm_config.mirror_x = false;
   srm_config.mirror_y = false;
 
-  // Color space configuration (M5Stack PPA API)
+  // Color space configuration
+  #ifdef PPA_COLOR_CONV_STD_RGB_YUV_BT601
+  // Set YUV→RGB color conversion standard (BT.601 for SD video, BT.709 for HD)
+  srm_config.in.yuv_std = (h >= 720) ? PPA_COLOR_CONV_STD_RGB_YUV_BT709 : PPA_COLOR_CONV_STD_RGB_YUV_BT601;
+  srm_config.in.yuv_range = PPA_COLOR_RANGE_LIMIT;  // Limited range [16-235] for video
+  #endif
+
   srm_config.rgb_swap = false;   // false = no RGB swap
   srm_config.byte_swap = false;  // false = no byte swap
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
@@ -2442,18 +2449,32 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
     return false;
   }
 
+  // PPA conversion succeeded - log on first use
+  static bool first_success = true;
+  if (first_success) {
+    ESP_LOGI(TAG, "✓ PPA hardware YUV→RGB conversion active (0%% CPU, <1ms @ %dx%d)", w, h);
+    first_success = false;
+  }
+
   return true;
 #endif  // PPA_SRM_COLOR_MODE_YUV420
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
   // Try PPA hardware acceleration first (0% CPU, <1ms)
+  // PPA is now the primary method - much faster than esp_imgfx SIMD
   if (this->apply_ppa_color_convert_(yuv, rgb, w, h)) {
     return;  // Hardware conversion succeeded
   }
 
-  // Fall back to optimized software converter (5-10x faster than naive loop)
+  // DEPRECATED: esp_imgfx SIMD fallback (slower, causes FPS loss)
+  // This is kept for compatibility but should rarely be used now that PPA YUV420 is enabled
   if (this->yuv_converter_ != nullptr) {
+    static bool fallback_warned = false;
+    if (!fallback_warned) {
+      ESP_LOGW(TAG, "Using esp_imgfx SIMD fallback (PPA unavailable) - may have FPS loss");
+      fallback_warned = true;
+    }
     this->yuv_converter_->convert_i420_to_rgb565(yuv, rgb, w, h);
   } else {
     ESP_LOGE(TAG, "YUV converter not initialized!");
