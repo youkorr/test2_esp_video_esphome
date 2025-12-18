@@ -818,9 +818,9 @@ bool MipiDSICamComponent::start_streaming() {
     // Sélectionner le format custom selon la résolution
     // Note: 1288x728 is the native resolution (no custom format needed)
     if (width == 480 && height == 640) {
-      // YAML: "480x640" → Format avec rotation 90° → Sortie capteur: 640×480
+      // YAML: "480x640" → Portrait capture, LVGL handles rotation
       custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
-      ESP_LOGI(TAG, "✅ Using ROTATED format: 480x640 → 640x480 RAW10 @ 30fps (90° hardware rotation)");
+      ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
