@@ -324,6 +324,8 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.out.buffer_size = out_width * out_height * 2;  // RGB565 = 2 bytes/pixel
   srm_config.out.pic_w = out_width;   // Output width (resized if configured)
   srm_config.out.pic_h = out_height;  // Output height (resized if configured)
+  srm_config.out.block_w = out_width;  // ← AJOUTÉ: même que pic_w
+  srm_config.out.block_h = out_height; // ← AJOUTÉ: même que pic_h
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
