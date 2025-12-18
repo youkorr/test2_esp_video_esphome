@@ -289,7 +289,10 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     out_width = (out_width + 15) & ~15;
     out_height = (out_height + 15) & ~15;
 
-    // PPA prefers uniform scale ratios - adjust height to match width's scale
+    // DISABLED: PPA aspect ratio adjustment
+    // Allow stretching if user explicitly sets output dimensions
+    // This lets 1288×728 (16:9) scale to 640×480 (4:3) with distortion
+    /*
     float scale_x_target = (float)out_width / (float)crop_width;
     int adjusted_height = (int)((float)crop_height * scale_x_target);
     adjusted_height = (adjusted_height + 15) & ~15;  // Align to 16
@@ -299,6 +302,7 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
                out_height, adjusted_height, scale_x_target);
       out_height = adjusted_height;
     }
+    */
   }
 
   // Calculate scale factors for PPA hardware resize
