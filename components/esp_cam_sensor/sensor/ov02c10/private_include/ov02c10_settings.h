@@ -1311,7 +1311,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3805, 0x35},  // X end low (1333 & 0xFF = 0x35 = 53)
     {0x3806, 0x04},  // Y end high ((60+976-1=1035) >> 8 = 4)
     {0x3807, 0x0b},  // Y end low (1035 & 0xFF = 0x0b = 11)
-    // Output size: 480x640 (portrait orientation)
+    // Output size: 480x640 (portrait, NO rotation - let LVGL handle it)
     {0x3808, 0x01},  // width high
     {0x3809, 0xe0},  // width low = 480
     {0x380a, 0x02},  // height high
@@ -1329,9 +1329,10 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3815, 0x01},  // No vertical binning
     {0x3816, 0x01},
     {0x3817, 0x01},
-    // No rotation - let software handle it
-    {0x3820, 0xa0},  // Same as standard (no vflip)
-    {0x3821, 0x00},  // Same as standard (no hmirror)
+    // NO hardware mirror/rotation - use mirror_x in YAML instead
+    // Hardware hmirror causes pixelation, use software mirror via PPA
+    {0x3820, 0xa0},  // No vflip
+    {0x3821, 0x00},  // No hmirror - MUST use mirror_x: true in YAML
     {0x3822, 0x80},
     {0x3823, 0x08},
     {0x3824, 0x00},
