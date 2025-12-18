@@ -29,30 +29,4 @@
 
 #endif // PPA_SRM_COLOR_MODE_YUV420
 
-// Define color conversion standards if not available
-#ifndef PPA_COLOR_CONV_STD_RGB_YUV_BT601
-
-/**
- * Color conversion standards for RGB<->YUV transformation
- */
-typedef enum {
-    PPA_COLOR_CONV_STD_RGB_YUV_BT601 = 0,   /*!< YUV<->RGB using BT.601 standard (SD video) */
-    PPA_COLOR_CONV_STD_RGB_YUV_BT709 = 1,   /*!< YUV<->RGB using BT.709 standard (HD video) */
-} ppa_color_conv_std_rgb_yuv_t;
-
-#endif // PPA_COLOR_CONV_STD_RGB_YUV_BT601
-
-// Define color range if not available
-#ifndef PPA_COLOR_RANGE_LIMIT
-
-/**
- * Color range definitions for YUV/RGB values
- */
-typedef enum {
-    PPA_COLOR_RANGE_LIMIT = 0,  /*!< Limited range: Y [16,235], U/V [16,240] */
-    PPA_COLOR_RANGE_FULL = 1,   /*!< Full range: Y/U/V [0,255] */
-} ppa_color_range_t;
-
-#endif // PPA_COLOR_RANGE_LIMIT
-
 #endif // CONFIG_IDF_TARGET_ESP32P4

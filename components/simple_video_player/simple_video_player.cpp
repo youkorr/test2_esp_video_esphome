@@ -2427,11 +2427,9 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   srm_config.mirror_y = false;
 
   // Color space configuration
-  #ifdef PPA_COLOR_CONV_STD_RGB_YUV_BT601
   // Set YUV→RGB color conversion standard (BT.601 for SD video, BT.709 for HD)
   srm_config.in.yuv_std = (h >= 720) ? PPA_COLOR_CONV_STD_RGB_YUV_BT709 : PPA_COLOR_CONV_STD_RGB_YUV_BT601;
   srm_config.in.yuv_range = PPA_COLOR_RANGE_LIMIT;  // Limited range [16-235] for video
-  #endif
 
   srm_config.rgb_swap = false;   // false = no RGB swap
   srm_config.byte_swap = false;  // false = no byte swap
