@@ -1218,23 +1218,42 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
-  if (this->ppa_enabled_) {
-    if (!this->apply_ppa_transform_(frame_data, frame_data)) {
-      ESP_LOGE(TAG, "PPA transform failed");
+  uint8_t *display_buffer = frame_data;  // By default, use captured frame directly
+
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    // Transform FROM V4L2 buffer TO separate PPA buffer (no in-place transform!)
+    if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
+      display_buffer = this->image_buffer_;  // Use PPA output for display
+    } else {
+      ESP_LOGE(TAG, "PPA transform failed, using original buffer");
     }
   }
   uint32_t t4 = esp_timer_get_time();
 
   // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
   portENTER_CRITICAL(&this->buffer_mutex_);
-  // Marquer l'ancien buffer comme disponible pour V4L2
+  // Marquer l'ancien buffer comme disponible pour V4L2 si c'est un buffer différent
+  // SAUF si PPA est actif (dans ce cas le V4L2 buffer reste en lecture seule)
   if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
-    this->simple_buffers_[this->current_buffer_index_].allocated = false;
+    if (!this->ppa_enabled_) {
+      this->simple_buffers_[this->current_buffer_index_].allocated = false;
+    }
   }
-  // Marquer le nouveau buffer comme actuellement affiché
+  // Marquer le nouveau buffer comme actuellement utilisé
   this->simple_buffers_[buffer_idx].allocated = true;
   this->current_buffer_index_ = buffer_idx;
-  this->image_buffer_ = frame_data;  // Legacy API pointer
+
+  // CRITICAL: When PPA is enabled, update the buffer element to point to PPA output!
+  // This ensures acquire_buffer() returns the transformed image, not the raw sensor data
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    // Temporarily override the V4L2 buffer pointer with PPA output
+    this->simple_buffers_[buffer_idx].data = this->image_buffer_;
+  }
+
+  // Legacy API pointer (not used when SimpleBufferElement is used)
+  if (!this->ppa_enabled_) {
+    this->image_buffer_ = display_buffer;
+  }
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
   this->frame_sequence_++;
@@ -1260,6 +1279,15 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
   uint32_t t5 = esp_timer_get_time();
+
+  // IMPORTANT: Restore original V4L2 buffer pointer before queuing back
+  // We may have overridden it with PPA buffer for display purposes
+  if (this->ppa_enabled_ && this->simple_buffers_[buffer_idx].data != frame_data) {
+    portENTER_CRITICAL(&this->buffer_mutex_);
+    this->simple_buffers_[buffer_idx].data = frame_data;  // Restore V4L2 pointer
+    portEXIT_CRITICAL(&this->buffer_mutex_);
+  }
+
   buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
   buf.length = this->image_buffer_size_;
   if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
