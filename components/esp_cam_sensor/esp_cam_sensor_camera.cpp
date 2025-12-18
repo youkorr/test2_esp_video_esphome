@@ -276,6 +276,16 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
   int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
 
+  // CRITICAL: Swap output dimensions for 90°/270° rotation
+  // When rotating 90° or 270°, width and height are swapped in the output
+  if ((this->rotation_ == 90 || this->rotation_ == 270) &&
+      this->output_width_ == 0 && this->output_height_ == 0) {
+    // Only auto-swap if user hasn't explicitly set output dimensions
+    std::swap(output_width, output_height);
+    ESP_LOGI(TAG, "Auto-swapping output dimensions for %d° rotation: %dx%d → %dx%d",
+             this->rotation_, input_width, input_height, output_width, output_height);
+  }
+
   // Calculate scale factors (1.0 = no scaling)
   float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
   float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
@@ -289,14 +299,9 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   // SIMPLE OUTPUT CONFIG (M5Stack style)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = output_width;
+  srm_config.out.pic_h = output_height;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-
-  // Only set output dimensions explicitly if we're resizing
-  // When scale = 1.0, PPA may infer dimensions from input automatically
-  if (this->output_width_ > 0 || this->output_height_ > 0) {
-    srm_config.out.pic_w = output_width;
-    srm_config.out.pic_h = output_height;
-  }
 
   // Transformation configuration
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
