@@ -262,73 +262,38 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     return true;  // Pas de transformation
   }
 
+  // SIMPLIFIED PPA configuration to match M5Stack's working implementation
+  // M5Stack only sets: buffer, pic_w, pic_h, scale_x, scale_y, mirror_x
+  // They do NOT set block_w, block_h, block_offset_x (let PPA handle defaults)
+
   ppa_srm_oper_config_t srm_config = {};
 
-  // Calculate cropped dimensions
-  int crop_width = this->image_width_ - this->crop_offset_x_;
-  int crop_height = this->image_height_;
+  // Input dimensions (from sensor)
+  int input_width = this->image_width_;
+  int input_height = this->image_height_;
 
-  // Determine output dimensions (resize if configured, otherwise keep cropped size)
-  int out_width = (this->output_width_ > 0) ? this->output_width_ : crop_width;
-  int out_height = (this->output_height_ > 0) ? this->output_height_ : crop_height;
+  // Output dimensions (resize if configured, otherwise keep input size)
+  int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
+  int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
 
-  // IMPORTANT: Swap dimensions for 90° and 270° rotations
-  // When rotating 90° or 270°, width becomes height and vice versa
-  bool swap_dimensions = (this->rotation_ == 90 || this->rotation_ == 270);
-  if (swap_dimensions && this->output_width_ == 0 && this->output_height_ == 0) {
-    // Only swap if user hasn't explicitly set output dimensions
-    std::swap(out_width, out_height);
-    ESP_LOGI(TAG, "PPA: Swapping dimensions for %d° rotation: %dx%d → %dx%d",
-             this->rotation_, crop_width, crop_height, out_width, out_height);
-  }
+  // Calculate scale factors (1.0 = no scaling)
+  float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
+  float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
 
-  // PPA constraints: dimensions must be multiples of 8 (ideally 16)
-  // Adjust if necessary to avoid "scale does not fit" error
-  if (this->output_width_ > 0 && this->output_height_ > 0) {
-    // Ensure dimensions are multiples of 16
-    out_width = (out_width + 15) & ~15;
-    out_height = (out_height + 15) & ~15;
-
-    // DISABLED: PPA aspect ratio adjustment
-    // Allow stretching if user explicitly sets output dimensions
-    // This lets 1288×728 (16:9) scale to 640×480 (4:3) with distortion
-    /*
-    float scale_x_target = (float)out_width / (float)crop_width;
-    int adjusted_height = (int)((float)crop_height * scale_x_target);
-    adjusted_height = (adjusted_height + 15) & ~15;  // Align to 16
-
-    if (abs(adjusted_height - out_height) > 16) {
-      ESP_LOGW(TAG, "PPA: Adjusting height %d→%d to match scale_x=%.3f (keeping aspect ratio)",
-               out_height, adjusted_height, scale_x_target);
-      out_height = adjusted_height;
-    }
-    */
-  }
-
-  // Calculate scale factors for PPA hardware resize
-  float scale_x = (this->output_width_ > 0) ? (float)out_width / (float)crop_width : 1.0f;
-  float scale_y = (this->output_height_ > 0) ? (float)out_height / (float)crop_height : 1.0f;
-
-  // Input configuration (with crop offset)
+  // SIMPLE INPUT CONFIG (M5Stack style)
   srm_config.in.buffer = src_buffer;
-  srm_config.in.pic_w = this->image_width_;
-  srm_config.in.pic_h = this->image_height_;
-  srm_config.in.block_w = crop_width;  // Width to extract (skip crop_offset_x from left)
-  srm_config.in.block_h = crop_height;
-  srm_config.in.block_offset_x = this->crop_offset_x_;  // Skip pixels from left
-  srm_config.in.block_offset_y = 0;
+  srm_config.in.pic_w = input_width;
+  srm_config.in.pic_h = input_height;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+  // NO block_w, block_h, block_offset - let PPA use defaults
 
-  // Output configuration (with optional resize)
+  // SIMPLE OUTPUT CONFIG (M5Stack style)
   srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = out_width * out_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.pic_w = out_width;   // Output width (resized if configured)
-  srm_config.out.pic_h = out_height;  // Output height (resized if configured)
-  srm_config.out.block_w = out_width;  // ← AJOUTÉ: même que pic_w
-  srm_config.out.block_h = out_height; // ← AJOUTÉ: même que pic_h
-  srm_config.out.block_offset_x = 0;
-  srm_config.out.block_offset_y = 0;
+  srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
+  srm_config.out.pic_w = output_width;
+  srm_config.out.pic_h = output_height;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+  // NO block_w, block_h, block_offset - let PPA use defaults
 
   // Transformation configuration
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
@@ -340,13 +305,21 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
   }
 
-  srm_config.scale_x = scale_x;  // Hardware downscale if output_width configured
-  srm_config.scale_y = scale_y;  // Hardware downscale if output_height configured
+  srm_config.scale_x = scale_x;
+  srm_config.scale_y = scale_y;
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
-  srm_config.rgb_swap = false;  // false = no RGB swap (M5Stack API)
-  srm_config.byte_swap = false;  // false = no byte swap (green tint is from lighting)
-  srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
+  srm_config.rgb_swap = false;
+  srm_config.byte_swap = false;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  // LOG PPA configuration for debugging
+  ESP_LOGI(TAG, "PPA Config:");
+  ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
+  ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
+  ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
+  ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
+  ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
 
   // Exécuter transformation hardware (M5Stack API: 2 parameters)
   esp_err_t ret = ppa_do_scale_rotate_mirror(
@@ -355,10 +328,11 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   );
 
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "PPA transform failed: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "❌ PPA transform failed: %s", esp_err_to_name(ret));
     return false;
   }
 
+  ESP_LOGI(TAG, "✓ PPA transform OK");
   return true;
 }
 
