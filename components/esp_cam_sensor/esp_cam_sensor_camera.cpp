@@ -273,23 +273,14 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int input_height = this->image_height_;
 
   // Output dimensions (resize if configured, otherwise keep input size)
+  // IMPORTANT: Do NOT auto-swap dimensions for rotation!
+  // PPA hardware rotates in-place, output buffer dimensions = input dimensions
   int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
   int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
 
-  // Calculate scale factors BEFORE dimension swap (1.0 = no scaling)
+  // Calculate scale factors (1.0 = no scaling)
   float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
   float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
-
-  // CRITICAL: Swap output dimensions for 90°/270° rotation
-  // When rotating 90° or 270°, width and height are swapped in the output
-  // This must happen AFTER scale calculation!
-  if ((this->rotation_ == 90 || this->rotation_ == 270) &&
-      this->output_width_ == 0 && this->output_height_ == 0) {
-    // Only auto-swap if user hasn't explicitly set output dimensions
-    std::swap(output_width, output_height);
-    ESP_LOGI(TAG, "Auto-swapping output dimensions for %d° rotation: %dx%d → %dx%d",
-             this->rotation_, input_width, input_height, output_width, output_height);
-  }
 
   // SIMPLE INPUT CONFIG (M5Stack style)
   srm_config.in.buffer = src_buffer;
