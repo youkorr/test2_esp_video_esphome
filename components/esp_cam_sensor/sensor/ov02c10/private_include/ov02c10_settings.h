@@ -1329,9 +1329,9 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3815, 0x01},  // No vertical binning
     {0x3816, 0x01},
     {0x3817, 0x01},
-    // NO hardware rotation - LVGL will handle rotation 270°
+    // Hardware mirror correction for side-mounted camera
     {0x3820, 0xa0},  // No vflip (standard)
-    {0x3821, 0x00},  // No hmirror (standard)
+    {0x3821, 0x02},  // Enable hmirror to correct left/right flip
     {0x3822, 0x80},
     {0x3823, 0x08},
     {0x3824, 0x00},
