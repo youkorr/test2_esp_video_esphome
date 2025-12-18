@@ -285,15 +285,18 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.in.pic_w = input_width;
   srm_config.in.pic_h = input_height;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  // NO block_w, block_h, block_offset - let PPA use defaults
 
   // SIMPLE OUTPUT CONFIG (M5Stack style)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.pic_w = output_width;
-  srm_config.out.pic_h = output_height;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-  // NO block_w, block_h, block_offset - let PPA use defaults
+
+  // Only set output dimensions explicitly if we're resizing
+  // When scale = 1.0, PPA may infer dimensions from input automatically
+  if (this->output_width_ > 0 || this->output_height_ > 0) {
+    srm_config.out.pic_w = output_width;
+    srm_config.out.pic_h = output_height;
+  }
 
   // Transformation configuration
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
