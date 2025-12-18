@@ -4,8 +4,7 @@
 
 // ESP-DL detection components (only for YOLO11 model)
 #ifdef ESP_DL_MODEL_YOLO11
-#include "dl_detect_base.hpp"
-#include "dl_detect_yolo11_postprocessor.hpp"
+#include "yolo11_detect.hpp"
 #include "dl_image.hpp"
 #endif
 
@@ -41,12 +40,17 @@ void YOLO11DetectionComponent::setup() {
   // Initialize YOLO11 object detector
   ESP_LOGI(TAG, "Initializing YOLO11 object detector...");
 
-  // TODO: Load YOLO11 model and create detector instance
-  // This requires a YOLO11 model file (.espdl) similar to pedestrian_detect or face_detect
-  ESP_LOGE(TAG, "YOLO11 model loading not yet implemented");
-  ESP_LOGE(TAG, "A YOLO11 .espdl model file is required but not provided");
-  this->mark_failed();
-  return;
+  this->object_detector_ = new YOLO11Detect();
+  if (this->object_detector_ != nullptr) {
+    this->object_detector_->set_score_thr(this->score_threshold_);
+    this->object_detector_->set_nms_thr(this->nms_threshold_);
+    ESP_LOGI(TAG, "YOLO11 detector initialized (score_thr=%.2f, nms_thr=%.2f)",
+             this->score_threshold_, this->nms_threshold_);
+  } else {
+    ESP_LOGE(TAG, "Failed to initialize YOLO11 detector");
+    this->mark_failed();
+    return;
+  }
 
   ESP_LOGI(TAG, "YOLO11 Object Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);

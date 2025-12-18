@@ -134,6 +134,19 @@ if os.path.exists(esp_dl_dir):
         print("[YOLO11 Detection] Added libfbs_model.a")
 
 # ========================================================================
+# Add yolo11_detect wrapper sources
+# ========================================================================
+yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
+if os.path.exists(yolo11_detect_dir):
+    env.Append(CPPPATH=[yolo11_detect_dir])
+    yolo11_sources = ["yolo11_detect.cpp"]
+    for src in yolo11_sources:
+        src_path = os.path.join(yolo11_detect_dir, src)
+        if os.path.exists(src_path):
+            sources_to_add.append(src_path)
+            print(f"[YOLO11 Detection] + {src}")
+
+# ========================================================================
 # Add local stub files (if needed)
 # ========================================================================
 # Custom dotprod implementation (no DSP version)

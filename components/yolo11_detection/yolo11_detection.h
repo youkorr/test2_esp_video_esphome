@@ -6,12 +6,8 @@
 #include <vector>
 #include <list>
 
-// ESP-DL forward declarations
-namespace dl {
-namespace detect {
-class DetectWrapper;
-}
-}
+// ESP-DL forward declaration
+class YOLO11Detect;
 
 namespace esphome {
 namespace yolo11_detection {
@@ -55,7 +51,7 @@ class YOLO11DetectionComponent : public Component {
 
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
-  dl::detect::DetectWrapper *object_detector_{nullptr};
+  YOLO11Detect *object_detector_{nullptr};
 
   // Configuration
   std::string canvas_id_{};
