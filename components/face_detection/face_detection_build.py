@@ -374,13 +374,22 @@ if sources_to_add:
             print(f"[Face Detection] Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
+        # Create static library
         lib = env.StaticLibrary(
             os.path.join("$BUILD_DIR", "libface_detection"),
             objects
         )
+
+        # Add library with proper linking flags for circular dependencies
+        env.Append(LINKFLAGS=["-Wl,--start-group"])
         env.Prepend(LIBS=[lib])
-        env['_LIBFLAGS'] = '-Wl,--start-group ' + env['_LIBFLAGS'] + ' -Wl,--end-group'
+        env.Append(LINKFLAGS=["-Wl,--end-group"])
+
+        # Also add objects directly to ensure they're linked
+        env.Append(PIOBUILDFILES=objects)
+
         print(f"[Face Detection] {len(sources_to_add)} source files compiled")
-        print("[Face Detection] libface_detection.a created")
+        print(f"[Face Detection] {len(objects)} object files created")
+        print("[Face Detection] libface_detection.a created and linked")
 
 print("[Face Detection] Build script completed")
