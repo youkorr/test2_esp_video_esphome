@@ -117,19 +117,9 @@ async def to_code(config):
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
 
-    # DEPRECATED: esp_image_effects (esp_imgfx) SIMD YUV→RGB conversion
-    # Now using PPA hardware acceleration instead - much faster with no FPS loss
-    # esp_imgfx is kept as fallback for compatibility only
-    esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
-    if os.path.exists(esp_imgfx_dir):
-        # Add preprocessor defines to enable SIMD code (fallback only)
-        cg.add_build_flag("-DUSE_ESP_IMAGE_EFFECTS=1")
-        cg.add_build_flag("-DHAVE_ESP_IMGFX_H=1")
-
-        # Add include paths for esp_imgfx headers
-        imgfx_inc = os.path.join(esp_imgfx_dir, "include")
-        if os.path.exists(imgfx_inc):
-            cg.add_build_flag(f"-I{imgfx_inc}")
+    # esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
+    # Now using: PPA hardware (ESP32-P4) + software LUT fallback
+    # esp_imgfx caused 42ms delays instead of expected 3-5ms
 
 
 # Action schemas

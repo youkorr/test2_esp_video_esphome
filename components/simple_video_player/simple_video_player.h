@@ -10,8 +10,7 @@
 #include "driver/jpeg_decode.h"
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUV→RGB
 #include "esphome/components/speaker/speaker.h"
-#include "yuv_rgb_convert.h"
-#include "yuv_rgb_convert_simd.h"  // SIMD-accelerated YUV→RGB (esp_imgfx)
+#include "yuv_rgb_convert.h"  // Software YUV→RGB with lookup tables (fallback only)
 
 // TODO: ESP-GMF will be added later
 // #include "esp_gmf_element.h"
@@ -330,9 +329,9 @@ class SimpleVideoPlayer : public Component {
   esp_h264_dec_handle_t h264_decoder_{nullptr};
   std::vector<uint8_t> yuv_buffer_;
   bool h264_decoder_ready_{false};
-  YuvRgbConverterSIMD *yuv_converter_{nullptr};  // SIMD converter (auto-fallback to software)
 
-  // PPA hardware acceleration for YUV→RGB conversion
+  // PPA hardware acceleration for YUV→RGB conversion (primary method)
+  // Falls back to software LUT conversion if PPA unavailable
   ppa_client_handle_t ppa_client_handle_{nullptr};
   bool ppa_color_convert_enabled_{false};
 

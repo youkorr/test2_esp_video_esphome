@@ -209,62 +209,11 @@ else:
     print(f"[Simple Video Player] ⚠️  esp_h264 component not found")
 
 # ========================================================================
-# DEPRECATED: esp_image_effects SIMD library (Hardware-accelerated YUV→RGB)
-# NOW USING: PPA hardware acceleration instead - much faster with no FPS loss
-# esp_imgfx is kept as fallback for compatibility only
+# esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
 # ========================================================================
-esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
-if os.path.exists(esp_imgfx_dir):
-    # Enable SIMD YUV→RGB conversion (fallback only)
-    env.Append(CPPDEFINES=[
-        ("USE_ESP_IMAGE_EFFECTS", "1"),
-        ("HAVE_ESP_IMGFX_H", "1")  # Tell code that headers are available
-    ])
-    print("[Simple Video Player] ⚠️  esp_imgfx SIMD enabled as fallback (PPA is now primary)")
-
-    # Add include paths
-    imgfx_inc = os.path.join(esp_imgfx_dir, "include")
-    if os.path.exists(imgfx_inc):
-        # Add to CPPPATH for normal includes
-        env.Append(CPPPATH=[imgfx_inc])
-
-        # Also add directly to compiler flags to ensure __has_include() finds it
-        env.Append(CCFLAGS=[f"-I{imgfx_inc}"])
-        env.Append(CXXFLAGS=[f"-I{imgfx_inc}"])
-
-        print(f"[Simple Video Player] Added esp_imgfx include path: {imgfx_inc}")
-
-        # Verify header files exist
-        header_path = os.path.join(imgfx_inc, "esp_imgfx_color_convert.h")
-        if os.path.exists(header_path):
-            print(f"[Simple Video Player] ✓ Header found: esp_imgfx_color_convert.h")
-        else:
-            print(f"[Simple Video Player] ⚠️  Header NOT found: {header_path}")
-
-    # Add library path and link library for ESP32-P4
-    imgfx_lib_dir = os.path.join(esp_imgfx_dir, "lib", "esp32p4")
-    imgfx_lib = os.path.join(imgfx_lib_dir, "libesp_image_effects.a")
-
-    if os.path.exists(imgfx_lib):
-        print(f"[Simple Video Player] Found esp_image_effects library: {imgfx_lib}")
-
-        # Add library path
-        env.Append(LIBPATH=[imgfx_lib_dir])
-
-        # Force linking with --whole-archive
-        env.Append(LINKFLAGS=[
-            "-Wl,--whole-archive",
-            imgfx_lib,
-            "-Wl,--no-whole-archive"
-        ])
-
-        print("[Simple Video Player] ✓ Linked esp_image_effects library (with --whole-archive)")
-        print("[Simple Video Player]   Expected: 3-5x faster YUV→RGB conversion (3-5ms vs 10-15ms)")
-        print("[Simple Video Player]   FPS boost: 640×480 → 35+ FPS, 480×272 → 100+ FPS")
-    else:
-        print(f"[Simple Video Player] ⚠️  esp_image_effects library not found: {imgfx_lib}")
-else:
-    print(f"[Simple Video Player] ⚠️  esp_image_effects component not found")
+# NOW USING: PPA hardware (ESP32-P4) + software LUT fallback
+# esp_imgfx was causing 42ms delays instead of expected 3-5ms
+print("[Simple Video Player] ✓ YUV→RGB: PPA hardware + software LUT (esp_imgfx removed)")
 
 # ========================================================================
 # Link audio codec library (esp_audio_codec)

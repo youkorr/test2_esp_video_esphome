@@ -1426,24 +1426,14 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   size_t yuv_size = this->actual_width_ * this->actual_height_ * 3 / 2;  // I420
   this->yuv_buffer_.resize(yuv_size);
 
-  // Initialize SIMD-accelerated YUV→RGB converter (BT.601 by default - most compatible)
-  // Tries esp_imgfx SIMD first (3-5x faster), falls back to optimized software
-  // Use BT.709 only if you're sure your videos are HD with BT.709 colorspace
-  if (this->yuv_converter_ == nullptr) {
-    this->yuv_converter_ = new YuvRgbConverterSIMD(YuvRgbConverterSIMD::Colorspace::BT601);
-  }
-
-  // Initialize lookup tables for alternative YUV→RGB method (test comparison)
-  init_yuv_lut_tables();
-  ESP_LOGI(TAG, "💡 TEST: Lookup table YUV→RGB available as alternative to SIMD");
-
-  // Note: PPA YUV420 not available in this build - SIMD converter provides best performance
-  // Expected: SIMD 3-5ms @ 480x272 (vs 10-15ms software fallback)
-  // FPS targets: 640×480 → 35+ FPS, 480×272 → 100+ FPS (GitHub issue #5)
+  // YUV→RGB conversion uses:
+  // 1. PPA hardware (ESP32-P4) - 0% CPU, <1ms - PRIMARY METHOD
+  // 2. Software with lookup tables - ~10-15ms @ 480x272 - FALLBACK ONLY
+  // esp_imgfx SIMD has been REMOVED (buggy, causes 42ms delays instead of expected 3-5ms)
 
   this->h264_decoder_ready_ = true;
   ESP_LOGI(TAG, "H.264 decoder initialized for %dx%d", this->actual_width_, this->actual_height_);
-  ESP_LOGI(TAG, "YUV→RGB converter: %s", this->yuv_converter_->get_method());
+  ESP_LOGI(TAG, "YUV→RGB: PPA hardware + software LUT fallback (esp_imgfx removed)");
 
   return true;
 }
@@ -2388,12 +2378,8 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
     return false;  // PPA not available
   }
 
-#ifndef PPA_SRM_COLOR_MODE_YUV420
-  // PPA YUV420 color mode not available in this build
-  // Fall back to software converter
-  ESP_LOGW(TAG, "PPA_SRM_COLOR_MODE_YUV420 not defined - using software YUV converter");
-  return false;
-#else
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // PPA is only available on ESP32-P4
 
   // Configure PPA SRM operation for YUV420→RGB565 conversion
   // Input: I420 planar YUV (Y plane + U plane + V plane)
@@ -2435,15 +2421,27 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   srm_config.byte_swap = false;  // false = no byte swap
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (wait for completion)
 
+  // Debug: log configuration on first use
+  static bool first_attempt = true;
+  if (first_attempt) {
+    ESP_LOGI(TAG, "PPA Config: YUV420(%dx%d) → RGB565(%dx%d)", w, h, w, h);
+    ESP_LOGI(TAG, "  IN: srm_cm=%d, yuv_std=%d, yuv_range=%d",
+             srm_config.in.srm_cm, srm_config.in.yuv_std, srm_config.in.yuv_range);
+    ESP_LOGI(TAG, "  OUT: srm_cm=%d, buffer_size=%d",
+             srm_config.out.srm_cm, srm_config.out.buffer_size);
+    first_attempt = false;
+  }
+
   // Execute hardware color conversion (DMA-based, 0% CPU)
-  // M5Stack PPA API: only 2 parameters (handle + config)
   esp_err_t ret = ppa_do_scale_rotate_mirror(
       (ppa_client_handle_t)this->ppa_client_handle_,
       &srm_config
   );
 
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s - falling back to software", esp_err_to_name(ret));
+    ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s (0x%x) - falling back to software",
+             esp_err_to_name(ret), ret);
+    ESP_LOGW(TAG, "  This usually means YUV420 mode is not supported in this ESP-IDF version");
     return false;
   }
 
@@ -2455,28 +2453,34 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   }
 
   return true;
-#endif  // PPA_SRM_COLOR_MODE_YUV420
+#else
+  // ESP32-P4 not available - no PPA hardware
+  ESP_LOGW(TAG, "PPA not available (not ESP32-P4 platform)");
+  return false;
+#endif  // CONFIG_IDF_TARGET_ESP32P4
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
   // Try PPA hardware acceleration first (0% CPU, <1ms)
-  // PPA is now the primary method - much faster than esp_imgfx SIMD
   if (this->apply_ppa_color_convert_(yuv, rgb, w, h)) {
     return;  // Hardware conversion succeeded
   }
 
-  // DEPRECATED: esp_imgfx SIMD fallback (slower, causes FPS loss)
-  // This is kept for compatibility but should rarely be used now that PPA YUV420 is enabled
-  if (this->yuv_converter_ != nullptr) {
-    static bool fallback_warned = false;
-    if (!fallback_warned) {
-      ESP_LOGW(TAG, "Using esp_imgfx SIMD fallback (PPA unavailable) - may have FPS loss");
-      fallback_warned = true;
-    }
-    this->yuv_converter_->convert_i420_to_rgb565(yuv, rgb, w, h);
-  } else {
-    ESP_LOGE(TAG, "YUV converter not initialized!");
+  // Fallback to optimized software conversion with lookup tables
+  // This is 5-10x faster than naive conversion (10-15ms @ 480x272)
+  // Uses BT.709 colorspace for HD video or BT.601 for SD
+  static YuvRgbConverter software_converter(
+    h >= 720 ? YuvRgbConverter::Colorspace::BT709 : YuvRgbConverter::Colorspace::BT601
+  );
+
+  static bool fallback_logged = false;
+  if (!fallback_logged) {
+    ESP_LOGI(TAG, "Using software YUV→RGB conversion (PPA unavailable, %s colorspace)",
+             h >= 720 ? "BT.709" : "BT.601");
+    fallback_logged = true;
   }
+
+  software_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
 }
 
 // ==============================================
