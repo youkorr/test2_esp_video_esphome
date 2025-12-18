@@ -1329,9 +1329,10 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x3815, 0x01},  // No vertical binning
     {0x3816, 0x01},
     {0x3817, 0x01},
-    // Hardware mirror enabled to correct left/right orientation
+    // NO hardware mirror/rotation - use mirror_x in YAML instead
+    // Hardware hmirror causes pixelation, use software mirror via PPA
     {0x3820, 0xa0},  // No vflip
-    {0x3821, 0x02},  // Enable hmirror - fixes mirror effect (left hand → left on screen)
+    {0x3821, 0x00},  // No hmirror - MUST use mirror_x: true in YAML
     {0x3822, 0x80},
     {0x3823, 0x08},
     {0x3824, 0x00},
