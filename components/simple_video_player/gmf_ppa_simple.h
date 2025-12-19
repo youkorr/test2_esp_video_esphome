@@ -9,6 +9,12 @@
  * 2. PPA (fallback, if 2D-DMA not available)
  */
 
+// Force ESP32-P4 target definition for PPA hardware
+// This should be set by build script, but we force it here as backup
+#ifndef CONFIG_IDF_TARGET_ESP32P4
+  #define CONFIG_IDF_TARGET_ESP32P4 1
+#endif
+
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 
 #include "esp_err.h"

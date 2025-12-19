@@ -13,6 +13,11 @@
  * License: LicenseRef-Espressif-Modified-MIT
  */
 
+// Force ESP32-P4 target definition for PPA hardware
+#ifndef CONFIG_IDF_TARGET_ESP32P4
+  #define CONFIG_IDF_TARGET_ESP32P4 1
+#endif
+
 #include "gmf_ppa_simple.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
@@ -234,6 +239,12 @@ static esp_err_t init_ppa_yuv420_to_rgb565(uint16_t width, uint16_t height) {
 // ============================================================================
 
 esp_err_t gmf_ppa_init() {
+    // CRITICAL: Add printf() to ensure this log is NEVER filtered
+    printf("\n========================================\n");
+    printf(">>> GMF_PPA_INIT() CALLED <<<\n");
+    printf(">>> CONFIG_IDF_TARGET_ESP32P4 = %d\n", CONFIG_IDF_TARGET_ESP32P4);
+    printf("========================================\n\n");
+
     if (g_gmf_ppa.initialized) {
         ESP_LOGW(TAG, "GMF PPA already initialized");
         return ESP_OK;
@@ -247,6 +258,8 @@ esp_err_t gmf_ppa_init() {
     ESP_LOGI(TAG, "✓ GMF PPA ready (PPA hardware for YUV→RGB, software fallback available)");
 
     g_gmf_ppa.initialized = true;
+
+    printf("\n>>> GMF PPA INITIALIZED SUCCESSFULLY <<<\n\n");
     return ESP_OK;
 }
 
