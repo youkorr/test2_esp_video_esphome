@@ -3058,6 +3058,24 @@ void SimpleVideoPlayer::update_display_() {
   // CRITICAL for ESP32-P4 with PSRAM: Reset canvas buffer pointer EVERY frame
   // Without this, LVGL caches the buffer address and doesn't see PSRAM updates
   // This is essential for 1024x600 resolution (1.2MB framebuffer)
+
+  // Diagnostic: Log stride information once
+  static bool stride_logged = false;
+  if (!stride_logged) {
+    ESP_LOGW(TAG, "🔍 LVGL Canvas stride diagnostic:");
+    ESP_LOGW(TAG, "   Canvas dimensions: %dx%d", this->actual_width_, this->actual_height_);
+    ESP_LOGW(TAG, "   Buffer total size: %zu bytes", this->rgb_buffer_size_);
+    ESP_LOGW(TAG, "   Expected size (actual): %d bytes (%dx%dx2)",
+             this->actual_width_ * this->actual_height_ * 2,
+             this->actual_width_, this->actual_height_);
+    ESP_LOGW(TAG, "   Expected size (aligned): %d bytes (%dx%dx2)",
+             this->aligned_width_ * this->aligned_height_ * 2,
+             this->aligned_width_, this->aligned_height_);
+    ESP_LOGW(TAG, "   Bytes per line (actual): %d", this->actual_width_ * 2);
+    ESP_LOGW(TAG, "   Bytes per line (aligned): %d", this->aligned_width_ * 2);
+    stride_logged = true;
+  }
+
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
                        this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
 
