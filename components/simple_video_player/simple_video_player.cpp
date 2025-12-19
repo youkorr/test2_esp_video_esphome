@@ -2330,6 +2330,16 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
       ESP_LOGW(TAG, "   YUV size: %d bytes", out_frame.out_size);
       ESP_LOGW(TAG, "   Expected for actual: %d bytes", this->actual_width_ * this->actual_height_ * 3 / 2);
       ESP_LOGW(TAG, "   Expected for aligned: %d bytes", this->aligned_width_ * this->aligned_height_ * 3 / 2);
+
+      // Dump first 32 bytes to check YUV format
+      ESP_LOGW(TAG, "   First 32 bytes (Y plane start):");
+      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf, 32, ESP_LOG_WARN);
+
+      // Check U plane start (should be after Y plane for I420)
+      int u_offset = this->actual_width_ * this->actual_height_;
+      ESP_LOGW(TAG, "   U plane start (offset %d):", u_offset);
+      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf + u_offset, 32, ESP_LOG_WARN);
+
       debug_logged = true;
     }
 
