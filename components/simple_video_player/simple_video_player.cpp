@@ -2346,15 +2346,54 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
-    // TEST: Switch between SIMD and lookup table
-    #define USE_LUT_YUV_RGB 0  // Set to 1 to test lookup tables, 0 for SIMD (SIMD is 40% faster!)
+    // DIAGNOSTIC: Test UV plane ordering
+    // Set to 1 to test if YVU (V before U) instead of YUV (U before V)
+    // Set to 2 to test NV12 (interleaved UV) instead of I420 (separate planes)
+    #define YUV_FORMAT_TEST 0
 
-    #if USE_LUT_YUV_RGB
-      // LOOKUP TABLE method (test)
-      yuv420_to_rgb565_lut(out_frame.outbuf, this->rgb_buffer_,
-                           this->actual_width_, this->actual_height_);
+    #if YUV_FORMAT_TEST == 1
+      // TEST 1: Swap U and V planes (test YV12 format)
+      ESP_LOGW(TAG, "🧪 DIAGNOSTIC TEST 1: Swapping U/V planes to test YVU format");
+      uint8_t *temp_yuv = (uint8_t*)heap_caps_malloc(this->actual_width_ * this->actual_height_ * 3 / 2,
+                                                       MALLOC_CAP_SPIRAM);
+      if (temp_yuv) {
+        size_t y_size = this->actual_width_ * this->actual_height_;
+        size_t uv_size = y_size / 4;
+        // Copy Y plane
+        memcpy(temp_yuv, out_frame.outbuf, y_size);
+        // Swap U and V planes
+        memcpy(temp_yuv + y_size, out_frame.outbuf + y_size + uv_size, uv_size);  // V→U
+        memcpy(temp_yuv + y_size + uv_size, out_frame.outbuf + y_size, uv_size);  // U→V
+        this->convert_i420_to_rgb565_(temp_yuv, this->rgb_buffer_,
+                                       this->actual_width_, this->actual_height_);
+        heap_caps_free(temp_yuv);
+      }
+    #elif YUV_FORMAT_TEST == 2
+      // TEST 2: Treat as NV12 (semi-planar, interleaved UV)
+      ESP_LOGW(TAG, "🧪 DIAGNOSTIC TEST 2: Treating as NV12 format (interleaved UV)");
+      // For NV12, U/V are interleaved after Y plane: UVUVUVUV...
+      // We need to de-interleave to I420 format for our converter
+      uint8_t *temp_yuv = (uint8_t*)heap_caps_malloc(this->actual_width_ * this->actual_height_ * 3 / 2,
+                                                       MALLOC_CAP_SPIRAM);
+      if (temp_yuv) {
+        size_t y_size = this->actual_width_ * this->actual_height_;
+        size_t uv_size = y_size / 4;
+        // Copy Y plane
+        memcpy(temp_yuv, out_frame.outbuf, y_size);
+        // De-interleave UV: UVUVUV... → UUU...VVV...
+        const uint8_t *nv12_uv = out_frame.outbuf + y_size;
+        uint8_t *i420_u = temp_yuv + y_size;
+        uint8_t *i420_v = i420_u + uv_size;
+        for (size_t i = 0; i < uv_size; i++) {
+          i420_u[i] = nv12_uv[i * 2];      // Extract U
+          i420_v[i] = nv12_uv[i * 2 + 1];  // Extract V
+        }
+        this->convert_i420_to_rgb565_(temp_yuv, this->rgb_buffer_,
+                                       this->actual_width_, this->actual_height_);
+        heap_caps_free(temp_yuv);
+      }
     #else
-      // SIMD method (current)
+      // Normal conversion (I420 format)
       this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
                                      this->actual_width_, this->actual_height_);
     #endif
