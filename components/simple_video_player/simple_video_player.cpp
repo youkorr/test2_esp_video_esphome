@@ -2349,7 +2349,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // DIAGNOSTIC: Test UV plane ordering
     // Set to 1 to test if YVU (V before U) instead of YUV (U before V)
     // Set to 2 to test NV12 (interleaved UV) instead of I420 (separate planes)
-    #define YUV_FORMAT_TEST 0
+    #define YUV_FORMAT_TEST 1  // TEST 1: Try YVU format (swap U/V planes)
 
     #if YUV_FORMAT_TEST == 1
       // TEST 1: Swap U and V planes (test YV12 format)
