@@ -66,6 +66,8 @@ void SimpleVideoPlayer::setup() {
   } else {
     ESP_LOGI(TAG, "✓ GMF PPA initialized (PPA hardware for YUV→RGB)");
   }
+#else
+  ESP_LOGW(TAG, "CONFIG_IDF_TARGET_ESP32P4 not defined - PPA hardware unavailable, using software YUV→RGB");
 #endif
 
   // Open video file
@@ -2346,78 +2348,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
-    // DIAGNOSTIC: Test UV plane ordering
-    // Set to 0 for normal I420 (baseline)
-    // Set to 1 to test if YVU (V before U) instead of YUV (U before V)
-    // Set to 2 to test NV12 (interleaved UV) instead of I420 (separate planes)
-    #define YUV_FORMAT_TEST 0  // Back to normal - format tests failed
-
-    // STRIDE DIAGNOSTIC: Test if decoder uses stride padding
-    // The decoder might use aligned stride (e.g., 512) instead of width (480)
-    // This would cause "divided image" because UV plane offsets are wrong
-    #define YUV_STRIDE_TEST 1  // Enable stride testing
-
-    #if YUV_STRIDE_TEST
-      // Calculate possible stride values (16-byte, 32-byte, 64-byte aligned)
-      int test_stride_y = ((this->actual_width_ + 31) & ~31);  // Try 32-byte alignment
-      int y_plane_size = test_stride_y * this->actual_height_;
-      int uv_plane_size = (test_stride_y / 2) * (this->actual_height_ / 2);
-
-      ESP_LOGW(TAG, "🔍 Testing stride: width=%d, stride_y=%d, Y_size=%d, UV_size=%d",
-               this->actual_width_, test_stride_y, y_plane_size, uv_plane_size);
-
-      // Check if this matches the buffer size
-      int expected_size = y_plane_size + uv_plane_size * 2;
-      ESP_LOGW(TAG, "   Expected total: %d bytes (actual buffer: %d bytes)",
-               expected_size, out_frame.out_size);
-    #endif
-
-    #if YUV_FORMAT_TEST == 1
-      // TEST 1: Swap U and V planes (test YV12 format)
-      ESP_LOGW(TAG, "🧪 DIAGNOSTIC TEST 1: Swapping U/V planes to test YVU format");
-      uint8_t *temp_yuv = (uint8_t*)heap_caps_malloc(this->actual_width_ * this->actual_height_ * 3 / 2,
-                                                       MALLOC_CAP_SPIRAM);
-      if (temp_yuv) {
-        size_t y_size = this->actual_width_ * this->actual_height_;
-        size_t uv_size = y_size / 4;
-        // Copy Y plane
-        memcpy(temp_yuv, out_frame.outbuf, y_size);
-        // Swap U and V planes
-        memcpy(temp_yuv + y_size, out_frame.outbuf + y_size + uv_size, uv_size);  // V→U
-        memcpy(temp_yuv + y_size + uv_size, out_frame.outbuf + y_size, uv_size);  // U→V
-        this->convert_i420_to_rgb565_(temp_yuv, this->rgb_buffer_,
-                                       this->actual_width_, this->actual_height_);
-        heap_caps_free(temp_yuv);
-      }
-    #elif YUV_FORMAT_TEST == 2
-      // TEST 2: Treat as NV12 (semi-planar, interleaved UV)
-      ESP_LOGW(TAG, "🧪 DIAGNOSTIC TEST 2: Treating as NV12 format (interleaved UV)");
-      // For NV12, U/V are interleaved after Y plane: UVUVUVUV...
-      // We need to de-interleave to I420 format for our converter
-      uint8_t *temp_yuv = (uint8_t*)heap_caps_malloc(this->actual_width_ * this->actual_height_ * 3 / 2,
-                                                       MALLOC_CAP_SPIRAM);
-      if (temp_yuv) {
-        size_t y_size = this->actual_width_ * this->actual_height_;
-        size_t uv_size = y_size / 4;
-        // Copy Y plane
-        memcpy(temp_yuv, out_frame.outbuf, y_size);
-        // De-interleave UV: UVUVUV... → UUU...VVV...
-        const uint8_t *nv12_uv = out_frame.outbuf + y_size;
-        uint8_t *i420_u = temp_yuv + y_size;
-        uint8_t *i420_v = i420_u + uv_size;
-        for (size_t i = 0; i < uv_size; i++) {
-          i420_u[i] = nv12_uv[i * 2];      // Extract U
-          i420_v[i] = nv12_uv[i * 2 + 1];  // Extract V
-        }
-        this->convert_i420_to_rgb565_(temp_yuv, this->rgb_buffer_,
-                                       this->actual_width_, this->actual_height_);
-        heap_caps_free(temp_yuv);
-      }
-    #else
-      // Normal conversion (I420 format)
-      this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
-                                     this->actual_width_, this->actual_height_);
-    #endif
+    // Convert I420 to RGB565 using GMF PPA (hardware) or optimized software
+    this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
+                                   this->actual_width_, this->actual_height_);
 
     uint32_t yuv_convert_time = (esp_timer_get_time() / 1000) - yuv_convert_start;
 

@@ -12,6 +12,14 @@ parent_components_dir = os.path.dirname(component_dir)
 
 print("[Simple Video Player] Build script running...")
 
+# Define ESP32-P4 target to enable PPA hardware acceleration
+env.Append(CPPDEFINES=[
+    ("CONFIG_IDF_TARGET_ESP32P4", "1"),  # Enable ESP32-P4 PPA hardware for YUV→RGB
+])
+env.Append(CCFLAGS=["-DCONFIG_IDF_TARGET_ESP32P4=1"])
+env.Append(CXXFLAGS=["-DCONFIG_IDF_TARGET_ESP32P4=1"])
+print("[Simple Video Player] ✓ Enabled CONFIG_IDF_TARGET_ESP32P4 (PPA hardware for YUV→RGB)")
+
 # ESPHome auto-discovers and compiles .cpp files in component directory
 # No need for manual StaticLibrary compilation
 print("[Simple Video Player] Note: yuv_rgb_convert*.cpp files auto-compiled by ESPHome")
