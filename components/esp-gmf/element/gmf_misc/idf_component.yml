@@ -1,0 +1,13 @@
+version: "0.7.0"
+description: Espressif GMF Misc Elements Module
+url: https://github.com/espressif/esp-gmf/tree/main/elements/gmf_misc
+documentation: "https://github.com/espressif/esp-gmf/blob/main/elements/gmf_misc/README.md"
+issues: "https://github.com/espressif/esp-gmf/issues"
+
+tags:
+   - "gmf"
+
+dependencies:
+  espressif/gmf_core:
+    require: public
+    version: ">=0.7"
