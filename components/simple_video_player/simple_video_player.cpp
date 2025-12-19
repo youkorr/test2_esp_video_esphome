@@ -59,12 +59,12 @@ void SimpleVideoPlayer::setup() {
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
   // Initialize GMF PPA for hardware-accelerated YUV→RGB conversion
-  // Supports: 2D-DMA with CSC (best), PPA (good), software LUT (fallback)
+  // Supports: PPA hardware (YUV420→RGB565), software LUT (fallback)
   esp_err_t ppa_ret = gmf_ppa_init();
   if (ppa_ret != ESP_OK) {
     ESP_LOGW(TAG, "GMF PPA init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
   } else {
-    ESP_LOGI(TAG, "✓ GMF PPA initialized (2D-DMA + PPA hardware)");
+    ESP_LOGI(TAG, "✓ GMF PPA initialized (PPA hardware for YUV→RGB)");
   }
 #endif
 
@@ -2377,9 +2377,9 @@ bool SimpleVideoPlayer::init_ppa_color_converter_() {
 
 void SimpleVideoPlayer::cleanup_ppa_color_converter_() {
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-  // Clean up GMF PPA (2D-DMA + PPA hardware)
+  // Clean up GMF PPA hardware
   gmf_ppa_deinit();
-  ESP_LOGI(TAG, "✓ GMF PPA cleanup (2D-DMA + PPA hardware)");
+  ESP_LOGI(TAG, "✓ GMF PPA cleanup");
 #endif
 
   if (this->ppa_client_handle_ != nullptr) {
