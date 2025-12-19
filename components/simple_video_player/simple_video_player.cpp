@@ -2494,32 +2494,24 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-  // Try GMF PPA (2D-DMA + PPA hardware) first
-  // Best performance: 2D-DMA with hardware CSC (<1ms, 0% CPU)
-  // Fallback: PPA hardware if 2D-DMA unavailable
-  esp_err_t ret = gmf_ppa_convert_yuv420_to_rgb565(yuv, rgb, w, h);
+  // CRITICAL: PPA ESP32-P4 does NOT support I420 planar for YUV→RGB!
+  // PPA only supports:
+  //   - OUYY_EVYY (ESP32-P4 packed YUV420 format)
+  //   - YUV422 (YUYV, UYVY, etc.)
+  //
+  // H.264 decoder outputs I420 planar, which PPA cannot handle correctly.
+  // Result: divided/corrupted image with PPA
+  //
+  // Solution: Use esp_imgfx SIMD which handles I420 correctly
+  //          Performance: ~7-10ms @ 480x272 (acceptable)
 
-  if (ret == ESP_OK) {
-    return;  // GMF PPA conversion succeeded
-  }
-
-  // If GMF PPA failed, log once and fall through to software
-  static bool gmf_fallback_logged = false;
-  if (!gmf_fallback_logged) {
-    ESP_LOGW(TAG, "GMF PPA unavailable (%s), using software YUV→RGB", esp_err_to_name(ret));
-    gmf_fallback_logged = true;
-  }
-#endif
-
-  // Fallback to optimized software conversion with lookup tables
-  // This is 5-10x faster than naive conversion (10-15ms @ 480x272)
-  // Uses BT.709 colorspace for HD video or BT.601 for SD
-  static YuvRgbConverter software_converter(
-    h >= 720 ? YuvRgbConverter::Colorspace::BT709 : YuvRgbConverter::Colorspace::BT601
+  // Use SIMD accelerated conversion (esp_image_effects)
+  // This is the ONLY hardware-accelerated method that correctly handles I420
+  static YuvRgbConverterSIMD simd_converter(
+    h >= 720 ? YuvRgbConverterSIMD::Colorspace::BT709 : YuvRgbConverterSIMD::Colorspace::BT601
   );
 
-  software_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
+  simd_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
 }
 
 // ==============================================
