@@ -3261,6 +3261,18 @@ void SimpleVideoPlayer::play() {
       }
     }
 #endif
+
+    // Re-initialize GMF PPA hardware for YUV→RGB conversion
+    // This is necessary after stop() calls gmf_ppa_deinit()
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    ESP_LOGI(TAG, "Re-initializing GMF PPA hardware...");
+    esp_err_t ppa_ret = gmf_ppa_init();
+    if (ppa_ret != ESP_OK) {
+      ESP_LOGW(TAG, "GMF PPA re-init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
+    } else {
+      ESP_LOGI(TAG, "✓ GMF PPA re-initialized (PPA hardware for YUV→RGB)");
+    }
+#endif
   }
 
   if (this->state_ == PlayerState::STOPPED) {
