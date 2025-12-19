@@ -11,8 +11,9 @@
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUV→RGB
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUV→RGB with lookup tables (fallback only)
+#include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
 
-// TODO: ESP-GMF will be added later
+// TODO: ESP-GMF full framework integration (currently using simplified wrapper)
 // #include "esp_gmf_element.h"
 // #include "esp_gmf_pipeline.h"
 // #include "esp_gmf_pool.h"

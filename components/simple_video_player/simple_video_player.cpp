@@ -57,6 +57,17 @@ void SimpleVideoPlayer::setup() {
     return;
   }
 
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // Initialize GMF PPA for hardware-accelerated YUV→RGB conversion
+  // Supports: 2D-DMA with CSC (best), PPA (good), software LUT (fallback)
+  esp_err_t ppa_ret = gmf_ppa_init();
+  if (ppa_ret != ESP_OK) {
+    ESP_LOGW(TAG, "GMF PPA init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
+  } else {
+    ESP_LOGI(TAG, "✓ GMF PPA initialized (2D-DMA + PPA hardware)");
+  }
+#endif
+
   // Open video file
   if (!this->open_video_file_()) {
     ESP_LOGE(TAG, "Failed to open video file");
@@ -2365,6 +2376,12 @@ bool SimpleVideoPlayer::init_ppa_color_converter_() {
 }
 
 void SimpleVideoPlayer::cleanup_ppa_color_converter_() {
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // Clean up GMF PPA (2D-DMA + PPA hardware)
+  gmf_ppa_deinit();
+  ESP_LOGI(TAG, "✓ GMF PPA cleanup (2D-DMA + PPA hardware)");
+#endif
+
   if (this->ppa_client_handle_ != nullptr) {
     ppa_unregister_client(this->ppa_client_handle_);
     this->ppa_client_handle_ = nullptr;
@@ -2461,10 +2478,23 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // Try PPA hardware acceleration first (0% CPU, <1ms)
-  if (this->apply_ppa_color_convert_(yuv, rgb, w, h)) {
-    return;  // Hardware conversion succeeded
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // Try GMF PPA (2D-DMA + PPA hardware) first
+  // Best performance: 2D-DMA with hardware CSC (<1ms, 0% CPU)
+  // Fallback: PPA hardware if 2D-DMA unavailable
+  esp_err_t ret = gmf_ppa_convert_yuv420_to_rgb565(yuv, rgb, w, h);
+
+  if (ret == ESP_OK) {
+    return;  // GMF PPA conversion succeeded
   }
+
+  // If GMF PPA failed, log once and fall through to software
+  static bool gmf_fallback_logged = false;
+  if (!gmf_fallback_logged) {
+    ESP_LOGW(TAG, "GMF PPA unavailable (%s), using software YUV→RGB", esp_err_to_name(ret));
+    gmf_fallback_logged = true;
+  }
+#endif
 
   // Fallback to optimized software conversion with lookup tables
   // This is 5-10x faster than naive conversion (10-15ms @ 480x272)
@@ -2472,13 +2502,6 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
   static YuvRgbConverter software_converter(
     h >= 720 ? YuvRgbConverter::Colorspace::BT709 : YuvRgbConverter::Colorspace::BT601
   );
-
-  static bool fallback_logged = false;
-  if (!fallback_logged) {
-    ESP_LOGI(TAG, "Using software YUV→RGB conversion (PPA unavailable, %s colorspace)",
-             h >= 720 ? "BT.709" : "BT.601");
-    fallback_logged = true;
-  }
 
   software_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
 }
