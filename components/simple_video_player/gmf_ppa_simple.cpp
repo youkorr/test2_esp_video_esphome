@@ -241,6 +241,17 @@ esp_err_t gmf_ppa_init() {
 
     ESP_LOGI(TAG, "Initializing GMF PPA hardware...");
 
+    // TEMPORARY: Disable PPA to test software LUT fallback
+    // Reason: YUV420 planar might not be properly supported by PPA SRM
+    // TODO: Re-enable after fixing YUV420 buffer layout issues
+    ESP_LOGW(TAG, "⚠️  PPA temporarily disabled - testing software LUT");
+    g_gmf_ppa.use_dma2d = false;
+    g_gmf_ppa.initialized = true;
+
+    // Return error to force software LUT fallback
+    return ESP_ERR_NOT_SUPPORTED;
+
+    /*
     // Use PPA hardware for YUV420→RGB565 conversion
     // NOTE: 2D-DMA CSC only supports RGB↔RGB, not YUV→RGB
     g_gmf_ppa.use_dma2d = false;
@@ -248,6 +259,7 @@ esp_err_t gmf_ppa_init() {
 
     g_gmf_ppa.initialized = true;
     return ESP_OK;
+    */
 }
 
 esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_out,
