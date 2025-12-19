@@ -2347,9 +2347,30 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
     // DIAGNOSTIC: Test UV plane ordering
+    // Set to 0 for normal I420 (baseline)
     // Set to 1 to test if YVU (V before U) instead of YUV (U before V)
     // Set to 2 to test NV12 (interleaved UV) instead of I420 (separate planes)
-    #define YUV_FORMAT_TEST 2  // TEST 2: Try NV12 format (de-interleave UV)
+    #define YUV_FORMAT_TEST 0  // Back to normal - format tests failed
+
+    // STRIDE DIAGNOSTIC: Test if decoder uses stride padding
+    // The decoder might use aligned stride (e.g., 512) instead of width (480)
+    // This would cause "divided image" because UV plane offsets are wrong
+    #define YUV_STRIDE_TEST 1  // Enable stride testing
+
+    #if YUV_STRIDE_TEST
+      // Calculate possible stride values (16-byte, 32-byte, 64-byte aligned)
+      int test_stride_y = ((this->actual_width_ + 31) & ~31);  // Try 32-byte alignment
+      int y_plane_size = test_stride_y * this->actual_height_;
+      int uv_plane_size = (test_stride_y / 2) * (this->actual_height_ / 2);
+
+      ESP_LOGW(TAG, "🔍 Testing stride: width=%d, stride_y=%d, Y_size=%d, UV_size=%d",
+               this->actual_width_, test_stride_y, y_plane_size, uv_plane_size);
+
+      // Check if this matches the buffer size
+      int expected_size = y_plane_size + uv_plane_size * 2;
+      ESP_LOGW(TAG, "   Expected total: %d bytes (actual buffer: %d bytes)",
+               expected_size, out_frame.out_size);
+    #endif
 
     #if YUV_FORMAT_TEST == 1
       // TEST 1: Swap U and V planes (test YV12 format)
