@@ -142,6 +142,9 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     return;
   }
 
+  // Reset watchdog before long operation
+  App.feed_wdt();
+
   // Create image structure for ESP-DL
   dl::image::img_t img = {
     .data = img_data,
@@ -150,8 +153,11 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Run face detection
+  // Run face detection (MSR + MNP two-stage detection)
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+
+  // Reset watchdog after detection
+  App.feed_wdt();
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
@@ -206,8 +212,10 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       }
       this->enroll_pending_ = false;
     } else {
-      // Try to recognize
+      // Try to recognize (feature extraction + database query)
+      App.feed_wdt();  // Reset before recognition
       dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+      App.feed_wdt();  // Reset after recognition
       if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
         this->last_recognition_.id = rec_result->id;
         this->last_recognition_.similarity = rec_result->similarity;

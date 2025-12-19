@@ -90,6 +90,9 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
     return;
   }
 
+  // Reset watchdog before long operation
+  App.feed_wdt();
+
   // Create image structure for ESP-DL
   dl::image::img_t img = {
     .data = img_data,
@@ -98,8 +101,11 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Run pedestrian detection
+  // Run pedestrian detection (PICO model)
   std::list<dl::detect::result_t> &ped_results = this->pedestrian_detector_->run(img);
+
+  // Reset watchdog after detection
+  App.feed_wdt();
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->pedestrian_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {

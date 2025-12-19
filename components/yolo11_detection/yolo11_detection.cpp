@@ -103,6 +103,9 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
     return;
   }
 
+  // Reset watchdog before long operation
+  App.feed_wdt();
+
   // Create image structure for ESP-DL
   dl::image::img_t img = {
     .data = img_data,
@@ -111,8 +114,11 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Run YOLO11 object detection
+  // Run YOLO11 object detection (can take several seconds)
   std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
+
+  // Reset watchdog after inference
+  App.feed_wdt();
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
