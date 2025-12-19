@@ -52,11 +52,37 @@ void YOLO11DetectionComponent::setup() {
     return;
   }
 
+  // Create frame queue for detection task (queue of 2 frames max)
+  this->frame_queue_ = xQueueCreate(2, sizeof(esp_cam_sensor::SimpleBufferElement*));
+  if (this->frame_queue_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create frame queue");
+    this->mark_failed();
+    return;
+  }
+
+  // Create detection task (runs on CPU 0, priority 5, 8KB stack)
+  BaseType_t result = xTaskCreatePinnedToCore(
+    detection_task_func_,      // Task function
+    "yolo11_detect",           // Task name
+    8192,                      // Stack size (8KB)
+    this,                      // Task parameter (this pointer)
+    5,                         // Priority
+    &this->detection_task_handle_,  // Task handle
+    0                          // CPU 0 (separate from main loop on CPU 1)
+  );
+
+  if (result != pdPASS || this->detection_task_handle_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create detection task");
+    this->mark_failed();
+    return;
+  }
+
   ESP_LOGI(TAG, "YOLO11 Object Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGI(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
+  ESP_LOGI(TAG, "  Detection task running on CPU 0 (non-blocking)");
 #endif
 }
 
@@ -85,16 +111,13 @@ void YOLO11DetectionComponent::process_frame_() {
     return;
   }
 
-  uint8_t* img_data = this->camera_->get_buffer_data(buffer);
-  uint16_t width = this->camera_->get_image_width();
-  uint16_t height = this->camera_->get_image_height();
-
-  if (img_data != nullptr) {
-    this->detect_objects_(img_data, width, height);
+  // Send buffer to detection task (non-blocking)
+  // If queue is full, skip this frame (detection task is still processing previous frame)
+  if (xQueueSend(this->frame_queue_, &buffer, 0) != pdTRUE) {
+    // Queue full - detection task is busy, release buffer and skip this frame
+    this->camera_->release_buffer(buffer);
   }
-
-  // Release buffer
-  this->camera_->release_buffer(buffer);
+  // Note: Detection task will release the buffer when done
 }
 
 void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -226,6 +249,37 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
     xSemaphoreGive(this->detections_mutex_);
   }
 #endif
+}
+
+void YOLO11DetectionComponent::detection_task_func_(void *param) {
+  YOLO11DetectionComponent *component = static_cast<YOLO11DetectionComponent*>(param);
+  ESP_LOGI(TAG, "Detection task started on CPU %d", xPortGetCoreID());
+
+  esp_cam_sensor::SimpleBufferElement *buffer = nullptr;
+
+  while (true) {
+    // Wait for frame from queue (blocks until frame available)
+    if (xQueueReceive(component->frame_queue_, &buffer, portMAX_DELAY) == pdTRUE && buffer != nullptr) {
+      uint8_t* img_data = component->camera_->get_buffer_data(buffer);
+      uint16_t width = component->camera_->get_image_width();
+      uint16_t height = component->camera_->get_image_height();
+
+      if (img_data != nullptr) {
+        // Run detection (can take several seconds - no problem in separate task!)
+        component->detect_objects_(img_data, width, height);
+      }
+
+      // Release buffer back to camera
+      component->camera_->release_buffer(buffer);
+      buffer = nullptr;
+
+      // Yield to let other tasks run
+      taskYIELD();
+    }
+  }
+
+  // Task should never exit, but clean up if it does
+  vTaskDelete(nullptr);
 }
 
 void YOLO11DetectionComponent::dump_config() {

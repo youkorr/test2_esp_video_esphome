@@ -65,6 +65,11 @@ class YOLO11DetectionComponent : public Component {
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
 
+  // Detection task (runs YOLO11 in separate task to avoid blocking main loop)
+  TaskHandle_t detection_task_handle_{nullptr};
+  QueueHandle_t frame_queue_{nullptr};
+  static void detection_task_func_(void *param);
+
   // Callbacks
   std::vector<std::function<void(int)>> on_object_detected_callbacks_;
 };
