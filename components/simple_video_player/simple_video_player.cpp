@@ -2320,6 +2320,19 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   }
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
+    // CRITICAL DEBUG: Check YUV buffer size vs expected
+    static bool debug_logged = false;
+    if (!debug_logged) {
+      ESP_LOGW(TAG, "🔍 YUV Buffer Debug:");
+      ESP_LOGW(TAG, "   actual: %dx%d, aligned: %dx%d",
+               this->actual_width_, this->actual_height_,
+               this->aligned_width_, this->aligned_height_);
+      ESP_LOGW(TAG, "   YUV size: %d bytes", out_frame.out_size);
+      ESP_LOGW(TAG, "   Expected for actual: %d bytes", this->actual_width_ * this->actual_height_ * 3 / 2);
+      ESP_LOGW(TAG, "   Expected for aligned: %d bytes", this->aligned_width_ * this->aligned_height_ * 3 / 2);
+      debug_logged = true;
+    }
+
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
