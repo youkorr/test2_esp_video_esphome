@@ -3,8 +3,11 @@
  * Based on esp-gmf/elements/gmf_video/esp_gmf_video_ppa.c
  *
  * Supports:
- * - 2D-DMA color space conversion (fastest, if supported)
- * - PPA hardware acceleration (fallback)
+ * - PPA hardware acceleration (YUV420→RGB565 with BT.601/BT.709)
+ * - Software LUT fallback (if PPA unavailable)
+ *
+ * NOTE: 2D-DMA CSC only supports RGB↔RGB conversions (RGB888↔RGB565).
+ *       For YUV→RGB, PPA is the only hardware option.
  *
  * Author: Simplified from Espressif GMF code
  * License: LicenseRef-Espressif-Modified-MIT
@@ -160,84 +163,20 @@ static void dma2d_link_dscr_init(dma2d_descriptor_t *dma2d, uint32_t *next, void
 // ============================================================================
 
 static esp_err_t init_dma2d_yuv420_to_rgb565(uint16_t width, uint16_t height) {
-    dma2d_info_t *dma2d = &g_gmf_ppa.dma2d_info;
+    // NOTE: 2D-DMA CSC in ESP-IDF only supports RGB↔RGB conversions:
+    //   - RGB888 ↔ RGB565 (DMA2D_CSC_TX_RGB888_TO_RGB565 / DMA2D_CSC_TX_RGB565_TO_RGB888)
+    //
+    // For YUV420→RGB565 conversion, we MUST use PPA hardware instead.
+    // The PPA supports:
+    //   - YUV420/YUV422/YUV444 → RGB565/RGB888
+    //   - Color space standards (BT.601, BT.709)
+    //   - Color range (limited/full)
+    //
+    // See components/esp-gmf/element/gmf_video/esp_gmf_video_ppa.c lines 409-418
+    // for reference - GMF only uses 2D-DMA for RGB↔RGB conversions.
 
-    dma2d_pool_config_t pool_config = {
-        .pool_id = 0,
-    };
-
-    esp_err_t ret = dma2d_acquire_pool(&pool_config, &dma2d->handle);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to allocate 2D-DMA pool: %s", esp_err_to_name(ret));
-        return ret;
-    }
-
-    // Allocate descriptors (cache-aligned for PSRAM)
-    uint8_t align = 64;  // ESP32-P4 cache line size
-    dma2d->tx_desc = (dma2d_descriptor_t *)heap_caps_aligned_calloc(align, 1, 64, MALLOC_CAP_SPIRAM);
-    dma2d->rx_desc = (dma2d_descriptor_t *)heap_caps_aligned_calloc(align, 1, 64, MALLOC_CAP_SPIRAM);
-    dma2d->sema = xSemaphoreCreateCounting(1, 0);
-
-    if (!dma2d->sema || !dma2d->rx_desc || !dma2d->tx_desc) {
-        ESP_LOGE(TAG, "Failed to allocate 2D-DMA descriptors/semaphore");
-        if (dma2d->tx_desc) heap_caps_free(dma2d->tx_desc);
-        if (dma2d->rx_desc) heap_caps_free(dma2d->rx_desc);
-        if (dma2d->sema) vSemaphoreDelete(dma2d->sema);
-        return ESP_ERR_NO_MEM;
-    }
-
-    // Configure DMA channel
-    dma2d->trans.dma_chan_desc.tx_channel_num = 1;
-    dma2d->trans.dma_chan_desc.rx_channel_num = 1;
-    dma2d->trans.dma_chan_desc.channel_flags = DMA2D_CHANNEL_FUNCTION_FLAG_SIBLING | DMA2D_CHANNEL_FUNCTION_FLAG_TX_CSC;
-    dma2d->trans.dma_chan_desc.specified_tx_channel_mask = 0;
-    dma2d->trans.dma_chan_desc.specified_rx_channel_mask = 0;
-    dma2d->trans.dma_chan_desc.user_config = (void*) &dma2d->trans;
-    dma2d->trans.dma_chan_desc.on_job_picked = dma2d_m2m_transaction_on_picked;
-
-    // Configure color space conversion (YUV420→RGB565)
-    dma2d->tx_cvt.pre_scramble = 3;  // YUV420 to RGB565 mode
-    dma2d->tx_cvt.tx_color_format = COLOR_TYPE_ID(COLOR_SPACE_YUV, COLOR_PIXEL_YUV420);
-    dma2d->tx_cvt.rx_color_format = COLOR_TYPE_ID(COLOR_SPACE_RGB, COLOR_PIXEL_RGB565);
-    dma2d->tx_cvt.yuv_sample = COLOR_CONV_STD_RGB_YUV_BT601;  // BT.601 for SD video
-    dma2d->tx_cvt.yuv_range = COLOR_RANGE_LIMIT;  // Limited range [16-235]
-
-    // Setup transfer configuration
-    dma2d->trans.m2m_trans_desc.transfer_ability.data_burst_length = DMA2D_DATA_BURST_LENGTH_128;
-    dma2d->trans.m2m_trans_desc.transfer_ability.desc_burst_en = true;
-    dma2d->trans.m2m_trans_desc.transfer_ability.mb_size = DMA2D_MACRO_BLOCK_SIZE_NONE;
-    dma2d->trans.m2m_trans_desc.tx_csc_config = &dma2d->tx_cvt;
-    dma2d->trans.m2m_trans_desc.trans_eof_cb = dma2d_m2m_suc_eof_event_cb;
-    dma2d->trans.m2m_trans_desc.user_data = (void *)dma2d->sema;
-
-    // Initialize descriptors for YUV420→RGB565
-    // Input: YUV420 = width * height * 1.5 bytes (Y plane + U/V planes)
-    // Output: RGB565 = width * height * 2 bytes
-    int src_size = width * height * 3 / 2;  // YUV420 size
-    int dst_size = width * height * 2;      // RGB565 size
-
-    // TX descriptor (input YUV420)
-    dma2d_link_dscr_init(dma2d->tx_desc, nullptr, nullptr,
-                         src_size >> 14, src_size >> 14,
-                         src_size & 0x3FFF, src_size & 0x3FFF,
-                         1, 0, DMA2D_DESCRIPTOR_PBYTE_1B0_PER_PIXEL,
-                         DMA2D_DESCRIPTOR_BLOCK_RW_MODE_SINGLE, 0, 0);
-
-    // RX descriptor (output RGB565)
-    dma2d_link_dscr_init(dma2d->rx_desc, nullptr, nullptr,
-                         0, dst_size >> 14,
-                         0, dst_size & 0x3FFF,
-                         0, 0, DMA2D_DESCRIPTOR_PBYTE_1B0_PER_PIXEL,
-                         DMA2D_DESCRIPTOR_BLOCK_RW_MODE_SINGLE, 0, 0);
-
-    // Set descriptor base addresses
-    dma2d->trans.m2m_trans_desc.tx_desc_base_addr = (intptr_t)dma2d->tx_desc;
-    dma2d->trans.m2m_trans_desc.rx_desc_base_addr = (intptr_t)dma2d->rx_desc;
-
-    ESP_LOGI(TAG, "✓ 2D-DMA initialized for YUV420→RGB565 (%dx%d)", width, height);
-    ESP_LOGI(TAG, "  TX descriptor: src_size=%d bytes", src_size);
-    ESP_LOGI(TAG, "  RX descriptor: dst_size=%d bytes", dst_size);
-    return ESP_OK;
+    ESP_LOGW(TAG, "2D-DMA does not support YUV→RGB conversion");
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 // ============================================================================
@@ -300,12 +239,12 @@ esp_err_t gmf_ppa_init() {
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Initializing GMF PPA (2D-DMA + PPA hardware)...");
+    ESP_LOGI(TAG, "Initializing GMF PPA hardware...");
 
-    // Try 2D-DMA first (best performance - direct YUV420→RGB565 with hardware CSC)
-    // If 2D-DMA fails, will fall back to PPA on first conversion
-    g_gmf_ppa.use_dma2d = true;
-    ESP_LOGI(TAG, "✓ GMF PPA ready (will try 2D-DMA, fallback to PPA if needed)");
+    // Use PPA hardware for YUV420→RGB565 conversion
+    // NOTE: 2D-DMA CSC only supports RGB↔RGB, not YUV→RGB
+    g_gmf_ppa.use_dma2d = false;
+    ESP_LOGI(TAG, "✓ GMF PPA ready (PPA hardware for YUV→RGB, software fallback available)");
 
     g_gmf_ppa.initialized = true;
     return ESP_OK;
@@ -318,7 +257,7 @@ esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_o
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Initialize for this resolution if needed
+    // Initialize PPA for this resolution if needed
     if (g_gmf_ppa.width != width || g_gmf_ppa.height != height) {
         // Cleanup old resources
         if (g_gmf_ppa.ppa_handle) {
@@ -326,20 +265,10 @@ esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_o
             g_gmf_ppa.ppa_handle = nullptr;
         }
 
-        esp_err_t ret;
-        if (g_gmf_ppa.use_dma2d) {
-            ret = init_dma2d_yuv420_to_rgb565(width, height);
-            if (ret != ESP_OK) {
-                ESP_LOGW(TAG, "2D-DMA init failed: %s, falling back to PPA", esp_err_to_name(ret));
-                g_gmf_ppa.use_dma2d = false;
-                ret = init_ppa_yuv420_to_rgb565(width, height);
-            }
-        } else {
-            ret = init_ppa_yuv420_to_rgb565(width, height);
-        }
-
+        // Initialize PPA hardware
+        esp_err_t ret = init_ppa_yuv420_to_rgb565(width, height);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize converter: %s", esp_err_to_name(ret));
+            ESP_LOGE(TAG, "Failed to initialize PPA: %s", esp_err_to_name(ret));
             return ret;
         }
 
@@ -347,52 +276,16 @@ esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_o
         g_gmf_ppa.height = height;
     }
 
-    // Perform conversion
-    if (g_gmf_ppa.use_dma2d) {
-        // 2D-DMA conversion with hardware CSC (Color Space Conversion)
-        dma2d_info_t *dma2d = &g_gmf_ppa.dma2d_info;
-        int yuv_size = width * height * 3 / 2;  // YUV420
-        int rgb_size = width * height * 2;      // RGB565
+    // Perform PPA conversion (YUV420→RGB565)
+    g_gmf_ppa.ppa_config.in.buffer = (void*)yuv_in;
+    g_gmf_ppa.ppa_config.out.buffer = (void*)rgb_out;
+    g_gmf_ppa.ppa_config.out.buffer_size = width * height * 2;  // RGB565
 
-        // Flush cache for source and destination buffers (PSRAM→DMA)
-        esp_cache_msync((void *)yuv_in, yuv_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-        esp_cache_msync((void *)rgb_out, rgb_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
-
-        // Set buffer pointers in descriptors
-        dma2d->tx_desc->buffer = (void *)yuv_in;
-        dma2d->rx_desc->buffer = (void *)rgb_out;
-
-        // Sync descriptor changes to memory
-        esp_cache_msync(dma2d->tx_desc, 64, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-        esp_cache_msync(dma2d->rx_desc, 64, ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_UNALIGNED);
-
-        // Enqueue DMA transfer
-        esp_err_t ret = dma2d_enqueue(dma2d->handle, &dma2d->trans.dma_chan_desc,
-                                       (dma2d_trans_t *)dma2d->trans.dma_trans_placeholder_head);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "2D-DMA enqueue failed: %s", esp_err_to_name(ret));
-            return ret;
-        }
-
-        // Wait for DMA transfer to complete
-        xSemaphoreTake(dma2d->sema, portMAX_DELAY);
-
-        // Invalidate destination buffer cache (DMA→CPU)
-        esp_cache_msync(rgb_out, rgb_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-
-        return ESP_OK;
-    } else {
-        // PPA conversion
-        g_gmf_ppa.ppa_config.in.buffer = (void*)yuv_in;
-        g_gmf_ppa.ppa_config.out.buffer = (void*)rgb_out;
-        g_gmf_ppa.ppa_config.out.buffer_size = width * height * 2;  // RGB565
-
-        esp_err_t ret = ppa_do_scale_rotate_mirror(g_gmf_ppa.ppa_handle, &g_gmf_ppa.ppa_config);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "PPA conversion failed: %s", esp_err_to_name(ret));
-        }
-        return ret;
+    esp_err_t ret = ppa_do_scale_rotate_mirror(g_gmf_ppa.ppa_handle, &g_gmf_ppa.ppa_config);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "PPA conversion failed: %s", esp_err_to_name(ret));
     }
+    return ret;
 }
 
 void gmf_ppa_deinit() {
@@ -403,22 +296,6 @@ void gmf_ppa_deinit() {
     if (g_gmf_ppa.ppa_handle) {
         ppa_unregister_client(g_gmf_ppa.ppa_handle);
         g_gmf_ppa.ppa_handle = nullptr;
-    }
-
-    if (g_gmf_ppa.use_dma2d) {
-        dma2d_info_t *dma2d = &g_gmf_ppa.dma2d_info;
-        if (dma2d->handle) {
-            dma2d_release_pool(dma2d->handle);
-        }
-        if (dma2d->tx_desc) {
-            heap_caps_free(dma2d->tx_desc);
-        }
-        if (dma2d->rx_desc) {
-            heap_caps_free(dma2d->rx_desc);
-        }
-        if (dma2d->sema) {
-            vSemaphoreDelete(dma2d->sema);
-        }
     }
 
     memset(&g_gmf_ppa, 0, sizeof(g_gmf_ppa));
