@@ -2507,11 +2507,11 @@ void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb
 
   // Use SIMD accelerated conversion (esp_image_effects)
   // This is the ONLY hardware-accelerated method that correctly handles I420
-  static YuvRgbConverterSIMD simd_converter(
-    h >= 720 ? YuvRgbConverterSIMD::Colorspace::BT709 : YuvRgbConverterSIMD::Colorspace::BT601
-  );
+  //static YuvRgbConverterSIMD simd_converter(
+    //h >= 720 ? YuvRgbConverterSIMD::Colorspace::BT709 : YuvRgbConverterSIMD::Colorspace::BT601
+  //);
 
-  simd_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
+  //simd_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
 }
 
 // ==============================================
