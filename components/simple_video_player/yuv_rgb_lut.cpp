@@ -5,38 +5,45 @@
 
 static const char *TAG = "YUV_LUT";
 
-// Lookup tables pour conversion YUV→RGB (optimisé pour vitesse)
-// Basé sur : https://github.com/yangfuyuan/yuv2rgb
-static int32_t tables[768];
+// Optimized lookup tables for YUV→RGB conversion (BT.601 standard)
+// R = Y + 1.402 * (V - 128)
+// G = Y - 0.344 * (U - 128) - 0.714 * (V - 128)
+// B = Y + 1.772 * (U - 128)
+static int16_t y_table[256];      // Y component (1.164 * (Y - 16))
+static int16_t u_b_table[256];    // U for blue (1.772 * (U - 128))
+static int16_t u_g_table[256];    // U for green (-0.344 * (U - 128))
+static int16_t v_r_table[256];    // V for red (1.402 * (V - 128))
+static int16_t v_g_table[256];    // V for green (-0.714 * (V - 128))
 static bool tables_initialized = false;
 
-// Initialisation des lookup tables (une seule fois au démarrage)
+// Initialize lookup tables (called once at startup)
 void init_yuv_lut_tables() {
   if (tables_initialized) return;
 
-  // Table Y (0-255)
+  // BT.601 coefficients (scaled by 256 for integer math)
   for (int i = 0; i < 256; i++) {
     int y = i - 16;
-    tables[i] = (y < 0) ? 0 : ((y * 76284) >> 16);  // 1.164
-  }
-
-  // Table U (256-511)
-  for (int i = 0; i < 256; i++) {
     int u = i - 128;
-    tables[256 + i] = (u * 132252) >> 16;  // 2.017
-  }
-
-  // Table V (512-767)
-  for (int i = 0; i < 256; i++) {
     int v = i - 128;
-    tables[512 + i] = (v * 104595) >> 16;  // 1.596
+
+    // Y table: 1.164 * (Y - 16)
+    y_table[i] = (y * 298) >> 8;  // 1.164 * 256 = 298
+
+    // U tables
+    u_b_table[i] = (u * 454) >> 8;  // 1.772 * 256 = 454
+    u_g_table[i] = (u * -88) >> 8;  // -0.344 * 256 = -88
+
+    // V tables
+    v_r_table[i] = (v * 359) >> 8;  // 1.402 * 256 = 359
+    v_g_table[i] = (v * -183) >> 8; // -0.714 * 256 = -183
   }
 
   tables_initialized = true;
-  ESP_LOGI(TAG, "✓ YUV→RGB lookup tables initialized (3 × 256 entries = 3 KB)");
+  ESP_LOGI(TAG, "✓ YUV→RGB lookup tables initialized (BT.601, 5 × 256 entries = 2.5 KB)");
 }
 
-// Conversion I420 → RGB565 avec lookup tables
+// Optimized I420 → RGB565 conversion using 2×2 block processing
+// Performance target: <15ms for 480×272 (vs previous 24ms)
 void yuv420_to_rgb565_lut(const uint8_t *yuv, uint8_t *rgb, int width, int height) {
   if (!tables_initialized) {
     ESP_LOGE(TAG, "Tables not initialized! Call init_yuv_lut_tables() first");
@@ -49,34 +56,71 @@ void yuv420_to_rgb565_lut(const uint8_t *yuv, uint8_t *rgb, int width, int heigh
 
   uint16_t *rgb565 = (uint16_t *)rgb;
 
-  for (int row = 0; row < height; row++) {
-    for (int col = 0; col < width; col++) {
-      int y_idx = row * width + col;
-      int uv_idx = (row / 2) * (width / 2) + (col / 2);
+  // Process 2×2 blocks (since U/V are subsampled 2×2 in YUV420)
+  // This eliminates division operations and improves cache locality
+  int uv_width = width >> 1;  // width / 2
 
-      int y = y_plane[y_idx];
-      int u = u_plane[uv_idx];
-      int v = v_plane[uv_idx];
+  for (int row = 0; row < height; row += 2) {
+    const uint8_t *y_row0 = y_plane + row * width;
+    const uint8_t *y_row1 = y_row0 + width;
+    uint16_t *rgb_row0 = rgb565 + row * width;
+    uint16_t *rgb_row1 = rgb_row0 + width;
 
-      // Lookup table conversion
-      int y_val = tables[y];
-      int u_val = tables[256 + u];
-      int v_val = tables[512 + v];
+    const uint8_t *uv_row = u_plane + (row >> 1) * uv_width;
+    const uint8_t *vv_row = v_plane + (row >> 1) * uv_width;
 
-      // RGB calculation (integer only)
-      int r = y_val + v_val;
-      int g = y_val - ((u_val + v_val) >> 1);
-      int b = y_val + u_val;
+    for (int col = 0; col < width; col += 2) {
+      // Load one U/V pair for this 2×2 block
+      int uv_idx = col >> 1;
+      uint8_t u = uv_row[uv_idx];
+      uint8_t v = vv_row[uv_idx];
 
-      // Clamp to 0-255
-      r = (r < 0) ? 0 : ((r > 255) ? 255 : r);
-      g = (g < 0) ? 0 : ((g > 255) ? 255 : g);
-      b = (b < 0) ? 0 : ((b > 255) ? 255 : b);
+      // Pre-fetch lookup values (shared by 4 pixels)
+      int16_t u_b = u_b_table[u];
+      int16_t u_g = u_g_table[u];
+      int16_t v_r = v_r_table[v];
+      int16_t v_g = v_g_table[v];
 
-      // Pack to RGB565 : RRRRRGGG GGGBBBBB
-      uint16_t rgb565_pixel = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+      // Process 2×2 block (4 Y pixels, same U/V)
+      // Pixel [0,0]
+      int y0 = y_table[y_row0[col]];
+      int r0 = y0 + v_r;
+      int g0 = y0 + u_g + v_g;
+      int b0 = y0 + u_b;
+      r0 = (r0 < 0) ? 0 : ((r0 > 255) ? 255 : r0);
+      g0 = (g0 < 0) ? 0 : ((g0 > 255) ? 255 : g0);
+      b0 = (b0 < 0) ? 0 : ((b0 > 255) ? 255 : b0);
+      rgb_row0[col] = ((r0 & 0xF8) << 8) | ((g0 & 0xFC) << 3) | (b0 >> 3);
 
-      rgb565[y_idx] = rgb565_pixel;
+      // Pixel [0,1]
+      int y1 = y_table[y_row0[col + 1]];
+      int r1 = y1 + v_r;
+      int g1 = y1 + u_g + v_g;
+      int b1 = y1 + u_b;
+      r1 = (r1 < 0) ? 0 : ((r1 > 255) ? 255 : r1);
+      g1 = (g1 < 0) ? 0 : ((g1 > 255) ? 255 : g1);
+      b1 = (b1 < 0) ? 0 : ((b1 > 255) ? 255 : b1);
+      rgb_row0[col + 1] = ((r1 & 0xF8) << 8) | ((g1 & 0xFC) << 3) | (b1 >> 3);
+
+      // Pixel [1,0]
+      int y2 = y_table[y_row1[col]];
+      int r2 = y2 + v_r;
+      int g2 = y2 + u_g + v_g;
+      int b2 = y2 + u_b;
+      r2 = (r2 < 0) ? 0 : ((r2 > 255) ? 255 : r2);
+      g2 = (g2 < 0) ? 0 : ((g2 > 255) ? 255 : g2);
+      b2 = (b2 < 0) ? 0 : ((b2 > 255) ? 255 : b2);
+      rgb_row1[col] = ((r2 & 0xF8) << 8) | ((g2 & 0xFC) << 3) | (b2 >> 3);
+
+      // Pixel [1,1]
+      int y3 = y_table[y_row1[col + 1]];
+      int r3 = y3 + v_r;
+      int g3 = y3 + u_g + v_g;
+      int b3 = y3 + u_b;
+      r3 = (r3 < 0) ? 0 : ((r3 > 255) ? 255 : r3);
+      g3 = (g3 < 0) ? 0 : ((g3 > 255) ? 255 : g3);
+      b3 = (b3 < 0) ? 0 : ((b3 > 255) ? 255 : b3);
+      rgb_row1[col + 1] = ((r3 & 0xF8) << 8) | ((g3 & 0xFC) << 3) | (b3 >> 3);
     }
   }
 }
