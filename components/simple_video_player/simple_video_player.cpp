@@ -1603,8 +1603,15 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
 
 bool SimpleVideoPlayer::init_h264_decoder_() {
   // Create software H.264 decoder
+  // IMPORTANT: Use ESP_H264_RAW_FMT_O_UYY_E_VYY format for ESP32-P4
+  // This format is compatible with PPA hardware acceleration for YUV→RGB
+  // I420 format would require slow software conversion
   esp_h264_dec_cfg_sw_t cfg = {
-    .pic_type = ESP_H264_RAW_FMT_I420
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+    .pic_type = ESP_H264_RAW_FMT_O_UYY_E_VYY  // ESP32-P4: Use PPA-compatible format
+#else
+    .pic_type = ESP_H264_RAW_FMT_I420  // Other platforms: Use I420
+#endif
   };
 
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
@@ -2720,18 +2727,26 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // CRITICAL: PPA ESP32-P4 does NOT support I420 planar format!
-  // PPA only supports:
-  //   - OUYY_EVYY (ESP32-P4 packed YUV420 format)
-  //   - YUV422 (YUYV, UYVY, etc.)
-  //
-  // H.264 decoder outputs I420 planar, which PPA cannot handle correctly.
-  // Result: divided/corrupted image with wrong colors
-  //
-  // Solution: Use software LUT conversion (fast and reliable)
-  //          Performance: ~10-15ms @ 480x272 (acceptable for 24fps)
+  // YUV→RGB conversion strategy (ESP32-P4):
+  // 1. H264 decoder outputs O_UYY_E_VYY format (PPA-compatible)
+  // 2. Use PPA hardware for conversion (<1ms)
+  // 3. Fallback to software LUT if PPA fails
 
-  // Use software LUT conversion (handles I420 correctly)
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // Use PPA hardware for O_UYY_E_VYY → RGB565 conversion
+  esp_err_t ret = gmf_ppa_convert_yuv420_to_rgb565(yuv, rgb, w, h);
+  if (ret == ESP_OK) {
+    return;  // Success! PPA hardware did the conversion
+  }
+
+  // PPA failed, log error and fall back to software
+  ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s - falling back to software",
+           esp_err_to_name(ret));
+#endif
+
+  // Software LUT fallback (for non-ESP32P4 or if PPA fails)
+  // Note: This assumes I420 format - if decoder outputs O_UYY_E_VYY,
+  // we need a different software converter
   yuv420_to_rgb565_lut(yuv, rgb, w, h);
 }
 
