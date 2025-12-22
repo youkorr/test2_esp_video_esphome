@@ -2720,23 +2720,18 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // YUV→RGB conversion strategy:
-  // 1. Try GMF PPA hardware (ESP32-P4) - <1ms
-  // 2. Fallback to software LUT - ~10-15ms @ 480x272
+  // CRITICAL: PPA ESP32-P4 does NOT support I420 planar format!
+  // PPA only supports:
+  //   - OUYY_EVYY (ESP32-P4 packed YUV420 format)
+  //   - YUV422 (YUYV, UYVY, etc.)
+  //
+  // H.264 decoder outputs I420 planar, which PPA cannot handle correctly.
+  // Result: divided/corrupted image with wrong colors
+  //
+  // Solution: Use software LUT conversion (fast and reliable)
+  //          Performance: ~10-15ms @ 480x272 (acceptable for 24fps)
 
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-  // Try PPA hardware conversion first
-  esp_err_t ret = gmf_ppa_convert_yuv420_to_rgb565(yuv, rgb, w, h);
-  if (ret == ESP_OK) {
-    return;  // Success! PPA hardware did the conversion
-  }
-
-  // PPA failed, log warning and fall back to software
-  ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s (0x%x) - falling back to software",
-           esp_err_to_name(ret), ret);
-#endif
-
-  // Software LUT fallback (works everywhere, ~10-15ms @ 480x272)
+  // Use software LUT conversion (handles I420 correctly)
   yuv420_to_rgb565_lut(yuv, rgb, w, h);
 }
 
