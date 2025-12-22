@@ -100,6 +100,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
+  void set_double_buffer(bool enable) { use_double_buffer_ = enable; }
 
   void setup() override;
   void loop() override;
@@ -297,9 +298,12 @@ class SimpleVideoPlayer : public Component {
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
   uint8_t *input_buffer_{nullptr};
-  uint8_t *rgb_buffer_{nullptr};
+  uint8_t *rgb_buffer_{nullptr};          // Front buffer (for display)
+  uint8_t *rgb_buffer_back_{nullptr};     // Back buffer (for decoding) - double buffering
   size_t input_size_{0};
   size_t rgb_buffer_size_{0};
+  bool use_double_buffer_{true};          // Enable double buffering for smoother playback
+  uint8_t current_write_buffer_{0};       // 0 = write to rgb_buffer_, 1 = write to rgb_buffer_back_
 
   lv_img_dsc_t frame_img_dsc_{};
 
