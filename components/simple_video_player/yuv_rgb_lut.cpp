@@ -5,22 +5,23 @@
 
 static const char *TAG = "YUV_LUT";
 
-// Optimized lookup tables for YUV→RGB conversion (BT.601 standard)
-// R = Y + 1.402 * (V - 128)
-// G = Y - 0.344 * (U - 128) - 0.714 * (V - 128)
-// B = Y + 1.772 * (U - 128)
+// Optimized lookup tables for YUV→RGB conversion (BT.601 limited range)
+// R = 1.164(Y - 16) + 1.596(V - 128)
+// G = 1.164(Y - 16) - 0.391(U - 128) - 0.813(V - 128)
+// B = 1.164(Y - 16) + 2.018(U - 128)
 static int16_t y_table[256];      // Y component (1.164 * (Y - 16))
-static int16_t u_b_table[256];    // U for blue (1.772 * (U - 128))
-static int16_t u_g_table[256];    // U for green (-0.344 * (U - 128))
-static int16_t v_r_table[256];    // V for red (1.402 * (V - 128))
-static int16_t v_g_table[256];    // V for green (-0.714 * (V - 128))
+static int16_t u_b_table[256];    // U for blue (2.018 * (U - 128))
+static int16_t u_g_table[256];    // U for green (-0.391 * (U - 128))
+static int16_t v_r_table[256];    // V for red (1.596 * (V - 128))
+static int16_t v_g_table[256];    // V for green (-0.813 * (V - 128))
 static bool tables_initialized = false;
 
 // Initialize lookup tables (called once at startup)
 void init_yuv_lut_tables() {
   if (tables_initialized) return;
 
-  // BT.601 coefficients (scaled by 256 for integer math)
+  // BT.601 limited range coefficients (scaled by 256 for integer math)
+  // Y range: 16-235, UV range: 16-240
   for (int i = 0; i < 256; i++) {
     int y = i - 16;
     int u = i - 128;
@@ -29,17 +30,17 @@ void init_yuv_lut_tables() {
     // Y table: 1.164 * (Y - 16)
     y_table[i] = (y * 298) >> 8;  // 1.164 * 256 = 298
 
-    // U tables
-    u_b_table[i] = (u * 454) >> 8;  // 1.772 * 256 = 454
-    u_g_table[i] = (u * -88) >> 8;  // -0.344 * 256 = -88
+    // U tables (Cb component)
+    u_b_table[i] = (u * 517) >> 8;  // 2.018 * 256 = 517
+    u_g_table[i] = (u * -100) >> 8; // -0.391 * 256 = -100
 
-    // V tables
-    v_r_table[i] = (v * 359) >> 8;  // 1.402 * 256 = 359
-    v_g_table[i] = (v * -183) >> 8; // -0.714 * 256 = -183
+    // V tables (Cr component)
+    v_r_table[i] = (v * 409) >> 8;  // 1.596 * 256 = 409
+    v_g_table[i] = (v * -208) >> 8; // -0.813 * 256 = -208
   }
 
   tables_initialized = true;
-  ESP_LOGI(TAG, "✓ YUV→RGB lookup tables initialized (BT.601, 5 × 256 entries = 2.5 KB)");
+  ESP_LOGI(TAG, "✓ YUV→RGB lookup tables initialized (BT.601 limited range, 5 × 256 entries)");
 }
 
 // Optimized I420 → RGB565 conversion using 2×2 block processing
@@ -47,6 +48,17 @@ void init_yuv_lut_tables() {
 void yuv420_to_rgb565_lut(const uint8_t *yuv, uint8_t *rgb, int width, int height) {
   if (!tables_initialized) {
     ESP_LOGE(TAG, "Tables not initialized! Call init_yuv_lut_tables() first");
+    return;
+  }
+
+  // YUV420 requires even dimensions (due to 2×2 subsampling)
+  if ((width & 1) || (height & 1)) {
+    ESP_LOGE(TAG, "Invalid dimensions %dx%d - YUV420 requires even width and height", width, height);
+    return;
+  }
+
+  if (yuv == nullptr || rgb == nullptr) {
+    ESP_LOGE(TAG, "Null pointer: yuv=%p rgb=%p", yuv, rgb);
     return;
   }
 
