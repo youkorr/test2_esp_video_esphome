@@ -303,7 +303,7 @@ class SimpleVideoPlayer : public Component {
   uint8_t *rgb_buffer_third_{nullptr};    // Buffer 2 - triple buffering (mandatory)
   size_t input_size_{0};
   size_t rgb_buffer_size_{0};
-  bool use_triple_buffer_{true};          // Triple buffering enabled (mandatory for MJPEG/MP4)
+  bool use_triple_buffer_{false};         // TEMPORARY: Disabled to test memory issue (was true)
   uint8_t current_write_buffer_{0};       // 0/1/2 = write to rgb_buffer_/rgb_buffer_back_/rgb_buffer_third_
 
   lv_img_dsc_t frame_img_dsc_{};

@@ -46,11 +46,16 @@ static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 }
 
 void SimpleVideoPlayer::setup() {
-  ESP_LOGI(TAG, "Setting up Simple Video Player...");
+  ESP_LOGI(TAG, "=== SimpleVideoPlayer::setup() START ===");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
+  ESP_LOGI(TAG, "  Free heap: %u bytes, Free PSRAM: %u bytes",
+           heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
   // Initialize YUV→RGB lookup tables (software fallback)
+  ESP_LOGI(TAG, "Initializing YUV→RGB lookup tables...");
   init_yuv_lut_tables();
+  ESP_LOGI(TAG, "✓ YUV→RGB tables initialized");
 
   // Allocate input buffer with cache alignment for optimal SPIRAM performance
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_, VIDEO_BUFFER_CAPS);
