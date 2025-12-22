@@ -1550,16 +1550,26 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
 }
 
 bool SimpleVideoPlayer::parse_mp4_() {
-  if (this->file_ == nullptr) return false;
+  if (this->file_ == nullptr) {
+    ESP_LOGE(TAG, "parse_mp4_: file is nullptr!");
+    return false;
+  }
 
+  ESP_LOGI(TAG, "Parsing MP4 file...");
   this->cached_fseek_(0, SEEK_SET);
 
+  bool found_moov = false;
   while (!this->cached_feof_()) {
     uint32_t size, type;
     if (!this->read_mp4_box_(size, type)) break;
 
     if (type == make_fourcc('m', 'o', 'o', 'v')) {
-      if (!this->parse_moov_(size - 8)) return false;
+      ESP_LOGI(TAG, "Found 'moov' box, parsing...");
+      if (!this->parse_moov_(size - 8)) {
+        ESP_LOGE(TAG, "Failed to parse 'moov' box");
+        return false;
+      }
+      found_moov = true;
     } else {
       // Skip other boxes
       if (size > 8) {
@@ -1568,7 +1578,20 @@ bool SimpleVideoPlayer::parse_mp4_() {
     }
   }
 
-  return !this->video_samples_.empty();
+  if (!found_moov) {
+    ESP_LOGE(TAG, "MP4 parsing failed: 'moov' box not found!");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "MP4 parsing complete: %u video samples, %u audio samples",
+           this->video_samples_.size(), this->audio_samples_.size());
+
+  if (this->video_samples_.empty()) {
+    ESP_LOGE(TAG, "MP4 parsing failed: no video samples found!");
+    return false;
+  }
+
+  return true;
 }
 
 bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
@@ -3419,6 +3442,16 @@ void SimpleVideoPlayer::play() {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       this->cached_fseek_(0, SEEK_SET);
     } else if (this->format_ == MediaFormat::MP4_H264) {
+      ESP_LOGI(TAG, "Starting MP4 playback: %u video samples, H264 decoder ready: %s",
+               this->video_samples_.size(), this->h264_decoder_ready_ ? "YES" : "NO");
+      if (this->video_samples_.empty()) {
+        ESP_LOGE(TAG, "Cannot play MP4: no video samples! MP4 parsing may have failed.");
+        return;
+      }
+      if (!this->h264_decoder_ready_) {
+        ESP_LOGE(TAG, "Cannot play MP4: H264 decoder not ready!");
+        return;
+      }
       this->current_video_sample_ = 0;
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
@@ -3731,7 +3764,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
                                    (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
           ESP_LOGI(TAG, "⏱️ %s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
-                   codec_name, player->width_, player->height_,
+                   codec_name, player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
           ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
@@ -3773,11 +3806,13 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "⏱️ Frame timing (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "⏱️ Frame timing (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #endif
