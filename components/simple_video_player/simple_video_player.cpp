@@ -898,13 +898,12 @@ bool SimpleVideoPlayer::open_video_file_() {
 
     // OPTIMIZATION: Allocate large file read buffer in PSRAM for faster sequential reading
     // This significantly improves SD card read performance for video playback
-    // Buffer size matches typical MJPEG frame size for optimal single-read performance
-    // 1MB buffer ensures single read for 800x600 JPEG frames (~950KB)
+    // 512KB buffer balances performance and stability (2 reads for 950KB frames)
     if (this->file_read_buffer_ == nullptr) {
       this->file_read_buffer_ = (uint8_t *)heap_caps_malloc(this->file_read_buffer_size_,
                                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
       if (this->file_read_buffer_ == nullptr) {
-        ESP_LOGW(TAG, "Failed to allocate 1MB read buffer in PSRAM, using default buffering");
+        ESP_LOGW(TAG, "Failed to allocate read buffer in PSRAM, using default buffering");
       } else {
         setvbuf(this->file_, (char *)this->file_read_buffer_, _IOFBF, this->file_read_buffer_size_);
         ESP_LOGI(TAG, "✓ Allocated %zu KB read buffer in PSRAM", this->file_read_buffer_size_ / 1024);

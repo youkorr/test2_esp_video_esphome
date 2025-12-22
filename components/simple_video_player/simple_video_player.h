@@ -299,7 +299,7 @@ class SimpleVideoPlayer : public Component {
 
   // FILE read buffer (dynamically allocated in PSRAM for large buffer sizes)
   uint8_t *file_read_buffer_{nullptr};   // Dynamic buffer for fread operations
-  size_t file_read_buffer_size_{1024 * 1024};  // 1MB default
+  size_t file_read_buffer_size_{512 * 1024};  // 512KB (stable, 2 reads for 950KB frames)
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};          // Front buffer (for display)
