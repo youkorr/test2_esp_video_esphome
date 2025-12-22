@@ -896,9 +896,10 @@ bool SimpleVideoPlayer::open_video_file_() {
       return false;
     }
 
-    // OPTIMIZATION: Configure larger file buffer (16KB) for faster sequential reading
+    // OPTIMIZATION: Configure larger file buffer for faster sequential reading
     // This significantly improves SD card read performance for video playback
-    static uint8_t file_buffer[16384];
+    // Buffer size matches typical MJPEG frame size for optimal single-read performance
+    static uint8_t file_buffer[256 * 1024];  // 256KB buffer (matches SD allocation unit)
     setvbuf(this->file_, (char *)file_buffer, _IOFBF, sizeof(file_buffer));
 
     // Get file size
