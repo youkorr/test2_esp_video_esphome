@@ -49,6 +49,9 @@ void SimpleVideoPlayer::setup() {
   ESP_LOGI(TAG, "Setting up Simple Video Player...");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
 
+  // Initialize YUV→RGB lookup tables (software fallback)
+  init_yuv_lut_tables();
+
   // Allocate input buffer with cache alignment for optimal SPIRAM performance
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_, VIDEO_BUFFER_CAPS);
   if (this->input_buffer_ == nullptr) {
@@ -2717,24 +2720,24 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // CRITICAL: PPA ESP32-P4 does NOT support I420 planar for YUV→RGB!
-  // PPA only supports:
-  //   - OUYY_EVYY (ESP32-P4 packed YUV420 format)
-  //   - YUV422 (YUYV, UYVY, etc.)
-  //
-  // H.264 decoder outputs I420 planar, which PPA cannot handle correctly.
-  // Result: divided/corrupted image with PPA
-  //
-  // Solution: Use esp_imgfx SIMD which handles I420 correctly
-  //          Performance: ~7-10ms @ 480x272 (acceptable)
+  // YUV→RGB conversion strategy:
+  // 1. Try GMF PPA hardware (ESP32-P4) - <1ms
+  // 2. Fallback to software LUT - ~10-15ms @ 480x272
 
-  // Use SIMD accelerated conversion (esp_image_effects)
-  // This is the ONLY hardware-accelerated method that correctly handles I420
-  //static YuvRgbConverterSIMD simd_converter(
-    //h >= 720 ? YuvRgbConverterSIMD::Colorspace::BT709 : YuvRgbConverterSIMD::Colorspace::BT601
-  //);
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  // Try PPA hardware conversion first
+  esp_err_t ret = gmf_ppa_convert_yuv420_to_rgb565(yuv, rgb, w, h);
+  if (ret == ESP_OK) {
+    return;  // Success! PPA hardware did the conversion
+  }
 
-  //simd_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
+  // PPA failed, log warning and fall back to software
+  ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s (0x%x) - falling back to software",
+           esp_err_to_name(ret), ret);
+#endif
+
+  // Software LUT fallback (works everywhere, ~10-15ms @ 480x272)
+  yuv420_to_rgb565_lut(yuv, rgb, w, h);
 }
 
 // ==============================================
