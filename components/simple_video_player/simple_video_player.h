@@ -100,7 +100,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
-  void set_double_buffer(bool enable) { use_double_buffer_ = enable; }
+  // Triple buffering is now mandatory for smooth playback (removed setter)
 
   void setup() override;
   void loop() override;
@@ -298,12 +298,13 @@ class SimpleVideoPlayer : public Component {
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
   uint8_t *input_buffer_{nullptr};
-  uint8_t *rgb_buffer_{nullptr};          // Front buffer (for display)
-  uint8_t *rgb_buffer_back_{nullptr};     // Back buffer (for decoding) - double buffering
+  uint8_t *rgb_buffer_{nullptr};          // Buffer 0 - triple buffering
+  uint8_t *rgb_buffer_back_{nullptr};     // Buffer 1 - triple buffering
+  uint8_t *rgb_buffer_third_{nullptr};    // Buffer 2 - triple buffering (mandatory)
   size_t input_size_{0};
   size_t rgb_buffer_size_{0};
-  bool use_double_buffer_{true};          // Enable double buffering for smoother playback
-  uint8_t current_write_buffer_{0};       // 0 = write to rgb_buffer_, 1 = write to rgb_buffer_back_
+  bool use_triple_buffer_{true};          // Triple buffering enabled (mandatory for MJPEG/MP4)
+  uint8_t current_write_buffer_{0};       // 0/1/2 = write to rgb_buffer_/rgb_buffer_back_/rgb_buffer_third_
 
   lv_img_dsc_t frame_img_dsc_{};
 
