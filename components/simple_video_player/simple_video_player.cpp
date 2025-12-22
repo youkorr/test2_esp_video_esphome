@@ -896,21 +896,10 @@ bool SimpleVideoPlayer::open_video_file_() {
       return false;
     }
 
-    // OPTIMIZATION: Allocate large file read buffer in PSRAM for faster sequential reading
-    // This significantly improves SD card read performance for video playback
-    // 512KB buffer balances performance and stability (2 reads for 950KB frames)
-    if (this->file_read_buffer_ == nullptr) {
-      this->file_read_buffer_ = (uint8_t *)heap_caps_malloc(this->file_read_buffer_size_,
-                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-      if (this->file_read_buffer_ == nullptr) {
-        ESP_LOGW(TAG, "Failed to allocate read buffer in PSRAM, using default buffering");
-      } else {
-        setvbuf(this->file_, (char *)this->file_read_buffer_, _IOFBF, this->file_read_buffer_size_);
-        ESP_LOGI(TAG, "✓ Allocated %zu KB read buffer in PSRAM", this->file_read_buffer_size_ / 1024);
-      }
-    } else {
-      setvbuf(this->file_, (char *)this->file_read_buffer_, _IOFBF, this->file_read_buffer_size_);
-    }
+    // Use system default buffering (typically 4KB in internal RAM)
+    // This is faster than large PSRAM buffers due to lower access latency
+    // For best performance, use preload_to_memory: true to load entire file to PSRAM
+    ESP_LOGI(TAG, "Using system default file buffering (internal RAM)");
 
     // Get file size
     this->cached_fseek_(0, SEEK_END);
@@ -3576,14 +3565,6 @@ void SimpleVideoPlayer::stop() {
   }
 
   this->rgb_buffer_size_ = 0;
-
-  // Free file read buffer
-  if (this->file_read_buffer_ != nullptr) {
-    total_freed += this->file_read_buffer_size_;
-    heap_caps_free(this->file_read_buffer_);
-    this->file_read_buffer_ = nullptr;
-    ESP_LOGD(TAG, "  Freed file_read_buffer_: %zu bytes", this->file_read_buffer_size_);
-  }
 
   // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
   if (!this->yuv_buffer_.empty()) {
