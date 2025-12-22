@@ -297,6 +297,10 @@ class SimpleVideoPlayer : public Component {
   bool use_file_cache_{false};           // Enable PSRAM caching (for small files <32MB)
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
+  // FILE read buffer (dynamically allocated in PSRAM for large buffer sizes)
+  uint8_t *file_read_buffer_{nullptr};   // Dynamic buffer for fread operations
+  size_t file_read_buffer_size_{1024 * 1024};  // 1MB default
+
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};          // Front buffer (for display)
   uint8_t *rgb_buffer_back_{nullptr};     // Back buffer (for decoding) - double buffering
