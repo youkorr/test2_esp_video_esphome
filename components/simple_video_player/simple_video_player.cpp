@@ -3464,7 +3464,10 @@ void SimpleVideoPlayer::create_controls_() {
 }
 
 void SimpleVideoPlayer::play() {
+  ESP_LOGI(TAG, "🎬 play() called - current state: %d", (int)this->state_);
+
   if (this->state_ == PlayerState::PLAYING) {
+    ESP_LOGI(TAG, "Already playing, ignoring play() call");
     return;
   }
 
