@@ -334,36 +334,11 @@ void ESPVideoComponent::setup() {
     close(fd);
   }
 
-  // Tenter de lire l'ID du capteur directement via I2C pour vérifier que XCLK fonctionne
-  // ESP_LOGW(TAG, "🔍 Test direct I2C du capteur SC202CS (addr 0x36):");
-  uint8_t sensor_id_high = 0, sensor_id_low = 0;
-
-  // SC202CS: Chip ID register high byte at 0x3107, low byte at 0x3108
-  // Expected ID: 0xEB52 (SC202CS_PID from sc202cs.c)
-  esp_err_t err_h = i2c_read_register(i2c_handle, 0x36, 0x3107, &sensor_id_high);
-  esp_err_t err_l = i2c_read_register(i2c_handle, 0x36, 0x3108, &sensor_id_low);
-
-  if (err_h == ESP_OK && err_l == ESP_OK) {
-    uint16_t chip_id = (sensor_id_high << 8) | sensor_id_low;
-    ESP_LOGW(TAG, "   ✅ I2C lecture réussie: Chip ID = 0x%04X (attendu: 0xEB52 pour SC202CS)", chip_id);
-    if (chip_id == 0xEB52) {
-      ESP_LOGW(TAG, "      ✅ SC202CS identifié correctement - XCLK fonctionne!");
-    } else if (chip_id == 0x0000 || chip_id == 0xFFFF) {
-      ESP_LOGW(TAG, "      ❌ ID invalide - XCLK probablement inactif ou capteur déconnecté");
-    } else {
-      ESP_LOGW(TAG, "      ⚠️  ID inattendu (0x%04X) - possible autre capteur", chip_id);
-      // Liste des IDs connus:
-      // 0xEB52 = SC202CS
-      // 0x5647 = OV5647
-      // 0x0C10 = OV02C10
-    }
-  } else {
-    ESP_LOGW(TAG, "   ❌ I2C lecture échouée (err_h=%d, err_l=%d)", err_h, err_l);
-    ESP_LOGW(TAG, "      Causes possibles:");
-    ESP_LOGW(TAG, "      1. XCLK non initialisé/inactif");
-    ESP_LOGW(TAG, "      2. Mauvaise adresse I2C");
-    ESP_LOGW(TAG, "      3. Capteur pas alimenté/connecté");
-  }
+  // NOTE: Sensor detection is already done by esp_video_init() above.
+  // The automatic detection loop correctly identifies SC202CS, OV5647, OV02C10, etc.
+  // Manual I2C chip ID verification is not needed and was causing confusing log messages
+  // for users with different sensors (was always checking SC202CS registers).
+  // If you need to debug sensor detection, enable verbose logging in esp_video_init.c
 
   // Vérifier si l'ISP pipeline est initialisé
 #ifdef ESP_VIDEO_ISP_ENABLED
