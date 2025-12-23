@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUVRGB
+#include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
@@ -256,7 +257,7 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
-  static void timer_cb_(lv_timer_t *timer);
+  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback for precise framerate
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
 
@@ -396,7 +397,7 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *loading_spinner_{nullptr};
   lv_obj_t *controls_container_{nullptr};
   lv_obj_t *touch_layer_{nullptr};
-  lv_timer_t *playback_timer_{nullptr};
+  esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
 
   uint32_t last_frame_time_{0};

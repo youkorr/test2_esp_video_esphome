@@ -363,9 +363,23 @@ void SimpleVideoPlayer::setup() {
   // Create UI
   this->create_ui_();
 
-  // Create playback timer
-  this->playback_timer_ = lv_timer_create(timer_cb_, this->frame_interval_, this);
-  lv_timer_pause(this->playback_timer_);
+  // Create ESP32 native timer for precise framerate control
+  // This replaces the broken LVGL timer that ignores configured intervals
+  esp_timer_create_args_t timer_args = {
+    .callback = &SimpleVideoPlayer::esp_timer_cb_,
+    .arg = this,
+    .dispatch_method = ESP_TIMER_TASK,
+    .name = "video_playback",
+    .skip_unhandled_events = false
+  };
+
+  esp_err_t err = esp_timer_create(&timer_args, &this->playback_timer_);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create ESP timer: %s", esp_err_to_name(err));
+  } else {
+    ESP_LOGI(TAG, "ESP32 native timer created for %u ms intervals (%.1f FPS)",
+             this->frame_interval_, 1000.0f / this->frame_interval_);
+  }
 
   if (this->auto_play_) {
     this->play();
@@ -640,9 +654,23 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   // Create UI
   this->create_ui_();
 
-  // Create playback timer
-  this->playback_timer_ = lv_timer_create(timer_cb_, this->frame_interval_, this);
-  lv_timer_pause(this->playback_timer_);
+  // Create ESP32 native timer for precise framerate control
+  // This replaces the broken LVGL timer that ignores configured intervals
+  esp_timer_create_args_t timer_args = {
+    .callback = &SimpleVideoPlayer::esp_timer_cb_,
+    .arg = this,
+    .dispatch_method = ESP_TIMER_TASK,
+    .name = "video_playback",
+    .skip_unhandled_events = false
+  };
+
+  esp_err_t err = esp_timer_create(&timer_args, &this->playback_timer_);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to create ESP timer: %s", esp_err_to_name(err));
+  } else {
+    ESP_LOGI(TAG, "ESP32 native timer created for %u ms intervals (%.1f FPS)",
+             this->frame_interval_, 1000.0f / this->frame_interval_);
+  }
 
   if (this->auto_play_) {
     this->play();
@@ -717,28 +745,8 @@ void SimpleVideoPlayer::loop() {
     }
   }
 
-  // WORKAROUND: ESPHome LVGL timer callbacks are not firing at the configured interval
-  // Manually check if enough time has elapsed and call timer callback directly
-  if (this->state_ == PlayerState::PLAYING && this->playback_timer_ != nullptr) {
-    uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
-    uint32_t elapsed = current_time - this->last_frame_time_;
-
-    // If enough time has passed, manually trigger the timer callback
-    // Use fixed timestep to maintain consistent framerate (add frame_interval instead of current_time)
-    if (elapsed >= this->frame_interval_) {
-      this->last_frame_time_ += this->frame_interval_;  // Fixed timestep for consistent timing
-      timer_cb_(this->playback_timer_);
-
-      // If we're falling behind (next frame is already due), catch up but limit to 2 frames
-      // This prevents spiral of death while recovering from temporary delays
-      if ((esp_timer_get_time() / 1000 - this->last_frame_time_) >= this->frame_interval_) {
-        this->last_frame_time_ += this->frame_interval_;
-        timer_cb_(this->playback_timer_);
-      }
-    }
-  }
-
-  // Main processing is done in LVGL timer callback (or manually above if LVGL timer fails)
+  // Frame processing is now handled by ESP32 native timer (esp_timer_cb_)
+  // No manual workaround needed - timer fires precisely at configured intervals
 }
 
 void SimpleVideoPlayer::dump_config() {
@@ -3669,12 +3677,11 @@ void SimpleVideoPlayer::play() {
     this->frame_count_ = 0;
   }
 
-  // Initialize manual timing for loop() workaround
-  this->last_frame_time_ = esp_timer_get_time() / 1000;
-
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
-    lv_timer_resume(this->playback_timer_);
+    // Start ESP32 native timer with precise interval
+    uint64_t interval_us = (uint64_t)this->frame_interval_ * 1000;  // Convert ms to microseconds
+    esp_timer_start_periodic(this->playback_timer_, interval_us);
   }
 
   // Show loading spinner when starting playback (it will be hidden on first successful frame)
@@ -3698,7 +3705,7 @@ void SimpleVideoPlayer::pause() {
 
   this->state_ = PlayerState::PAUSED;
   if (this->playback_timer_ != nullptr) {
-    lv_timer_pause(this->playback_timer_);
+    esp_timer_stop(this->playback_timer_);
   }
 
   // Show controls when paused
@@ -3717,7 +3724,8 @@ void SimpleVideoPlayer::resume() {
 
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
-    lv_timer_resume(this->playback_timer_);
+    uint64_t interval_us = (uint64_t)this->frame_interval_ * 1000;
+    esp_timer_start_periodic(this->playback_timer_, interval_us);
   }
 
   // Start auto-hide timer
@@ -3732,7 +3740,7 @@ void SimpleVideoPlayer::resume() {
 void SimpleVideoPlayer::stop() {
   this->state_ = PlayerState::STOPPED;
   if (this->playback_timer_ != nullptr) {
-    lv_timer_pause(this->playback_timer_);
+    esp_timer_stop(this->playback_timer_);
   }
 
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
@@ -3899,8 +3907,9 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
   }
 }
 
-void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
-  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+// ESP32 native timer callback for precise framerate control
+void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
 
   if (player->state_ != PlayerState::PLAYING) {
     return;
@@ -3926,10 +3935,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
                actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
 
       // Warn if actual interval is significantly higher than configured
+      // With ESP32 native timer, this should rarely happen (only if system is heavily loaded)
       if (avg_interval > player->frame_interval_ * 1.5f) {
-        ESP_LOGW(TAG, "LVGL timer callback delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
+        ESP_LOGW(TAG, "Timer callback delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
                  player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
-        ESP_LOGW(TAG, "Possible causes: ESPHome LVGL update_interval too high, or LVGL handler not called frequently enough");
+        ESP_LOGW(TAG, "System may be overloaded (ESP32 native timer should be precise)");
       }
     }
 
