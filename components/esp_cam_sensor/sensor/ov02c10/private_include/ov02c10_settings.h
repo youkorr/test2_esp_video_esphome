@@ -116,18 +116,20 @@
      {0x37e4, 0x08},
      {0x37e5, 0x02},
      {0x37e6, 0x08},
-     {0x3800, 0x01},
-     {0x3801, 0x40},
-     {0x3802, 0x00},
-     {0x3803, 0xb4},
-     {0x3804, 0x06},
-     {0x3805, 0x4f},
-     {0x3806, 0x03},
-     {0x3807, 0x8F},
-     {0x3808, 0x05},
-     {0x3809, 0x08},
-     {0x380a, 0x02},
-     {0x380b, 0xd8},
+     // Crop window: 16:9 aspect ratio (320-1615 x 180-911 = 1296x732)
+     {0x3800, 0x01},  // X start high
+     {0x3801, 0x40},  // X start low = 320
+     {0x3802, 0x00},  // Y start high
+     {0x3803, 0xb4},  // Y start low = 180
+     {0x3804, 0x06},  // X end high
+     {0x3805, 0x4f},  // X end low = 1615
+     {0x3806, 0x03},  // Y end high
+     {0x3807, 0x8F},  // Y end low = 911
+     // Output size: 1288x728 (16:9 aspect ratio preserved, minimal ISP downscaling)
+     {0x3808, 0x05},  // width high
+     {0x3809, 0x08},  // width low = 1288
+     {0x380a, 0x02},  // height high
+     {0x380b, 0xd8},  // height low = 728
      {0x380c, 0x08},
      {0x380d, 0xe8},
      {0x380e, 0x04},
@@ -824,16 +826,16 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE (320-1615 x 180-911)
+    // Crop window: 4:3 aspect ratio (480-1455 x 180-911 = 976x732)
     {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    {0x3801, 0xe0},  // X start low = 480
     {0x3802, 0x00},  // Y start high
     {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
+    {0x3804, 0x05},  // X end high
+    {0x3805, 0xaf},  // X end low = 1455
     {0x3806, 0x03},  // Y end high
     {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 640x480 (ISP downscales from 1296x732)
+    // Output size: 640x480 (ISP downscales from 976x732, 4:3 aspect ratio preserved)
     {0x3808, 0x02},  // width high
     {0x3809, 0x80},  // width low = 640
     {0x380a, 0x01},  // height high
@@ -1061,16 +1063,16 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE (320-1615 x 180-911)
+    // Crop window: 4:3 aspect ratio (480-1455 x 180-911 = 976x732)
     {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    {0x3801, 0xe0},  // X start low = 480
     {0x3802, 0x00},  // Y start high
     {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
+    {0x3804, 0x05},  // X end high
+    {0x3805, 0xaf},  // X end low = 1455
     {0x3806, 0x03},  // Y end high
     {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 800x600 (ISP downscales from 1296x732)
+    // Output size: 800x600 (ISP downscales from 976x732, 4:3 aspect ratio preserved)
     {0x3808, 0x03},  // width high
     {0x3809, 0x20},  // width low = 800
     {0x380a, 0x02},  // height high
@@ -1299,17 +1301,17 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE and 640×480 (320-1615 x 180-911)
-    // Using proven crop window to avoid duplication issues
-    {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    // Crop window: 3:4 portrait aspect ratio (602-1333 x 58-1033 = 732x976)
+    // Centered crop window matching portrait aspect ratio to eliminate distortion
+    {0x3800, 0x02},  // X start high
+    {0x3801, 0x5a},  // X start low = 602
     {0x3802, 0x00},  // Y start high
-    {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
-    {0x3806, 0x03},  // Y end high
-    {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 480x640 (portrait, NO rotation - let LVGL handle it)
+    {0x3803, 0x3a},  // Y start low = 58
+    {0x3804, 0x05},  // X end high
+    {0x3805, 0x35},  // X end low = 1333
+    {0x3806, 0x04},  // Y end high
+    {0x3807, 0x09},  // Y end low = 1033
+    // Output size: 480x640 (ISP downscales from 732x976, 3:4 aspect ratio preserved)
     {0x3808, 0x01},  // width high
     {0x3809, 0xe0},  // width low = 480
     {0x380a, 0x02},  // height high
