@@ -116,15 +116,16 @@ void SimpleVideoPlayer::setup() {
       this->actual_height_ = this->height_;
     }
 
-    // Auto-detect framerate from AVI header (if present and not overridden by user)
-    if (!this->fps_override_) {
-      if (!this->detect_avi_framerate_()) {
+    // Always parse AVI header to detect format and find movi offset
+    // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
+    if (!this->detect_avi_framerate_()) {
+      if (!this->fps_override_) {
         ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
         // Keep default frame_interval_ = 20ms (50fps)
+      } else {
+        ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
+                 1000.0f / this->frame_interval_);
       }
-    } else {
-      ESP_LOGI(TAG, "Using user-configured framerate: %.2f fps (interval: %lu ms)",
-               1000.0f / this->frame_interval_, (unsigned long)this->frame_interval_);
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
@@ -392,15 +393,16 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       this->actual_height_ = this->height_;
     }
 
-    // Auto-detect framerate from AVI header (if present and not overridden by user)
-    if (!this->fps_override_) {
-      if (!this->detect_avi_framerate_()) {
+    // Always parse AVI header to detect format and find movi offset
+    // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
+    if (!this->detect_avi_framerate_()) {
+      if (!this->fps_override_) {
         ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
         // Keep default frame_interval_ = 20ms (50fps)
+      } else {
+        ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
+                 1000.0f / this->frame_interval_);
       }
-    } else {
-      ESP_LOGI(TAG, "Using user-configured framerate: %.2f fps (interval: %lu ms)",
-               1000.0f / this->frame_interval_, (unsigned long)this->frame_interval_);
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
@@ -1285,10 +1287,17 @@ bool SimpleVideoPlayer::parse_avi_header_() {
   if (us_per_frame > 0 && us_per_frame < 1000000) {  // Sanity check (1-1000 fps)
     // Calculate framerate and frame interval
     float fps = 1000000.0f / us_per_frame;
-    this->frame_interval_ = us_per_frame / 1000;  // Convert microseconds to milliseconds
 
-    ESP_LOGI(TAG, "AVI: framerate=%.2f fps, total_frames=%u",
-             fps, this->avi_total_frames_);
+    // Only update frame_interval_ if user hasn't overridden FPS
+    // (we still parse AVI to get movi_offset and is_avi_format)
+    if (!this->fps_override_) {
+      this->frame_interval_ = us_per_frame / 1000;  // Convert microseconds to milliseconds
+      ESP_LOGI(TAG, "AVI: framerate=%.2f fps (auto-detected), total_frames=%u",
+               fps, this->avi_total_frames_);
+    } else {
+      ESP_LOGI(TAG, "AVI: framerate=%.2f fps (detected but ignored - using user config %.2f fps), total_frames=%u",
+               fps, 1000.0f / this->frame_interval_, this->avi_total_frames_);
+    }
   }
 
   // Now find the movi list offset
