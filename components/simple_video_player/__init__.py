@@ -102,10 +102,10 @@ async def to_code(config):
     esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
     if os.path.exists(esp_h264_dir):
         # Enable dual-core H.264 decoding on ESP32-P4
-        # These are initial flags; full configuration is done in simple_video_player_build.py
+        # Priority 17 matches library default for optimal performance
         cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
         cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
-        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5")
+        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=17")
         cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
 
         # Add H.264 include paths for decoder headers
