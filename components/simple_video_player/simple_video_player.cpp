@@ -2096,7 +2096,15 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
     uint32_t entry_size = this->read_be32_();
     uint32_t format = this->read_be32_();
 
+    char fourcc[5] = {0};
+    fourcc[0] = (format >> 24) & 0xFF;
+    fourcc[1] = (format >> 16) & 0xFF;
+    fourcc[2] = (format >> 8) & 0xFF;
+    fourcc[3] = format & 0xFF;
+    ESP_LOGI(TAG, "stsd entry: format='%s', size=%u", fourcc, entry_size);
+
     if (format == make_fourcc('a', 'v', 'c', '1')) {
+      ESP_LOGI(TAG, "Found AVC1 codec, parsing...");
       this->parse_avc1_(entry_size - 8);
       found_video_codec = true;
     } else if (format == make_fourcc('m', 'p', '4', 'a')) {
@@ -2175,6 +2183,7 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
 }
 
 bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
+  ESP_LOGI(TAG, "Parsing avcC box (size=%u bytes)...", size);
   this->cached_fseek_(4, SEEK_CUR);  // configurationVersion, profile, compatibility, level
 
   uint8_t len_size_minus_one;
@@ -2490,6 +2499,21 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Convert AVCC to Annex-B format
   std::vector<uint8_t> annexb_data;
+
+  // Debug: Check SPS/PPS status
+  static bool debug_logged = false;
+  if (!debug_logged) {
+    ESP_LOGW(TAG, "H.264 Decode Debug:");
+    ESP_LOGW(TAG, "  SPS size: %d bytes", this->sps_.size());
+    ESP_LOGW(TAG, "  PPS size: %d bytes", this->pps_.size());
+    ESP_LOGW(TAG, "  NAL length size: %d", this->nal_length_size_);
+    ESP_LOGW(TAG, "  sps_pps_sent: %s", this->sps_pps_sent_ ? "YES" : "NO");
+    if (this->sps_.empty() || this->pps_.empty()) {
+      ESP_LOGE(TAG, "  ERROR: SPS/PPS not parsed from MP4! Decoder will fail!");
+      ESP_LOGE(TAG, "  This means the avcC box was not found or not parsed correctly");
+    }
+    debug_logged = true;
+  }
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
