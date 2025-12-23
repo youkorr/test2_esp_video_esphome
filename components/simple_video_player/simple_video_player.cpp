@@ -6,6 +6,7 @@
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"     // For watchdog reset during PSRAM loading
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
 #include "yuv_rgb_lut.h"      // Lookup table YUVRGB conversion (test alternative)
@@ -1021,6 +1022,9 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
   ESP_LOGI(TAG, "Loading file to PSRAM cache: %ld bytes (%.2f MB)...",
            this->file_size_, this->file_size_ / (1024.0f * 1024.0f));
 
+  // Reset watchdog before starting long PSRAM load
+  esp_task_wdt_reset();
+
   uint32_t start_time = esp_timer_get_time() / 1000;
 
   // Allocate PSRAM buffer with cache alignment for optimal access
@@ -1055,11 +1059,15 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
 
     bytes_loaded += read;
 
-    // Progress every 1MB
+    // Progress every 1MB (and reset watchdog to prevent timeout during long loads)
     if (bytes_loaded % (1024 * 1024) == 0) {
       ESP_LOGI(TAG, "   Loading... %.1f MB / %.1f MB",
                bytes_loaded / (1024.0f * 1024.0f),
                this->file_size_ / (1024.0f * 1024.0f));
+
+      // Reset watchdog timer to prevent timeout on large files
+      // PSRAM loading can take 5-10 seconds for large videos
+      esp_task_wdt_reset();
     }
   }
 
@@ -1075,6 +1083,9 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
 
   // Reset file position for cached reading
   this->cached_fseek_(0, SEEK_SET);
+
+  // Final watchdog reset after completing long load
+  esp_task_wdt_reset();
 
   return true;
 }
