@@ -724,9 +724,17 @@ void SimpleVideoPlayer::loop() {
     uint32_t elapsed = current_time - this->last_frame_time_;
 
     // If enough time has passed, manually trigger the timer callback
+    // Use fixed timestep to maintain consistent framerate (add frame_interval instead of current_time)
     if (elapsed >= this->frame_interval_) {
-      this->last_frame_time_ = current_time;
+      this->last_frame_time_ += this->frame_interval_;  // Fixed timestep for consistent timing
       timer_cb_(this->playback_timer_);
+
+      // If we're falling behind (next frame is already due), catch up but limit to 2 frames
+      // This prevents spiral of death while recovering from temporary delays
+      if ((esp_timer_get_time() / 1000 - this->last_frame_time_) >= this->frame_interval_) {
+        this->last_frame_time_ += this->frame_interval_;
+        timer_cb_(this->playback_timer_);
+      }
     }
   }
 
