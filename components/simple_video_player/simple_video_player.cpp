@@ -2535,30 +2535,30 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
   uint32_t h264_only_time = (esp_timer_get_time() / 1000) - h264_only_start;
 
   if (err != ESP_H264_ERR_OK) {
-    ESP_LOGW(TAG, "H.264 decode error: %d", err);
+    ESP_LOGD(TAG, "H.264 decode error: %d (occasional errors are normal and handled)", err);
     return false;
   }
 
   if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
-    // CRITICAL DEBUG: Check YUV buffer size vs expected
+    // Debug: Check YUV buffer size vs expected (only logged in verbose debug mode)
     static bool debug_logged = false;
     if (!debug_logged) {
-      ESP_LOGW(TAG, "🔍 YUV Buffer Debug:");
-      ESP_LOGW(TAG, "   actual: %dx%d, aligned: %dx%d",
+      ESP_LOGD(TAG, "YUV Buffer Debug:");
+      ESP_LOGD(TAG, "   actual: %dx%d, aligned: %dx%d",
                this->actual_width_, this->actual_height_,
                this->aligned_width_, this->aligned_height_);
-      ESP_LOGW(TAG, "   YUV size: %d bytes", out_frame.out_size);
-      ESP_LOGW(TAG, "   Expected for actual: %d bytes", this->actual_width_ * this->actual_height_ * 3 / 2);
-      ESP_LOGW(TAG, "   Expected for aligned: %d bytes", this->aligned_width_ * this->aligned_height_ * 3 / 2);
+      ESP_LOGD(TAG, "   YUV size: %d bytes", out_frame.out_size);
+      ESP_LOGD(TAG, "   Expected for actual: %d bytes", this->actual_width_ * this->actual_height_ * 3 / 2);
+      ESP_LOGD(TAG, "   Expected for aligned: %d bytes", this->aligned_width_ * this->aligned_height_ * 3 / 2);
 
       // Dump first 32 bytes to check YUV format
-      ESP_LOGW(TAG, "   First 32 bytes (Y plane start):");
-      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf, 32, ESP_LOG_WARN);
+      ESP_LOGD(TAG, "   First 32 bytes (Y plane start):");
+      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf, 32, ESP_LOG_DEBUG);
 
       // Check U plane start (should be after Y plane for I420)
       int u_offset = this->actual_width_ * this->actual_height_;
-      ESP_LOGW(TAG, "   U plane start (offset %d):", u_offset);
-      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf + u_offset, 32, ESP_LOG_WARN);
+      ESP_LOGD(TAG, "   U plane start (offset %d):", u_offset);
+      ESP_LOG_BUFFER_HEX_LEVEL(TAG, out_frame.outbuf + u_offset, 32, ESP_LOG_DEBUG);
 
       debug_logged = true;
     }
@@ -3291,24 +3291,24 @@ void SimpleVideoPlayer::update_display_() {
     display_buffer = (this->current_write_buffer_ == 0) ? this->rgb_buffer_ : this->rgb_buffer_back_;
   }
 
-  // Diagnostic: Log stride information once
+  // Diagnostic: Log stride information once (only in debug mode)
   static bool stride_logged = false;
   if (!stride_logged) {
-    ESP_LOGW(TAG, "🔍 LVGL Canvas stride diagnostic:");
-    ESP_LOGW(TAG, "   Canvas dimensions: %dx%d", this->actual_width_, this->actual_height_);
-    ESP_LOGW(TAG, "   Buffer total size: %zu bytes", this->rgb_buffer_size_);
-    ESP_LOGW(TAG, "   Expected size (actual): %d bytes (%dx%dx2)",
+    ESP_LOGD(TAG, "LVGL Canvas stride diagnostic:");
+    ESP_LOGD(TAG, "   Canvas dimensions: %dx%d", this->actual_width_, this->actual_height_);
+    ESP_LOGD(TAG, "   Buffer total size: %zu bytes", this->rgb_buffer_size_);
+    ESP_LOGD(TAG, "   Expected size (actual): %d bytes (%dx%dx2)",
              this->actual_width_ * this->actual_height_ * 2,
              this->actual_width_, this->actual_height_);
-    ESP_LOGW(TAG, "   Expected size (aligned): %d bytes (%dx%dx2)",
+    ESP_LOGD(TAG, "   Expected size (aligned): %d bytes (%dx%dx2)",
              this->aligned_width_ * this->aligned_height_ * 2,
              this->aligned_width_, this->aligned_height_);
-    ESP_LOGW(TAG, "   Bytes per line (actual): %d", this->actual_width_ * 2);
-    ESP_LOGW(TAG, "   Bytes per line (aligned): %d", this->aligned_width_ * 2);
+    ESP_LOGD(TAG, "   Bytes per line (actual): %d", this->actual_width_ * 2);
+    ESP_LOGD(TAG, "   Bytes per line (aligned): %d", this->aligned_width_ * 2);
     if (this->use_triple_buffer_ && this->rgb_buffer_third_ != nullptr) {
-      ESP_LOGW(TAG, "   🎬 Triple buffering enabled (3 buffers)");
+      ESP_LOGD(TAG, "   Triple buffering enabled (3 buffers)");
     } else if (this->rgb_buffer_back_ != nullptr) {
-      ESP_LOGW(TAG, "   ✓ Double buffering enabled (2 buffers)");
+      ESP_LOGD(TAG, "   Double buffering enabled (2 buffers)");
     }
     stride_logged = true;
   }
