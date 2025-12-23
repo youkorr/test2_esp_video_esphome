@@ -1045,7 +1045,7 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         // Le sensor retourne parfois des valeurs énormes (63x) qui causent saturation/bruit
         // Limiter à 16x pour meilleur rapport signal/bruit
         if (isp->sensor.max_gain > 16.0f) {
-            ESP_LOGW(TAG, "⚠️  Limiting max_gain from %0.4f to 16.0 (SC202CS optimal)", isp->sensor.max_gain);
+            ESP_LOGW(TAG, " Limiting max_gain from %0.4f to 16.0 (SC202CS optimal)", isp->sensor.max_gain);
             isp->sensor.max_gain = 16.0f;
         }
     } else {
@@ -1304,7 +1304,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
                       fail_0, TAG, "failed to create IPA pipeline");
 
     // Print loaded IPA algorithms for verification
-    ESP_LOGI(TAG, "📸 IPA Pipeline created - verifying loaded algorithms:");
+    ESP_LOGI(TAG, "IPA Pipeline created - verifying loaded algorithms:");
     esp_ipa_pipeline_print(isp->ipa_pipeline);
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
@@ -1313,7 +1313,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     metadata.flags = 0;
     ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
                       fail_3, TAG, "failed to initialize IPA pipeline");
-    ESP_LOGI(TAG, "✅ IPA Pipeline initialized successfully");
+    ESP_LOGI(TAG, "IPA Pipeline initialized successfully");
     config_isp_and_camera(isp, &metadata);
 
     /**

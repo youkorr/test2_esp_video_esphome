@@ -159,13 +159,7 @@ async def to_code(config):
     cg.add_build_flag("-DUSE_ESP32_VARIANT_ESP32P4")
     cg.add_build_flag("-DCONFIG_CAMERA_CORE0=1")
 
-    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
-    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
-    cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
-
-    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
-    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
-    cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
+    # Dual-task H.264 flags are defined in esp_h264/__init__.py to avoid redefinition warnings
 
     # Build flags spécifiques au sensor OV5647
     if config[CONF_SENSOR_TYPE].lower() == "ov5647":

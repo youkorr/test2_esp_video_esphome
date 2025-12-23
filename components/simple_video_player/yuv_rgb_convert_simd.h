@@ -18,12 +18,12 @@ namespace esphome {
 namespace simple_video_player {
 
 /**
- * SIMD-accelerated YUV→RGB converter using esp_image_effects
+ * SIMD-accelerated YUVRGB converter using esp_image_effects
  *
  * Performance comparison:
  * - Naive conversion: ~50-100ms (480x272)
  * - Optimized software (BT.709): ~10-15ms (480x272)
- * - SIMD (esp_image_effects): ~3-5ms (480x272) ⭐ 3-5x faster!
+ * - SIMD (esp_image_effects): ~3-5ms (480x272) 3-5x faster!
  *
  * Fallback to optimized software if esp_image_effects not available.
  */

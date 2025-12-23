@@ -33,9 +33,10 @@ async def to_code(config):
 
     # Enable dual-core H.264 decoding on ESP32-P4 for 30-50% performance boost
     # These flags must be defined here (early) for esp_h264_dec_sw.c compilation
+    # Priority 17 matches library default for optimal performance
     cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
     cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
-    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5")
+    cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=17")
 
     # NOTE: Les sources sont compilées par esp_video_build.py (script PlatformIO)
     # Ne pas utiliser cg.add_library() ici pour éviter la double compilation

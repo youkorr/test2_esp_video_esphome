@@ -66,9 +66,9 @@ if os.path.exists(gmf_core_dir):
         for src in gmf_core_sources:
             env.StaticObject(src)
     else:
-        print("[ESP-GMF] ⚠️  No gmf_core sources found")
+        print("[ESP-GMF]  No gmf_core sources found")
 else:
-    print("[ESP-GMF] ⚠️  gmf_core directory not found")
+    print("[ESP-GMF]  gmf_core directory not found")
 
 # ========================================================================
 # GMF Video - Video processing elements
@@ -101,14 +101,14 @@ if os.path.exists(gmf_video_dir):
 
         if os.path.exists(ppa_src):
             env.StaticObject(ppa_src)
-            print(f"[ESP-GMF]   ✓ esp_gmf_video_ppa.c")
+            print(f"[ESP-GMF]   esp_gmf_video_ppa.c")
 
         if os.path.exists(common_src):
             env.StaticObject(common_src)
-            print(f"[ESP-GMF]   ✓ gmf_video_common.c")
+            print(f"[ESP-GMF]   gmf_video_common.c")
     else:
-        print("[ESP-GMF] ⚠️  No gmf_video sources found")
+        print("[ESP-GMF]  No gmf_video sources found")
 else:
-    print("[ESP-GMF] ⚠️  gmf_video directory not found")
+    print("[ESP-GMF]  gmf_video directory not found")
 
 print("[ESP-GMF] Build script completed")

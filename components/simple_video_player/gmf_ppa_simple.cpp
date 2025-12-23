@@ -1,13 +1,13 @@
 /**
- * Simplified GMF PPA implementation for YUV420→RGB565 conversion
+ * Simplified GMF PPA implementation for YUV420RGB565 conversion
  * Based on esp-gmf/elements/gmf_video/esp_gmf_video_ppa.c
  *
  * Supports:
- * - PPA hardware acceleration (YUV420→RGB565 with BT.601/BT.709)
+ * - PPA hardware acceleration (YUV420RGB565 with BT.601/BT.709)
  * - Software LUT fallback (if PPA unavailable)
  *
- * NOTE: 2D-DMA CSC only supports RGB↔RGB conversions (RGB888↔RGB565).
- *       For YUV→RGB, PPA is the only hardware option.
+ * NOTE: 2D-DMA CSC only supports RGBRGB conversions (RGB888RGB565).
+ *       For YUVRGB, PPA is the only hardware option.
  *
  * Author: Simplified from Espressif GMF code
  * License: LicenseRef-Espressif-Modified-MIT
@@ -164,28 +164,28 @@ static void dma2d_link_dscr_init(dma2d_descriptor_t *dma2d, uint32_t *next, void
 }
 
 // ============================================================================
-// 2D-DMA initialization for YUV420→RGB565
+// 2D-DMA initialization for YUV420RGB565
 // ============================================================================
 
 static esp_err_t init_dma2d_yuv420_to_rgb565(uint16_t width, uint16_t height) {
-    // NOTE: 2D-DMA CSC in ESP-IDF only supports RGB↔RGB conversions:
-    //   - RGB888 ↔ RGB565 (DMA2D_CSC_TX_RGB888_TO_RGB565 / DMA2D_CSC_TX_RGB565_TO_RGB888)
+    // NOTE: 2D-DMA CSC in ESP-IDF only supports RGBRGB conversions:
+    //   - RGB888 RGB565 (DMA2D_CSC_TX_RGB888_TO_RGB565 / DMA2D_CSC_TX_RGB565_TO_RGB888)
     //
-    // For YUV420→RGB565 conversion, we MUST use PPA hardware instead.
+    // For YUV420RGB565 conversion, we MUST use PPA hardware instead.
     // The PPA supports:
-    //   - YUV420/YUV422/YUV444 → RGB565/RGB888
+    //   - YUV420/YUV422/YUV444 RGB565/RGB888
     //   - Color space standards (BT.601, BT.709)
     //   - Color range (limited/full)
     //
     // See components/esp-gmf/element/gmf_video/esp_gmf_video_ppa.c lines 409-418
-    // for reference - GMF only uses 2D-DMA for RGB↔RGB conversions.
+    // for reference - GMF only uses 2D-DMA for RGBRGB conversions.
 
-    ESP_LOGW(TAG, "2D-DMA does not support YUV→RGB conversion");
+    ESP_LOGW(TAG, "2D-DMA does not support YUVRGB conversion");
     return ESP_ERR_NOT_SUPPORTED;
 }
 
 // ============================================================================
-// PPA initialization for YUV420→RGB565 (fallback)
+// PPA initialization for YUV420RGB565 (fallback)
 // ============================================================================
 
 static esp_err_t init_ppa_yuv420_to_rgb565(uint16_t width, uint16_t height) {
@@ -199,7 +199,7 @@ static esp_err_t init_ppa_yuv420_to_rgb565(uint16_t width, uint16_t height) {
         return ret;
     }
 
-    // Configure PPA for YUV420→RGB565
+    // Configure PPA for YUV420RGB565
     memset(&g_gmf_ppa.ppa_config, 0, sizeof(g_gmf_ppa.ppa_config));
 
     // Input (YUV420)
@@ -230,7 +230,7 @@ static esp_err_t init_ppa_yuv420_to_rgb565(uint16_t width, uint16_t height) {
     g_gmf_ppa.ppa_config.byte_swap = false;
     g_gmf_ppa.ppa_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-    ESP_LOGI(TAG, "✓ PPA initialized for YUV420→RGB565 (%dx%d)", width, height);
+    ESP_LOGI(TAG, "PPA initialized for YUV420RGB565 (%dx%d)", width, height);
     return ESP_OK;
 }
 
@@ -252,10 +252,10 @@ esp_err_t gmf_ppa_init() {
 
     ESP_LOGI(TAG, "Initializing GMF PPA hardware...");
 
-    // Use PPA hardware for YUV420→RGB565 conversion
-    // NOTE: 2D-DMA CSC only supports RGB↔RGB, not YUV→RGB
+    // Use PPA hardware for YUV420RGB565 conversion
+    // NOTE: 2D-DMA CSC only supports RGBRGB, not YUVRGB
     g_gmf_ppa.use_dma2d = false;
-    ESP_LOGI(TAG, "✓ GMF PPA ready (PPA hardware for YUV→RGB, software fallback available)");
+    ESP_LOGI(TAG, "GMF PPA ready (PPA hardware for YUVRGB, software fallback available)");
 
     g_gmf_ppa.initialized = true;
 
@@ -289,7 +289,7 @@ esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_o
         g_gmf_ppa.height = height;
     }
 
-    // Perform PPA conversion (YUV420→RGB565)
+    // Perform PPA conversion (YUV420RGB565)
     g_gmf_ppa.ppa_config.in.buffer = (void*)yuv_in;
     g_gmf_ppa.ppa_config.out.buffer = (void*)rgb_out;
     g_gmf_ppa.ppa_config.out.buffer_size = width * height * 2;  // RGB565

@@ -4,7 +4,7 @@
  * Simplified GMF PPA implementation for simple_video_player
  * Based on esp-gmf/elements/gmf_video/esp_gmf_video_ppa.c
  *
- * Supports YUV420 → RGB565 conversion using:
+ * Supports YUV420 RGB565 conversion using:
  * 1. 2D-DMA (best performance, if supported)
  * 2. PPA (fallback, if 2D-DMA not available)
  */

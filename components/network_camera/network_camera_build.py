@@ -41,10 +41,10 @@ if os.path.exists(esp_h264_dir):
             openh264_lib,
             "-Wl,--no-whole-archive"
         ])
-        print(f"[Network Camera] ✓ Linked openh264 (Baseline/Main/High profiles, --whole-archive, --allow-multiple-definition)")
+        print(f"[Network Camera] Linked openh264 (Baseline/Main/High profiles, --whole-archive, --allow-multiple-definition)")
     else:
-        print(f"[Network Camera] ⚠️  openh264 not found at {openh264_lib}")
+        print(f"[Network Camera]  openh264 not found at {openh264_lib}")
 else:
-    print(f"[Network Camera] ⚠️  esp_h264 component not found")
+    print(f"[Network Camera]  esp_h264 component not found")
 
 print("[Network Camera] Build script completed")
