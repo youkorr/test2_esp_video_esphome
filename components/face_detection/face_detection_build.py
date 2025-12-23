@@ -260,8 +260,7 @@ if os.path.exists(esp_dl_dir):
     # Files to exclude (conditionally based on model type)
     esp_dl_exclude = [
         "dl_base_dotprod.cpp",       # Use custom implementation
-        "dl_image_jpeg.cpp",         # JPEG not used
-        "dl_image_bmp.cpp",          # BMP not used
+        # DO NOT exclude dl_image_jpeg.cpp or dl_image_bmp.cpp - may contain needed symbols
     ]
 
     # Exclude ONLY YOLO/pose-specific files if not needed
@@ -380,12 +379,11 @@ if sources_to_add:
             objects
         )
 
-        # Add library with proper linking flags for circular dependencies
-        env.Append(LINKFLAGS=["-Wl,--start-group"])
-        env.Prepend(LIBS=[lib])
-        env.Append(LINKFLAGS=["-Wl,--end-group"])
+        # Force link ALL objects to resolve ESP-DL template/inline function references
+        # Strategy: Link objects directly instead of via static library to avoid symbol resolution issues
+        # Static library is still created for organization but we use objects for linking
 
-        # Also add objects directly to ensure they're linked
+        # Also add objects directly to ensure they're available
         env.Append(PIOBUILDFILES=objects)
 
         print(f"[Face Detection] {len(sources_to_add)} source files compiled")
