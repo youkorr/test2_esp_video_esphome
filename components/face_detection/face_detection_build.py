@@ -260,7 +260,8 @@ if os.path.exists(esp_dl_dir):
     # Files to exclude (conditionally based on model type)
     esp_dl_exclude = [
         "dl_base_dotprod.cpp",       # Use custom implementation
-        # DO NOT exclude dl_image_jpeg.cpp or dl_image_bmp.cpp - may contain needed symbols
+        "dl_image_jpeg.cpp",         # JPEG not used
+        "dl_image_bmp.cpp",          # BMP not used
     ]
 
     # Exclude ONLY YOLO/pose-specific files if not needed
@@ -303,13 +304,11 @@ if os.path.exists(esp_dl_dir):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
                         sources_count["vision"] += 1
-                        print(f"[Face Detection]   + vision: {os.path.relpath(src_file, esp_dl_dir)}")
             else:
                 for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
                         sources_count["core"] += 1
-                        print(f"[Face Detection]   + core: {os.path.relpath(src_file, esp_dl_dir)}")
 
     # Add ALL dl/base/*.cpp files (required for neural network operations)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
@@ -375,12 +374,22 @@ if sources_to_add:
             print(f"[Face Detection] Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # Force linkage by adding ALL object files to build files list
-        # SCons will compile them first, then link them automatically
+        # Create static library
+        lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libface_detection"),
+            objects
+        )
+
+        # Add library with proper linking flags for circular dependencies
+        env.Append(LINKFLAGS=["-Wl,--start-group"])
+        env.Prepend(LIBS=[lib])
+        env.Append(LINKFLAGS=["-Wl,--end-group"])
+
+        # Also add objects directly to ensure they're linked
         env.Append(PIOBUILDFILES=objects)
 
-        print(f"[Face Detection] {len(sources_to_add)} source files queued for compilation")
-        print(f"[Face Detection] {len(objects)} object files will be compiled and linked")
-        print(f"[Face Detection] All objects added to PIOBUILDFILES for automatic linking")
+        print(f"[Face Detection] {len(sources_to_add)} source files compiled")
+        print(f"[Face Detection] {len(objects)} object files created")
+        print("[Face Detection] libface_detection.a created and linked")
 
 print("[Face Detection] Build script completed")
