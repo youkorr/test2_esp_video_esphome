@@ -35,32 +35,8 @@ if os.path.exists(yuv_lut_src):
 # ========================================================================
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
-    # Configure H.264 decoder for dual-core ESP32-P4 processing
-    # Use core 1 for decoding (core 0 for main app)
-    # Priority 17 matches library default for optimal performance
-    env.Append(CPPDEFINES=[
-        ("CONFIG_ESP_H264_DUAL_TASK", "1"),           # Enable dual-task mode
-        ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),      # Use CPU core 1 for decode task
-        ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "17"), # Task priority (library default)
-        ("CONFIG_ESP_H264_DECODER_IRAM", "1"),        # Place decoder in IRAM for faster execution
-    ])
-
-    # Also add as compiler flags to ensure they reach GCC
-    env.Append(CCFLAGS=[
-        "-DCONFIG_ESP_H264_DUAL_TASK=1",
-        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
-        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=17",
-        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
-    ])
-    env.Append(CXXFLAGS=[
-        "-DCONFIG_ESP_H264_DUAL_TASK=1",
-        "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
-        "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=17",
-        "-DCONFIG_ESP_H264_DECODER_IRAM=1",
-    ])
-
-    print("[Simple Video Player] Enabled dual-core H.264 decoding (core 1, priority 17)")
-    print("[Simple Video Player] Enabled IRAM placement for decoder (faster execution)")
+    # Dual-task H.264 flags are defined in esp_h264/__init__.py to avoid redefinition warnings
+    print("[Simple Video Player] Using H.264 dual-task config from esp_h264 component")
 
     # ESP32-P4 specific optimizations for video decoding performance
     # Use -Os (optimize for size) instead of -O3 to reduce flash usage
@@ -108,29 +84,19 @@ if os.path.exists(esp_h264_dir):
         print("[Simple Video Player]  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
         wrapper_objects = []
         for src in h264_wrapper_sources:
-            # Convert deque to list, then add our DUAL_TASK flags
+            # Use existing environment defines (from esp_h264/__init__.py)
+            # No need to redefine flags here - they're inherited from global environment
             existing_defines = list(env.get('CPPDEFINES', []))
-            dual_task_defines = existing_defines + [
-                ("CONFIG_ESP_H264_DUAL_TASK", "1"),
-                ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
-                ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
-            ]
 
             # Use UNIQUE target name to force recompilation (avoid SCons cached version)
             src_basename = os.path.basename(src).replace('.c', '_dual_task.o')
             target_path = os.path.join(env['PROJECT_BUILD_DIR'], src_basename)
 
-            # CRITICAL: Pass flags as BOTH CPPDEFINES AND CCFLAGS to ensure they reach GCC
+            # Compile with inherited flags from global environment
             obj = env.Object(
                 target=target_path,
                 source=src,
-                CPPDEFINES=dual_task_defines + [("CONFIG_ESP_H264_DECODER_IRAM", "1")],
-                CCFLAGS=env.get('CCFLAGS', []) + [
-                    "-DCONFIG_ESP_H264_DUAL_TASK=1",
-                    "-DCONFIG_ESP_H264_DUAL_TASK_CORE=1",
-                    "-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5",
-                    "-DCONFIG_ESP_H264_DECODER_IRAM=1"
-                ]
+                CPPDEFINES=existing_defines
             )
 
             # Force SCons to ALWAYS rebuild this file (never use cache)

@@ -101,12 +101,7 @@ async def to_code(config):
     # Enable optimized H.264 decoder if esp_h264 component is available
     esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
     if os.path.exists(esp_h264_dir):
-        # Enable dual-core H.264 decoding on ESP32-P4
-        # Priority 17 matches library default for optimal performance
-        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK=1")
-        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_CORE=1")
-        cg.add_build_flag("-DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=17")
-        cg.add_build_flag("-DCONFIG_ESP_H264_DECODER_IRAM=1")
+        # Dual-task flags are defined in esp_h264/__init__.py to avoid redefinition warnings
 
         # Add H.264 include paths for decoder headers
         h264_inc_paths = [
