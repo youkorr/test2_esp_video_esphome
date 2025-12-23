@@ -882,7 +882,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Si RGB565 n'a aucune résolution, vérifier RAW8 (conversion ISP possible)
   if (!size_found) {
-    ESP_LOGW(TAG, "No sizes found for RGB565 - checking native RAW8 formats...");
+    ESP_LOGD(TAG, "No sizes found for RGB565 - checking native RAW8 formats...");
     for (int i = 0; i < 20; i++) {
       memset(&frmsize, 0, sizeof(frmsize));
       frmsize.index = i;
@@ -907,7 +907,7 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Si toujours pas trouvé, vérifier RAW10 (OV02C10 custom formats)
   if (!size_found) {
-    ESP_LOGW(TAG, "No sizes found for RAW8 - checking native RAW10 formats...");
+    ESP_LOGD(TAG, "No sizes found for RAW8 - checking native RAW10 formats...");
     for (int i = 0; i < 20; i++) {
       memset(&frmsize, 0, sizeof(frmsize));
       frmsize.index = i;
@@ -932,8 +932,8 @@ bool MipiDSICamComponent::start_streaming() {
 
 
   if (!size_found) {
-    ESP_LOGW(TAG, "Requested size %ux%u not found in supported list", width, height);
-    ESP_LOGW(TAG, "Trying to set anyway (driver may adjust)...");
+    ESP_LOGD(TAG, "Requested size %ux%u not found in supported list", width, height);
+    ESP_LOGD(TAG, "Trying to set anyway (driver may adjust)...");
   }
 
   struct v4l2_format fmt;

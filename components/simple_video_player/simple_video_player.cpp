@@ -3541,9 +3541,9 @@ void SimpleVideoPlayer::play() {
 
     // Re-initialize audio decoder if needed
 #if USE_ESP_AUDIO_CODEC
-    if (this->has_audio_ && !this->aac_decoder_ready_) {
+    if (this->has_audio_ && !this->aac_decoder_ready_ && this->speaker_ != nullptr) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to re-initialize AAC decoder");
+        ESP_LOGE(TAG, "Failed to re-initialize AAC decoder");
       }
     }
 #endif
