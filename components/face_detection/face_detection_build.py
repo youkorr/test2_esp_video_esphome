@@ -303,11 +303,13 @@ if os.path.exists(esp_dl_dir):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
                         sources_count["vision"] += 1
+                        print(f"[Face Detection]   + vision: {os.path.relpath(src_file, esp_dl_dir)}")
             else:
                 for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
                         sources_count["core"] += 1
+                        print(f"[Face Detection]   + core: {os.path.relpath(src_file, esp_dl_dir)}")
 
     # Add ALL dl/base/*.cpp files (required for neural network operations)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
@@ -373,21 +375,23 @@ if sources_to_add:
             print(f"[Face Detection] Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # Create static library
-        lib = env.StaticLibrary(
-            os.path.join("$BUILD_DIR", "libface_detection"),
-            objects
-        )
+        # CRITICAL: Force linkage of ALL ESP-DL objects by adding them directly to link command
+        # This resolves "undefined reference" errors for template and non-template functions
 
-        # Force link ALL objects to resolve ESP-DL template/inline function references
-        # Strategy: Link objects directly instead of via static library to avoid symbol resolution issues
-        # Static library is still created for organization but we use objects for linking
-
-        # Also add objects directly to ensure they're available
+        # Method 1: Add all object files directly to the program's source list
+        # This ensures they're linked even if not directly referenced
         env.Append(PIOBUILDFILES=objects)
 
+        # Method 2: For extra safety, also create object file list and pass to linker
+        # Convert SCons File nodes to paths
+        obj_paths = [str(obj.path) if hasattr(obj, 'path') else str(obj) for obj in objects]
+
+        # Add each object file path to LINKFLAGS to force inclusion
+        for obj_path in obj_paths:
+            env.Append(LINKFLAGS=[obj_path])
+
         print(f"[Face Detection] {len(sources_to_add)} source files compiled")
-        print(f"[Face Detection] {len(objects)} object files created")
-        print("[Face Detection] libface_detection.a created and linked")
+        print(f"[Face Detection] {len(objects)} object files created and forced into linkage")
+        print(f"[Face Detection] CRITICAL: All {len(obj_paths)} objects added to LINKFLAGS")
 
 print("[Face Detection] Build script completed")
