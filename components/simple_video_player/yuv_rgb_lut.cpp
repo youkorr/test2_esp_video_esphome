@@ -5,7 +5,7 @@
 
 static const char *TAG = "YUV_LUT";
 
-// Optimized lookup tables for YUV→RGB conversion (BT.601 limited range)
+// Optimized lookup tables for YUVRGB conversion (BT.601 limited range)
 // R = 1.164(Y - 16) + 1.596(V - 128)
 // G = 1.164(Y - 16) - 0.391(U - 128) - 0.813(V - 128)
 // B = 1.164(Y - 16) + 2.018(U - 128)
@@ -40,10 +40,10 @@ void init_yuv_lut_tables() {
   }
 
   tables_initialized = true;
-  ESP_LOGI(TAG, "✓ YUV→RGB lookup tables initialized (BT.601 limited range, 5 × 256 entries)");
+  ESP_LOGI(TAG, "YUVRGB lookup tables initialized (BT.601 limited range, 5 × 256 entries)");
 }
 
-// Optimized I420 → RGB565 conversion using 2×2 block processing
+// Optimized I420 RGB565 conversion using 2×2 block processing
 // Performance target: <15ms for 480×272 (vs previous 24ms)
 void yuv420_to_rgb565_lut(const uint8_t *yuv, uint8_t *rgb, int width, int height) {
   if (!tables_initialized) {

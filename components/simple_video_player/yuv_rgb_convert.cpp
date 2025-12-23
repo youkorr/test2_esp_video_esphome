@@ -26,15 +26,15 @@ void YuvRgbConverter::init_lut_bt601_() {
 
     u_r_lut_[i] = 0;                          // U doesn't affect R
     u_g_lut_[i] = (-100 * u_offset) >> 8;     // -0.391 ≈ -100/256
-    u_b_lut_[i] = (516 * u_offset) >> 8;      // 2.018 ≈ 516/256 ← FIX
+    u_b_lut_[i] = (516 * u_offset) >> 8;      // 2.018 ≈ 516/256 FIX
 
     v_r_lut_[i] = (409 * v_offset) >> 8;      // 1.596 ≈ 409/256
     v_g_lut_[i] = (-208 * v_offset) >> 8;     // -0.813 ≈ -208/256
-    v_b_lut_[i] = 0;                          // V doesn't affect B ← FIX
+    v_b_lut_[i] = 0;                          // V doesn't affect B FIX
   }
 
   lut_initialized_ = true;
-  ESP_LOGI(TAG, "YUV→RGB conversion initialized (BT.601 colorspace)");
+  ESP_LOGI(TAG, "YUVRGB conversion initialized (BT.601 colorspace)");
 }
 
 void YuvRgbConverter::init_lut_bt709_() {
@@ -51,15 +51,15 @@ void YuvRgbConverter::init_lut_bt709_() {
 
     u_r_lut_[i] = 0;                          // U doesn't affect R
     u_g_lut_[i] = (-55 * u_offset) >> 8;      // -0.213 ≈ -55/256
-    u_b_lut_[i] = (541 * u_offset) >> 8;      // 2.112 ≈ 541/256 ← FIX
+    u_b_lut_[i] = (541 * u_offset) >> 8;      // 2.112 ≈ 541/256 FIX
 
     v_r_lut_[i] = (459 * v_offset) >> 8;      // 1.793 ≈ 459/256
     v_g_lut_[i] = (-136 * v_offset) >> 8;     // -0.533 ≈ -136/256
-    v_b_lut_[i] = 0;                          // V doesn't affect B ← FIX
+    v_b_lut_[i] = 0;                          // V doesn't affect B FIX
   }
 
   lut_initialized_ = true;
-  ESP_LOGI(TAG, "YUV→RGB conversion initialized (BT.709 colorspace - HD standard)");
+  ESP_LOGI(TAG, "YUVRGB conversion initialized (BT.709 colorspace - HD standard)");
 }
 
 void IRAM_ATTR YuvRgbConverter::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rgb,
@@ -91,7 +91,7 @@ void IRAM_ATTR YuvRgbConverter::convert_i420_to_rgb565(const uint8_t *yuv, uint8
       // Compute RGB using lookup tables (much faster than multiplication)
       const int r = y_val + v_r_lut_[v];
       const int g = y_val + u_g_lut_[u] + v_g_lut_[v];
-      const int b = y_val + u_b_lut_[u];  // ← FIX: Use U for blue, not V!
+      const int b = y_val + u_b_lut_[u];  // FIX: Use U for blue, not V!
 
       // Pack to RGB565 with clamping
       rgb_row[x] = pack_rgb565(r, g, b);

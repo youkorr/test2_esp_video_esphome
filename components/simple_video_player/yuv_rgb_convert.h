@@ -42,10 +42,10 @@ private:
   int16_t y_lut_[256];      // Y coefficient
   int16_t u_r_lut_[256];    // U contribution to R (always 0)
   int16_t u_g_lut_[256];    // U contribution to G (negative)
-  int16_t u_b_lut_[256];    // U contribution to B (positive) ← FIX
+  int16_t u_b_lut_[256];    // U contribution to B (positive) FIX
   int16_t v_r_lut_[256];    // V contribution to R (positive)
   int16_t v_g_lut_[256];    // V contribution to G (negative)
-  int16_t v_b_lut_[256];    // V contribution to B (always 0) ← FIX
+  int16_t v_b_lut_[256];    // V contribution to B (always 0) FIX
 
   Colorspace colorspace_;
   bool lut_initialized_{false};

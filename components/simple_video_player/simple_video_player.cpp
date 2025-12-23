@@ -8,7 +8,7 @@
 #include "esp_timer.h"
 #include "esp_http_client.h"  // For HTTP/HTTPS video streaming
 #include <cstring>            // For strncmp
-#include "yuv_rgb_lut.h"      // Lookup table YUV→RGB conversion (test alternative)
+#include "yuv_rgb_lut.h"      // Lookup table YUVRGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
 #include "ppa_compat.h"       // PPA YUV420 compatibility for older ESP-IDF versions
 
@@ -52,10 +52,10 @@ void SimpleVideoPlayer::setup() {
            heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
            heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-  // Initialize YUV→RGB lookup tables (software fallback)
-  ESP_LOGI(TAG, "Initializing YUV→RGB lookup tables...");
+  // Initialize YUVRGB lookup tables (software fallback)
+  ESP_LOGI(TAG, "Initializing YUVRGB lookup tables...");
   init_yuv_lut_tables();
-  ESP_LOGI(TAG, "✓ YUV→RGB tables initialized");
+  ESP_LOGI(TAG, "YUVRGB tables initialized");
 
   // Allocate input buffer with cache alignment for optimal SPIRAM performance
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_, VIDEO_BUFFER_CAPS);
@@ -66,16 +66,16 @@ void SimpleVideoPlayer::setup() {
   }
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-  // Initialize GMF PPA for hardware-accelerated YUV→RGB conversion
-  // Supports: PPA hardware (YUV420→RGB565), software LUT (fallback)
+  // Initialize GMF PPA for hardware-accelerated YUVRGB conversion
+  // Supports: PPA hardware (YUV420RGB565), software LUT (fallback)
   esp_err_t ppa_ret = gmf_ppa_init();
   if (ppa_ret != ESP_OK) {
     ESP_LOGW(TAG, "GMF PPA init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
   } else {
-    ESP_LOGI(TAG, "✓ GMF PPA initialized (PPA hardware for YUV→RGB)");
+    ESP_LOGI(TAG, "GMF PPA initialized (PPA hardware for YUVRGB)");
   }
 #else
-  ESP_LOGW(TAG, "CONFIG_IDF_TARGET_ESP32P4 not defined - PPA hardware unavailable, using software YUV→RGB");
+  ESP_LOGW(TAG, "CONFIG_IDF_TARGET_ESP32P4 not defined - PPA hardware unavailable, using software YUVRGB");
 #endif
 
   // Open video file
@@ -91,7 +91,7 @@ void SimpleVideoPlayer::setup() {
     return;  // Exit setup early, complete initialization in loop()
   }
 
-  // 🚀 Load file to PSRAM cache if enabled (eliminates SD card overhead)
+  // Load file to PSRAM cache if enabled (eliminates SD card overhead)
   if (this->use_file_cache_) {
     if (!this->load_file_to_cache_()) {
       ESP_LOGW(TAG, "Failed to load file to cache, continuing with normal SD access");
@@ -160,7 +160,7 @@ void SimpleVideoPlayer::setup() {
       ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
       this->use_triple_buffer_ = false;
     } else {
-      ESP_LOGI(TAG, "✓ Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+      ESP_LOGI(TAG, "Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
 
       // Allocate third buffer
       this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
@@ -169,8 +169,8 @@ void SimpleVideoPlayer::setup() {
         ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
         this->use_triple_buffer_ = false;
       } else {
-        ESP_LOGI(TAG, "✓ Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-        ESP_LOGI(TAG, "🎬 Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
+        ESP_LOGI(TAG, "Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
                  this->rgb_buffer_size_, (this->rgb_buffer_size_ * 3) / 1048576.0f);
       }
     }
@@ -436,7 +436,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
       this->use_triple_buffer_ = false;
     } else {
-      ESP_LOGI(TAG, "✓ Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+      ESP_LOGI(TAG, "Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
 
       // Allocate third buffer
       this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
@@ -445,8 +445,8 @@ void SimpleVideoPlayer::complete_video_initialization_() {
         ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
         this->use_triple_buffer_ = false;
       } else {
-        ESP_LOGI(TAG, "✓ Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-        ESP_LOGI(TAG, "🎬 Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
+        ESP_LOGI(TAG, "Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
                  this->rgb_buffer_size_, (this->rgb_buffer_size_ * 3) / 1048576.0f);
       }
     }
@@ -696,7 +696,7 @@ void SimpleVideoPlayer::loop() {
     }
 
     this->file_size_ = this->http_buffer_size_;
-    ESP_LOGI(TAG, "✓ HTTP video loaded into memory: %ld bytes", this->file_size_);
+    ESP_LOGI(TAG, "HTTP video loaded into memory: %ld bytes", this->file_size_);
 
     // Now complete initialization (same code as setup() after open_video_file_())
     this->complete_video_initialization_();
@@ -704,7 +704,7 @@ void SimpleVideoPlayer::loop() {
     this->http_download_pending_ = false;
     this->initialization_complete_ = true;
 
-    ESP_LOGI(TAG, "✓ HTTP video player fully initialized");
+    ESP_LOGI(TAG, "HTTP video player fully initialized");
 
     // Auto-play if this was a re-download triggered by play()
     if (this->auto_play_after_download_) {
@@ -779,7 +779,7 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
   // Check maximum file size limit if Content-Length is provided
   if (content_length > 0) {
     if ((size_t)content_length > this->max_http_file_size_) {
-      ESP_LOGE(TAG, "❌ HTTP file too large: %d bytes (%.2f MB)",
+      ESP_LOGE(TAG, "HTTP file too large: %d bytes (%.2f MB)",
                content_length, content_length / 1048576.0f);
       ESP_LOGE(TAG, "   Maximum allowed: %zu bytes (%.2f MB)",
                this->max_http_file_size_, this->max_http_file_size_ / 1048576.0f);
@@ -831,7 +831,7 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
 
         // Check size limit BEFORE reallocating
         if (new_capacity > this->max_http_file_size_) {
-          ESP_LOGE(TAG, "❌ Download would exceed maximum size: %zu MB",
+          ESP_LOGE(TAG, "Download would exceed maximum size: %zu MB",
                    new_capacity / 1048576);
           ESP_LOGE(TAG, "   Maximum allowed: %zu MB", this->max_http_file_size_ / 1048576);
           ESP_LOGE(TAG, "   Aborting download to prevent memory exhaustion!");
@@ -891,7 +891,7 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
 
     this->http_buffer_size_ = total_downloaded;
 
-    ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes (%.2f MB) in SPIRAM",
+    ESP_LOGI(TAG, "HTTP download complete: %zu bytes (%.2f MB) in SPIRAM",
              total_downloaded, total_downloaded / 1048576.0f);
     return true;
   }
@@ -947,7 +947,7 @@ bool SimpleVideoPlayer::download_http_file_(const char *url) {
     ESP_LOGW(TAG, "Downloaded %zu bytes, expected %d bytes", downloaded, content_length);
   }
 
-  ESP_LOGI(TAG, "✓ HTTP download complete: %zu bytes", downloaded);
+  ESP_LOGI(TAG, "HTTP download complete: %zu bytes", downloaded);
   return true;
 }
 
@@ -990,14 +990,14 @@ bool SimpleVideoPlayer::open_video_file_() {
     this->file_size_ = this->cached_ftell_();
     this->cached_fseek_(0, SEEK_SET);
 
-    ESP_LOGI(TAG, "✓ Local video file opened: %ld bytes", this->file_size_);
+    ESP_LOGI(TAG, "Local video file opened: %ld bytes", this->file_size_);
   }
 
   return true;
 }
 
 // ============================================================================
-// 🚀 PSRAM File Cache - Load entire file to memory (eliminates SD overhead)
+// PSRAM File Cache - Load entire file to memory (eliminates SD overhead)
 // ============================================================================
 bool SimpleVideoPlayer::load_file_to_cache_() {
   if (!this->use_file_cache_ || this->file_cache_loaded_) {
@@ -1016,7 +1016,7 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
     return true;  // Continue without cache
   }
 
-  ESP_LOGI(TAG, "🚀 Loading file to PSRAM cache: %ld bytes (%.2f MB)...",
+  ESP_LOGI(TAG, "Loading file to PSRAM cache: %ld bytes (%.2f MB)...",
            this->file_size_, this->file_size_ / (1024.0f * 1024.0f));
 
   uint32_t start_time = esp_timer_get_time() / 1000;
@@ -1068,7 +1068,7 @@ bool SimpleVideoPlayer::load_file_to_cache_() {
   uint32_t load_time = (esp_timer_get_time() / 1000) - start_time;
   float speed_mbps = (this->file_size_ / 1024.0f / 1024.0f) / (load_time / 1000.0f);
 
-  ESP_LOGI(TAG, "✅ File cached to PSRAM in %lu ms (%.2f MB/s)", load_time, speed_mbps);
+  ESP_LOGI(TAG, "File cached to PSRAM in %lu ms (%.2f MB/s)", load_time, speed_mbps);
   ESP_LOGI(TAG, "   All video reads will now use RAM instead of SD card!");
 
   // Reset file position for cached reading
@@ -1359,7 +1359,7 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
     // AVI format: Read chunks with FourCC headers
     // OPTIMIZED: Use buffered reading to reduce SD card seeks
 
-    // 🔍 DIAGNOSTICS: Track I/O operations to identify bottleneck
+    // DIAGNOSTICS: Track I/O operations to identify bottleneck
     static uint32_t total_chunks_read = 0;
     static uint32_t total_fseek_calls = 0;
     static uint32_t total_fread_skip_calls = 0;
@@ -1413,11 +1413,11 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
           this->cached_fread_(&padding, 1, 1);
         }
 
-        // 🔍 DIAGNOSTICS: Log I/O stats every 30 frames
+        // DIAGNOSTICS: Log I/O stats every 30 frames
         if (this->frame_count_ % 30 == 0) {
           float avg_chunks_per_frame = (float)total_chunks_read / this->frame_count_;
           float seek_ratio = (float)total_fseek_calls / total_chunks_read * 100.0f;
-          ESP_LOGI(TAG, "📊 AVI I/O stats: chunks/frame=%.1f, fseek=%lu (%.1f%%), fread_skip=%lu, seeked=%luKB, read_skip=%luKB",
+          ESP_LOGI(TAG, "AVI I/O stats: chunks/frame=%.1f, fseek=%lu (%.1f%%), fread_skip=%lu, seeked=%luKB, read_skip=%luKB",
                    avg_chunks_per_frame, total_fseek_calls, seek_ratio, total_fread_skip_calls,
                    total_bytes_seeked / 1024, total_bytes_read_skip / 1024);
         }
@@ -1540,7 +1540,7 @@ bool SimpleVideoPlayer::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✅ JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for 1024x600)");
+  ESP_LOGI(TAG, "JPEG hardware decoder initialized (intr_priority=0, timeout=100ms, optimized for 1024x600)");
   return true;
 }
 
@@ -1566,7 +1566,7 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
   // Select write buffer for triple buffering (mandatory)
   uint8_t *write_buffer = this->rgb_buffer_;
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
-    // Triple buffering: rotate through 3 buffers (0→1→2→0)
+    // Triple buffering: rotate through 3 buffers (0120)
     if (this->current_write_buffer_ == 0) {
       write_buffer = this->rgb_buffer_;
     } else if (this->current_write_buffer_ == 1) {
@@ -1634,14 +1634,14 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   size_t yuv_size = this->actual_width_ * this->actual_height_ * 3 / 2;  // I420
   this->yuv_buffer_.resize(yuv_size);
 
-  // YUV→RGB conversion uses:
+  // YUVRGB conversion uses:
   // 1. PPA hardware (ESP32-P4) - 0% CPU, <1ms - PRIMARY METHOD
   // 2. Software with lookup tables - ~10-15ms @ 480x272 - FALLBACK ONLY
   // esp_imgfx SIMD has been REMOVED (buggy, causes 42ms delays instead of expected 3-5ms)
 
   this->h264_decoder_ready_ = true;
   ESP_LOGI(TAG, "H.264 decoder initialized for %dx%d", this->actual_width_, this->actual_height_);
-  ESP_LOGI(TAG, "YUV→RGB: PPA hardware + software LUT fallback (esp_imgfx removed)");
+  ESP_LOGI(TAG, "YUVRGB: PPA hardware + software LUT fallback (esp_imgfx removed)");
 
   return true;
 }
@@ -1997,11 +1997,11 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
 
     // Verify all samples were created
     if (sample_index < sample_sizes.size()) {
-      ESP_LOGW(TAG, "⚠️  WARNING: Only created %u samples out of %u total!",
+      ESP_LOGW(TAG, " WARNING: Only created %u samples out of %u total!",
                sample_index, sample_sizes.size());
       ESP_LOGW(TAG, "   This means some samples are missing (chunks exhausted before samples)");
     } else {
-      ESP_LOGI(TAG, "✅ Successfully created all %u samples from %zu chunks",
+      ESP_LOGI(TAG, "Successfully created all %u samples from %zu chunks",
                sample_index, chunk_offsets.size());
     }
 
@@ -2479,7 +2479,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     offset += this->nal_length_size_;
 
     if (offset + nalu_len > this->input_size_) {
-      ESP_LOGE(TAG, "❌ CORRUPT SAMPLE DETECTED!");
+      ESP_LOGE(TAG, "CORRUPT SAMPLE DETECTED!");
       ESP_LOGE(TAG, "   NALU length %u exceeds remaining data (%u bytes)",
                nalu_len, this->input_size_ - offset);
       ESP_LOGE(TAG, "   This usually means MP4 sample offset is WRONG!");
@@ -2569,7 +2569,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // Select write buffer for triple buffering (mandatory)
     uint8_t *write_buffer = this->rgb_buffer_;
     if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
-      // Triple buffering: rotate through 3 buffers (0→1→2→0)
+      // Triple buffering: rotate through 3 buffers (0120)
       if (this->current_write_buffer_ == 0) {
         write_buffer = this->rgb_buffer_;
       } else if (this->current_write_buffer_ == 1) {
@@ -2591,7 +2591,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // Log breakdown every 30 frames
     static int log_counter = 0;
     if (++log_counter >= 30) {
-      ESP_LOGI(TAG, "  └─ Breakdown: H.264 only=%lums, YUV→RGB=%lums",
+      ESP_LOGI(TAG, "  Breakdown: H.264 only=%lums, YUVRGB=%lums",
                (unsigned long)h264_only_time, (unsigned long)yuv_convert_time);
       log_counter = 0;
     }
@@ -2603,7 +2603,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 }
 
 // ==============================================
-// PPA HARDWARE YUV→RGB CONVERSION
+// PPA HARDWARE YUVRGB CONVERSION
 // ==============================================
 
 bool SimpleVideoPlayer::init_ppa_color_converter_() {
@@ -2614,12 +2614,12 @@ bool SimpleVideoPlayer::init_ppa_color_converter_() {
 
   esp_err_t ret = ppa_register_client(&ppa_config, &this->ppa_client_handle_);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register PPA client for YUV→RGB conversion: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Failed to register PPA client for YUVRGB conversion: %s", esp_err_to_name(ret));
     return false;
   }
 
   this->ppa_color_convert_enabled_ = true;
-  ESP_LOGI(TAG, "✓ PPA hardware YUV420→RGB565 conversion enabled (0%% CPU, <1ms)");
+  ESP_LOGI(TAG, "PPA hardware YUV420RGB565 conversion enabled (0%% CPU, <1ms)");
   ESP_LOGI(TAG, "  This should improve FPS by 10-20%% compared to software conversion");
 
   return true;
@@ -2629,14 +2629,14 @@ void SimpleVideoPlayer::cleanup_ppa_color_converter_() {
 #ifdef CONFIG_IDF_TARGET_ESP32P4
   // Clean up GMF PPA hardware
   gmf_ppa_deinit();
-  ESP_LOGI(TAG, "✓ GMF PPA cleanup");
+  ESP_LOGI(TAG, "GMF PPA cleanup");
 #endif
 
   if (this->ppa_client_handle_ != nullptr) {
     ppa_unregister_client(this->ppa_client_handle_);
     this->ppa_client_handle_ = nullptr;
     this->ppa_color_convert_enabled_ = false;
-    ESP_LOGI(TAG, "✓ PPA hardware color converter cleanup");
+    ESP_LOGI(TAG, "PPA hardware color converter cleanup");
   }
 }
 
@@ -2648,7 +2648,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 #ifdef CONFIG_IDF_TARGET_ESP32P4
   // PPA is only available on ESP32-P4
 
-  // Configure PPA SRM operation for YUV420→RGB565 conversion
+  // Configure PPA SRM operation for YUV420RGB565 conversion
   // Input: I420 planar YUV (Y plane + U plane + V plane)
   // Output: RGB565 (2 bytes per pixel)
   ppa_srm_oper_config_t srm_config = {};
@@ -2680,7 +2680,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   srm_config.mirror_y = false;
 
   // Color space configuration
-  // Set YUV→RGB color conversion standard (BT.601 for SD video, BT.709 for HD)
+  // Set YUVRGB color conversion standard (BT.601 for SD video, BT.709 for HD)
   srm_config.in.yuv_std = (h >= 720) ? PPA_COLOR_CONV_STD_RGB_YUV_BT709 : PPA_COLOR_CONV_STD_RGB_YUV_BT601;
   srm_config.in.yuv_range = PPA_COLOR_RANGE_LIMIT;  // Limited range [16-235] for video
 
@@ -2691,7 +2691,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   // Debug: log configuration on first use
   static bool first_attempt = true;
   if (first_attempt) {
-    ESP_LOGI(TAG, "PPA Config: YUV420(%dx%d) → RGB565(%dx%d)", w, h, w, h);
+    ESP_LOGI(TAG, "PPA Config: YUV420(%dx%d) RGB565(%dx%d)", w, h, w, h);
     ESP_LOGI(TAG, "  IN: srm_cm=%d, yuv_std=%d, yuv_range=%d",
              srm_config.in.srm_cm, srm_config.in.yuv_std, srm_config.in.yuv_range);
     ESP_LOGI(TAG, "  OUT: srm_cm=%d, buffer_size=%d",
@@ -2706,7 +2706,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   );
 
   if (ret != ESP_OK) {
-    ESP_LOGW(TAG, "PPA YUV→RGB conversion failed: %s (0x%x) - falling back to software",
+    ESP_LOGW(TAG, "PPA YUVRGB conversion failed: %s (0x%x) - falling back to software",
              esp_err_to_name(ret), ret);
     ESP_LOGW(TAG, "  This usually means YUV420 mode is not supported in this ESP-IDF version");
     return false;
@@ -2715,7 +2715,7 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
   // PPA conversion succeeded - log on first use
   static bool first_success = true;
   if (first_success) {
-    ESP_LOGI(TAG, "✓ PPA hardware YUV→RGB conversion active (0%% CPU, <1ms @ %dx%d)", w, h);
+    ESP_LOGI(TAG, "PPA hardware YUVRGB conversion active (0%% CPU, <1ms @ %dx%d)", w, h);
     first_success = false;
   }
 
@@ -2728,13 +2728,13 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // YUV→RGB conversion strategy:
+  // YUVRGB conversion strategy:
   // Software H264 decoder outputs I420 format (YUV420 planar)
   // PPA hardware does NOT support I420 format (only supports O_UYY_E_VYY)
   // Therefore: Use software LUT conversion ONLY
   // Performance: ~24ms for 480x272 (needs optimization)
 
-  // Software LUT conversion for I420 → RGB565
+  // Software LUT conversion for I420 RGB565
   yuv420_to_rgb565_lut(yuv, rgb, w, h);
 }
 
@@ -3316,7 +3316,7 @@ void SimpleVideoPlayer::update_display_() {
   lv_canvas_set_buffer(this->canvas_, display_buffer,
                        this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
 
-  // Swap buffers for next frame (rotate: 0→1→2→0 for triple, 0→1→0 for double)
+  // Swap buffers for next frame (rotate: 0120 for triple, 010 for double)
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
     this->current_write_buffer_ = (this->current_write_buffer_ + 1) % 3;
   } else if (this->rgb_buffer_back_ != nullptr) {
@@ -3465,7 +3465,7 @@ void SimpleVideoPlayer::create_controls_() {
 }
 
 void SimpleVideoPlayer::play() {
-  ESP_LOGI(TAG, "🎬 play() called - current state: %d", (int)this->state_);
+  ESP_LOGI(TAG, "play() called - current state: %d", (int)this->state_);
 
   if (this->state_ == PlayerState::PLAYING) {
     ESP_LOGI(TAG, "Already playing, ignoring play() call");
@@ -3548,7 +3548,7 @@ void SimpleVideoPlayer::play() {
     }
 #endif
 
-    // Re-initialize GMF PPA hardware for YUV→RGB conversion
+    // Re-initialize GMF PPA hardware for YUVRGB conversion
     // This is necessary after stop() calls gmf_ppa_deinit()
 #ifdef CONFIG_IDF_TARGET_ESP32P4
     ESP_LOGI(TAG, "Re-initializing GMF PPA hardware...");
@@ -3556,7 +3556,7 @@ void SimpleVideoPlayer::play() {
     if (ppa_ret != ESP_OK) {
       ESP_LOGW(TAG, "GMF PPA re-init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
     } else {
-      ESP_LOGI(TAG, "✓ GMF PPA re-initialized (PPA hardware for YUV→RGB)");
+      ESP_LOGI(TAG, "GMF PPA re-initialized (PPA hardware for YUVRGB)");
     }
 #endif
   }
@@ -3842,7 +3842,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     if (fps_measure_start > 0) {
       uint32_t time_elapsed = current_time - fps_measure_start;
       float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
-      ESP_LOGI(TAG, "📊 Performance: %.2f FPS | decode time shown below | target: %.0f FPS",
+      ESP_LOGI(TAG, "Performance: %.2f FPS | decode time shown below | target: %.0f FPS",
                actual_fps, 1000.0f / player->frame_interval_);
     }
 
@@ -3893,11 +3893,11 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         if (callback_count % 30 == 0) {
           const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
                                    (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
-          ESP_LOGI(TAG, "⏱️ %s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+          ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
                    codec_name, player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
-          ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
+          ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
                    100.0f * display_time / total_time);
         }
       }
@@ -3936,12 +3936,12 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
@@ -3953,12 +3953,12 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         consecutive_decode_errors++;
 
         if (consecutive_decode_errors <= 5) {
-          ESP_LOGE(TAG, "❌ Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
+          ESP_LOGE(TAG, "Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
                    player->current_video_sample_ - 1, consecutive_decode_errors);
         } else if (consecutive_decode_errors == 10) {
-          ESP_LOGE(TAG, "❌ 10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
+          ESP_LOGE(TAG, "10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
         } else if (consecutive_decode_errors % 30 == 0) {
-          ESP_LOGE(TAG, "❌ Still failing: %d consecutive decode errors", consecutive_decode_errors);
+          ESP_LOGE(TAG, "Still failing: %d consecutive decode errors", consecutive_decode_errors);
         }
         // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
       }

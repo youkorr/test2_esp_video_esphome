@@ -8,9 +8,9 @@
 
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
-#include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUV→RGB
+#include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUVRGB
 #include "esphome/components/speaker/speaker.h"
-#include "yuv_rgb_convert.h"  // Software YUV→RGB with lookup tables (fallback only)
+#include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
 
 // TODO: ESP-GMF full framework integration (currently using simplified wrapper)
@@ -126,10 +126,10 @@ class SimpleVideoPlayer : public Component {
   bool read_next_mjpeg_frame_();
   bool decode_mjpeg_frame_();
 
-  // 🚀 PSRAM File Cache - Load entire file to memory to eliminate SD overhead
+  // PSRAM File Cache - Load entire file to memory to eliminate SD overhead
   bool load_file_to_cache_();
 
-  // 🚀 Cache-aware file I/O methods (work with both PSRAM cache and SD card)
+  // Cache-aware file I/O methods (work with both PSRAM cache and SD card)
   inline size_t cached_fread_(void* ptr, size_t size, size_t count) {
     if (file_cache_loaded_) {
       size_t bytes = size * count;
@@ -235,7 +235,7 @@ class SimpleVideoPlayer : public Component {
   bool decode_audio_frame_();
   void process_audio_();
 
-  // PPA hardware YUV→RGB conversion (replaces software converter)
+  // PPA hardware YUVRGB conversion (replaces software converter)
   bool init_ppa_color_converter_();
   void cleanup_ppa_color_converter_();
   bool apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rgb, int w, int h);
@@ -290,7 +290,7 @@ class SimpleVideoPlayer : public Component {
   bool initialization_complete_{false};  // true if video player is fully initialized
   bool auto_play_after_download_{false};  // true if should auto-play after re-downloading
 
-  // 🚀 PSRAM File Cache - Eliminate SD card overhead by loading entire file to RAM
+  // PSRAM File Cache - Eliminate SD card overhead by loading entire file to RAM
   uint8_t *file_cache_buffer_{nullptr};  // Entire file loaded into PSRAM
   size_t file_cache_size_{0};            // Actual file size in cache
   size_t file_cache_pos_{0};             // Current read position in cache
@@ -336,7 +336,7 @@ class SimpleVideoPlayer : public Component {
   std::vector<uint8_t> yuv_buffer_;
   bool h264_decoder_ready_{false};
 
-  // PPA hardware acceleration for YUV→RGB conversion (primary method)
+  // PPA hardware acceleration for YUVRGB conversion (primary method)
   // Falls back to software LUT conversion if PPA unavailable
   ppa_client_handle_t ppa_client_handle_{nullptr};
   bool ppa_color_convert_enabled_{false};

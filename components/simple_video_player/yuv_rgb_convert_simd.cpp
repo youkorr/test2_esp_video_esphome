@@ -30,17 +30,17 @@ static const char *TAG = "yuv_rgb_simd";
 
 YuvRgbConverterSIMD::YuvRgbConverterSIMD(Colorspace colorspace) : colorspace_(colorspace) {
 #if USE_ESP_IMAGE_EFFECTS && HAVE_ESP_IMGFX_H
-  // Initialize esp_imgfx SIMD YUV→RGB converter
-  ESP_LOGI(TAG, "Initializing esp_imgfx SIMD YUV→RGB converter...");
+  // Initialize esp_imgfx SIMD YUVRGB converter
+  ESP_LOGI(TAG, "Initializing esp_imgfx SIMD YUVRGB converter...");
 
   // Note: Resolution will be set on first conversion call
   // We'll create the handle during first use to know the actual dimensions
   this->simd_available_ = true;
-  ESP_LOGI(TAG, "✓ esp_imgfx library available");
+  ESP_LOGI(TAG, "esp_imgfx library available");
   ESP_LOGI(TAG, "  Colorspace: %s",
            colorspace_ == Colorspace::BT709 ? "BT.709 (HD)" : "BT.601 (SD)");
   ESP_LOGI(TAG, "  Expected: 3-5x faster than software (~3-5ms @ 480x272)");
-  ESP_LOGI(TAG, "  FPS boost: 640×480 → 35+ FPS, 480×272 → 100+ FPS");
+  ESP_LOGI(TAG, "  FPS boost: 640×480 35+ FPS, 480×272 100+ FPS");
 #else
   ESP_LOGW(TAG, "esp_imgfx not available, using optimized software converter");
   this->simd_available_ = false;
@@ -81,7 +81,7 @@ void YuvRgbConverterSIMD::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rg
         return;
       }
 
-      ESP_LOGI(TAG, "✓ esp_imgfx SIMD converter initialized for %dx%d", width, height);
+      ESP_LOGI(TAG, "esp_imgfx SIMD converter initialized for %dx%d", width, height);
     }
 
     // Use SIMD-accelerated conversion via esp_imgfx
@@ -112,7 +112,7 @@ void YuvRgbConverterSIMD::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rg
       // SIMD conversion succeeded - log timing every 30 frames
       static int simd_log_counter = 0;
       if (++simd_log_counter >= 30) {
-        ESP_LOGI(TAG, "    └─ esp_imgfx SIMD actual time: %lums (expected 3-5ms)", (unsigned long)simd_time);
+        ESP_LOGI(TAG, "    esp_imgfx SIMD actual time: %lums (expected 3-5ms)", (unsigned long)simd_time);
         simd_log_counter = 0;
       }
       return;
