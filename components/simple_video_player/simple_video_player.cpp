@@ -717,7 +717,20 @@ void SimpleVideoPlayer::loop() {
     }
   }
 
-  // Main processing is done in LVGL timer callback
+  // WORKAROUND: ESPHome LVGL timer callbacks are not firing at the configured interval
+  // Manually check if enough time has elapsed and call timer callback directly
+  if (this->state_ == PlayerState::PLAYING && this->playback_timer_ != nullptr) {
+    uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+    uint32_t elapsed = current_time - this->last_frame_time_;
+
+    // If enough time has passed, manually trigger the timer callback
+    if (elapsed >= this->frame_interval_) {
+      this->last_frame_time_ = current_time;
+      timer_cb_(this->playback_timer_);
+    }
+  }
+
+  // Main processing is done in LVGL timer callback (or manually above if LVGL timer fails)
 }
 
 void SimpleVideoPlayer::dump_config() {
@@ -3612,6 +3625,9 @@ void SimpleVideoPlayer::play() {
     }
     this->frame_count_ = 0;
   }
+
+  // Initialize manual timing for loop() workaround
+  this->last_frame_time_ = esp_timer_get_time() / 1000;
 
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
