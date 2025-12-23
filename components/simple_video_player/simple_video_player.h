@@ -100,6 +100,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
+  // Triple buffering is now mandatory for smooth playback (removed setter)
 
   void setup() override;
   void loop() override;
@@ -297,9 +298,13 @@ class SimpleVideoPlayer : public Component {
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
   uint8_t *input_buffer_{nullptr};
-  uint8_t *rgb_buffer_{nullptr};
+  uint8_t *rgb_buffer_{nullptr};          // Buffer 0 - triple buffering
+  uint8_t *rgb_buffer_back_{nullptr};     // Buffer 1 - triple buffering
+  uint8_t *rgb_buffer_third_{nullptr};    // Buffer 2 - triple buffering (mandatory)
   size_t input_size_{0};
   size_t rgb_buffer_size_{0};
+  bool use_triple_buffer_{false};         // TEMPORARY: Disabled to test memory issue (was true)
+  uint8_t current_write_buffer_{0};       // 0/1/2 = write to rgb_buffer_/rgb_buffer_back_/rgb_buffer_third_
 
   lv_img_dsc_t frame_img_dsc_{};
 

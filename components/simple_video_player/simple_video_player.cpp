@@ -46,8 +46,16 @@ static uint32_t make_fourcc(uint8_t a, uint8_t b, uint8_t c, uint8_t d) {
 }
 
 void SimpleVideoPlayer::setup() {
-  ESP_LOGI(TAG, "Setting up Simple Video Player...");
+  ESP_LOGI(TAG, "=== SimpleVideoPlayer::setup() START ===");
   ESP_LOGI(TAG, "  File: %s", this->file_path_.c_str());
+  ESP_LOGI(TAG, "  Free heap: %u bytes, Free PSRAM: %u bytes",
+           heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+           heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+  // Initialize YUV→RGB lookup tables (software fallback)
+  ESP_LOGI(TAG, "Initializing YUV→RGB lookup tables...");
+  init_yuv_lut_tables();
+  ESP_LOGI(TAG, "✓ YUV→RGB tables initialized");
 
   // Allocate input buffer with cache alignment for optimal SPIRAM performance
   this->input_buffer_ = (uint8_t *)heap_caps_malloc(this->buffer_size_, VIDEO_BUFFER_CAPS);
@@ -138,11 +146,35 @@ void SimpleVideoPlayer::setup() {
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                           VIDEO_BUFFER_CAPS);
   if (this->rgb_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+    ESP_LOGE(TAG, "Failed to allocate RGB front buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
     return;
   }
-  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+  ESP_LOGI(TAG, "Allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+  // Allocate second and third RGB buffers for MANDATORY triple buffering
+  if (this->use_triple_buffer_) {
+    this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                 VIDEO_BUFFER_CAPS);
+    if (this->rgb_buffer_back_ == nullptr) {
+      ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
+      this->use_triple_buffer_ = false;
+    } else {
+      ESP_LOGI(TAG, "✓ Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+      // Allocate third buffer
+      this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                    VIDEO_BUFFER_CAPS);
+      if (this->rgb_buffer_third_ == nullptr) {
+        ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
+        this->use_triple_buffer_ = false;
+      } else {
+        ESP_LOGI(TAG, "✓ Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "🎬 Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
+                 this->rgb_buffer_size_, (this->rgb_buffer_size_ * 3) / 1048576.0f);
+      }
+    }
+  }
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
@@ -169,17 +201,47 @@ void SimpleVideoPlayer::setup() {
                  this->actual_width_, this->actual_height_,
                  this->aligned_width_, this->aligned_height_);
 
-        // Re-allocate RGB buffer with correct size
+        // Re-allocate RGB buffers with correct size
         heap_caps_free(this->rgb_buffer_);
+        if (this->rgb_buffer_back_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_back_);
+          this->rgb_buffer_back_ = nullptr;
+        }
+        if (this->rgb_buffer_third_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_third_);
+          this->rgb_buffer_third_ = nullptr;
+        }
+
         this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
           return;
         }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+        // Re-allocate buffers 1 and 2 for triple buffering
+        if (this->use_triple_buffer_) {
+          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                       VIDEO_BUFFER_CAPS);
+          if (this->rgb_buffer_back_ == nullptr) {
+            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            this->use_triple_buffer_ = false;
+          } else {
+            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                         VIDEO_BUFFER_CAPS);
+            if (this->rgb_buffer_third_ == nullptr) {
+              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              this->use_triple_buffer_ = false;
+            } else {
+              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+            }
+          }
+        }
       }
     }
 
@@ -229,17 +291,47 @@ void SimpleVideoPlayer::setup() {
                  this->actual_width_, this->actual_height_,
                  this->aligned_width_, this->aligned_height_);
 
-        // Re-allocate RGB buffer with correct size
+        // Re-allocate RGB buffers with correct size
         heap_caps_free(this->rgb_buffer_);
+        if (this->rgb_buffer_back_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_back_);
+          this->rgb_buffer_back_ = nullptr;
+        }
+        if (this->rgb_buffer_third_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_third_);
+          this->rgb_buffer_third_ = nullptr;
+        }
+
         this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
           return;
         }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+        // Re-allocate buffers 1 and 2 for triple buffering
+        if (this->use_triple_buffer_) {
+          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                       VIDEO_BUFFER_CAPS);
+          if (this->rgb_buffer_back_ == nullptr) {
+            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            this->use_triple_buffer_ = false;
+          } else {
+            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                         VIDEO_BUFFER_CAPS);
+            if (this->rgb_buffer_third_ == nullptr) {
+              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              this->use_triple_buffer_ = false;
+            } else {
+              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+            }
+          }
+        }
       }
     }
 
@@ -330,11 +422,35 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                           VIDEO_BUFFER_CAPS);
   if (this->rgb_buffer_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+    ESP_LOGE(TAG, "Failed to allocate RGB front buffer (%u bytes)", this->rgb_buffer_size_);
     this->mark_failed();
     return;
   }
-  ESP_LOGI(TAG, "Allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+  ESP_LOGI(TAG, "Allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+  // Allocate second and third RGB buffers for MANDATORY triple buffering
+  if (this->use_triple_buffer_) {
+    this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                 VIDEO_BUFFER_CAPS);
+    if (this->rgb_buffer_back_ == nullptr) {
+      ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
+      this->use_triple_buffer_ = false;
+    } else {
+      ESP_LOGI(TAG, "✓ Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+      // Allocate third buffer
+      this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                    VIDEO_BUFFER_CAPS);
+      if (this->rgb_buffer_third_ == nullptr) {
+        ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
+        this->use_triple_buffer_ = false;
+      } else {
+        ESP_LOGI(TAG, "✓ Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "🎬 Triple buffering ENABLED (3x%u bytes = %.1f MB total)",
+                 this->rgb_buffer_size_, (this->rgb_buffer_size_ * 3) / 1048576.0f);
+      }
+    }
+  }
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
@@ -361,17 +477,47 @@ void SimpleVideoPlayer::complete_video_initialization_() {
                  this->actual_width_, this->actual_height_,
                  this->aligned_width_, this->aligned_height_);
 
-        // Re-allocate RGB buffer with correct size
+        // Re-allocate RGB buffers with correct size
         heap_caps_free(this->rgb_buffer_);
+        if (this->rgb_buffer_back_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_back_);
+          this->rgb_buffer_back_ = nullptr;
+        }
+        if (this->rgb_buffer_third_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_third_);
+          this->rgb_buffer_third_ = nullptr;
+        }
+
         this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
           return;
         }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+        // Re-allocate buffers 1 and 2 for triple buffering
+        if (this->use_triple_buffer_) {
+          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                       VIDEO_BUFFER_CAPS);
+          if (this->rgb_buffer_back_ == nullptr) {
+            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            this->use_triple_buffer_ = false;
+          } else {
+            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                         VIDEO_BUFFER_CAPS);
+            if (this->rgb_buffer_third_ == nullptr) {
+              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              this->use_triple_buffer_ = false;
+            } else {
+              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+            }
+          }
+        }
       }
     }
 
@@ -421,17 +567,47 @@ void SimpleVideoPlayer::complete_video_initialization_() {
                  this->actual_width_, this->actual_height_,
                  this->aligned_width_, this->aligned_height_);
 
-        // Re-allocate RGB buffer with correct size
+        // Re-allocate RGB buffers with correct size
         heap_caps_free(this->rgb_buffer_);
+        if (this->rgb_buffer_back_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_back_);
+          this->rgb_buffer_back_ = nullptr;
+        }
+        if (this->rgb_buffer_third_ != nullptr) {
+          heap_caps_free(this->rgb_buffer_third_);
+          this->rgb_buffer_third_ = nullptr;
+        }
+
         this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
         this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                 VIDEO_BUFFER_CAPS);
         if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer (%u bytes)", this->rgb_buffer_size_);
+          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
           this->mark_failed();
           return;
         }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer: %u bytes", this->rgb_buffer_size_);
+        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+
+        // Re-allocate buffers 1 and 2 for triple buffering
+        if (this->use_triple_buffer_) {
+          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                       VIDEO_BUFFER_CAPS);
+          if (this->rgb_buffer_back_ == nullptr) {
+            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            this->use_triple_buffer_ = false;
+          } else {
+            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+
+            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
+                                                                         VIDEO_BUFFER_CAPS);
+            if (this->rgb_buffer_third_ == nullptr) {
+              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              this->use_triple_buffer_ = false;
+            } else {
+              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
+            }
+          }
+        }
       }
     }
 
@@ -804,10 +980,10 @@ bool SimpleVideoPlayer::open_video_file_() {
       return false;
     }
 
-    // OPTIMIZATION: Configure larger file buffer (16KB) for faster sequential reading
-    // This significantly improves SD card read performance for video playback
-    static uint8_t file_buffer[16384];
-    setvbuf(this->file_, (char *)file_buffer, _IOFBF, sizeof(file_buffer));
+    // Use system default buffering (typically 4KB in internal RAM)
+    // This is faster than large PSRAM buffers due to lower access latency
+    // For best performance, use preload_to_memory: true to load entire file to PSRAM
+    ESP_LOGI(TAG, "Using system default file buffering (internal RAM)");
 
     // Get file size
     this->cached_fseek_(0, SEEK_END);
@@ -1387,10 +1563,26 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
     .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
 
+  // Select write buffer for triple buffering (mandatory)
+  uint8_t *write_buffer = this->rgb_buffer_;
+  if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
+    // Triple buffering: rotate through 3 buffers (0→1→2→0)
+    if (this->current_write_buffer_ == 0) {
+      write_buffer = this->rgb_buffer_;
+    } else if (this->current_write_buffer_ == 1) {
+      write_buffer = this->rgb_buffer_back_;
+    } else {
+      write_buffer = this->rgb_buffer_third_;
+    }
+  } else if (this->rgb_buffer_back_ != nullptr) {
+    // Fallback to double buffering
+    write_buffer = (this->current_write_buffer_ == 0) ? this->rgb_buffer_ : this->rgb_buffer_back_;
+  }
+
   uint32_t out_size = 0;
   esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
                                         this->input_buffer_, this->input_size_,
-                                        this->rgb_buffer_, this->rgb_buffer_size_,
+                                        write_buffer, this->rgb_buffer_size_,
                                         &out_size);
 
   if (ret != ESP_OK) {
@@ -1416,8 +1608,11 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
 
 bool SimpleVideoPlayer::init_h264_decoder_() {
   // Create software H.264 decoder
+  // CRITICAL: Software H264 decoder (esp_h264_dec_sw) ONLY supports I420 format
+  // O_UYY_E_VYY format is only for hardware decoder (esp_h264_dec_hw)
+  // I420 format requires software LUT conversion (PPA doesn't support I420)
   esp_h264_dec_cfg_sw_t cfg = {
-    .pic_type = ESP_H264_RAW_FMT_I420
+    .pic_type = ESP_H264_RAW_FMT_I420  // Software decoder ONLY supports I420
   };
 
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
@@ -1452,16 +1647,26 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
 }
 
 bool SimpleVideoPlayer::parse_mp4_() {
-  if (this->file_ == nullptr) return false;
+  if (this->file_ == nullptr) {
+    ESP_LOGE(TAG, "parse_mp4_: file is nullptr!");
+    return false;
+  }
 
+  ESP_LOGI(TAG, "Parsing MP4 file...");
   this->cached_fseek_(0, SEEK_SET);
 
+  bool found_moov = false;
   while (!this->cached_feof_()) {
     uint32_t size, type;
     if (!this->read_mp4_box_(size, type)) break;
 
     if (type == make_fourcc('m', 'o', 'o', 'v')) {
-      if (!this->parse_moov_(size - 8)) return false;
+      ESP_LOGI(TAG, "Found 'moov' box, parsing...");
+      if (!this->parse_moov_(size - 8)) {
+        ESP_LOGE(TAG, "Failed to parse 'moov' box");
+        return false;
+      }
+      found_moov = true;
     } else {
       // Skip other boxes
       if (size > 8) {
@@ -1470,7 +1675,20 @@ bool SimpleVideoPlayer::parse_mp4_() {
     }
   }
 
-  return !this->video_samples_.empty();
+  if (!found_moov) {
+    ESP_LOGE(TAG, "MP4 parsing failed: 'moov' box not found!");
+    return false;
+  }
+
+  ESP_LOGI(TAG, "MP4 parsing complete: %u video samples, %u audio samples",
+           this->video_samples_.size(), this->audio_samples_.size());
+
+  if (this->video_samples_.empty()) {
+    ESP_LOGE(TAG, "MP4 parsing failed: no video samples found!");
+    return false;
+  }
+
+  return true;
 }
 
 bool SimpleVideoPlayer::read_mp4_box_(uint32_t &size, uint32_t &type) {
@@ -2348,8 +2566,24 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     // Convert I420 to RGB565 (use actual dimensions for conversion, aligned for output)
     uint32_t yuv_convert_start = esp_timer_get_time() / 1000;
 
+    // Select write buffer for triple buffering (mandatory)
+    uint8_t *write_buffer = this->rgb_buffer_;
+    if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
+      // Triple buffering: rotate through 3 buffers (0→1→2→0)
+      if (this->current_write_buffer_ == 0) {
+        write_buffer = this->rgb_buffer_;
+      } else if (this->current_write_buffer_ == 1) {
+        write_buffer = this->rgb_buffer_back_;
+      } else {
+        write_buffer = this->rgb_buffer_third_;
+      }
+    } else if (this->rgb_buffer_back_ != nullptr) {
+      // Fallback to double buffering
+      write_buffer = (this->current_write_buffer_ == 0) ? this->rgb_buffer_ : this->rgb_buffer_back_;
+    }
+
     // Convert I420 to RGB565 using GMF PPA (hardware) or optimized software
-    this->convert_i420_to_rgb565_(out_frame.outbuf, this->rgb_buffer_,
+    this->convert_i420_to_rgb565_(out_frame.outbuf, write_buffer,
                                    this->actual_width_, this->actual_height_);
 
     uint32_t yuv_convert_time = (esp_timer_get_time() / 1000) - yuv_convert_start;
@@ -2494,24 +2728,14 @@ bool SimpleVideoPlayer::apply_ppa_color_convert_(const uint8_t *yuv, uint8_t *rg
 }
 
 void SimpleVideoPlayer::convert_i420_to_rgb565_(const uint8_t *yuv, uint8_t *rgb, int w, int h) {
-  // CRITICAL: PPA ESP32-P4 does NOT support I420 planar for YUV→RGB!
-  // PPA only supports:
-  //   - OUYY_EVYY (ESP32-P4 packed YUV420 format)
-  //   - YUV422 (YUYV, UYVY, etc.)
-  //
-  // H.264 decoder outputs I420 planar, which PPA cannot handle correctly.
-  // Result: divided/corrupted image with PPA
-  //
-  // Solution: Use esp_imgfx SIMD which handles I420 correctly
-  //          Performance: ~7-10ms @ 480x272 (acceptable)
+  // YUV→RGB conversion strategy:
+  // Software H264 decoder outputs I420 format (YUV420 planar)
+  // PPA hardware does NOT support I420 format (only supports O_UYY_E_VYY)
+  // Therefore: Use software LUT conversion ONLY
+  // Performance: ~24ms for 480x272 (needs optimization)
 
-  // Use SIMD accelerated conversion (esp_image_effects)
-  // This is the ONLY hardware-accelerated method that correctly handles I420
-  //static YuvRgbConverterSIMD simd_converter(
-    //h >= 720 ? YuvRgbConverterSIMD::Colorspace::BT709 : YuvRgbConverterSIMD::Colorspace::BT601
-  //);
-
-  //simd_converter.convert_i420_to_rgb565(yuv, rgb, w, h);
+  // Software LUT conversion for I420 → RGB565
+  yuv420_to_rgb565_lut(yuv, rgb, w, h);
 }
 
 // ==============================================
@@ -3051,6 +3275,22 @@ void SimpleVideoPlayer::update_display_() {
   // Without this, LVGL caches the buffer address and doesn't see PSRAM updates
   // This is essential for 1024x600 resolution (1.2MB framebuffer)
 
+  // Select display buffer (the one that was just written to)
+  uint8_t *display_buffer = this->rgb_buffer_;
+  if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
+    // Triple buffering: select current buffer
+    if (this->current_write_buffer_ == 0) {
+      display_buffer = this->rgb_buffer_;
+    } else if (this->current_write_buffer_ == 1) {
+      display_buffer = this->rgb_buffer_back_;
+    } else {
+      display_buffer = this->rgb_buffer_third_;
+    }
+  } else if (this->rgb_buffer_back_ != nullptr) {
+    // Fallback to double buffering
+    display_buffer = (this->current_write_buffer_ == 0) ? this->rgb_buffer_ : this->rgb_buffer_back_;
+  }
+
   // Diagnostic: Log stride information once
   static bool stride_logged = false;
   if (!stride_logged) {
@@ -3065,11 +3305,23 @@ void SimpleVideoPlayer::update_display_() {
              this->aligned_width_, this->aligned_height_);
     ESP_LOGW(TAG, "   Bytes per line (actual): %d", this->actual_width_ * 2);
     ESP_LOGW(TAG, "   Bytes per line (aligned): %d", this->aligned_width_ * 2);
+    if (this->use_triple_buffer_ && this->rgb_buffer_third_ != nullptr) {
+      ESP_LOGW(TAG, "   🎬 Triple buffering enabled (3 buffers)");
+    } else if (this->rgb_buffer_back_ != nullptr) {
+      ESP_LOGW(TAG, "   ✓ Double buffering enabled (2 buffers)");
+    }
     stride_logged = true;
   }
 
-  lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
+  lv_canvas_set_buffer(this->canvas_, display_buffer,
                        this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+
+  // Swap buffers for next frame (rotate: 0→1→2→0 for triple, 0→1→0 for double)
+  if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
+    this->current_write_buffer_ = (this->current_write_buffer_ + 1) % 3;
+  } else if (this->rgb_buffer_back_ != nullptr) {
+    this->current_write_buffer_ = 1 - this->current_write_buffer_;
+  }
 
   // Force immediate invalidation and rendering
   lv_obj_invalidate(this->canvas_);
@@ -3213,7 +3465,10 @@ void SimpleVideoPlayer::create_controls_() {
 }
 
 void SimpleVideoPlayer::play() {
+  ESP_LOGI(TAG, "🎬 play() called - current state: %d", (int)this->state_);
+
   if (this->state_ == PlayerState::PLAYING) {
+    ESP_LOGI(TAG, "Already playing, ignoring play() call");
     return;
   }
 
@@ -3240,16 +3495,37 @@ void SimpleVideoPlayer::play() {
       ESP_LOGD(TAG, "Re-allocated input_buffer_: %zu bytes", this->buffer_size_);
     }
 
-    // Re-allocate RGB buffer
+    // Re-allocate RGB buffers
     if (this->rgb_buffer_ == nullptr) {
       this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
       this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                               VIDEO_BUFFER_CAPS);
       if (this->rgb_buffer_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to re-allocate RGB buffer");
+        ESP_LOGE(TAG, "Failed to re-allocate RGB front buffer");
         return;
       }
-      ESP_LOGD(TAG, "Re-allocated rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+      ESP_LOGD(TAG, "Re-allocated rgb_buffer_0: %zu bytes", this->rgb_buffer_size_);
+
+      // Re-allocate buffers 1 and 2 for triple buffering
+      if (this->use_triple_buffer_) {
+        this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                     VIDEO_BUFFER_CAPS);
+        if (this->rgb_buffer_back_ == nullptr) {
+          ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+          this->use_triple_buffer_ = false;
+        } else {
+          ESP_LOGD(TAG, "Re-allocated rgb_buffer_1: %zu bytes", this->rgb_buffer_size_);
+
+          this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
+                                                                       VIDEO_BUFFER_CAPS);
+          if (this->rgb_buffer_third_ == nullptr) {
+            ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+            this->use_triple_buffer_ = false;
+          } else {
+            ESP_LOGD(TAG, "Re-allocated rgb_buffer_2: %zu bytes", this->rgb_buffer_size_);
+          }
+        }
+      }
     }
 
     // Re-initialize H.264 decoder if needed
@@ -3289,6 +3565,16 @@ void SimpleVideoPlayer::play() {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       this->cached_fseek_(0, SEEK_SET);
     } else if (this->format_ == MediaFormat::MP4_H264) {
+      ESP_LOGI(TAG, "Starting MP4 playback: %u video samples, H264 decoder ready: %s",
+               this->video_samples_.size(), this->h264_decoder_ready_ ? "YES" : "NO");
+      if (this->video_samples_.empty()) {
+        ESP_LOGE(TAG, "Cannot play MP4: no video samples! MP4 parsing may have failed.");
+        return;
+      }
+      if (!this->h264_decoder_ready_) {
+        ESP_LOGE(TAG, "Cannot play MP4: H264 decoder not ready!");
+        return;
+      }
       this->current_video_sample_ = 0;
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
@@ -3419,14 +3705,29 @@ void SimpleVideoPlayer::stop() {
     ESP_LOGD(TAG, "  Freed input_buffer_: %zu bytes", this->buffer_size_);
   }
 
-  // Free RGB output buffer
+  // Free RGB output buffers
   if (this->rgb_buffer_ != nullptr) {
     total_freed += this->rgb_buffer_size_;
     heap_caps_free(this->rgb_buffer_);
     this->rgb_buffer_ = nullptr;
-    this->rgb_buffer_size_ = 0;
-    ESP_LOGD(TAG, "  Freed rgb_buffer_: %zu bytes", this->rgb_buffer_size_);
+    ESP_LOGD(TAG, "  Freed rgb_buffer_ (front): %zu bytes", this->rgb_buffer_size_);
   }
+
+  if (this->rgb_buffer_back_ != nullptr) {
+    total_freed += this->rgb_buffer_size_;
+    heap_caps_free(this->rgb_buffer_back_);
+    this->rgb_buffer_back_ = nullptr;
+    ESP_LOGD(TAG, "  Freed rgb_buffer_back_ (buffer 1): %zu bytes", this->rgb_buffer_size_);
+  }
+
+  if (this->rgb_buffer_third_ != nullptr) {
+    total_freed += this->rgb_buffer_size_;
+    heap_caps_free(this->rgb_buffer_third_);
+    this->rgb_buffer_third_ = nullptr;
+    ESP_LOGD(TAG, "  Freed rgb_buffer_third_ (buffer 2): %zu bytes", this->rgb_buffer_size_);
+  }
+
+  this->rgb_buffer_size_ = 0;
 
   // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
   if (!this->yuv_buffer_.empty()) {
@@ -3593,7 +3894,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
           const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
                                    (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
           ESP_LOGI(TAG, "⏱️ %s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
-                   codec_name, player->width_, player->height_,
+                   codec_name, player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
           ESP_LOGI(TAG, "💡 Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
@@ -3635,11 +3936,13 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
         uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "⏱️ Frame timing (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "⏱️ Frame timing (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "⏱️ H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                   player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #endif
