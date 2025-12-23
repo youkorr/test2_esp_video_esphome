@@ -130,8 +130,13 @@ if os.path.exists(esp_h264_dir):
         # Clone environment to avoid affecting other files
         dec_env = env.Clone()
 
-        # Dual-task H.264 flags are defined in esp_h264/__init__.py
-        # They are automatically inherited from global build environment
+        # Add DUAL_TASK flags explicitly for esp_h264_dec_sw.c
+        # These MUST be defined for this file to compile correctly
+        dec_env.Append(CPPDEFINES=[
+            ("CONFIG_ESP_H264_DUAL_TASK", "1"),
+            ("CONFIG_ESP_H264_DUAL_TASK_CORE", "1"),
+            ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "17"),
+        ])
 
         # Add required include paths for decoder
         dec_includes = [
