@@ -3851,8 +3851,16 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
     if (fps_measure_start > 0) {
       uint32_t time_elapsed = current_time - fps_measure_start;
       float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
-      ESP_LOGI(TAG, "Performance: %.2f FPS | decode time shown below | target: %.0f FPS",
-               actual_fps, 1000.0f / player->frame_interval_);
+      float avg_interval = time_elapsed / (float)fps_frame_count;
+      ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
+               actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
+
+      // Warn if actual interval is significantly higher than configured
+      if (avg_interval > player->frame_interval_ * 1.5f) {
+        ESP_LOGW(TAG, "LVGL timer callback delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
+                 player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
+        ESP_LOGW(TAG, "Possible causes: ESPHome LVGL update_interval too high, or LVGL handler not called frequently enough");
+      }
     }
 
     // Reset FPS measurement
