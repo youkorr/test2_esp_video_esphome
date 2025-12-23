@@ -41,7 +41,7 @@ esp_video_sources = [
 esp_video_private_include = os.path.join(component_dir, "private_include")
 if os.path.exists(esp_video_private_include):
     env.Append(CPPPATH=[esp_video_private_include])
-    print(f"[ESP-Video Build] 📁 Include privé ajouté: {esp_video_private_include}")
+    print(f"[ESP-Video Build] Include privé ajouté: {esp_video_private_include}")
 
 for src in esp_video_sources:
     src_path = os.path.join(component_dir, src)
@@ -78,7 +78,7 @@ if os.path.exists(esp_cam_sensor_dir):
         inc_path = os.path.join(esp_cam_sensor_dir, inc)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
-            print(f"[ESP-Video Build] 📁 Include sensor ajouté: {inc_path}")
+            print(f"[ESP-Video Build] Include sensor ajouté: {inc_path}")
 
     # Compiler les sources
     for src in esp_cam_sensor_sources:
@@ -158,9 +158,9 @@ if os.path.exists(esp_h264_dir):
             'path': esp_h264_dec_sw_path,
             'env': dec_env
         })
-        print("[ESP-Video Build] ✓ Will compile esp_h264_dec_sw.c with DUAL_TASK flags (core=1, priority=5, IRAM=1)")
+        print("[ESP-Video Build] Will compile esp_h264_dec_sw.c with DUAL_TASK flags (core=1, priority=5, IRAM=1)")
     else:
-        print("[ESP-Video Build] ⚠️  esp_h264_dec_sw.c not found!")
+        print("[ESP-Video Build]  esp_h264_dec_sw.c not found!")
 
     # These flags are now for reference only (main dual-task compile is above)
     env.Append(CPPDEFINES=[
@@ -169,7 +169,7 @@ if os.path.exists(esp_h264_dir):
         ("CONFIG_ESP_H264_DUAL_TASK_PRIORITY", "5"),
         ("CONFIG_ESP_H264_DECODER_IRAM", "1"),
     ])
-    print("[ESP-Video Build] ✓ H.264 DUAL_TASK flags added to global environment")
+    print("[ESP-Video Build] H.264 DUAL_TASK flags added to global environment")
 
     # Ajouter les chemins d'include pour les bibliothèques H.264
     h264_lib_includes = [
@@ -188,18 +188,18 @@ if os.path.exists(esp_h264_dir):
         inc_path = os.path.join(esp_h264_dir, inc)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
-            print(f"[ESP-Video Build] 📁 Include H.264 lib ajouté: {inc}")
+            print(f"[ESP-Video Build] Include H.264 lib ajouté: {inc}")
 
     for inc in h264_hw_includes:
         inc_path = os.path.join(esp_h264_dir, inc)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
-            print(f"[ESP-Video Build] 📁 Include H.264 HW ajouté: {inc}")
+            print(f"[ESP-Video Build] Include H.264 HW ajouté: {inc}")
 
     # Note: H.264 decoder uses tinyh264 (h264bsd), encoder uses OpenH264
     # tinyh264 supports H.264 Baseline profile
-    print(f"[ESP-Video Build] ✓ tinyh264 decoder enabled (H.264 Baseline profile)")
-    print(f"[ESP-Video Build]   ✓ Up to 8K UHD, 8-bit 4:2:0 planar YUV")
+    print(f"[ESP-Video Build] tinyh264 decoder enabled (H.264 Baseline profile)")
+    print(f"[ESP-Video Build]   Up to 8K UHD, 8-bit 4:2:0 planar YUV")
 
     # Link H.264 libraries: tinyh264 (decoder) + OpenH264 (encoder)
     h264_static_libs_dir = os.path.join(esp_h264_dir, "sw/libs/esp32p4")
@@ -225,14 +225,14 @@ if os.path.exists(esp_h264_dir):
             # Link TinyH264 NORMALLY (not --whole-archive) to allow our custom wrapper to override
             env.Append(LIBS=["tinyh264"])
 
-            print(f"[ESP-Video Build] ✓ Linked libopenh264.a (--whole-archive)")
-            print(f"[ESP-Video Build] ✓ Linked libtinyh264.a (NORMAL mode)")
-            print(f"[ESP-Video Build] ℹ️  Custom esp_h264_dec_sw.o (with DUAL_TASK) will override library version")
+            print(f"[ESP-Video Build] Linked libopenh264.a (--whole-archive)")
+            print(f"[ESP-Video Build] Linked libtinyh264.a (NORMAL mode)")
+            print(f"[ESP-Video Build]  Custom esp_h264_dec_sw.o (with DUAL_TASK) will override library version")
         else:
             if not os.path.exists(tinyh264_lib):
-                print(f"[ESP-Video Build] ⚠️  libtinyh264.a not found in {h264_static_libs_dir}")
+                print(f"[ESP-Video Build]  libtinyh264.a not found in {h264_static_libs_dir}")
             if not os.path.exists(openh264_lib):
-                print(f"[ESP-Video Build] ⚠️  libopenh264.a not found in {h264_static_libs_dir}")
+                print(f"[ESP-Video Build]  libopenh264.a not found in {h264_static_libs_dir}")
 
     for src in esp_h264_sources:
         src_path = os.path.join(esp_h264_dir, src)
@@ -259,14 +259,14 @@ if os.path.exists(esp_ipa_dir):
         src_path = os.path.join(esp_ipa_dir, src)
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
-            print(f"[ESP-Video Build] ✓ esp_ipa/{src} -> libesp_video_full.a")
+            print(f"[ESP-Video Build] esp_ipa/{src} -> libesp_video_full.a")
     # print("[ESP-Video Build]")
     # print("[ESP-Video Build] Ces sources seront dans libesp_video_full.a")
     # print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
     # print("[ESP-Video Build] ========================================")
 else:
     pass
-    # print("[ESP-Video Build] ⚠️  Répertoire esp_ipa introuvable!")
+    # print("[ESP-Video Build]  Répertoire esp_ipa introuvable!")
 
 # print("")
 
@@ -312,7 +312,7 @@ if os.path.exists(esp_audio_codec_dir):
         inc_path = os.path.join(esp_audio_codec_dir, inc)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
-            print(f"[ESP-Video Build] 📁 Include audio codec ajouté: {inc}")
+            print(f"[ESP-Video Build] Include audio codec ajouté: {inc}")
 
     # Add source files
     for src in esp_audio_codec_sources:
@@ -326,7 +326,7 @@ if os.path.exists(esp_audio_codec_dir):
     if os.path.exists(audio_codec_lib_dir):
         env.Append(LIBPATH=[audio_codec_lib_dir])
         env.Append(LIBS=["esp_audio_codec", "esp_audio_simple_dec"])
-        print(f"[ESP-Video Build] 📚 Bibliothèques audio codec ajoutées: libesp_audio_codec.a, libesp_audio_simple_dec.a")
+        print(f"[ESP-Video Build] Bibliothèques audio codec ajoutées: libesp_audio_codec.a, libesp_audio_simple_dec.a")
 
 # ========================================================================
 # Embarquer les fichiers JSON IPA des capteurs comme binary data
@@ -392,13 +392,13 @@ const char {symbol_name}_start[] __attribute__((aligned(4))) =
 
             # Ajouter ce wrapper aux sources à compiler
             sources_to_add.append(wrapper_path)
-            print(f"[ESP-Video Build] 📄 JSON embarqué: {os.path.basename(json_path)} -> {symbol_name}")
+            print(f"[ESP-Video Build] JSON embarqué: {os.path.basename(json_path)} -> {symbol_name}")
 
         except Exception as e:
-            print(f"[ESP-Video Build] ⚠️  Erreur lors de l'embedding de {json_path}: {e}")
+            print(f"[ESP-Video Build]  Erreur lors de l'embedding de {json_path}: {e}")
     else:
         pass
-        # print(f"[ESP-Video Build] ⚠️  Fichier JSON introuvable: {json_path}")
+        # print(f"[ESP-Video Build]  Fichier JSON introuvable: {json_path}")
 
 # print("[ESP-Video Build] ========================================")
 # print("")
@@ -430,7 +430,7 @@ for src_file in force_rebuild_files:
             os.remove(obj_file)
             print(f"[ESP-Video Build] 🗑️  DELETED: {obj_file}")
         except Exception as e:
-            print(f"[ESP-Video Build] ⚠️  Could not delete {obj_file}: {e}")
+            print(f"[ESP-Video Build]  Could not delete {obj_file}: {e}")
 
 # Étape 2: Modifier les timestamps des sources
 for src_file in force_rebuild_files:
@@ -442,7 +442,7 @@ for src_file in force_rebuild_files:
         # print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
     else:
         pass
-        # print(f"[ESP-Video Build] ⚠️  File not found: {src_file}")
+        # print(f"[ESP-Video Build]  File not found: {src_file}")
 
 # print("[ESP-Video Build] ========================================")
 
@@ -462,8 +462,8 @@ if sources_to_add:
             obj = custom_env.Object(src_file)
             # CRITICAL: Don't add to objects[] - we'll link it directly later
             h264_dec_obj = obj[0] if isinstance(obj, list) else obj
-            print(f"[ESP-Video Build] ⚡ Compiled {os.path.basename(src_file)} with DUAL_TASK environment")
-            print(f"[ESP-Video Build] ℹ️  This object will be linked DIRECTLY (not in archive) to force precedence")
+            print(f"[ESP-Video Build] Compiled {os.path.basename(src_file)} with DUAL_TASK environment")
+            print(f"[ESP-Video Build]  This object will be linked DIRECTLY (not in archive) to force precedence")
 
     for src_file in sources_to_add:
         # Skip if this file was already compiled with custom environment
@@ -486,7 +486,7 @@ if sources_to_add:
             env.AlwaysBuild(obj)
             # NoCache: Don't use cached version of this object file
             env.NoCache(obj)
-            print(f"[ESP-Video Build] ⚡ ALWAYS BUILD (NO CACHE): {os.path.basename(src_file)}")
+            print(f"[ESP-Video Build] ALWAYS BUILD (NO CACHE): {os.path.basename(src_file)}")
 
         objects.extend(obj)
 
@@ -509,11 +509,11 @@ if sources_to_add:
         )
         # Prepend this library to be linked FIRST
         env.Prepend(LIBS=[h264_custom_lib])
-        print(f"[ESP-Video Build] ✓ Created libh264_decoder_custom.a with DUAL_TASK decoder")
-        print(f"[ESP-Video Build] ✓ This library will be linked FIRST (highest precedence)")
+        print(f"[ESP-Video Build] Created libh264_decoder_custom.a with DUAL_TASK decoder")
+        print(f"[ESP-Video Build] This library will be linked FIRST (highest precedence)")
 
-    # print(f"[ESP-Video Build] ✓ {len(sources_to_add)} fichiers sources ajoutés à la compilation")
-    # print(f"[ESP-Video Build] ✓ libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
+    # print(f"[ESP-Video Build] {len(sources_to_add)} fichiers sources ajoutés à la compilation")
+    # print(f"[ESP-Video Build] libesp_video_full.a créée avec tous les .o (y compris version.o custom)")
 
     # Maintenant linker avec libesp_ipa.a pour les fonctions IPA internes
     # Le linker utilisera notre version.o de libesp_video_full.a (déjà Prepend ci-dessus)
@@ -524,16 +524,16 @@ if sources_to_add:
         env.Append(LIBS=["esp_ipa"])
         # print("")
         # print("[ESP-Video Build] ========================================")
-        # print("[ESP-Video Build] ✓ Linking avec libesp_ipa.a (fonctions IPA internes)")
+        # print("[ESP-Video Build] Linking avec libesp_ipa.a (fonctions IPA internes)")
         # print("[ESP-Video Build]   Ordre de linking:")
         # print("[ESP-Video Build]   1. libesp_video_full.a (version.o custom)")
         # print("[ESP-Video Build]   2. libesp_ipa.a (fonctions internes seulement)")
         # print("[ESP-Video Build] ========================================")
     else:
-        # print("[ESP-Video Build] ⚠️  libesp_ipa.a introuvable!")
+        # print("[ESP-Video Build]  libesp_ipa.a introuvable!")
         pass
 else:
-    # print("[ESP-Video Build] ⚠️ Aucune source trouvée!")
+    # print("[ESP-Video Build] Aucune source trouvée!")
     pass
 
 # Message simple final
