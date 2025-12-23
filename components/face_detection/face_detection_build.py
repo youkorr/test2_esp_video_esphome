@@ -375,23 +375,12 @@ if sources_to_add:
             print(f"[Face Detection] Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # CRITICAL: Force linkage of ALL ESP-DL objects by adding them directly to link command
-        # This resolves "undefined reference" errors for template and non-template functions
-
-        # Method 1: Add all object files directly to the program's source list
-        # This ensures they're linked even if not directly referenced
+        # Force linkage by adding ALL object files to build files list
+        # SCons will compile them first, then link them automatically
         env.Append(PIOBUILDFILES=objects)
 
-        # Method 2: For extra safety, also create object file list and pass to linker
-        # Convert SCons File nodes to paths
-        obj_paths = [str(obj.path) if hasattr(obj, 'path') else str(obj) for obj in objects]
-
-        # Add each object file path to LINKFLAGS to force inclusion
-        for obj_path in obj_paths:
-            env.Append(LINKFLAGS=[obj_path])
-
-        print(f"[Face Detection] {len(sources_to_add)} source files compiled")
-        print(f"[Face Detection] {len(objects)} object files created and forced into linkage")
-        print(f"[Face Detection] CRITICAL: All {len(obj_paths)} objects added to LINKFLAGS")
+        print(f"[Face Detection] {len(sources_to_add)} source files queued for compilation")
+        print(f"[Face Detection] {len(objects)} object files will be compiled and linked")
+        print(f"[Face Detection] All objects added to PIOBUILDFILES for automatic linking")
 
 print("[Face Detection] Build script completed")
