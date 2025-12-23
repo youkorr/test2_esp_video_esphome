@@ -2150,15 +2150,26 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
   clearerr(this->file_);  // Clear any flags from previous operations
 
   // Parse child boxes to find avcC
+  ESP_LOGI(TAG, "Searching for avcC box inside avc1 (end_pos=%ld)...", end_pos);
+  int child_box_count = 0;
   while (this->cached_ftell_() < end_pos && !this->cached_feof_()) {
     long current_pos = this->cached_ftell_();
     uint32_t box_size, box_type;
     if (!this->read_mp4_box_(box_size, box_type)) {
+      ESP_LOGW(TAG, "Failed to read child box at pos=%ld", current_pos);
       clearerr(this->file_);  // Clear EOF flag immediately
       break;
     }
 
+    char fourcc[5] = {0};
+    fourcc[0] = (box_type >> 24) & 0xFF;
+    fourcc[1] = (box_type >> 16) & 0xFF;
+    fourcc[2] = (box_type >> 8) & 0xFF;
+    fourcc[3] = box_type & 0xFF;
+    ESP_LOGI(TAG, "  Child box #%d: '%s', size=%u", child_box_count++, fourcc, box_size);
+
     if (box_type == make_fourcc('a', 'v', 'c', 'C')) {
+      ESP_LOGI(TAG, "Found avcC box! Parsing SPS/PPS...");
       this->parse_avcc_(box_size - 8);
       break;  // We found avcC, no need to continue
     } else {
