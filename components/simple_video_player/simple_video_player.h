@@ -403,6 +403,7 @@ class SimpleVideoPlayer : public Component {
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
   volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
+  volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{10};
@@ -410,7 +411,7 @@ class SimpleVideoPlayer : public Component {
   uint32_t total_duration_ms_{0};
 
   bool controls_visible_{true};
-  uint32_t hide_delay_ms_{3000};
+  uint32_t hide_delay_ms_{5000};  // Auto-hide controls after 5 seconds
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {

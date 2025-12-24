@@ -130,7 +130,10 @@ void SimpleVideoPlayer::setup() {
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
-    this->frame_interval_ = 20;  
+    // Only set default framerate if user hasn't configured one
+    if (!this->fps_override_) {
+      this->frame_interval_ = 20;  // Default: 50 FPS
+    }
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;
   }
@@ -427,7 +430,10 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     }
   } else {
     // For MP4, use configured dimensions initially (will be updated during parsing)
-    this->frame_interval_ = 20;
+    // Only set default framerate if user hasn't configured one
+    if (!this->fps_override_) {
+      this->frame_interval_ = 20;  // Default: 50 FPS
+    }
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;
   }
@@ -755,6 +761,14 @@ void SimpleVideoPlayer::loop() {
       this->auto_play_after_download_ = false;
       this->play();  // Now play() will work since buffer is available
     }
+  }
+
+  // Check if timer callback has requested a stop (e.g., end of video reached)
+  // Process stop in main thread to avoid LVGL conflicts
+  if (this->stop_pending_) {
+    this->stop_pending_ = false;
+    this->stop();
+    return;  // Early exit after stop
   }
 
   // Check if ESP32 timer has decoded a new frame (flag set by esp_timer_cb_)
@@ -3507,28 +3521,31 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
 
-  // Play button (larger and better spaced)
+  // Play button (larger, better spaced, and rounded)
   this->play_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->play_btn_, 65, 50);
   lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, -5);
+  lv_obj_set_style_radius(this->play_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
   lv_obj_t *play_label = lv_label_create(this->play_btn_);
   lv_label_set_text(play_label, LV_SYMBOL_PLAY);
   lv_obj_center(play_label);
   lv_obj_add_event_cb(this->play_btn_, play_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Pause button (larger and better spaced)
+  // Pause button (larger, better spaced, and rounded)
   this->pause_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->pause_btn_, 65, 50);
   lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 90, -5);
+  lv_obj_set_style_radius(this->pause_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
   lv_obj_t *pause_label = lv_label_create(this->pause_btn_);
   lv_label_set_text(pause_label, LV_SYMBOL_PAUSE);
   lv_obj_center(pause_label);
   lv_obj_add_event_cb(this->pause_btn_, pause_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Stop button (larger and better spaced)
+  // Stop button (larger, better spaced, and rounded)
   this->stop_btn_ = lv_btn_create(this->controls_container_);
   lv_obj_set_size(this->stop_btn_, 65, 50);
   lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 170, -5);
+  lv_obj_set_style_radius(this->stop_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
   lv_obj_t *stop_label = lv_label_create(this->stop_btn_);
   lv_label_set_text(stop_label, LV_SYMBOL_STOP);
   lv_obj_center(stop_label);
@@ -3571,16 +3588,16 @@ void SimpleVideoPlayer::create_controls_() {
     format_text = "???";
   }
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -10);
+  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -3);  // Moved up from -10 to -3
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
   lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_16, 0);
 
-  // Resolution label (bottom row, next to format)
+  // Resolution label (bottom row, to the right of format badge)
   this->resolution_label_ = lv_label_create(this->controls_container_);
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 80, -10);
+  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 100, -3);  // Moved right from 80 to 100, up from -10 to -3
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
   lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_16, 0);
 }
@@ -3682,9 +3699,12 @@ void SimpleVideoPlayer::play() {
 #endif
   }
 
+  // CRITICAL: Always reset to beginning when starting from STOPPED state
+  // This handles both normal stop button AND auto-stop when video reaches end
   if (this->state_ == PlayerState::STOPPED) {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       this->cached_fseek_(0, SEEK_SET);
+      this->current_pos_ = 0;
     } else if (this->format_ == MediaFormat::MP4_H264) {
       ESP_LOGI(TAG, "Starting MP4 playback: %u video samples, H264 decoder ready: %s",
                this->video_samples_.size(), this->h264_decoder_ready_ ? "YES" : "NO");
@@ -3712,6 +3732,7 @@ void SimpleVideoPlayer::play() {
       this->sps_pps_sent_ = false;
     }
     this->frame_count_ = 0;
+    this->current_time_ms_ = 0;
   }
 
   this->state_ = PlayerState::PLAYING;
@@ -3775,13 +3796,31 @@ void SimpleVideoPlayer::resume() {
 }
 
 void SimpleVideoPlayer::stop() {
+  // CRITICAL: Set state first so timer callback will early-return
   this->state_ = PlayerState::STOPPED;
+
+  // Clear frame ready flag to prevent LVGL updates after stop
+  this->frame_ready_ = false;
+
+  // Stop the ESP32 timer
   if (this->playback_timer_ != nullptr) {
     esp_timer_stop(this->playback_timer_);
   }
 
-  // Clear frame ready flag to prevent LVGL updates after stop
-  this->frame_ready_ = false;
+  // CRITICAL: Wait for any in-progress timer callback to finish
+  // The callback checks state_ and will exit quickly, but we must ensure
+  // it's not accessing buffers we're about to free
+  if (this->lvgl_mutex_ != nullptr) {
+    // Try to acquire mutex - this ensures timer callback has released it
+    if (xSemaphoreTake(this->lvgl_mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
+      xSemaphoreGive(this->lvgl_mutex_);
+    } else {
+      ESP_LOGW(TAG, "Timeout waiting for timer callback to finish");
+    }
+  }
+
+  // Small delay to absolutely ensure timer callback has exited
+  vTaskDelay(pdMS_TO_TICKS(10));
 
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
     this->cached_fseek_(0, SEEK_SET);
@@ -3973,7 +4012,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       uint32_t time_elapsed = current_time - fps_measure_start;
       float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
       float avg_interval = time_elapsed / (float)fps_frame_count;
-      ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
+      ESP_LOGD(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
                actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
 
       // Note: With ESP32 native timer, delays can still occur if system is heavily loaded
@@ -3981,7 +4020,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       // This is expected and not a timer issue - just system load
       if (avg_interval > player->frame_interval_ * 2.0f) {
         // Only warn if VERY delayed (>2x expected) - indicates serious system overload
-        ESP_LOGW(TAG, "Timer callback VERY delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
+        ESP_LOGD(TAG, "Timer callback VERY delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
                  player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
       }
     }
@@ -4033,11 +4072,11 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
         if (callback_count % 30 == 0) {
           const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
                                    (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
-          ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+          ESP_LOGD(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
                    codec_name, player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
-          ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
+          ESP_LOGD(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
                    100.0f * display_time / total_time);
         }
       }
@@ -4076,12 +4115,12 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
         uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGD(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGD(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
@@ -4154,8 +4193,10 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
   if (end_of_stream) {
     // End of video
     if (!player->loop_) {
-      ESP_LOGI(TAG, "Reached end of video, stopping playback");
-      player->stop();
+      ESP_LOGI(TAG, "Reached end of video, requesting stop");
+      // CRITICAL: Don't call stop() directly from timer callback (causes LVGL conflicts)
+      // Instead, set flag for main thread to process in loop()
+      player->stop_pending_ = true;
 
       // NOTE: We do NOT free the HTTP buffer here to allow replay
       // Buffer will be freed when opening a new video or when component is destroyed
