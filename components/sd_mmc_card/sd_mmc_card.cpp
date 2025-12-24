@@ -92,7 +92,7 @@ void SdMmc::setup() {
     ESP_LOGI(TAG, "Power control pin activated.");
     vTaskDelay(pdMS_TO_TICKS(100));  // Attends 100 ms pour stabiliser l'alimentation
   } else {
-    ESP_LOGW(TAG, "No power control pin defined. Ensure the SD card is always powered.");
+    ESP_LOGD(TAG, "No power control pin defined (SD card always powered)");
   }
 
   // Étape 2 : Configuration optimale pour le montage de la carte SD
@@ -144,7 +144,7 @@ void SdMmc::setup() {
       ESP_LOGI(TAG, "SD Card mounted successfully on slot %d!", this->slot_);
       break;
     }
-    ESP_LOGW(TAG, "Mount attempt %d failed: %s", attempt, esp_err_to_name(ret));
+    ESP_LOGD(TAG, "Mount attempt %d failed: %s (will retry)", attempt, esp_err_to_name(ret));
     vTaskDelay(pdMS_TO_TICKS(100));  // Pause entre tentatives
   }
 
