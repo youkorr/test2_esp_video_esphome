@@ -3562,7 +3562,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_label_set_text(this->format_badge_, format_text);
   lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -8);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_10, 0);
 
   // Resolution label (bottom row, next to format)
   this->resolution_label_ = lv_label_create(this->controls_container_);
@@ -3571,7 +3571,7 @@ void SimpleVideoPlayer::create_controls_() {
   lv_label_set_text(this->resolution_label_, res_text);
   lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 70, -8);
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_12, 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_10, 0);
 }
 
 void SimpleVideoPlayer::play() {
