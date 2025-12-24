@@ -3560,18 +3560,18 @@ void SimpleVideoPlayer::create_controls_() {
   this->format_badge_ = lv_label_create(this->controls_container_);
   const char *format_text = this->format_ == MediaFormat::MP4_H264 ? "MP4" : "MJPEG";
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -8);
+  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -10);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_10, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_16, 0);
 
   // Resolution label (bottom row, next to format)
   this->resolution_label_ = lv_label_create(this->controls_container_);
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 70, -8);
+  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 80, -10);
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_10, 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_16, 0);
 }
 
 void SimpleVideoPlayer::play() {
