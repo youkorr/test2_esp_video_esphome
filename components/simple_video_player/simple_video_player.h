@@ -9,6 +9,9 @@
 #include "lvgl.h"
 #include "driver/jpeg_decode.h"
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUVRGB
+#include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
@@ -256,7 +259,7 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
-  static void timer_cb_(lv_timer_t *timer);
+  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback for precise framerate
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
 
@@ -396,8 +399,12 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *loading_spinner_{nullptr};
   lv_obj_t *controls_container_{nullptr};
   lv_obj_t *touch_layer_{nullptr};
-  lv_timer_t *playback_timer_{nullptr};
+  esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
+  SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
+  volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
+  volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
+  volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{10};
@@ -405,7 +412,7 @@ class SimpleVideoPlayer : public Component {
   uint32_t total_duration_ms_{0};
 
   bool controls_visible_{true};
-  uint32_t hide_delay_ms_{3000};
+  uint32_t hide_delay_ms_{5000};  // Auto-hide controls after 5 seconds
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {

@@ -1768,10 +1768,10 @@ static esp_err_t ov02c10_set_para_value(esp_cam_sensor_device_t *dev, uint32_t i
     }
 
     if (ov02c10_get_sensor_id(dev, &dev->id) != ESP_OK) {
-        ESP_LOGE(TAG, "Get sensor ID failed");
+        ESP_LOGD(TAG, "Get sensor ID failed");
         goto err_free_handler;
     } else if (dev->id.pid != OV02C10_PID) {
-        ESP_LOGE(TAG, "Camera sensor is not OV02C10, PID=0x%x", dev->id.pid);
+        ESP_LOGD(TAG, "Camera sensor is not OV02C10, PID=0x%x", dev->id.pid);
         goto err_free_handler;
     }
     ESP_LOGI(TAG, "Detected Camera sensor PID=0x%x", dev->id.pid);

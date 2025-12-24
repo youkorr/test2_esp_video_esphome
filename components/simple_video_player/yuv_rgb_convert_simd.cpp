@@ -42,7 +42,7 @@ YuvRgbConverterSIMD::YuvRgbConverterSIMD(Colorspace colorspace) : colorspace_(co
   ESP_LOGI(TAG, "  Expected: 3-5x faster than software (~3-5ms @ 480x272)");
   ESP_LOGI(TAG, "  FPS boost: 640×480 35+ FPS, 480×272 100+ FPS");
 #else
-  ESP_LOGW(TAG, "esp_imgfx not available, using optimized software converter");
+  ESP_LOGD(TAG, "esp_imgfx not available (using optimized software converter)");
   this->simd_available_ = false;
 #endif
 }
@@ -75,7 +75,7 @@ void YuvRgbConverterSIMD::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rg
       esp_imgfx_err_t ret = esp_imgfx_color_convert_open(&cfg, (esp_imgfx_color_convert_handle_t*)&this->image_effects_handle_);
 
       if (ret != ESP_IMGFX_ERR_OK || this->image_effects_handle_ == nullptr) {
-        ESP_LOGW(TAG, "esp_imgfx_color_convert_open failed: %d, using software fallback", ret);
+        ESP_LOGD(TAG, "esp_imgfx_color_convert_open failed: %d (using software fallback)", ret);
         this->simd_available_ = false;
         this->convert_i420_to_rgb565_software_(yuv, rgb, width, height);
         return;
@@ -119,7 +119,7 @@ void YuvRgbConverterSIMD::convert_i420_to_rgb565(const uint8_t *yuv, uint8_t *rg
     }
 
     // If SIMD fails, log warning and fall through to software
-    ESP_LOGW(TAG, "esp_imgfx_color_convert_process failed: %d, using software fallback", ret);
+    ESP_LOGD(TAG, "esp_imgfx_color_convert_process failed: %d (using software fallback)", ret);
   }
 #endif
 
