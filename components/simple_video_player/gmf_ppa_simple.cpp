@@ -246,7 +246,7 @@ esp_err_t gmf_ppa_init() {
     printf("========================================\n\n");
 
     if (g_gmf_ppa.initialized) {
-        ESP_LOGW(TAG, "GMF PPA already initialized");
+        ESP_LOGD(TAG, "GMF PPA already initialized");
         return ESP_OK;
     }
 
@@ -296,7 +296,7 @@ esp_err_t gmf_ppa_convert_yuv420_to_rgb565(const uint8_t *yuv_in, uint8_t *rgb_o
 
     esp_err_t ret = ppa_do_scale_rotate_mirror(g_gmf_ppa.ppa_handle, &g_gmf_ppa.ppa_config);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "PPA conversion failed: %s", esp_err_to_name(ret));
+        ESP_LOGD(TAG, "PPA conversion failed: %s (using software)", esp_err_to_name(ret));
     }
     return ret;
 }

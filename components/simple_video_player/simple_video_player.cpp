@@ -71,12 +71,12 @@ void SimpleVideoPlayer::setup() {
   // Supports: PPA hardware (YUV420RGB565), software LUT (fallback)
   esp_err_t ppa_ret = gmf_ppa_init();
   if (ppa_ret != ESP_OK) {
-    ESP_LOGW(TAG, "GMF PPA init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
+    ESP_LOGD(TAG, "GMF PPA init failed: %s (using software conversion)", esp_err_to_name(ppa_ret));
   } else {
     ESP_LOGI(TAG, "GMF PPA initialized (PPA hardware for YUVRGB)");
   }
 #else
-  ESP_LOGW(TAG, "CONFIG_IDF_TARGET_ESP32P4 not defined - PPA hardware unavailable, using software YUVRGB");
+  ESP_LOGD(TAG, "CONFIG_IDF_TARGET_ESP32P4 not defined (using software YUVRGB)");
 #endif
 
   // Open video file
@@ -95,7 +95,7 @@ void SimpleVideoPlayer::setup() {
   // Load file to PSRAM cache if enabled (eliminates SD card overhead)
   if (this->use_file_cache_) {
     if (!this->load_file_to_cache_()) {
-      ESP_LOGW(TAG, "Failed to load file to cache, continuing with normal SD access");
+      ESP_LOGD(TAG, "File not cached (continuing with normal SD access)");
     }
   }
 
@@ -112,7 +112,7 @@ void SimpleVideoPlayer::setup() {
     if (this->detect_jpeg_resolution_(this->actual_width_, this->actual_height_)) {
       ESP_LOGI(TAG, "Auto-detected JPEG resolution: %dx%d", this->actual_width_, this->actual_height_);
     } else {
-      ESP_LOGW(TAG, "Failed to auto-detect resolution, using configured: %dx%d", this->width_, this->height_);
+      ESP_LOGD(TAG, "Auto-detect resolution failed, using configured: %dx%d", this->width_, this->height_);
       this->actual_width_ = this->width_;
       this->actual_height_ = this->height_;
     }
@@ -121,7 +121,7 @@ void SimpleVideoPlayer::setup() {
     // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
     if (!this->detect_avi_framerate_()) {
       if (!this->fps_override_) {
-        ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+        ESP_LOGD(TAG, "AVI framerate not detected, using default: 50 fps");
         // Keep default frame_interval_ = 20ms (50fps)
       } else {
         ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
@@ -162,7 +162,7 @@ void SimpleVideoPlayer::setup() {
     this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                                  VIDEO_BUFFER_CAPS);
     if (this->rgb_buffer_back_ == nullptr) {
-      ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
+      ESP_LOGD(TAG, "Buffer 1 allocation failed (disabling triple buffering)");
       this->use_triple_buffer_ = false;
     } else {
       ESP_LOGI(TAG, "Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -171,7 +171,7 @@ void SimpleVideoPlayer::setup() {
       this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                                     VIDEO_BUFFER_CAPS);
       if (this->rgb_buffer_third_ == nullptr) {
-        ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
+        ESP_LOGD(TAG, "Buffer 2 allocation failed (using double buffering)");
         this->use_triple_buffer_ = false;
       } else {
         ESP_LOGI(TAG, "Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -232,7 +232,7 @@ void SimpleVideoPlayer::setup() {
           this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                        VIDEO_BUFFER_CAPS);
           if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
             this->use_triple_buffer_ = false;
           } else {
             ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -240,7 +240,7 @@ void SimpleVideoPlayer::setup() {
             this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                          VIDEO_BUFFER_CAPS);
             if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
               this->use_triple_buffer_ = false;
             } else {
               ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -260,7 +260,7 @@ void SimpleVideoPlayer::setup() {
     // Initialize audio decoder if speaker is configured
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
         // Continue without audio
       }
     }
@@ -322,7 +322,7 @@ void SimpleVideoPlayer::setup() {
           this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                        VIDEO_BUFFER_CAPS);
           if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
             this->use_triple_buffer_ = false;
           } else {
             ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -330,7 +330,7 @@ void SimpleVideoPlayer::setup() {
             this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                          VIDEO_BUFFER_CAPS);
             if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
               this->use_triple_buffer_ = false;
             } else {
               ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -350,7 +350,7 @@ void SimpleVideoPlayer::setup() {
     // Initialize audio decoder if speaker is configured
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
         // Continue without audio
       }
     }
@@ -412,7 +412,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     if (this->detect_jpeg_resolution_(this->actual_width_, this->actual_height_)) {
       ESP_LOGI(TAG, "Auto-detected JPEG resolution: %dx%d", this->actual_width_, this->actual_height_);
     } else {
-      ESP_LOGW(TAG, "Failed to auto-detect resolution, using configured: %dx%d", this->width_, this->height_);
+      ESP_LOGD(TAG, "Auto-detect resolution failed, using configured: %dx%d", this->width_, this->height_);
       this->actual_width_ = this->width_;
       this->actual_height_ = this->height_;
     }
@@ -421,7 +421,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
     if (!this->detect_avi_framerate_()) {
       if (!this->fps_override_) {
-        ESP_LOGW(TAG, "Failed to detect AVI framerate, using default: 50 fps");
+        ESP_LOGD(TAG, "AVI framerate not detected, using default: 50 fps");
         // Keep default frame_interval_ = 20ms (50fps)
       } else {
         ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
@@ -462,7 +462,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                                  VIDEO_BUFFER_CAPS);
     if (this->rgb_buffer_back_ == nullptr) {
-      ESP_LOGW(TAG, "Failed to allocate buffer 1 - disabling triple buffering");
+      ESP_LOGD(TAG, "Buffer 1 allocation failed (disabling triple buffering)");
       this->use_triple_buffer_ = false;
     } else {
       ESP_LOGI(TAG, "Allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -471,7 +471,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
                                                                     VIDEO_BUFFER_CAPS);
       if (this->rgb_buffer_third_ == nullptr) {
-        ESP_LOGW(TAG, "Failed to allocate buffer 2 - falling back to double buffering");
+        ESP_LOGD(TAG, "Buffer 2 allocation failed (using double buffering)");
         this->use_triple_buffer_ = false;
       } else {
         ESP_LOGI(TAG, "Allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -532,7 +532,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
           this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                        VIDEO_BUFFER_CAPS);
           if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
             this->use_triple_buffer_ = false;
           } else {
             ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -540,7 +540,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
             this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                          VIDEO_BUFFER_CAPS);
             if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
               this->use_triple_buffer_ = false;
             } else {
               ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -560,7 +560,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // Initialize audio decoder if speaker is configured
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
         // Continue without audio
       }
     }
@@ -622,7 +622,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
           this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                        VIDEO_BUFFER_CAPS);
           if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGW(TAG, "Failed to re-allocate buffer 1 - disabling triple buffering");
+            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
             this->use_triple_buffer_ = false;
           } else {
             ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
@@ -630,7 +630,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
             this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
                                                                          VIDEO_BUFFER_CAPS);
             if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGW(TAG, "Failed to re-allocate buffer 2 - falling back to double buffering");
+              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
               this->use_triple_buffer_ = false;
             } else {
               ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
@@ -650,7 +650,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // Initialize audio decoder if speaker is configured
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
-        ESP_LOGW(TAG, "Failed to initialize audio decoder");
+        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
         // Continue without audio
       }
     }
@@ -3692,7 +3692,7 @@ void SimpleVideoPlayer::play() {
     ESP_LOGI(TAG, "Re-initializing GMF PPA hardware...");
     esp_err_t ppa_ret = gmf_ppa_init();
     if (ppa_ret != ESP_OK) {
-      ESP_LOGW(TAG, "GMF PPA re-init failed: %s (will use software conversion)", esp_err_to_name(ppa_ret));
+      ESP_LOGD(TAG, "GMF PPA re-init failed: %s (using software conversion)", esp_err_to_name(ppa_ret));
     } else {
       ESP_LOGI(TAG, "GMF PPA re-initialized (PPA hardware for YUVRGB)");
     }
