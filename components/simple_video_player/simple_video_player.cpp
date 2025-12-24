@@ -3558,7 +3558,18 @@ void SimpleVideoPlayer::create_controls_() {
 
   // Format badge (bottom row, well below buttons)
   this->format_badge_ = lv_label_create(this->controls_container_);
-  const char *format_text = this->format_ == MediaFormat::MP4_H264 ? "MP4" : "MJPEG";
+  const char *format_text;
+  if (this->format_ == MediaFormat::MP4_H264) {
+    format_text = "MP4";
+  } else if (this->format_ == MediaFormat::MKV_H264) {
+    format_text = "MKV";
+  } else if (this->format_ == MediaFormat::MJPEG) {
+    format_text = this->is_avi_format_ ? "AVI" : "MJPEG";
+  } else if (this->format_ == MediaFormat::GIF_ANIMATED) {
+    format_text = "GIF";
+  } else {
+    format_text = "???";
+  }
   lv_label_set_text(this->format_badge_, format_text);
   lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -10);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
