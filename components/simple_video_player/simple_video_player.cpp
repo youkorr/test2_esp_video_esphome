@@ -757,8 +757,15 @@ void SimpleVideoPlayer::loop() {
     }
   }
 
-  // Frame processing is now handled by ESP32 native timer (esp_timer_cb_)
-  // No manual workaround needed - timer fires precisely at configured intervals
+  // Check if ESP32 timer has decoded a new frame (flag set by esp_timer_cb_)
+  // Update LVGL display from main thread to avoid async render conflicts
+  if (this->frame_ready_ && this->lvgl_mutex_ != nullptr) {
+    if (xSemaphoreTake(this->lvgl_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+      this->frame_ready_ = false;  // Clear flag
+      this->update_display_();
+      xSemaphoreGive(this->lvgl_mutex_);
+    }
+  }
 }
 
 void SimpleVideoPlayer::dump_config() {
@@ -3419,11 +3426,9 @@ void SimpleVideoPlayer::update_display_() {
     this->current_write_buffer_ = 1 - this->current_write_buffer_;
   }
 
-  // Force immediate invalidation and synchronous rendering
-  // lv_refr_now() ensures rendering happens NOW, not deferred
-  // This prevents LVGL warning about modifying dirty areas during async render
+  // Invalidate canvas to trigger LVGL refresh
+  // Called from main thread (via loop()), so no threading conflicts
   lv_obj_invalidate(this->canvas_);
-  lv_refr_now(NULL);  // Force synchronous refresh to avoid async render conflicts
 
   // Update UI controls only every 30 frames (~1 second at 30fps) to minimize overhead
   if (this->frame_count_ % 30 == 0) {
@@ -3923,18 +3928,12 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
 }
 
 // ESP32 native timer callback for precise framerate control
+// This runs in ESP timer task - only decode frames, don't touch LVGL
+// LVGL update is done in main thread (loop()) when frame_ready_ flag is set
 void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
 
   if (player->state_ != PlayerState::PLAYING) {
-    return;
-  }
-
-  // Lock LVGL mutex for thread-safe access from ESP timer task
-  // Timeout after 100ms to avoid blocking the timer if LVGL is stuck
-  if (player->lvgl_mutex_ == nullptr ||
-      xSemaphoreTake(player->lvgl_mutex_, pdMS_TO_TICKS(100)) != pdTRUE) {
-    // Failed to acquire mutex, skip this frame
     return;
   }
 
@@ -4000,10 +3999,10 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
           player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
         }
 
-        // Measure LVGL display update time
-        uint32_t display_start = esp_timer_get_time() / 1000;
-        player->update_display_();
-        uint32_t display_time = (esp_timer_get_time() / 1000) - display_start;
+        // Signal main thread that frame is ready for LVGL update
+        // Don't call update_display_() here - it must run in main thread to avoid LVGL conflicts
+        player->frame_ready_ = true;
+        uint32_t display_time = 0;  // Will be measured in main thread
 
         got_frame = true;
 
@@ -4043,9 +4042,9 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
           player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
         }
 
-        uint32_t display_start = esp_timer_get_time() / 1000;
-        player->update_display_();
-        uint32_t display_time = (esp_timer_get_time() / 1000) - display_start;
+        // Signal main thread that frame is ready for LVGL update
+        player->frame_ready_ = true;
+        uint32_t display_time = 0;  // Will be measured in main thread
 
         got_frame = true;
 
@@ -4097,7 +4096,8 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
         if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
           player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
         }
-        player->update_display_();
+        // Signal main thread that frame is ready for LVGL update
+        player->frame_ready_ = true;
         got_frame = true;
 
         uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
@@ -4140,11 +4140,6 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       // Buffer will be freed when opening a new video or when component is destroyed
       // If you want to free memory immediately after playback, call stop() manually
     }
-  }
-
-  // Release LVGL mutex
-  if (player->lvgl_mutex_ != nullptr) {
-    xSemaphoreGive(player->lvgl_mutex_);
   }
 }
 
