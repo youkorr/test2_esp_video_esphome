@@ -759,7 +759,7 @@ void SimpleVideoPlayer::loop() {
 
   // Check if ESP32 timer has decoded a new frame (flag set by esp_timer_cb_)
   // Update LVGL display from main thread to avoid async render conflicts
-  if (this->frame_ready_ && this->lvgl_mutex_ != nullptr) {
+  if (this->frame_ready_ && this->state_ == PlayerState::PLAYING && this->lvgl_mutex_ != nullptr) {
     if (xSemaphoreTake(this->lvgl_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
       this->frame_ready_ = false;  // Clear flag
       this->update_display_();
@@ -1356,6 +1356,12 @@ bool SimpleVideoPlayer::parse_avi_header_() {
     } else {
       ESP_LOGI(TAG, "AVI: framerate=%.2f fps (detected but ignored - using user config %.2f fps), total_frames=%u",
                fps, 1000.0f / this->frame_interval_, this->avi_total_frames_);
+    }
+
+    // Set total_frames for slider/progress tracking
+    this->total_frames_ = this->avi_total_frames_;
+    if (this->avi_total_frames_ > 0) {
+      this->total_duration_ms_ = this->avi_total_frames_ * this->frame_interval_;
     }
   }
 
@@ -3763,6 +3769,9 @@ void SimpleVideoPlayer::stop() {
     esp_timer_stop(this->playback_timer_);
   }
 
+  // Clear frame ready flag to prevent LVGL updates after stop
+  this->frame_ready_ = false;
+
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
     this->cached_fseek_(0, SEEK_SET);
   } else if (this->format_ == MediaFormat::MP4_H264) {
@@ -3956,12 +3965,13 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
                actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
 
-      // Warn if actual interval is significantly higher than configured
-      // With ESP32 native timer, this should rarely happen (only if system is heavily loaded)
-      if (avg_interval > player->frame_interval_ * 1.5f) {
-        ESP_LOGW(TAG, "Timer callback delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
+      // Note: With ESP32 native timer, delays can still occur if system is heavily loaded
+      // (e.g., WiFi, audio processing, face detection running concurrently)
+      // This is expected and not a timer issue - just system load
+      if (avg_interval > player->frame_interval_ * 2.0f) {
+        // Only warn if VERY delayed (>2x expected) - indicates serious system overload
+        ESP_LOGW(TAG, "Timer callback VERY delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
                  player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
-        ESP_LOGW(TAG, "System may be overloaded (ESP32 native timer should be precise)");
       }
     }
 
