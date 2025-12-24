@@ -3588,7 +3588,7 @@ void SimpleVideoPlayer::create_controls_() {
     format_text = "???";
   }
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, 0);  // Moved down: -3 → 0 (flush with bottom edge)
+  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, 5);  // Moved down further: 0 → 5 (extends below container)
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
   lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_16, 0);
 
@@ -3597,7 +3597,7 @@ void SimpleVideoPlayer::create_controls_() {
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 110, 0);  // Moved right: 100 → 110, down: -3 → 0
+  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 110, 5);  // Moved down further: 0 → 5
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
   lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_16, 0);
 }
