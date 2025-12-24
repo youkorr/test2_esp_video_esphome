@@ -402,6 +402,7 @@ class SimpleVideoPlayer : public Component {
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
+  volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{10};

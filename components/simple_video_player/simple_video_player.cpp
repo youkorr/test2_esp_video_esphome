@@ -3419,8 +3419,11 @@ void SimpleVideoPlayer::update_display_() {
     this->current_write_buffer_ = 1 - this->current_write_buffer_;
   }
 
-  // Force immediate invalidation and rendering
+  // Force immediate invalidation and synchronous rendering
+  // lv_refr_now() ensures rendering happens NOW, not deferred
+  // This prevents LVGL warning about modifying dirty areas during async render
   lv_obj_invalidate(this->canvas_);
+  lv_refr_now(NULL);  // Force synchronous refresh to avoid async render conflicts
 
   // Update UI controls only every 30 frames (~1 second at 30fps) to minimize overhead
   if (this->frame_count_ % 30 == 0) {
