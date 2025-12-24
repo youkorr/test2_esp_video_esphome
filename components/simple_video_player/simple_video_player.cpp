@@ -4020,7 +4020,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
     static uint32_t last_drop_warning = 0;
     uint32_t now = esp_timer_get_time() / 1000;
     if (now - last_drop_warning > 1000) {  // Warn max once per second
-      ESP_LOGW(TAG, "Frame drops detected: %lu frames (loop() too slow - try lowering FPS/resolution)",
+      ESP_LOGI(TAG, "Frame drops: %lu frames (system load - consider lowering FPS/resolution)",
                (unsigned long)player->frames_dropped_);
       last_drop_warning = now;
     }
@@ -4043,7 +4043,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       uint32_t time_elapsed = current_time - fps_measure_start;
       float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
       float avg_interval = time_elapsed / (float)fps_frame_count;
-      ESP_LOGD(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
+      ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
                actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
 
       // Note: With ESP32 native timer, delays can still occur if system is heavily loaded
@@ -4051,7 +4051,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       // This is expected and not a timer issue - just system load
       if (avg_interval > player->frame_interval_ * 2.0f) {
         // Only warn if VERY delayed (>2x expected) - indicates serious system overload
-        ESP_LOGD(TAG, "Timer callback VERY delayed! Expected %ums, actual %.1fms (%.0f%% slower)",
+        ESP_LOGI(TAG, "Timer callback delayed: Expected %ums, actual %.1fms (%.0f%% slower)",
                  player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
       }
     }
@@ -4103,11 +4103,11 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
         if (callback_count % 30 == 0) {
           const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
                                    (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
-          ESP_LOGD(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+          ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
                    codec_name, player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
-          ESP_LOGD(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
+          ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
                    100.0f * display_time / total_time);
         }
       }
@@ -4146,12 +4146,12 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
         uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
         if (callback_count % 30 == 0) {
 #ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGD(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
 #else
-          ESP_LOGD(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+          ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
                    player->actual_width_, player->actual_height_,
                    (unsigned long)total_time, (unsigned long)read_time,
                    (unsigned long)decode_time, (unsigned long)display_time);
