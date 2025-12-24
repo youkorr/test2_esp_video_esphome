@@ -104,7 +104,8 @@ void SdMmc::setup() {
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.slot = SDMMC_HOST_SLOT_0 + this->slot_;  // Utilise le slot configuré
-  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;  // 50MHz
+  host.max_freq_khz = SDMMC_FREQ_52M;  // 52MHz (au lieu de SDMMC_FREQ_HIGHSPEED 40MHz)
+                                        // Gain: +30% de vitesse théorique sur cartes compatibles
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
@@ -163,8 +164,17 @@ void SdMmc::setup() {
   ESP_LOGI(TAG, "SD Card Info (slot %d):", this->slot_);
   ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
   ESP_LOGI(TAG, "  Type: %s", sd_card_type().c_str());
-  ESP_LOGI(TAG, "  Speed: %d kHz (max: %d kHz)", this->card_->max_freq_khz, SDMMC_FREQ_HIGHSPEED);
+  ESP_LOGI(TAG, "  Speed: %d kHz (requested: %d kHz)", this->card_->real_freq_khz, SDMMC_FREQ_52M);
+  ESP_LOGI(TAG, "  Bus width: %d-bit", this->mode_1bit_ ? 1 : 4);
+  ESP_LOGI(TAG, "  DDR mode: %s", this->card_->is_ddr ? "YES" : "NO");
   ESP_LOGI(TAG, "  Size: %llu MB", ((uint64_t)this->card_->csd.capacity * this->card_->csd.sector_size) / (1024 * 1024));
+
+  // Performance diagnostic
+  float theoretical_speed_mbps = (this->card_->real_freq_khz / 1000.0) * (this->mode_1bit_ ? 1 : 4) / 8.0;
+  if (this->card_->is_ddr) {
+    theoretical_speed_mbps *= 2;  // DDR doubles the data rate
+  }
+  ESP_LOGI(TAG, "  Theoretical max speed: %.1f MB/s", theoretical_speed_mbps);
 
   update_sensors();
 }
