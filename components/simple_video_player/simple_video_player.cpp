@@ -771,6 +771,20 @@ void SimpleVideoPlayer::loop() {
     return;  // Early exit after stop
   }
 
+  // WORKAROUND: Call ESP32 timer callback manually from loop() for precise timing
+  // This ensures video plays at configured FPS regardless of timer firing rate
+  // The ESP32 timer runs in a separate task, but we can boost performance by calling directly
+  if (this->state_ == PlayerState::PLAYING && this->playback_timer_ != nullptr) {
+    uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+    uint32_t elapsed = current_time - this->last_frame_time_;
+
+    // If enough time has passed, manually trigger the timer callback
+    if (elapsed >= this->frame_interval_) {
+      this->last_frame_time_ = current_time;
+      esp_timer_cb_(this->playback_timer_);
+    }
+  }
+
   // Check if ESP32 timer has decoded a new frame (flag set by esp_timer_cb_)
   // Update LVGL display from main thread to avoid async render conflicts
   if (this->frame_ready_ && this->state_ == PlayerState::PLAYING && this->lvgl_mutex_ != nullptr) {
@@ -3737,6 +3751,9 @@ void SimpleVideoPlayer::play() {
 
   // Reset frame drop counter at start of playback
   this->frames_dropped_ = 0;
+
+  // Initialize manual timing for loop() workaround
+  this->last_frame_time_ = esp_timer_get_time() / 1000;
 
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
