@@ -363,6 +363,12 @@ void SimpleVideoPlayer::setup() {
   // Create UI
   this->create_ui_();
 
+  // Create mutex for thread-safe LVGL access from timer callback
+  this->lvgl_mutex_ = xSemaphoreCreateMutex();
+  if (this->lvgl_mutex_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create LVGL mutex");
+  }
+
   // Create ESP32 native timer for precise framerate control
   // This replaces the broken LVGL timer that ignores configured intervals
   esp_timer_create_args_t timer_args = {
@@ -653,6 +659,12 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
   // Create UI
   this->create_ui_();
+
+  // Create mutex for thread-safe LVGL access from timer callback
+  this->lvgl_mutex_ = xSemaphoreCreateMutex();
+  if (this->lvgl_mutex_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create LVGL mutex");
+  }
 
   // Create ESP32 native timer for precise framerate control
   // This replaces the broken LVGL timer that ignores configured intervals
@@ -3915,6 +3927,14 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
     return;
   }
 
+  // Lock LVGL mutex for thread-safe access from ESP timer task
+  // Timeout after 100ms to avoid blocking the timer if LVGL is stuck
+  if (player->lvgl_mutex_ == nullptr ||
+      xSemaphoreTake(player->lvgl_mutex_, pdMS_TO_TICKS(100)) != pdTRUE) {
+    // Failed to acquire mutex, skip this frame
+    return;
+  }
+
   static uint32_t last_callback_time = 0;
   uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
 
@@ -4117,6 +4137,11 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       // Buffer will be freed when opening a new video or when component is destroyed
       // If you want to free memory immediately after playback, call stop() manually
     }
+  }
+
+  // Release LVGL mutex
+  if (player->lvgl_mutex_ != nullptr) {
+    xSemaphoreGive(player->lvgl_mutex_);
   }
 }
 

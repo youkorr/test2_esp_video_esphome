@@ -10,6 +10,8 @@
 #include "driver/jpeg_decode.h"
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUVRGB
 #include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
@@ -399,6 +401,7 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *touch_layer_{nullptr};
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
+  SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{10};
