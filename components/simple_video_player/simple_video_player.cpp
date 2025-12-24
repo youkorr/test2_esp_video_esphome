@@ -3735,6 +3735,9 @@ void SimpleVideoPlayer::play() {
     this->current_time_ms_ = 0;
   }
 
+  // Reset frame drop counter at start of playback
+  this->frames_dropped_ = 0;
+
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
     // Start ESP32 native timer with precise interval
@@ -3945,6 +3948,19 @@ void SimpleVideoPlayer::stop() {
   ESP_LOGI(TAG, "Playback stopped - freed %zu bytes (%.2f MB) from SPIRAM",
            total_freed, total_freed / (1024.0 * 1024.0));
   ESP_LOGI(TAG, "NOTE: H.264 decoder also freed internal SPIRAM (amount not tracked)");
+
+  // Log playback statistics
+  if (this->frame_count_ > 0) {
+    float drop_rate = (this->frames_dropped_ * 100.0f) / (this->frame_count_ + this->frames_dropped_);
+    if (this->frames_dropped_ > 0) {
+      ESP_LOGW(TAG, "Playback stats: %lu frames played, %lu dropped (%.1f%% drop rate)",
+               (unsigned long)this->frame_count_, (unsigned long)this->frames_dropped_, drop_rate);
+      ESP_LOGW(TAG, "Frame drops indicate system overload - consider lowering FPS or resolution");
+    } else {
+      ESP_LOGI(TAG, "Playback stats: %lu frames played, 0 dropped (perfect!)",
+               (unsigned long)this->frame_count_);
+    }
+  }
 }
 
 // Static callbacks
@@ -3994,6 +4010,21 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
 
   if (player->state_ != PlayerState::PLAYING) {
     return;
+  }
+
+  // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
+  // If frame_ready_ is true, main thread hasn't processed the last frame yet
+  // Decoding a new frame would OVERWRITE the previous one → frame drop!
+  if (player->frame_ready_) {
+    player->frames_dropped_++;
+    static uint32_t last_drop_warning = 0;
+    uint32_t now = esp_timer_get_time() / 1000;
+    if (now - last_drop_warning > 1000) {  // Warn max once per second
+      ESP_LOGW(TAG, "Frame drops detected: %lu frames (loop() too slow - try lowering FPS/resolution)",
+               (unsigned long)player->frames_dropped_);
+      last_drop_warning = now;
+    }
+    return;  // Skip this timer iteration to avoid overwriting unprocessed frame
   }
 
   static uint32_t last_callback_time = 0;

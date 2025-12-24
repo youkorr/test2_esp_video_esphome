@@ -404,6 +404,7 @@ class SimpleVideoPlayer : public Component {
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
   volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
   volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
+  volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{10};
