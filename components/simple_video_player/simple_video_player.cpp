@@ -3502,33 +3502,33 @@ void SimpleVideoPlayer::create_controls_() {
 
   // Controls container at bottom (use actual video width) - made taller for badges
   this->controls_container_ = lv_obj_create(parent);
-  lv_obj_set_size(this->controls_container_, this->actual_width_, 90);
+  lv_obj_set_size(this->controls_container_, this->actual_width_, 100);
   lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
 
-  // Play button
+  // Play button (larger and better spaced)
   this->play_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->play_btn_, 50, 40);
-  lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, 0);
+  lv_obj_set_size(this->play_btn_, 65, 50);
+  lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, -5);
   lv_obj_t *play_label = lv_label_create(this->play_btn_);
   lv_label_set_text(play_label, LV_SYMBOL_PLAY);
   lv_obj_center(play_label);
   lv_obj_add_event_cb(this->play_btn_, play_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Pause button
+  // Pause button (larger and better spaced)
   this->pause_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->pause_btn_, 50, 40);
-  lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 70, 0);
+  lv_obj_set_size(this->pause_btn_, 65, 50);
+  lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 90, -5);
   lv_obj_t *pause_label = lv_label_create(this->pause_btn_);
   lv_label_set_text(pause_label, LV_SYMBOL_PAUSE);
   lv_obj_center(pause_label);
   lv_obj_add_event_cb(this->pause_btn_, pause_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Stop button
+  // Stop button (larger and better spaced)
   this->stop_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->stop_btn_, 50, 40);
-  lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 130, 0);
+  lv_obj_set_size(this->stop_btn_, 65, 50);
+  lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 170, -5);
   lv_obj_t *stop_label = lv_label_create(this->stop_btn_);
   lv_label_set_text(stop_label, LV_SYMBOL_STOP);
   lv_obj_center(stop_label);
@@ -3536,8 +3536,8 @@ void SimpleVideoPlayer::create_controls_() {
 
   // Progress slider (enhanced style)
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_size(this->slider_, this->actual_width_ - 300, 12);
-  lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 190, 0);
+  lv_obj_set_size(this->slider_, this->actual_width_ - 350, 12);
+  lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 245, -5);
   lv_slider_set_range(this->slider_, 0, 100);
 
   // Style the slider for better visibility
@@ -3556,22 +3556,22 @@ void SimpleVideoPlayer::create_controls_() {
   lv_obj_align(this->time_label_, LV_ALIGN_TOP_RIGHT, -10, 5);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
 
-  // Format badge (bottom row, left side)
+  // Format badge (bottom row, well below buttons)
   this->format_badge_ = lv_label_create(this->controls_container_);
   const char *format_text = this->format_ == MediaFormat::MP4_H264 ? "MP4" : "MJPEG";
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -5);
+  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, -8);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_12, 0);
 
   // Resolution label (bottom row, next to format)
   this->resolution_label_ = lv_label_create(this->controls_container_);
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 80, -5);
+  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 70, -8);
   lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_14, 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_12, 0);
 }
 
 void SimpleVideoPlayer::play() {
