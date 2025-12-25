@@ -34,6 +34,21 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "   Camera: Operationnelle");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
+
+  // Log transformation settings
+  if (this->rotation_ != 0 || this->mirror_x_ || this->mirror_y_) {
+    ESP_LOGI(TAG, "   Transformations (applied in LVGL, not PPA):");
+    if (this->rotation_ != 0) {
+      ESP_LOGI(TAG, "      Rotation: %d°", this->rotation_);
+    }
+    if (this->mirror_x_) {
+      ESP_LOGI(TAG, "      Mirror X: enabled");
+    }
+    if (this->mirror_y_) {
+      ESP_LOGI(TAG, "      Mirror Y: enabled");
+    }
+  }
+
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
 }
 
@@ -192,6 +207,37 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
     lv_coord_t w = lv_obj_get_width(canvas);
     lv_coord_t h = lv_obj_get_height(canvas);
     ESP_LOGI(TAG, "   Taille canvas: %dx%d", w, h);
+
+    // Apply LVGL transformations (rotation and mirroring)
+    if (this->rotation_ != 0 || this->mirror_x_ || this->mirror_y_) {
+      ESP_LOGI(TAG, "   Applying LVGL transformations:");
+
+      // Apply rotation
+      if (this->rotation_ != 0) {
+        int16_t angle = (this->rotation_ * 10);  // LVGL uses 0.1 degree units
+        lv_obj_set_style_transform_angle(canvas, angle, 0);
+
+        // Set pivot point to center for rotation
+        lv_obj_set_style_transform_pivot_x(canvas, w / 2, 0);
+        lv_obj_set_style_transform_pivot_y(canvas, h / 2, 0);
+
+        ESP_LOGI(TAG, "      Rotation: %d°", this->rotation_);
+      }
+
+      // Apply mirroring using LVGL transform
+      if (this->mirror_x_ || this->mirror_y_) {
+        // Note: LVGL doesn't have direct mirror, but we can use negative scale
+        // For now, log a warning - mirror will need pixel-level transformation
+        if (this->mirror_x_) {
+          ESP_LOGW(TAG, "      Mirror X: Not yet implemented in LVGL transform");
+          ESP_LOGW(TAG, "      → Use rotation instead, or implement pixel transformation");
+        }
+        if (this->mirror_y_) {
+          ESP_LOGW(TAG, "      Mirror Y: Not yet implemented in LVGL transform");
+          ESP_LOGW(TAG, "      → Use rotation instead, or implement pixel transformation");
+        }
+      }
+    }
   }
 }
 

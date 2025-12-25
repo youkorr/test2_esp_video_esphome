@@ -24,6 +24,9 @@ class LVGLCameraDisplay : public Component {
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
+  void set_rotation(int rotation) { this->rotation_ = rotation; }
+  void set_mirror_x(bool mirror) { this->mirror_x_ = mirror; }
+  void set_mirror_y(bool mirror) { this->mirror_y_ = mirror; }
 #ifdef USE_FACE_DETECTION
   void set_face_detection(face_detection::FaceDetectionComponent *face_detect) { this->face_detection_ = face_detect; }
 #endif
@@ -54,6 +57,11 @@ class LVGLCameraDisplay : public Component {
   uint32_t last_fps_time_{0};
 
   lv_timer_t *lvgl_timer_{nullptr};
+
+  // Transformation parameters (applied in LVGL, not PPA)
+  int rotation_{0};        // 0, 90, 180, 270
+  bool mirror_x_{false};   // Horizontal mirror
+  bool mirror_y_{false};   // Vertical mirror
 
   // Buffer pool tracking (pour release apres affichage)
   esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};

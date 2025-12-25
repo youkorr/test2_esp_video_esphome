@@ -9,6 +9,9 @@ CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
 CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FACE_DETECTION_ID = "face_detection_id"
+CONF_ROTATION = "rotation"
+CONF_MIRROR_X = "mirror_x"
+CONF_MIRROR_Y = "mirror_y"
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -25,6 +28,9 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_UPDATE_INTERVAL, default="33ms"): cv.positive_time_period_milliseconds,
     cv.Optional(CONF_FACE_DETECTION_ID): cv.use_id(FaceDetectionComponent),
+    cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
+    cv.Optional(CONF_MIRROR_X, default=False): cv.boolean,
+    cv.Optional(CONF_MIRROR_Y, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -39,6 +45,11 @@ async def to_code(config):
 
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
+
+    # Add transformation parameters
+    cg.add(var.set_rotation(config[CONF_ROTATION]))
+    cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
+    cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
 
     if CONF_FACE_DETECTION_ID in config:
         cg.add_define("USE_FACE_DETECTION")
