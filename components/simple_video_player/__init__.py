@@ -77,20 +77,10 @@ async def to_code(config):
     if CONF_MEDIA_PLAYER_ENTITY in config:
         cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
 
-    # Add esp_audio_codec include paths for AAC decoder support
+    # esp_audio_codec has been removed (not working)
     import os
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
-
-    audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
-    if os.path.exists(audio_codec_dir):
-        # Add main include directory
-        cg.add_build_flag(f"-I{audio_codec_dir}/include")
-        # Add decoder include directory
-        cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder")
-        # Add codec implementations
-        cg.add_build_flag(f"-I{audio_codec_dir}/include/codec")
-        cg.add_build_flag(f"-I{audio_codec_dir}/include/decoder/impl")
 
     # Add build script for linking H264 and audio codec libraries
     # AND compiling additional source files

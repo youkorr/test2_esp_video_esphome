@@ -257,13 +257,12 @@ void SimpleVideoPlayer::setup() {
       return;
     }
 
-    // Initialize audio decoder if speaker is configured
-    if (this->speaker_ != nullptr && this->has_audio_) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-        // Continue without audio
-      }
-    }
+    // Audio codec removed (not working)
+    // if (this->speaker_ != nullptr && this->has_audio_) {
+    //   if (!this->init_aac_decoder_()) {
+    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
+    //   }
+    // }
   } else if (this->format_ == MediaFormat::MKV_H264) {
     // Parse MKV file (this will extract resolution)
     if (!this->parse_mkv_()) {
@@ -347,13 +346,12 @@ void SimpleVideoPlayer::setup() {
       return;
     }
 
-    // Initialize audio decoder if speaker is configured
-    if (this->speaker_ != nullptr && this->has_audio_) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-        // Continue without audio
-      }
-    }
+    // Audio codec removed (not working)
+    // if (this->speaker_ != nullptr && this->has_audio_) {
+    //   if (!this->init_aac_decoder_()) {
+    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
+    //   }
+    // }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -557,13 +555,12 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       return;
     }
 
-    // Initialize audio decoder if speaker is configured
-    if (this->speaker_ != nullptr && this->has_audio_) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-        // Continue without audio
-      }
-    }
+    // Audio codec removed (not working)
+    // if (this->speaker_ != nullptr && this->has_audio_) {
+    //   if (!this->init_aac_decoder_()) {
+    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
+    //   }
+    // }
   } else if (this->format_ == MediaFormat::MKV_H264) {
     // Parse MKV file (this will extract resolution)
     if (!this->parse_mkv_()) {
@@ -647,13 +644,12 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       return;
     }
 
-    // Initialize audio decoder if speaker is configured
-    if (this->speaker_ != nullptr && this->has_audio_) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-        // Continue without audio
-      }
-    }
+    // Audio codec removed (not working)
+    // if (this->speaker_ != nullptr && this->has_audio_) {
+    //   if (!this->init_aac_decoder_()) {
+    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
+    //   }
+    // }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -2328,11 +2324,11 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
     } while (b & 0x80);
 
     if (tag == 0x05) {  // DecoderSpecificInfo
-      // This is the AAC config
+      // This is the AAC config (audio codec removed - not working)
       this->audio_config_.resize(len);
       this->cached_fread_(this->audio_config_.data(), 1, len);
-      this->has_audio_ = true;
-      ESP_LOGI(TAG, "Found AAC config: %d bytes", len);
+      // this->has_audio_ = true;  // Audio codec removed
+      ESP_LOGI(TAG, "Found AAC config: %d bytes (audio codec disabled)", len);
       break;
     } else {
       // Skip other descriptors (but parse nested ones)
@@ -2357,151 +2353,17 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
 // AUDIO DECODER
 // ==============================================
 
-bool SimpleVideoPlayer::init_aac_decoder_() {
-#if USE_ESP_AUDIO_CODEC
-  if (this->speaker_ == nullptr || !this->has_audio_) {
-    return false;
-  }
+// Audio codec removed (not working)
+// bool SimpleVideoPlayer::init_aac_decoder_() { ... }
 
-  // Register AAC decoder
-  esp_aac_dec_register();
+// Audio codec removed (not working)
+// bool SimpleVideoPlayer::read_next_audio_sample_() { ... }
 
-  // Configure AAC decoder
-  esp_aac_dec_cfg_t aac_cfg = {
-    .aac_plus_enable = true,
-  };
+// Audio codec removed (not working)
+// bool SimpleVideoPlayer::decode_audio_frame_() { ... }
 
-  esp_audio_dec_cfg_t dec_cfg = {
-    .type = ESP_AUDIO_TYPE_AAC,
-    .cfg = &aac_cfg,
-    .cfg_sz = sizeof(aac_cfg),
-  };
-
-  // Create decoder instance
-  esp_audio_err_t ret = esp_audio_dec_open(&dec_cfg, &this->aac_decoder_);
-  if (ret != ESP_AUDIO_ERR_OK || this->aac_decoder_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to create AAC decoder: %d", ret);
-    return false;
-  }
-
-  // Allocate audio buffers (larger for decoded PCM)
-  this->audio_input_buffer_ = (uint8_t *)heap_caps_malloc(8192,
-                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  this->audio_output_buffer_ = (uint8_t *)heap_caps_malloc(16384,
-                                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-
-  if (!this->audio_input_buffer_ || !this->audio_output_buffer_) {
-    ESP_LOGE(TAG, "Failed to allocate audio buffers");
-    esp_audio_dec_close(this->aac_decoder_);
-    this->aac_decoder_ = nullptr;
-    return false;
-  }
-
-  this->aac_decoder_ready_ = true;
-  ESP_LOGI(TAG, "AAC decoder initialized: %d Hz, %d channels",
-           this->audio_sample_rate_, this->audio_channels_);
-
-  return true;
-#else
-  ESP_LOGW(TAG, "AAC decoder not available - esp_audio_codec not found");
-  return false;
-#endif
-}
-
-bool SimpleVideoPlayer::read_next_audio_sample_() {
-  if (this->current_audio_sample_ >= this->audio_samples_.size()) {
-    return false;
-  }
-
-  AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
-
-  // Seek to sample position
-  this->cached_fseek_(sample.offset, SEEK_SET);
-
-  // Read sample data
-  if (sample.size > 8192) {
-    ESP_LOGW(TAG, "Audio sample too large: %u", sample.size);
-    this->current_audio_sample_++;
-    return false;
-  }
-
-  size_t bytes_read = this->cached_fread_(this->audio_input_buffer_, 1, sample.size);
-  if (bytes_read != sample.size) {
-    return false;
-  }
-
-  this->audio_input_size_ = sample.size;
-  this->current_audio_sample_++;
-
-  return true;
-}
-
-bool SimpleVideoPlayer::decode_audio_frame_() {
-#if USE_ESP_AUDIO_CODEC
-  if (!this->aac_decoder_ready_ || this->speaker_ == nullptr || this->audio_input_size_ == 0) {
-    return false;
-  }
-
-  // Prepare input frame
-  esp_audio_dec_in_raw_t in_frame = {
-    .buffer = this->audio_input_buffer_,
-    .len = this->audio_input_size_,
-    .consumed = 0,
-  };
-
-  // Prepare output frame
-  esp_audio_dec_out_frame_t out_frame = {
-    .buffer = this->audio_output_buffer_,
-    .len = 16384,
-    .decoded_size = 0,
-  };
-
-  // Decode AAC to PCM
-  esp_audio_err_t ret = esp_audio_dec_process(this->aac_decoder_, &in_frame, &out_frame);
-  if (ret != ESP_AUDIO_ERR_OK) {
-    ESP_LOGW(TAG, "AAC decode failed: %d", ret);
-    return false;
-  }
-
-  // Send decoded PCM to speaker
-  if (out_frame.decoded_size > 0) {
-    size_t bytes_written = this->speaker_->play(this->audio_output_buffer_, out_frame.decoded_size);
-    if (bytes_written == 0) {
-      ESP_LOGW(TAG, "Failed to write audio to speaker");
-    }
-  }
-
-  return true;
-#else
-  return false;
-#endif
-}
-
-void SimpleVideoPlayer::process_audio_() {
-  if (!this->has_audio_ || this->speaker_ == nullptr) {
-    return;
-  }
-
-  // Process audio samples to keep in sync with video
-  // This is a simplified implementation
-  while (this->current_audio_sample_ < this->audio_samples_.size()) {
-    AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
-
-    // Check if this audio sample should be played based on video position
-    if (this->current_video_sample_ > 0) {
-      Mp4Sample &video = this->video_samples_[this->current_video_sample_ - 1];
-      if (sample.timestamp_ms > video.timestamp_ms + 100) {
-        break;  // Audio is ahead, wait
-      }
-    }
-
-    if (this->read_next_audio_sample_()) {
-      this->decode_audio_frame_();
-    } else {
-      break;
-    }
-  }
-}
+// Audio codec removed (not working)
+// void SimpleVideoPlayer::process_audio_() { ... }
 
 bool SimpleVideoPlayer::read_next_mp4_sample_() {
   if (this->current_video_sample_ >= this->video_samples_.size()) {
@@ -3196,10 +3058,10 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
       ESP_LOGI(TAG, "Found H.264 video track %u: %dx%d", track_number, width, height);
     }
   } else if (track_type == 2 && (codec_id == "A_AAC" || codec_id.find("AAC") != std::string::npos)) {
-    // Audio track
+    // Audio track (audio codec removed - not working)
     this->mkv_audio_track_ = track_number;
-    this->has_audio_ = true;
-    ESP_LOGI(TAG, "Found AAC audio track %u", track_number);
+    // this->has_audio_ = true;  // Audio codec removed
+    ESP_LOGI(TAG, "Found AAC audio track %u (audio codec disabled)", track_number);
   }
 
   return true;
@@ -3677,14 +3539,15 @@ void SimpleVideoPlayer::play() {
       }
     }
 
+    // Audio codec removed (not working)
     // Re-initialize audio decoder if needed
-#if USE_ESP_AUDIO_CODEC
-    if (this->has_audio_ && !this->aac_decoder_ready_ && this->speaker_ != nullptr) {
-      if (!this->init_aac_decoder_()) {
-        ESP_LOGE(TAG, "Failed to re-initialize AAC decoder");
-      }
-    }
-#endif
+// #if USE_ESP_AUDIO_CODEC
+//     if (this->has_audio_ && !this->aac_decoder_ready_ && this->speaker_ != nullptr) {
+//       if (!this->init_aac_decoder_()) {
+//         ESP_LOGE(TAG, "Failed to re-initialize AAC decoder");
+//       }
+//     }
+// #endif
 
     // Re-initialize GMF PPA hardware for YUVRGB conversion
     // This is necessary after stop() calls gmf_ppa_deinit()
@@ -3907,30 +3770,32 @@ void SimpleVideoPlayer::stop() {
     ESP_LOGD(TAG, "  Freed yuv_buffer_: %zu bytes", yuv_size);
   }
 
+  // Audio codec removed (not working)
   // Free audio buffers
-  if (this->audio_input_buffer_ != nullptr) {
-    total_freed += 8192;
-    heap_caps_free(this->audio_input_buffer_);
-    this->audio_input_buffer_ = nullptr;
-    ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
-  }
+  // if (this->audio_input_buffer_ != nullptr) {
+  //   total_freed += 8192;
+  //   heap_caps_free(this->audio_input_buffer_);
+  //   this->audio_input_buffer_ = nullptr;
+  //   ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
+  // }
 
-  if (this->audio_output_buffer_ != nullptr) {
-    total_freed += 16384;
-    heap_caps_free(this->audio_output_buffer_);
-    this->audio_output_buffer_ = nullptr;
-    ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
-  }
+  // if (this->audio_output_buffer_ != nullptr) {
+  //   total_freed += 16384;
+  //   heap_caps_free(this->audio_output_buffer_);
+  //   this->audio_output_buffer_ = nullptr;
+  //   ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
+  // }
 
+  // Audio codec removed (not working)
   // Close AAC decoder
-#if USE_ESP_AUDIO_CODEC
-  if (this->aac_decoder_ != nullptr) {
-    esp_audio_dec_close(this->aac_decoder_);
-    this->aac_decoder_ = nullptr;
-    this->aac_decoder_ready_ = false;
-    ESP_LOGD(TAG, "  Closed AAC decoder");
-  }
-#endif
+// #if USE_ESP_AUDIO_CODEC
+//   if (this->aac_decoder_ != nullptr) {
+//     esp_audio_dec_close(this->aac_decoder_);
+//     this->aac_decoder_ = nullptr;
+//     this->aac_decoder_ready_ = false;
+//     ESP_LOGD(TAG, "  Closed AAC decoder");
+//   }
+// #endif
 
   // Close H.264 decoder (CRITICAL for SPIRAM release!)
   if (this->h264_decoder_ != nullptr) {
@@ -4176,8 +4041,8 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       // read_next_mp4_sample_() returned false = reached end of video
       end_of_stream = true;
     }
-    // Process audio
-    player->process_audio_();
+    // Audio codec removed (not working)
+    // player->process_audio_();
   } else if (player->format_ == MediaFormat::MKV_H264) {
     uint32_t decode_start = esp_timer_get_time() / 1000;
 
@@ -4208,8 +4073,8 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
       ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
       end_of_stream = true;
     }
-    // Process audio
-    player->process_audio_();
+    // Audio codec removed (not working)
+    // player->process_audio_();
   }
 
   // Hide loading spinner after first frame
