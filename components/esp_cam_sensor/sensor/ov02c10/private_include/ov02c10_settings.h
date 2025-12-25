@@ -744,9 +744,9 @@
 // ============================================================================
 // Custom format: 640x480 @ 30fps RAW10 (VGA)
 // ============================================================================
-// VGA resolution using ISP downscaling from native crop
-// Strategy: SAME crop window as native, only change output size
-// This ensures timing and MIPI parameters remain consistent
+// VGA resolution using ISP downscaling from FULL SENSOR (NO ZOOM)
+// Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 640x480
+// This enables proper rotation support and eliminates digital zoom
 
 static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[] = {
     // PLL configuration (IDENTICAL to native)
@@ -824,16 +824,16 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE (320-1615 x 180-911)
-    {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    // Crop window: FULL SENSOR (0-1935 x 4-1091) - NO ZOOM
+    {0x3800, 0x00},  // X start high
+    {0x3801, 0x00},  // X start low = 0
     {0x3802, 0x00},  // Y start high
-    {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
-    {0x3806, 0x03},  // Y end high
-    {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 640x480 (ISP downscales from 1296x732)
+    {0x3803, 0x04},  // Y start low = 4
+    {0x3804, 0x07},  // X end high
+    {0x3805, 0x8f},  // X end low = 1935
+    {0x3806, 0x04},  // Y end high
+    {0x3807, 0x43},  // Y end low = 1091
+    // Output size: 640x480 (ISP downscales from 1936x1087)
     {0x3808, 0x02},  // width high
     {0x3809, 0x80},  // width low = 640
     {0x380a, 0x01},  // height high
@@ -982,8 +982,8 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[
 // ============================================================================
 // Custom format: 800x600 @ 30fps RAW10 (SVGA)
 // ============================================================================
-// SVGA resolution using ISP downscaling from native crop
-// Strategy: SAME crop window as native, only change output size
+// SVGA resolution using ISP downscaling from FULL SENSOR (NO ZOOM)
+// Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 800x600
 
 static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[] = {
     // PLL configuration (IDENTICAL to native)
@@ -1061,16 +1061,16 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE (320-1615 x 180-911)
-    {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    // Crop window: FULL SENSOR (0-1935 x 4-1091) - NO ZOOM
+    {0x3800, 0x00},  // X start high
+    {0x3801, 0x00},  // X start low = 0
     {0x3802, 0x00},  // Y start high
-    {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
-    {0x3806, 0x03},  // Y end high
-    {0x3807, 0x8f},  // Y end low = 911
-    // Output size: 800x600 (ISP downscales from 1296x732)
+    {0x3803, 0x04},  // Y start low = 4
+    {0x3804, 0x07},  // X end high
+    {0x3805, 0x8f},  // X end low = 1935
+    {0x3806, 0x04},  // Y end high
+    {0x3807, 0x43},  // Y end low = 1091
+    // Output size: 800x600 (ISP downscales from 1936x1087)
     {0x3808, 0x03},  // width high
     {0x3809, 0x20},  // width low = 800
     {0x380a, 0x02},  // height high
@@ -1220,8 +1220,8 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
 // Custom format: 480x640 @ 30fps RAW10 (Portrait VGA)
 // ============================================================================
 // Portrait VGA resolution (480 wide x 640 tall)
-// Strategy: Adjust crop window to maintain 3:4 aspect ratio, use ISP downscaling
-// Note: Rotation should be handled in software/display layer if needed
+// Strategy: Use FULL SENSOR (NO ZOOM), ISP downscales to 480x640
+// Full sensor enables proper rotation support in software/display layer
 
 static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270[] = {
     // PLL configuration (IDENTICAL to native)
@@ -1299,16 +1299,16 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: SAME AS NATIVE and 640×480 (320-1615 x 180-911)
-    // Using proven crop window to avoid duplication issues
-    {0x3800, 0x01},  // X start high
-    {0x3801, 0x40},  // X start low = 320
+    // Crop window: FULL SENSOR (0-1935 x 4-1091) - NO ZOOM
+    // Full sensor enables proper rotation support
+    {0x3800, 0x00},  // X start high
+    {0x3801, 0x00},  // X start low = 0
     {0x3802, 0x00},  // Y start high
-    {0x3803, 0xb4},  // Y start low = 180
-    {0x3804, 0x06},  // X end high
-    {0x3805, 0x4f},  // X end low = 1615
-    {0x3806, 0x03},  // Y end high
-    {0x3807, 0x8f},  // Y end low = 911
+    {0x3803, 0x04},  // Y start low = 4
+    {0x3804, 0x07},  // X end high
+    {0x3805, 0x8f},  // X end low = 1935
+    {0x3806, 0x04},  // Y end high
+    {0x3807, 0x43},  // Y end low = 1091
     // Output size: 480x640 (portrait, NO rotation - let LVGL handle it)
     {0x3808, 0x01},  // width high
     {0x3809, 0xe0},  // width low = 480
