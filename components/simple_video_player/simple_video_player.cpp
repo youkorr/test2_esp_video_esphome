@@ -2324,11 +2324,11 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
     } while (b & 0x80);
 
     if (tag == 0x05) {  // DecoderSpecificInfo
-      // This is the AAC config
+      // This is the AAC config (audio codec removed - not working)
       this->audio_config_.resize(len);
       this->cached_fread_(this->audio_config_.data(), 1, len);
-      this->has_audio_ = true;
-      ESP_LOGI(TAG, "Found AAC config: %d bytes", len);
+      // this->has_audio_ = true;  // Audio codec removed
+      ESP_LOGI(TAG, "Found AAC config: %d bytes (audio codec disabled)", len);
       break;
     } else {
       // Skip other descriptors (but parse nested ones)
@@ -3058,10 +3058,10 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
       ESP_LOGI(TAG, "Found H.264 video track %u: %dx%d", track_number, width, height);
     }
   } else if (track_type == 2 && (codec_id == "A_AAC" || codec_id.find("AAC") != std::string::npos)) {
-    // Audio track
+    // Audio track (audio codec removed - not working)
     this->mkv_audio_track_ = track_number;
-    this->has_audio_ = true;
-    ESP_LOGI(TAG, "Found AAC audio track %u", track_number);
+    // this->has_audio_ = true;  // Audio codec removed
+    ESP_LOGI(TAG, "Found AAC audio track %u (audio codec disabled)", track_number);
   }
 
   return true;
@@ -3770,20 +3770,21 @@ void SimpleVideoPlayer::stop() {
     ESP_LOGD(TAG, "  Freed yuv_buffer_: %zu bytes", yuv_size);
   }
 
+  // Audio codec removed (not working)
   // Free audio buffers
-  if (this->audio_input_buffer_ != nullptr) {
-    total_freed += 8192;
-    heap_caps_free(this->audio_input_buffer_);
-    this->audio_input_buffer_ = nullptr;
-    ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
-  }
+  // if (this->audio_input_buffer_ != nullptr) {
+  //   total_freed += 8192;
+  //   heap_caps_free(this->audio_input_buffer_);
+  //   this->audio_input_buffer_ = nullptr;
+  //   ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
+  // }
 
-  if (this->audio_output_buffer_ != nullptr) {
-    total_freed += 16384;
-    heap_caps_free(this->audio_output_buffer_);
-    this->audio_output_buffer_ = nullptr;
-    ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
-  }
+  // if (this->audio_output_buffer_ != nullptr) {
+  //   total_freed += 16384;
+  //   heap_caps_free(this->audio_output_buffer_);
+  //   this->audio_output_buffer_ = nullptr;
+  //   ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
+  // }
 
   // Audio codec removed (not working)
   // Close AAC decoder
