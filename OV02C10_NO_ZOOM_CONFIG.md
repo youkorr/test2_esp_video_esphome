@@ -1,39 +1,49 @@
 # Configuration OV02C10 SANS ZOOM avec Rotation
 
-## 🎯 Problème identifié
+## ✅ CORRECTION APPLIQUÉE (Commit 23f6e16)
 
-Le sensor OV02C10 utilise par défaut le format **1288x728** qui applique un **crop (recadrage)** de 67% du sensor, créant un effet de zoom numérique ~1.5X qui empêche la rotation de fonctionner correctement.
+**Tous les formats custom OV02C10 ont été corrigés** pour utiliser le full sensor (100% de la surface) au lieu du crop réduit (67%). Le zoom numérique ~1.5X a été **éliminé** de tous les formats.
+
+## 🎯 Problème identifié (RÉSOLU)
+
+Le sensor OV02C10 utilisait par défaut des formats custom (640x480, 800x600, 480x640) qui appliquaient un **crop (recadrage)** de 67% du sensor, créant un effet de zoom numérique ~1.5X qui empêchait la rotation de fonctionner correctement.
 
 ## ✅ Solution: Format 1920x1080 Full Sensor
 
-### Comparaison des formats:
+### Comparaison AVANT/APRÈS la correction:
 
-| Format | Crop Window | % Sensor | Zoom | Rotation |
-|--------|-------------|----------|------|----------|
-| **1288x728** (défaut) | (320,180)→(1615,911) | 67% | ✅ 1.5X | ❌ Limitée |
-| **1920x1080** (full) | (0,4)→(1935,1091) | 100% | ❌ **AUCUN** | ✅ **Complète** |
+| Format | État | Crop Window | % Sensor | Zoom | Rotation |
+|--------|------|-------------|----------|------|----------|
+| **640x480** | ❌ AVANT | (320,180)→(1615,911) | 67% | ✅ 1.5X | ❌ Limitée |
+| **640x480** | ✅ APRÈS | (0,4)→(1935,1091) | 100% | ❌ **AUCUN** | ✅ **Complète** |
+| **800x600** | ❌ AVANT | (320,180)→(1615,911) | 67% | ✅ 1.5X | ❌ Limitée |
+| **800x600** | ✅ APRÈS | (0,4)→(1935,1091) | 100% | ❌ **AUCUN** | ✅ **Complète** |
+| **480x640** | ❌ AVANT | (320,180)→(1615,911) | 67% | ✅ 1.5X | ❌ Limitée |
+| **480x640** | ✅ APRÈS | (0,4)→(1935,1091) | 100% | ❌ **AUCUN** | ✅ **Complète** |
+| **1920x1080** | ✅ Toujours | (0,4)→(1935,1091) | 100% | ❌ **AUCUN** | ✅ **Complète** |
 
 ### Configuration YAML recommandée:
 
+**BONNE NOUVELLE:** Tous les formats custom sont maintenant corrigés! Vous pouvez utiliser **n'importe quel format** sans zoom:
+
 ```yaml
-# Configuration caméra OV02C10 SANS zoom
+# Configuration caméra OV02C10 - TOUS LES FORMATS SUPPORTENT LA ROTATION
 esp_video:
   id: tab5_cam
   i2c_id: bsp_bus
   sensor_type: ov02c10
   sensor_addr: 0x36
 
-  # ⭐ IMPORTANT: Utiliser le format FULL SENSOR (pas de zoom)
-  resolution: "1920x1080"    # Format complet sans crop
+  # ✅ TOUS CES FORMATS UTILISENT MAINTENANT LE FULL SENSOR (PAS DE ZOOM):
+  resolution: "640x480"      # VGA - Full sensor, ISP downscale
+  # resolution: "800x600"    # SVGA - Full sensor, ISP downscale
+  # resolution: "480x640"    # Portrait - Full sensor, ISP downscale
+  # resolution: "1920x1080"  # Full HD - Full sensor, pas de downscale
+
   pixel_format: RGB565
   framerate: 30
 
-  # PPA (Post-Processing Accelerator) pour redimensionner à votre écran
-  # Décommentez si votre écran est 800x480:
-  # output_width: 800
-  # output_height: 480
-
-  # Rotation supportée (0, 90, 180, 270)
+  # ✅ Rotation maintenant supportée sur TOUS les formats!
   rotate: 0                  # Ou 90, 180, 270 selon besoin
 
   # Miroir horizontal (si nécessaire)
@@ -114,16 +124,18 @@ Le zoom est contrôlé par les **registres du sensor** (0x3800-0x3807), pas par 
    - Privilégiez la rotation hardware si disponible
    - Ou utilisez le format portrait natif (480x640)
 
-## 📚 Formats disponibles
+## 📚 Formats disponibles (TOUS CORRIGÉS!)
 
 Tous les formats OV02C10 supportés (source: `ov02c10.c:997-1106`):
 
-- `1288x728` - Défaut, **avec crop** ❌
-- `640x480` - VGA, **avec crop** ❌
-- `800x600` - SVGA, **avec crop** ❌
-- `480x640` - Portrait, **avec crop** ❌
-- `1920x1080` - Full HD, **SANS crop** ✅ **RECOMMANDÉ**
+**✅ TOUS les formats utilisent maintenant le FULL SENSOR (100% de la surface):**
+
+- `640x480` - VGA, **SANS crop** ✅ Full sensor → ISP downscale
+- `800x600` - SVGA, **SANS crop** ✅ Full sensor → ISP downscale
+- `480x640` - Portrait, **SANS crop** ✅ Full sensor → ISP downscale
+- `1920x1080` - Full HD, **SANS crop** ✅ Full sensor (pas de downscale)
 - `1920x1080_2lane` - Full HD 2-lane, **SANS crop** ✅ **MEILLEURE PERFORMANCE**
+- `1288x728` - Format natif legacy (toujours disponible mais non recommandé)
 
 ## 🔗 Références
 
