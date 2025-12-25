@@ -798,9 +798,9 @@ bool MipiDSICamComponent::start_streaming() {
     // Sélectionner le format custom selon la résolution
     // Note: 1288x728 is the native resolution (no custom format needed)
     if (width == 480 && height == 640) {
-      // YAML: "480x640" → Portrait capture, LVGL handles rotation
+      // YAML: "480x640" → Portrait capture with sensor hardware rotation
       custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
-      ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
+      ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (sensor handles 270° rotation in hardware)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
@@ -822,6 +822,14 @@ bool MipiDSICamComponent::start_streaming() {
         width = custom_format->width;
         height = custom_format->height;
         ESP_LOGI(TAG, "   Actual output dimensions after rotation: %ux%u", width, height);
+
+        // CRITICAL FIX: For 480x640 format, disable PPA rotation since sensor already rotates
+        // The ov02c10_format_480x640_raw10_30fps_rot270 format applies 270° rotation in sensor registers
+        // Attempting PPA rotation on top of this causes watchdog timeout due to processing overhead
+        if (width == 480 && height == 640 && this->rotation_ == 270) {
+          ESP_LOGI(TAG, "   Disabling PPA rotation (sensor already rotated 270°)");
+          this->rotation_ = 0;  // Clear rotation flag to prevent PPA from rotating again
+        }
       }
     }
   }
