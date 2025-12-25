@@ -1728,8 +1728,9 @@ image_t* MipiDSICamComponent::get_imlib_image() {
   }
 
   // Initialiser la structure imlib image_t pour pointer vers le buffer V4L2 (zero-copy)
-  this->imlib_image_->w = this->image_width_;
-  this->imlib_image_->h = this->image_height_;
+  // Use getters to account for rotation
+  this->imlib_image_->w = this->get_image_width();
+  this->imlib_image_->h = this->get_image_height();
   this->imlib_image_->pixfmt = PIXFORMAT_RGB565;
   this->imlib_image_->pixels = this->image_buffer_;
   this->imlib_image_valid_ = true;
@@ -1879,11 +1880,11 @@ bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out
     return false;
   }
 
-  // Extract data and dimensions
+  // Extract data and dimensions (use getters to account for rotation)
   *buffer_out = buffer;
   *data = buffer->data;
-  *width = static_cast<int>(this->image_width_);
-  *height = static_cast<int>(this->image_height_);
+  *width = static_cast<int>(this->get_image_width());
+  *height = static_cast<int>(this->get_image_height());
 
   return true;
 }
