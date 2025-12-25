@@ -222,6 +222,16 @@ bool MipiDSICamComponent::init_ppa_() {
     return true;
   }
 
+  // CRITICAL: Disable PPA completely for OV02C10 sensor
+  // PPA operations cause watchdog timeout with OV02C10 (all formats tested)
+  if (this->sensor_name_ == "ov02c10") {
+    ESP_LOGI(TAG, "⚠️  PPA DISABLED for OV02C10 sensor (causes watchdog timeout)");
+    ESP_LOGI(TAG, "   → Rotation/mirror settings will be ignored");
+    ESP_LOGI(TAG, "   → Use sensor native output or configure rotation in LVGL");
+    this->ppa_enabled_ = false;
+    return true;
+  }
+
   // Auto-detect: Enable PPA if crop offset, mirror, rotation, or resize is configured
   if (!this->ppa_user_override_) {
     if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
