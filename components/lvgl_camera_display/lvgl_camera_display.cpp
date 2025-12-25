@@ -355,7 +355,7 @@ bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width
   srm_config.mirror_x = this->mirror_x_;
   srm_config.mirror_y = this->mirror_y_;
 
-  srm_config.rgb_swap = PPA_SRM_COLOR_RGB_SWAP_NONE;
+  srm_config.rgb_swap = false;
   srm_config.byte_swap = false;
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
