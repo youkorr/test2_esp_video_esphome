@@ -823,12 +823,17 @@ bool MipiDSICamComponent::start_streaming() {
         height = custom_format->height;
         ESP_LOGI(TAG, "   Actual output dimensions after rotation: %ux%u", width, height);
 
-        // CRITICAL FIX: For 480x640 format, disable PPA rotation since sensor already rotates
-        // The ov02c10_format_480x640_raw10_30fps_rot270 format applies 270° rotation in sensor registers
-        // Attempting PPA rotation on top of this causes watchdog timeout due to processing overhead
-        if (width == 480 && height == 640 && this->rotation_ == 270) {
-          ESP_LOGI(TAG, "   Disabling PPA rotation (sensor already rotated 270°)");
-          this->rotation_ = 0;  // Clear rotation flag to prevent PPA from rotating again
+        // CRITICAL FIX: For 480x640 format, disable PPA completely
+        // The ov02c10_format_480x640_raw10_30fps_rot270 applies rotation via sensor registers
+        // PPA operations (rotation, mirroring) cause watchdog timeout with this format
+        if (width == 480 && height == 640) {
+          ESP_LOGI(TAG, "   ⚠️  Disabling PPA completely for 480x640 format (causes watchdog timeout)");
+          this->ppa_user_override_ = true;   // Override PPA auto-detection
+          this->ppa_enabled_ = false;         // Force disable PPA
+          this->rotation_ = 0;                // Clear all transformation flags
+          this->mirror_x_ = false;
+          this->mirror_y_ = false;
+          ESP_LOGI(TAG, "   ⚠️  Mirror/rotation settings ignored - use sensor output as-is");
         }
       }
     }
