@@ -29,13 +29,15 @@ CONF_RESOLUTION = "resolution"
 CONF_PIXEL_FORMAT = "pixel_format"
 CONF_FRAMERATE = "framerate"
 CONF_JPEG_QUALITY = "jpeg_quality"
-CONF_MIRROR_X = "mirror_x"  # Hardware PPA transform (M5Stack-style)
-CONF_MIRROR_Y = "mirror_y"  # Hardware PPA transform
-CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
-CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset (pixels from left)
-CONF_OUTPUT_WIDTH = "output_width"    # Hardware PPA resize output (0 = no resize)
-CONF_OUTPUT_HEIGHT = "output_height"  # Hardware PPA resize output
-CONF_PPA_ENABLED = "ppa_enabled"      # Explicit PPA enable/disable (overrides auto-detection)
+# DEPRECATED: These parameters have been moved to lvgl_camera_display component
+# They are kept here only for backward compatibility and will show a warning
+CONF_MIRROR_X = "mirror_x"           # DEPRECATED: Use lvgl_camera_display.mirror_x instead
+CONF_MIRROR_Y = "mirror_y"           # DEPRECATED: Use lvgl_camera_display.mirror_y instead
+CONF_ROTATION = "rotation"           # DEPRECATED: Use lvgl_camera_display.rotation instead
+CONF_CROP_OFFSET_X = "crop_offset_x" # DEPRECATED: Will be removed
+CONF_OUTPUT_WIDTH = "output_width"   # DEPRECATED: Will be removed
+CONF_OUTPUT_HEIGHT = "output_height" # DEPRECATED: Will be removed
+CONF_PPA_ENABLED = "ppa_enabled"     # DEPRECATED: PPA disabled for OV02C10
 CONF_FILENAME = "filename"
 CONF_RGB_GAINS = "rgb_gains"
 CONF_RED_GAIN = "red"
@@ -84,17 +86,36 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.string,
         cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
         cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
-        # Options obsolètes (acceptées mais ignorées)
-        cv.Optional(CONF_MIRROR_X): cv.boolean,
-        cv.Optional(CONF_MIRROR_Y): cv.boolean,
-        cv.Optional(CONF_ROTATION): cv.int_,
-        # PPA crop offset (hardware crop via block_offset_x)
-        cv.Optional(CONF_CROP_OFFSET_X, default=0): cv.int_range(min=0, max=800),
-        # PPA resize (hardware downscale - 0 = no resize, keep capture resolution)
-        cv.Optional(CONF_OUTPUT_WIDTH, default=0): cv.int_range(min=0, max=1920),
-        cv.Optional(CONF_OUTPUT_HEIGHT, default=0): cv.int_range(min=0, max=1080),
-        # PPA explicit enable/disable (overrides auto-detection based on transforms)
-        cv.Optional(CONF_PPA_ENABLED): cv.boolean,
+        # DEPRECATED: Transform options moved to lvgl_camera_display component
+        # These are accepted for backward compatibility but will show deprecation warnings
+        cv.Optional(CONF_MIRROR_X): cv.invalid(
+            "mirror_x has been moved to lvgl_camera_display component. "
+            "Please configure it there instead."
+        ),
+        cv.Optional(CONF_MIRROR_Y): cv.invalid(
+            "mirror_y has been moved to lvgl_camera_display component. "
+            "Please configure it there instead."
+        ),
+        cv.Optional(CONF_ROTATION): cv.invalid(
+            "rotation has been moved to lvgl_camera_display component. "
+            "Please configure it there instead."
+        ),
+        cv.Optional(CONF_CROP_OFFSET_X): cv.invalid(
+            "crop_offset_x is deprecated and will be removed. "
+            "PPA transformations should be done in lvgl_camera_display."
+        ),
+        cv.Optional(CONF_OUTPUT_WIDTH): cv.invalid(
+            "output_width is deprecated and will be removed. "
+            "Resize should be done in lvgl_camera_display or LVGL widgets."
+        ),
+        cv.Optional(CONF_OUTPUT_HEIGHT): cv.invalid(
+            "output_height is deprecated and will be removed. "
+            "Resize should be done in lvgl_camera_display or LVGL widgets."
+        ),
+        cv.Optional(CONF_PPA_ENABLED): cv.invalid(
+            "ppa_enabled is deprecated. PPA is now automatically disabled for OV02C10. "
+            "Use transformation options in lvgl_camera_display instead."
+        ),
         # Contrôles ISP avancés (CCM RGB gains pour correction couleur)
         cv.Optional(CONF_RGB_GAINS): cv.Schema({
             cv.Optional(CONF_RED_GAIN, default=1.0): cv.float_range(min=0.1, max=4.0),
@@ -126,24 +147,14 @@ async def to_code(config):
     cg.add(var.set_framerate(config[CONF_FRAMERATE]))
     cg.add(var.set_jpeg_quality(config[CONF_JPEG_QUALITY]))
 
-    # Configuration mirror/rotate (PPA hardware M5Stack-style)
-    if CONF_MIRROR_X in config:
-        cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
-    if CONF_MIRROR_Y in config:
-        cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
-    if CONF_ROTATION in config:
-        cg.add(var.set_rotation(config[CONF_ROTATION]))
-
-    # Configuration crop offset (PPA hardware crop)
-    cg.add(var.set_crop_offset_x(config[CONF_CROP_OFFSET_X]))
-
-    # Configuration PPA resize (hardware downscale)
-    cg.add(var.set_output_width(config[CONF_OUTPUT_WIDTH]))
-    cg.add(var.set_output_height(config[CONF_OUTPUT_HEIGHT]))
-
-    # Configuration PPA explicit enable/disable
-    if CONF_PPA_ENABLED in config:
-        cg.add(var.set_ppa_enabled(config[CONF_PPA_ENABLED]))
+    # REMOVED: PPA transformation parameters (moved to lvgl_camera_display)
+    # The following parameters are now configured in lvgl_camera_display:
+    #   - rotation: Use lvgl_camera_display.rotation instead
+    #   - mirror_x: Use lvgl_camera_display.mirror_x instead
+    #   - mirror_y: Use lvgl_camera_display.mirror_y instead
+    #   - crop_offset_x: Removed (use LVGL canvas positioning instead)
+    #   - output_width/height: Removed (use LVGL widgets or canvas size instead)
+    #   - ppa_enabled: Removed (PPA auto-disabled for OV02C10)
 
     # Configuration des gains RGB CCM si présents
     if CONF_RGB_GAINS in config:
