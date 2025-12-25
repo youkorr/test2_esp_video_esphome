@@ -273,14 +273,36 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int input_height = this->image_height_;
 
   // Output dimensions (resize if configured, otherwise keep input size)
-  // IMPORTANT: Do NOT auto-swap dimensions for rotation!
-  // PPA hardware rotates in-place, output buffer dimensions = input dimensions
-  int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
-  int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
+  // IMPORTANT: Swap dimensions for 90°/270° rotation!
+  // When rotating 90° or 270°, output dimensions are swapped
+  bool swap_dims = (this->rotation_ == 90 || this->rotation_ == 270);
 
-  // Calculate scale factors (1.0 = no scaling)
-  float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
-  float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
+  int output_width, output_height;
+  float scale_x, scale_y;
+
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    // User specified explicit output size (FINAL dimensions after rotation)
+    // Do NOT swap user-specified dimensions
+    output_width = this->output_width_;
+    output_height = this->output_height_;
+
+    // Calculate scale based on dimensions BEFORE rotation
+    // For 90/270 rotation: scale calculation must account for pre-rotation dimensions
+    if (swap_dims) {
+      // Output after rotation is WxH, so before rotation it was HxW
+      scale_x = (float)output_height / (float)input_width;
+      scale_y = (float)output_width / (float)input_height;
+    } else {
+      scale_x = (float)output_width / (float)input_width;
+      scale_y = (float)output_height / (float)input_height;
+    }
+  } else {
+    // No explicit output size - use input size but swap for rotation
+    output_width = swap_dims ? input_height : input_width;
+    output_height = swap_dims ? input_width : input_height;
+    scale_x = 1.0f;
+    scale_y = 1.0f;
+  }
 
   // SIMPLE INPUT CONFIG (M5Stack style)
   srm_config.in.buffer = src_buffer;
