@@ -27,6 +27,7 @@ class LVGLCameraDisplay : public Component {
   void set_rotation(int rotation) { this->rotation_ = rotation; }
   void set_mirror_x(bool mirror) { this->mirror_x_ = mirror; }
   void set_mirror_y(bool mirror) { this->mirror_y_ = mirror; }
+  void set_ppa_enabled(bool enabled) { this->ppa_enabled_ = enabled; }
 #ifdef USE_FACE_DETECTION
   void set_face_detection(face_detection::FaceDetectionComponent *face_detect) { this->face_detection_ = face_detect; }
 #endif
@@ -58,16 +59,24 @@ class LVGLCameraDisplay : public Component {
 
   lv_timer_t *lvgl_timer_{nullptr};
 
-  // Transformation parameters (applied in LVGL, not PPA)
+  // Transformation parameters (applied in LVGL or PPA)
   int rotation_{0};        // 0, 90, 180, 270
   bool mirror_x_{false};   // Horizontal mirror
   bool mirror_y_{false};   // Vertical mirror
+  bool ppa_enabled_{false};  // Use PPA hardware for transformations
+
+  // PPA (Pixel Processing Accelerator) hardware handles
+  void *ppa_client_handle_{nullptr};
+  uint8_t *ppa_buffer_{nullptr};  // Temporary buffer for PPA output
 
   // Buffer pool tracking (pour release apres affichage)
   esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();
+  bool init_ppa_();
+  void cleanup_ppa_();
+  bool apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height, uint8_t **out_buffer);
 };
 
 }  // namespace lvgl_camera_display

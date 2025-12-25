@@ -1,6 +1,9 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+// PPA hardware transform includes
+#include <esp_ppa.h>
+#include <esp_heap_caps.h>
 // Conditionally include face_detection only if it exists
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -35,9 +38,19 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
 
+  // Initialize PPA if enabled
+  if (this->ppa_enabled_) {
+    if (!this->init_ppa_()) {
+      ESP_LOGE(TAG, "Failed to initialize PPA");
+      this->mark_failed();
+      return;
+    }
+  }
+
   // Log transformation settings
   if (this->rotation_ != 0 || this->mirror_x_ || this->mirror_y_) {
-    ESP_LOGI(TAG, "   Transformations (applied in LVGL, not PPA):");
+    const char *transform_mode = this->ppa_enabled_ ? "PPA hardware" : "LVGL software";
+    ESP_LOGI(TAG, "   Transformations (via %s):", transform_mode);
     if (this->rotation_ != 0) {
       ESP_LOGI(TAG, "      Rotation: %d°", this->rotation_);
     }
@@ -69,6 +82,12 @@ void LVGLCameraDisplay::loop() {
     ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
+
+    // Cleanup PPA if it was initialized
+    if (this->ppa_enabled_) {
+      this->cleanup_ppa_();
+    }
+
     ESP_LOGI(TAG, "LVGL Camera Display stopped");
   }
 }
@@ -183,16 +202,28 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 #endif
 
+  // Apply PPA transformation if enabled
+  uint8_t *display_data = img_data;
+  if (this->ppa_enabled_ && (this->rotation_ != 0 || this->mirror_x_ || this->mirror_y_)) {
+    if (!this->apply_ppa_transform_(img_data, width, height, &display_data)) {
+      ESP_LOGW(TAG, "PPA transform failed, using original buffer");
+      display_data = img_data;
+    }
+  }
+
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
-             img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
+             display_data[0], display_data[1], display_data[2], display_data[3], display_data[4], display_data[5]);
+    if (this->ppa_enabled_) {
+      ESP_LOGI(TAG, "   PPA transformation: enabled");
+    }
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  lv_canvas_set_buffer(this->canvas_obj_, display_data, width, height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update
@@ -238,6 +269,118 @@ void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
         }
       }
     }
+  }
+}
+
+// ============================================================================
+// PPA (Pixel-Processing Accelerator) Hardware Transform Functions
+// ============================================================================
+
+bool LVGLCameraDisplay::init_ppa_() {
+  // Register PPA client
+  ppa_client_config_t ppa_config = {
+    .oper_type = PPA_OPERATION_SRM,
+  };
+
+  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t *)&this->ppa_client_handle_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  // Allocate PPA output buffer in SPIRAM (same size as input)
+  uint16_t width = this->camera_->get_image_width();
+  uint16_t height = this->camera_->get_image_height();
+  size_t buffer_size = width * height * 2;  // RGB565
+
+  this->ppa_buffer_ = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
+  if (this->ppa_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate PPA buffer (%u bytes)", buffer_size);
+    ppa_unregister_client((ppa_client_handle_t)this->ppa_client_handle_);
+    this->ppa_client_handle_ = nullptr;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "✓ PPA hardware transform initialized");
+  ESP_LOGI(TAG, "   Rotation: %d°", this->rotation_);
+  ESP_LOGI(TAG, "   Mirror X: %d, Mirror Y: %d", this->mirror_x_, this->mirror_y_);
+  ESP_LOGI(TAG, "   Buffer: %u bytes @ %p", buffer_size, this->ppa_buffer_);
+
+  return true;
+}
+
+bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height, uint8_t **out_buffer) {
+  if (!this->ppa_enabled_ || !this->ppa_client_handle_) {
+    return true;  // No transformation
+  }
+
+  // Configure PPA transformation
+  ppa_srm_oper_config_t srm_config = {};
+
+  // Input buffer
+  srm_config.in.buffer = src_buffer;
+  srm_config.in.pic_w = width;
+  srm_config.in.pic_h = height;
+  srm_config.in.block_w = width;
+  srm_config.in.block_h = height;
+  srm_config.in.block_offset_x = 0;
+  srm_config.in.block_offset_y = 0;
+  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  // Output buffer
+  srm_config.out.buffer = this->ppa_buffer_;
+  srm_config.out.buffer_size = width * height * 2;
+  srm_config.out.pic_w = width;
+  srm_config.out.pic_h = height;
+  srm_config.out.block_offset_x = 0;
+  srm_config.out.block_offset_y = 0;
+  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  // Transformation parameters
+  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  if (this->rotation_ == 90) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+  } else if (this->rotation_ == 180) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
+  } else if (this->rotation_ == 270) {
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
+  }
+
+  srm_config.scale_x = 1.0f;
+  srm_config.scale_y = 1.0f;
+  srm_config.mirror_x = this->mirror_x_;
+  srm_config.mirror_y = this->mirror_y_;
+
+  srm_config.rgb_swap = PPA_SRM_COLOR_RGB_SWAP_NONE;
+  srm_config.byte_swap = false;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+
+  // Execute PPA transformation
+  esp_err_t ret = ppa_do_scale_rotate_mirror(
+      (ppa_client_handle_t)this->ppa_client_handle_,
+      &srm_config
+  );
+
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "PPA transform failed: %s", esp_err_to_name(ret));
+    return false;
+  }
+
+  // Return transformed buffer
+  *out_buffer = this->ppa_buffer_;
+  return true;
+}
+
+void LVGLCameraDisplay::cleanup_ppa_() {
+  if (this->ppa_buffer_ != nullptr) {
+    heap_caps_free(this->ppa_buffer_);
+    this->ppa_buffer_ = nullptr;
+  }
+
+  if (this->ppa_client_handle_ != nullptr) {
+    ppa_unregister_client((ppa_client_handle_t)this->ppa_client_handle_);
+    this->ppa_client_handle_ = nullptr;
+    ESP_LOGI(TAG, "✓ PPA hardware transform cleanup");
   }
 }
 
