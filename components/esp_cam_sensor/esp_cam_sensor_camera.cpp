@@ -212,161 +212,8 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 }
 
 // ============================================================================
-// PPA (Pixel-Processing Accelerator) Hardware Transform Functions
-// ============================================================================
-
-bool MipiDSICamComponent::init_ppa_() {
-  // Check if user explicitly set PPA enable/disable via YAML
-  if (this->ppa_user_override_) {
-    if (!this->ppa_enabled_) {
-      ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false)");
-      return true;
-    } else {
-      // User explicitly enabled PPA - allow it but warn for OV02C10
-      if (this->sensor_name_ == "ov02c10") {
-        ESP_LOGW(TAG, "⚠️  PPA FORCE-ENABLED by user for OV02C10 sensor!");
-        ESP_LOGW(TAG, "   → WARNING: This may cause watchdog timeout");
-        ESP_LOGW(TAG, "   → Use rotation in lvgl_camera_display instead if it crashes");
-      }
-      ESP_LOGI(TAG, "✓ PPA explicitly ENABLED by user (ppa_enabled: true)");
-      // Continue to PPA registration below
-    }
-  } else {
-    // No user override - apply automatic rules
-    // CRITICAL: Auto-disable PPA for OV02C10 sensor
-    // PPA operations cause watchdog timeout with OV02C10 (all formats tested)
-    if (this->sensor_name_ == "ov02c10") {
-      ESP_LOGI(TAG, "⚠️  PPA auto-DISABLED for OV02C10 sensor (causes watchdog timeout)");
-      ESP_LOGI(TAG, "   → Use rotation in lvgl_camera_display instead");
-      ESP_LOGI(TAG, "   → Or force-enable with ppa_enabled: true (not recommended)");
-      this->ppa_enabled_ = false;
-      return true;
-    }
-  }
-
-  // Auto-detect: Enable PPA if crop offset, mirror, rotation, or resize is configured
-  if (!this->ppa_user_override_) {
-    if (!this->mirror_x_ && !this->mirror_y_ && this->rotation_ == 0 &&
-        this->crop_offset_x_ == 0 && this->output_width_ == 0 && this->output_height_ == 0) {
-      ESP_LOGI(TAG, "PPA not needed (no mirror/rotate/crop/resize configured)");
-      this->ppa_enabled_ = false;
-      return true;
-    }
-  }
-
-  ppa_client_config_t ppa_config = {};
-  ppa_config.oper_type = PPA_OPERATION_SRM;
-  ppa_config.max_pending_trans_num = 16;
-
-  esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to register PPA client: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  this->ppa_enabled_ = true;
-
-  // Log PPA configuration
-  if (this->output_width_ > 0 && this->output_height_ > 0) {
-    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d, resize=%dx%d)",
-             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_,
-             this->output_width_, this->output_height_);
-  } else {
-    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
-             this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
-  }
-
-  return true;
-}
-
-bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer) {
-  if (!this->ppa_enabled_ || !this->ppa_client_handle_) {
-    return true;  // Pas de transformation
-  }
-
-  // SIMPLIFIED PPA configuration to match M5Stack's working implementation
-  // M5Stack only sets: buffer, pic_w, pic_h, scale_x, scale_y, mirror_x
-  // They do NOT set block_w, block_h, block_offset_x (let PPA handle defaults)
-
-  ppa_srm_oper_config_t srm_config = {};
-
-  // Input dimensions (from sensor)
-  int input_width = this->image_width_;
-  int input_height = this->image_height_;
-
-  // Output dimensions (resize if configured, otherwise keep input size)
-  // IMPORTANT: Do NOT auto-swap dimensions for rotation!
-  // PPA hardware rotates in-place, output buffer dimensions = input dimensions
-  int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
-  int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
-
-  // Calculate scale factors (1.0 = no scaling)
-  float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
-  float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
-
-  // SIMPLE INPUT CONFIG (M5Stack style)
-  srm_config.in.buffer = src_buffer;
-  srm_config.in.pic_w = input_width;
-  srm_config.in.pic_h = input_height;
-  srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-
-  // SIMPLE OUTPUT CONFIG (M5Stack style)
-  srm_config.out.buffer = dst_buffer;
-  srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
-  srm_config.out.pic_w = output_width;
-  srm_config.out.pic_h = output_height;
-  srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
-
-  // Transformation configuration
-  srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
-  if (this->rotation_ == 90) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
-  } else if (this->rotation_ == 180) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
-  } else if (this->rotation_ == 270) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
-  }
-
-  srm_config.scale_x = scale_x;
-  srm_config.scale_y = scale_y;
-  srm_config.mirror_x = this->mirror_x_;
-  srm_config.mirror_y = this->mirror_y_;
-  srm_config.rgb_swap = false;
-  srm_config.byte_swap = false;
-  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
-
-  // LOG PPA configuration for debugging
-  ESP_LOGI(TAG, "PPA Config:");
-  ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
-  ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
-  ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
-  ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
-  ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
-
-  // Exécuter transformation hardware (M5Stack API: 2 parameters)
-  esp_err_t ret = ppa_do_scale_rotate_mirror(
-      (ppa_client_handle_t)this->ppa_client_handle_,
-      &srm_config
-  );
-
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "❌ PPA transform failed: %s", esp_err_to_name(ret));
-    return false;
-  }
-
-  ESP_LOGI(TAG, "✓ PPA transform OK");
-  return true;
-}
-
-void MipiDSICamComponent::cleanup_ppa_() {
-  if (this->ppa_client_handle_) {
-    ppa_unregister_client((ppa_client_handle_t)this->ppa_client_handle_);
-    this->ppa_client_handle_ = nullptr;
-    this->ppa_enabled_ = false;
-    ESP_LOGI(TAG, "✓ PPA hardware transform cleanup");
-  }
-}
-
+// NOTE: PPA (Pixel-Processing Accelerator) has been moved to lvgl_camera_display
+// This component now only produces RAW frames from the camera sensor
 // ============================================================================
 
 void MipiDSICamComponent::setup() {
@@ -442,11 +289,6 @@ void MipiDSICamComponent::setup() {
 
   this->pipeline_started_ = true;
   this->last_health_check_ = millis();
-
-  // Initialiser PPA (Pixel-Processing Accelerator) si mirror/rotate configurés
-  if (!this->init_ppa_()) {
-    ESP_LOGW(TAG, "PPA initialization failed, mirror/rotate will not be available");
-  }
 
   // Messages simples de succès
   ESP_LOGI(TAG, "esp-cam-sensor: ok (%s)", this->sensor_name_.c_str());
@@ -845,18 +687,8 @@ bool MipiDSICamComponent::start_streaming() {
         height = custom_format->height;
         ESP_LOGI(TAG, "   Actual output dimensions after rotation: %ux%u", width, height);
 
-        // CRITICAL FIX: For 480x640 format, disable PPA completely
-        // The ov02c10_format_480x640_raw10_30fps_rot270 applies rotation via sensor registers
-        // PPA operations (rotation, mirroring) cause watchdog timeout with this format
-        if (width == 480 && height == 640) {
-          ESP_LOGI(TAG, "   ⚠️  Disabling PPA completely for 480x640 format (causes watchdog timeout)");
-          this->ppa_user_override_ = true;   // Override PPA auto-detection
-          this->ppa_enabled_ = false;         // Force disable PPA
-          this->rotation_ = 0;                // Clear all transformation flags
-          this->mirror_x_ = false;
-          this->mirror_y_ = false;
-          ESP_LOGI(TAG, "   ⚠️  Mirror/rotation settings ignored - use sensor output as-is");
-        }
+        // NOTE: PPA transformations have been moved to lvgl_camera_display component
+        // This component now only configures and captures RAW frames from the sensor
       }
     }
   }
@@ -1028,20 +860,11 @@ bool MipiDSICamComponent::start_streaming() {
   this->image_height_ = fmt.fmt.pix.height;
 
   // Calculer la taille du buffer pour CAPTURE (RGB565 = 2 bytes/pixel)
-  // NOTE: Buffers must be allocated at CAPTURE size, not PPA output size
   this->image_buffer_size_ = this->image_width_ * this->image_height_ * 2;
 
-  // Log PPA resize if configured (but keep buffer size at capture dimensions)
-  if (this->output_width_ > 0 && this->output_height_ > 0) {
-    ESP_LOGI(TAG, "Format: %ux%u RGB565 → PPA resize → %ux%u, buffer size: %u bytes (%u KB)",
-             this->image_width_, this->image_height_,
-             this->output_width_, this->output_height_,
-             this->image_buffer_size_, this->image_buffer_size_ / 1024);
-  } else {
-    ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
-             this->image_width_, this->image_height_,
-             this->image_buffer_size_, this->image_buffer_size_ / 1024);
-  }
+  ESP_LOGI(TAG, "Format: %ux%u RGB565, buffer size: %u bytes (%u KB)",
+           this->image_width_, this->image_height_,
+           this->image_buffer_size_, this->image_buffer_size_ / 1024);
 
   // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
   // No re-application needed - timing registers are set by driver's native format
@@ -1142,19 +965,7 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
-  // Allouer buffer séparé pour PPA si mirror/rotate activés
-  if (this->ppa_enabled_) {
-    this->image_buffer_ = (uint8_t*)heap_caps_malloc(
-        this->image_buffer_size_,
-        MALLOC_CAP_DMA | MALLOC_CAP_SPIRAM
-    );
-    if (!this->image_buffer_) {
-      ESP_LOGE(TAG, "Failed to allocate PPA image buffer (%u bytes)", this->image_buffer_size_);
-      this->stop_streaming();
-      return false;
-    }
-    ESP_LOGI(TAG, "✓ PPA buffer allocated: %u bytes @ %p", this->image_buffer_size_, this->image_buffer_);
-  }
+  // NOTE: PPA transformation has been moved to lvgl_camera_display component
 
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
@@ -1242,44 +1053,23 @@ bool MipiDSICamComponent::capture_frame() {
   int buffer_idx = buf.index;
   uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
-  // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
+  // NOTE: PPA transformations have been moved to lvgl_camera_display component
+  // This component now only provides RAW frames from the camera sensor
   uint32_t t3 = esp_timer_get_time();
-  uint8_t *display_buffer = frame_data;  // By default, use captured frame directly
-
-  if (this->ppa_enabled_ && this->image_buffer_) {
-    // Transform FROM V4L2 buffer TO separate PPA buffer (no in-place transform!)
-    if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
-      display_buffer = this->image_buffer_;  // Use PPA output for display
-    } else {
-      ESP_LOGE(TAG, "PPA transform failed, using original buffer");
-    }
-  }
   uint32_t t4 = esp_timer_get_time();
 
-  // 4. Mettre à jour current_buffer_index_ (pour acquire_buffer)
+  // 3. Mettre à jour current_buffer_index_ (pour acquire_buffer)
   portENTER_CRITICAL(&this->buffer_mutex_);
   // Marquer l'ancien buffer comme disponible pour V4L2 si c'est un buffer différent
-  // SAUF si PPA est actif (dans ce cas le V4L2 buffer reste en lecture seule)
   if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
-    if (!this->ppa_enabled_) {
-      this->simple_buffers_[this->current_buffer_index_].allocated = false;
-    }
+    this->simple_buffers_[this->current_buffer_index_].allocated = false;
   }
   // Marquer le nouveau buffer comme actuellement utilisé
   this->simple_buffers_[buffer_idx].allocated = true;
   this->current_buffer_index_ = buffer_idx;
 
-  // CRITICAL: When PPA is enabled, update the buffer element to point to PPA output!
-  // This ensures acquire_buffer() returns the transformed image, not the raw sensor data
-  if (this->ppa_enabled_ && this->image_buffer_) {
-    // Temporarily override the V4L2 buffer pointer with PPA output
-    this->simple_buffers_[buffer_idx].data = this->image_buffer_;
-  }
-
-  // Legacy API pointer (not used when SimpleBufferElement is used)
-  if (!this->ppa_enabled_) {
-    this->image_buffer_ = display_buffer;
-  }
+  // Legacy API pointer (points to current captured frame)
+  this->image_buffer_ = frame_data;
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
   this->frame_sequence_++;
@@ -1305,14 +1095,6 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
   uint32_t t5 = esp_timer_get_time();
-
-  // IMPORTANT: Restore original V4L2 buffer pointer before queuing back
-  // We may have overridden it with PPA buffer for display purposes
-  if (this->ppa_enabled_ && this->simple_buffers_[buffer_idx].data != frame_data) {
-    portENTER_CRITICAL(&this->buffer_mutex_);
-    this->simple_buffers_[buffer_idx].data = frame_data;  // Restore V4L2 pointer
-    portEXIT_CRITICAL(&this->buffer_mutex_);
-  }
 
   buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
   buf.length = this->image_buffer_size_;
@@ -1367,12 +1149,7 @@ void MipiDSICamComponent::stop_streaming() {
   // Reset legacy pointer
   this->image_buffer_ = nullptr;
 
-  // 4. Cleanup PPA si activé
-  if (this->ppa_enabled_) {
-    this->cleanup_ppa_();
-  }
-
-  // 5. Libérer la structure imlib si allouée (seulement si imlib activé)
+  // 4. Libérer la structure imlib si allouée (seulement si imlib activé)
 #if IMLIB_AVAILABLE
   if (this->imlib_image_) {
     free(this->imlib_image_);

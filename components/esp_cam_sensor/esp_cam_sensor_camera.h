@@ -59,15 +59,6 @@ class MipiDSICamComponent : public Component {
   void set_framerate(int f) { framerate_ = f; }
   void set_jpeg_quality(int q) { jpeg_quality_ = q; }
 
-  // Configuration mirror/rotate (PPA hardware si disponible)
-  void set_mirror_x(bool enable) { mirror_x_ = enable; }
-  void set_mirror_y(bool enable) { mirror_y_ = enable; }
-  void set_rotation(int degrees) { rotation_ = degrees; }  // 0, 90, 180, 270
-  void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset (pixels)
-  void set_output_width(int width) { output_width_ = width; }      // PPA resize output (0 = no resize)
-  void set_output_height(int height) { output_height_ = height; }  // PPA resize output
-  void set_ppa_enabled(bool enable) { ppa_user_override_ = true; ppa_enabled_ = enable; }  // Explicit PPA control
-
   // Configuration des gains RGB CCM depuis YAML
   void set_rgb_gains_config(float red, float green, float blue) {
     rgb_gains_red_ = red;
@@ -119,19 +110,10 @@ class MipiDSICamComponent : public Component {
 
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
-  // Return PPA output size if resize configured, otherwise capture size
-  uint16_t get_image_width() const {
-    return (output_width_ > 0) ? output_width_ : image_width_;
-  }
-  uint16_t get_image_height() const {
-    return (output_height_ > 0) ? output_height_ : image_height_;
-  }
-  size_t get_image_size() const {
-    if (output_width_ > 0 && output_height_ > 0) {
-      return output_width_ * output_height_ * 2;  // RGB565 after PPA resize
-    }
-    return image_buffer_size_;
-  }
+  // Return sensor capture size (no PPA transformations in esp_cam_sensor anymore)
+  uint16_t get_image_width() const { return image_width_; }
+  uint16_t get_image_height() const { return image_height_; }
+  size_t get_image_size() const { return image_buffer_size_; }
 
   // Contrôles manuels d'exposition et couleur (pour corriger surexposition et blanc→vert)
   bool set_exposure(int value);     // Contrôle manuel de l'exposition (0-65535, défaut: auto)
@@ -173,21 +155,6 @@ class MipiDSICamComponent : public Component {
   int framerate_{30};
   int jpeg_quality_{10};
 
-  // Configuration mirror/rotate (M5Stack-style PPA hardware)
-  bool mirror_x_{false};
-  bool mirror_y_{false};
-  int rotation_{0};  // 0, 90, 180, 270 degrees
-  int crop_offset_x_{0};  // PPA crop offset in pixels (from left)
-
-  // PPA resize (optional - downscale only)
-  int output_width_{0};   // 0 = no resize (keep capture resolution)
-  int output_height_{0};  // 0 = no resize
-
-  // PPA (Pixel-Processing Accelerator) hardware handles
-  void *ppa_client_handle_{nullptr};
-  bool ppa_enabled_{false};
-  bool ppa_user_override_{false};  // True if user explicitly set ppa_enabled in YAML
-
   // Configuration CCM RGB gains depuis YAML
   bool rgb_gains_enabled_{false};
   float rgb_gains_red_{1.0f};
@@ -227,11 +194,6 @@ class MipiDSICamComponent : public Component {
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();
-
-  // PPA (Pixel-Processing Accelerator) hardware transform functions
-  bool init_ppa_();
-  bool apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer);
-  void cleanup_ppa_();
 };
 
 using MipiDsiCam = MipiDSICamComponent;
