@@ -344,10 +344,16 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
 
   // Exécuter transformation hardware (M5Stack API: 2 parameters)
+  ESP_LOGI(TAG, "→ Calling ppa_do_scale_rotate_mirror...");
+  ESP_LOGI(TAG, "  in_buffer=%p, out_buffer=%p", srm_config.in.buffer, srm_config.out.buffer);
+  ESP_LOGI(TAG, "  out_buf_size=%d bytes", srm_config.out.buffer_size);
+
   esp_err_t ret = ppa_do_scale_rotate_mirror(
       (ppa_client_handle_t)this->ppa_client_handle_,
       &srm_config
   );
+
+  ESP_LOGI(TAG, "← Returned from ppa_do_scale_rotate_mirror");
 
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ PPA transform failed: %s", esp_err_to_name(ret));
@@ -1237,6 +1243,7 @@ bool MipiDSICamComponent::capture_frame() {
     // Transform FROM V4L2 buffer TO separate PPA buffer (no in-place transform!)
     if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
       display_buffer = this->image_buffer_;  // Use PPA output for display
+      ESP_LOGI(TAG, "✓ Using PPA output buffer at %p", display_buffer);
     } else {
       ESP_LOGE(TAG, "PPA transform failed, using original buffer");
     }
