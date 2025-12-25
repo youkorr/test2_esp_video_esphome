@@ -1,9 +1,13 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-// PPA hardware transform includes
-#include <esp_ppa.h>
-#include <esp_heap_caps.h>
+
+// PPA hardware transform includes (C headers)
+extern "C" {
+#include "driver/ppa.h"  // Pixel-Processing Accelerator
+#include "esp_heap_caps.h"
+}
+
 // Conditionally include face_detection only if it exists
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
