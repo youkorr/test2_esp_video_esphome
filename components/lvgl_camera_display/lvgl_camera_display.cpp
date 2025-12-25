@@ -208,16 +208,22 @@ void LVGLCameraDisplay::update_canvas_() {
 
   // Apply PPA transformation if enabled
   uint8_t *display_data = img_data;
+  uint16_t display_width = width;
+  uint16_t display_height = height;
+
   if (this->ppa_enabled_ && (this->rotation_ != 0 || this->mirror_x_ || this->mirror_y_)) {
-    if (!this->apply_ppa_transform_(img_data, width, height, &display_data)) {
+    if (!this->apply_ppa_transform_(img_data, width, height, &display_data, &display_width, &display_height)) {
       ESP_LOGW(TAG, "PPA transform failed, using original buffer");
       display_data = img_data;
+      display_width = width;
+      display_height = height;
     }
   }
 
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
-    ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
+    ESP_LOGI(TAG, "   Input dimensions: %ux%u", width, height);
+    ESP_LOGI(TAG, "   Display dimensions: %ux%u", display_width, display_height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              display_data[0], display_data[1], display_data[2], display_data[3], display_data[4], display_data[5]);
@@ -227,7 +233,7 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, display_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  lv_canvas_set_buffer(this->canvas_obj_, display_data, display_width, display_height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update
@@ -292,10 +298,12 @@ bool LVGLCameraDisplay::init_ppa_() {
     return false;
   }
 
-  // Allocate PPA output buffer in SPIRAM (same size as input)
+  // Allocate PPA output buffer in SPIRAM
+  // Use max dimension for both width and height to handle rotation
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
-  size_t buffer_size = width * height * 2;  // RGB565
+  uint16_t max_dim = (width > height) ? width : height;
+  size_t buffer_size = max_dim * max_dim * 2;  // RGB565, large enough for any rotation
 
   this->ppa_buffer_ = (uint8_t *)heap_caps_malloc(buffer_size, MALLOC_CAP_SPIRAM);
   if (this->ppa_buffer_ == nullptr) {
@@ -313,9 +321,20 @@ bool LVGLCameraDisplay::init_ppa_() {
   return true;
 }
 
-bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height, uint8_t **out_buffer) {
+bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height,
+                                             uint8_t **out_buffer, uint16_t *out_width, uint16_t *out_height) {
   if (!this->ppa_enabled_ || !this->ppa_client_handle_) {
+    *out_width = width;
+    *out_height = height;
     return true;  // No transformation
+  }
+
+  // Calculate output dimensions (swap for 90/270 rotation)
+  uint16_t output_w = width;
+  uint16_t output_h = height;
+  if (this->rotation_ == 90 || this->rotation_ == 270) {
+    output_w = height;  // Swap dimensions
+    output_h = width;
   }
 
   // Configure PPA transformation
@@ -331,11 +350,11 @@ bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width
   srm_config.in.block_offset_y = 0;
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // Output buffer
+  // Output buffer (with correct rotated dimensions!)
   srm_config.out.buffer = this->ppa_buffer_;
-  srm_config.out.buffer_size = width * height * 2;
-  srm_config.out.pic_w = width;
-  srm_config.out.pic_h = height;
+  srm_config.out.buffer_size = output_w * output_h * 2;
+  srm_config.out.pic_w = output_w;
+  srm_config.out.pic_h = output_h;
   srm_config.out.block_offset_x = 0;
   srm_config.out.block_offset_y = 0;
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
@@ -370,8 +389,10 @@ bool LVGLCameraDisplay::apply_ppa_transform_(uint8_t *src_buffer, uint16_t width
     return false;
   }
 
-  // Return transformed buffer
+  // Return transformed buffer and dimensions
   *out_buffer = this->ppa_buffer_;
+  *out_width = output_w;
+  *out_height = output_h;
   return true;
 }
 

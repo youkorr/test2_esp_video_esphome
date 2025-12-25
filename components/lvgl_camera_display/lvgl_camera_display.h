@@ -76,7 +76,8 @@ class LVGLCameraDisplay : public Component {
   void update_canvas_();
   bool init_ppa_();
   void cleanup_ppa_();
-  bool apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height, uint8_t **out_buffer);
+  bool apply_ppa_transform_(uint8_t *src_buffer, uint16_t width, uint16_t height,
+                            uint8_t **out_buffer, uint16_t *out_width, uint16_t *out_height);
 };
 
 }  // namespace lvgl_camera_display
