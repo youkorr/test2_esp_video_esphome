@@ -216,20 +216,32 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Check if user explicitly disabled PPA via YAML
-  if (this->ppa_user_override_ && !this->ppa_enabled_) {
-    ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false) - hardware rotation only");
-    return true;
-  }
-
-  // CRITICAL: Disable PPA completely for OV02C10 sensor
-  // PPA operations cause watchdog timeout with OV02C10 (all formats tested)
-  if (this->sensor_name_ == "ov02c10") {
-    ESP_LOGI(TAG, "⚠️  PPA DISABLED for OV02C10 sensor (causes watchdog timeout)");
-    ESP_LOGI(TAG, "   → Rotation/mirror settings will be ignored");
-    ESP_LOGI(TAG, "   → Use sensor native output or configure rotation in LVGL");
-    this->ppa_enabled_ = false;
-    return true;
+  // Check if user explicitly set PPA enable/disable via YAML
+  if (this->ppa_user_override_) {
+    if (!this->ppa_enabled_) {
+      ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false)");
+      return true;
+    } else {
+      // User explicitly enabled PPA - allow it but warn for OV02C10
+      if (this->sensor_name_ == "ov02c10") {
+        ESP_LOGW(TAG, "⚠️  PPA FORCE-ENABLED by user for OV02C10 sensor!");
+        ESP_LOGW(TAG, "   → WARNING: This may cause watchdog timeout");
+        ESP_LOGW(TAG, "   → Use rotation in lvgl_camera_display instead if it crashes");
+      }
+      ESP_LOGI(TAG, "✓ PPA explicitly ENABLED by user (ppa_enabled: true)");
+      // Continue to PPA registration below
+    }
+  } else {
+    // No user override - apply automatic rules
+    // CRITICAL: Auto-disable PPA for OV02C10 sensor
+    // PPA operations cause watchdog timeout with OV02C10 (all formats tested)
+    if (this->sensor_name_ == "ov02c10") {
+      ESP_LOGI(TAG, "⚠️  PPA auto-DISABLED for OV02C10 sensor (causes watchdog timeout)");
+      ESP_LOGI(TAG, "   → Use rotation in lvgl_camera_display instead");
+      ESP_LOGI(TAG, "   → Or force-enable with ppa_enabled: true (not recommended)");
+      this->ppa_enabled_ = false;
+      return true;
+    }
   }
 
   // Auto-detect: Enable PPA if crop offset, mirror, rotation, or resize is configured
