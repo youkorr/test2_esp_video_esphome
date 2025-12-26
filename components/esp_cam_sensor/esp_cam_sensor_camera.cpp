@@ -1151,6 +1151,16 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
+  // Réinitialiser PPA si nécessaire (au cas où stop_streaming() l'a désactivé)
+  // Vérifier si rotation/mirror/crop sont configurés même si ppa_enabled_ est actuellement false
+  if (!this->ppa_enabled_ && (this->mirror_x_ || this->mirror_y_ || this->rotation_ != 0 ||
+                               this->crop_offset_x_ != 0 || this->output_width_ > 0 || this->output_height_ > 0)) {
+    ESP_LOGI(TAG, "Reinitializing PPA (was disabled by previous stop_streaming)");
+    if (!this->init_ppa_()) {
+      ESP_LOGW(TAG, "PPA reinitialization failed");
+    }
+  }
+
   // Allouer buffer séparé pour PPA si mirror/rotate activés
   if (this->ppa_enabled_) {
     this->image_buffer_ = (uint8_t*)heap_caps_malloc(
