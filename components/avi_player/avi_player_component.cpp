@@ -196,6 +196,23 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
   // You can use ESP32's JPEG hardware decoder or a software decoder
 }
 
+// Static callbacks for LVGL button events
+static void play_btn_event_cb(lv_event_t *e) {
+  AviPlayerComponent *player = static_cast<AviPlayerComponent *>(lv_event_get_user_data(e));
+  if (player != nullptr && lv_event_get_code(e) == LV_EVENT_CLICKED) {
+    ESP_LOGI(TAG, "Play button clicked");
+    player->play();
+  }
+}
+
+static void stop_btn_event_cb(lv_event_t *e) {
+  AviPlayerComponent *player = static_cast<AviPlayerComponent *>(lv_event_get_user_data(e));
+  if (player != nullptr && lv_event_get_code(e) == LV_EVENT_CLICKED) {
+    ESP_LOGI(TAG, "Stop button clicked");
+    player->stop();
+  }
+}
+
 void AviPlayerComponent::create_controls() {
   if (parent_ == nullptr) {
     return;
@@ -218,6 +235,9 @@ void AviPlayerComponent::create_controls() {
     lv_label_set_text(play_label, LV_SYMBOL_PLAY);
     lv_obj_center(play_label);
 
+    // Add event callback for play button
+    lv_obj_add_event_cb(play_btn_, play_btn_event_cb, LV_EVENT_CLICKED, this);
+
     // Create stop button
     stop_btn_ = lv_btn_create(controls_panel_);
     lv_obj_set_size(stop_btn_, 60, 40);
@@ -226,6 +246,9 @@ void AviPlayerComponent::create_controls() {
     lv_label_set_text(stop_label, LV_SYMBOL_STOP);
     lv_obj_center(stop_label);
     lv_obj_add_state(stop_btn_, LV_STATE_DISABLED);
+
+    // Add event callback for stop button
+    lv_obj_add_event_cb(stop_btn_, stop_btn_event_cb, LV_EVENT_CLICKED, this);
   }
 
   // Create slider
