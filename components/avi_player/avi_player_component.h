@@ -9,6 +9,7 @@
 #include "lvgl.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "driver/jpeg_decode.h"
 
 extern "C" {
 #include "avi_player.h"
@@ -78,6 +79,9 @@ class AviPlayerComponent : public Component {
   lv_color_t *video_buffer_{nullptr};
   uint8_t *memory_buffer_{nullptr};  // For preload_to_memory
   size_t memory_buffer_size_{0};
+
+  jpeg_decoder_handle_t jpeg_decoder_{nullptr};
+  lv_img_dsc_t lvgl_img_dsc_;  // LVGL image descriptor
 
   static void video_frame_callback(frame_data_t *data, void *arg);
   static void audio_frame_callback(frame_data_t *data, void *arg);

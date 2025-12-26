@@ -76,6 +76,26 @@ void AviPlayerComponent::setup() {
     return;
   }
 
+  // Initialize JPEG decoder
+  jpeg_decode_config_t jpeg_config = {
+    .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+    .rotate = JPEG_ROTATE_0D,
+  };
+
+  err = jpeg_new_decoder_engine(&jpeg_config, &jpeg_decoder_);
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize JPEG decoder: %s", esp_err_to_name(err));
+    return;
+  }
+
+  // Initialize LVGL image descriptor
+  lvgl_img_dsc_.header.always_zero = 0;
+  lvgl_img_dsc_.header.w = width_;
+  lvgl_img_dsc_.header.h = height_;
+  lvgl_img_dsc_.data_size = width_ * height_ * sizeof(lv_color_t);
+  lvgl_img_dsc_.header.cf = LV_IMG_CF_TRUE_COLOR;
+  lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
+
   ESP_LOGI(TAG, "AVI Player initialized successfully");
 
   if (auto_play_) {
@@ -181,19 +201,42 @@ void AviPlayerComponent::play_end_callback(void *arg) {
 }
 
 void AviPlayerComponent::render_frame(frame_data_t *data) {
-  if (data == nullptr || data->data == nullptr || img_ == nullptr) {
+  if (data == nullptr || data->data == nullptr || img_ == nullptr || jpeg_decoder_ == nullptr) {
     return;
   }
 
-  // For MJPEG format, we need to decode the JPEG
-  // For now, we'll use a simple approach - you may need to add JPEG decoding
-  ESP_LOGV(TAG, "Video frame: %d bytes, format: %d, size: %dx%d",
-           data->data_bytes, data->video_info.frame_format,
-           data->video_info.width, data->video_info.height);
+  if (data->video_info.frame_format != FORMAT_MJEPG) {
+    ESP_LOGW(TAG, "Unsupported video format: %d", data->video_info.frame_format);
+    return;
+  }
 
-  // TODO: Add JPEG decoding here
-  // For now, just log the frame
-  // You can use ESP32's JPEG hardware decoder or a software decoder
+  ESP_LOGV(TAG, "Decoding JPEG frame: %d bytes, size: %dx%d",
+           data->data_bytes, data->video_info.width, data->video_info.height);
+
+  // Decode JPEG to RGB565
+  jpeg_decode_picture_info_t picture_info;
+  uint32_t out_size = 0;
+
+  esp_err_t err = jpeg_decoder_process(jpeg_decoder_,
+                                        (jpeg_decode_cfg_t *)nullptr,
+                                        data->data,
+                                        data->data_bytes,
+                                        (uint8_t *)video_buffer_,
+                                        width_ * height_ * sizeof(lv_color_t),
+                                        &out_size,
+                                        &picture_info);
+
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(err));
+    return;
+  }
+
+  ESP_LOGV(TAG, "JPEG decoded: %dx%d, output: %u bytes",
+           picture_info.width, picture_info.height, out_size);
+
+  // Update LVGL image
+  lv_img_set_src(img_, &lvgl_img_dsc_);
+  lv_obj_invalidate(img_);
 }
 
 // Static callbacks for LVGL button events
