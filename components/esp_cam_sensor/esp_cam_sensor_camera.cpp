@@ -274,40 +274,37 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int input_height = this->image_height_;
 
   // Output dimensions and scaling - GENERIC ALGORITHM for all sensors/resolutions
-  // CRITICAL: Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
-  // - Output dimensions are ALWAYS the FINAL desired dimensions (no swap needed)
-  // - Scale factors are SWAPPED for 90°/270° rotation (scale_x uses height, scale_y uses width)
+  // Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
   //
-  // Examples (works for ANY resolution):
-  //   640x480 + rotation 270° → output 480x640
-  //   800x600 + rotation 270° → output 600x800
-  //   1920x1080 + rotation 90° → output 1080x1920
+  // TEST BOTH APPROACHES to fix "quadrupled image" issue:
+  // Approach A: Swap dimensions for rotation (ESP-GMF style)
+  // Approach B: Keep dimensions same for rotation
+  //
+  // Currently testing: Approach A (ESP-GMF)
 
   int output_width, output_height;
   float scale_x, scale_y;
 
   if (this->output_width_ > 0 && this->output_height_ > 0) {
-    // User specified explicit output size - use as-is (these are final dimensions)
+    // User specified explicit output size
     output_width = this->output_width_;
     output_height = this->output_height_;
 
-    // Calculate scale factors (ESP-GMF style: swap for 90°/270° rotation)
+    // Calculate scale factors (ESP-GMF: swap for 90°/270°)
     if (this->rotation_ == 0 || this->rotation_ == 180) {
       scale_x = (float)output_width / (float)input_width;
       scale_y = (float)output_height / (float)input_height;
-    } else {  // 90° or 270° rotation
-      // For rotation: scale_x uses HEIGHT, scale_y uses WIDTH
+    } else {  // 90° or 270°
       scale_x = (float)output_height / (float)input_width;
       scale_y = (float)output_width / (float)input_height;
     }
   } else {
-    // No explicit output size - calculate based on input and rotation
-    // For 90°/270°: final dimensions are swapped from input
+    // No explicit output - APPROACH A: Swap dimensions (ESP-GMF style)
     if (this->rotation_ == 90 || this->rotation_ == 270) {
-      output_width = input_height;   // After 90°/270° rotation
-      output_height = input_width;
+      output_width = input_height;   // 640
+      output_height = input_width;   // 480
     } else {
-      output_width = input_width;    // No dimension change for 0°/180°
+      output_width = input_width;
       output_height = input_height;
     }
     scale_x = 1.0f;
