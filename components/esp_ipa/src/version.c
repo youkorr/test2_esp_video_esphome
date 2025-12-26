@@ -100,6 +100,10 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
             // SC202CS: Désactiver CCM pour éviter le fond vert (même config que OV5647)
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - fixes green tint)", cam_name);
             return &ipa_config_ov5647;
+        } else if (strcmp(cam_name, "OV02C10") == 0 || strcmp(cam_name, "ov02c10") == 0) {
+            // OV02C10: Désactiver CCM pour éviter la teinte verte excessive
+            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - fixes green tint)", cam_name);
+            return &ipa_config_ov5647;
         } else {
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
             return &ipa_config_full;
