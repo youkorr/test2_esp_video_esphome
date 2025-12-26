@@ -831,7 +831,7 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
     // ============================================================================
-  // Custom Format Support (OV02C10 @ 640x480, 800x600, 480x640, or 1920x1080)
+  // Custom Format Support (OV02C10 @ 640x480, 800x600, 854x480, 480x640, or 1920x1080)
   // ============================================================================
   if (this->sensor_name_ == "ov02c10") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
@@ -844,10 +844,13 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA 4:3, 25%% horizontal crop)");
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, 25%% horizontal crop)");
+    } else if (width == 854 && height == 480) {
+      custom_format = &ov02c10_format_854x480_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 854x480 RAW10 @ 30fps (WVGA 16:9, 0%% crop - PERFECT FOV!)");
     } else if (width == 1920 && height == 1080) {
       custom_format = &ov02c10_format_1920x1080_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");
