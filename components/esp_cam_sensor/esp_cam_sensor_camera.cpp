@@ -331,13 +331,16 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
   // Transformation configuration
+  // CRITICAL: PPA angles are INVERTED from logical rotation (from LVGL lvgl_port_v9.c)
+  //   Logical 90° → PPA_SRM_ROTATION_ANGLE_270
+  //   Logical 270° → PPA_SRM_ROTATION_ANGLE_90
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
   if (this->rotation_ == 90) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;  // INVERTED!
   } else if (this->rotation_ == 180) {
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
   } else if (this->rotation_ == 270) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;   // INVERTED!
   }
 
   srm_config.scale_x = scale_x;
