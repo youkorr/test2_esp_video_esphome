@@ -1306,7 +1306,7 @@ static int sc202cs_get_hts(esp_cam_sensor_device_t *dev)
     sc202cs_read(dev->sccb_handle, 0x320c, &temp1);  // HTS MSB
     sc202cs_read(dev->sccb_handle, 0x320d, &temp2);  // HTS LSB
     hts = (temp1 << 8) + temp2;
-    ESP_LOGI(TAG, "SC202CS HTS readback = 0x%04x (%d)", hts, hts);
+    ESP_LOGW(TAG, "SC202CS HTS readback = 0x%04x (%d)", hts, hts);
     return hts;
 }
 
@@ -1318,7 +1318,7 @@ static int sc202cs_get_vts(esp_cam_sensor_device_t *dev)
     sc202cs_read(dev->sccb_handle, 0x320e, &temp1);  // VTS MSB
     sc202cs_read(dev->sccb_handle, 0x320f, &temp2);  // VTS LSB
     vts = (temp1 << 8) + temp2;
-    ESP_LOGI(TAG, "SC202CS VTS readback = 0x%04x (%d)", vts, vts);
+    ESP_LOGW(TAG, "SC202CS VTS readback = 0x%04x (%d)", vts, vts);
     return vts;
 }
 
@@ -1341,8 +1341,9 @@ static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_
     }
 
     // ✅ DIAGNOSTIC: Read back HTS/VTS to verify timing configuration
-    ESP_LOGI(TAG, "SC202CS Timing Configuration Verification:");
-    ESP_LOGI(TAG, "  Expected: pclk=%u Hz, HTS=%u, VTS=%u, FPS=%u",
+    ESP_LOGW(TAG, "========================================");
+    ESP_LOGW(TAG, "SC202CS Timing Configuration Verification:");
+    ESP_LOGW(TAG, "  Expected: pclk=%u Hz, HTS=%u, VTS=%u, FPS=%u",
              format->isp_info->isp_v1_info.pclk,
              format->isp_info->isp_v1_info.hts,
              format->isp_info->isp_v1_info.vts,
@@ -1365,8 +1366,9 @@ static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_
         ESP_LOGW(TAG, "  Expected FPS: %.2f", expected_fps);
         ESP_LOGW(TAG, "  Actual FPS:   %.2f (based on readback)", actual_fps);
     } else {
-        ESP_LOGI(TAG, "✓ Timing registers verified correctly");
+        ESP_LOGW(TAG, "✓ Timing registers verified correctly");
     }
+    ESP_LOGW(TAG, "========================================");
 
     dev->cur_format = format;
     // init para
