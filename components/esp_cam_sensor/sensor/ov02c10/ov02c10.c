@@ -1107,8 +1107,8 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  };
 
 // Custom format definitions (exposed via ov02c10_custom_formats.h)
-// Supported formats: 640x480 (VGA 4:3), 800x600 (SVGA 4:3), 640x360 (nHD 16:9), 480x640 (portrait), 1920x1080 (1080P)
-// All formats use full sensor with ISP downscaling, 640x360 has perfect 16:9 aspect ratio with 8-byte alignment
+// Supported formats: 640x480 (VGA 4:3), 800x600 (SVGA 4:3), 640x368 (near 16:9), 480x640 (portrait), 1920x1080 (1080P)
+// All formats use full sensor with ISP downscaling, 640x368 has near 16:9 aspect ratio with 16-byte alignment
 
 const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
@@ -1167,15 +1167,15 @@ const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
     .reserved = NULL,
 };
 
-const esp_cam_sensor_format_t ov02c10_format_640x360_raw10_30fps = {
-    .name = "MIPI_1lane_24Minput_RAW10_640x360_30fps",
+const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
+    .name = "MIPI_1lane_24Minput_RAW10_640x368_30fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .xclk = 24000000,
     .width = 640,
-    .height = 360,
-    .regs = ov02c10_input_24M_MIPI_1lane_raw10_640x360_30fps,
-    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_640x360_30fps),
+    .height = 368,
+    .regs = ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps,
+    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps),
     .fps = 30,
     .isp_info = &ov02c10_isp_info[0],
     .mipi_info = {
