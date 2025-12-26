@@ -60,6 +60,23 @@ void LVGLCameraDisplay::loop() {
 
 // Callback du timer LVGL (appele periodiquement par LVGL)
 void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
+  // ⏱️ DIAGNOSTIC: Measure actual timer callback rate
+  static uint32_t last_callback_time = 0;
+  static uint32_t callback_count = 0;
+  uint32_t now = millis();
+
+  if (last_callback_time != 0) {
+    uint32_t interval = now - last_callback_time;
+    callback_count++;
+
+    // Log every 100 callbacks
+    if (callback_count % 100 == 0) {
+      ESP_LOGW(TAG, "🔥 LVGL Timer: called every ~%u ms (expected: 33ms, count=%u)",
+               interval, callback_count);
+    }
+  }
+  last_callback_time = now;
+
   LVGLCameraDisplay *display = static_cast<LVGLCameraDisplay *>(timer->user_data);
   if (display != nullptr) {
     display->update_camera_frame_();
