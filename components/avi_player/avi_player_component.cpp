@@ -76,17 +76,20 @@ void AviPlayerComponent::setup() {
     return;
   }
 
-  // Initialize JPEG decoder
-  jpeg_decode_config_t jpeg_config = {
-    .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
-    .rotate = JPEG_ROTATE_0D,
+  // Initialize JPEG decoder engine
+  jpeg_decode_engine_cfg_t engine_cfg = {
+    .timeout_ms = 100,
   };
 
-  err = jpeg_new_decoder_engine(&jpeg_config, &jpeg_decoder_);
+  err = jpeg_new_decoder_engine(&engine_cfg, &jpeg_decoder_);
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize JPEG decoder: %s", esp_err_to_name(err));
     return;
   }
+
+  // Configure JPEG decoder for RGB565 output
+  jpeg_decode_cfg_.output_format = JPEG_DECODE_OUT_FORMAT_RGB565;
+  jpeg_decode_cfg_.rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR;
 
   // Initialize LVGL image descriptor
   lvgl_img_dsc_.header.always_zero = 0;
@@ -214,25 +217,22 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
            data->data_bytes, data->video_info.width, data->video_info.height);
 
   // Decode JPEG to RGB565
-  jpeg_decode_picture_info_t picture_info;
   uint32_t out_size = 0;
 
   esp_err_t err = jpeg_decoder_process(jpeg_decoder_,
-                                        (jpeg_decode_cfg_t *)nullptr,
+                                        &jpeg_decode_cfg_,
                                         data->data,
                                         data->data_bytes,
                                         (uint8_t *)video_buffer_,
                                         width_ * height_ * sizeof(lv_color_t),
-                                        &out_size,
-                                        &picture_info);
+                                        &out_size);
 
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(err));
     return;
   }
 
-  ESP_LOGV(TAG, "JPEG decoded: %dx%d, output: %u bytes",
-           picture_info.width, picture_info.height, out_size);
+  ESP_LOGV(TAG, "JPEG decoded: output %u bytes", out_size);
 
   // Update LVGL image
   lv_img_set_src(img_, &lvgl_img_dsc_);
