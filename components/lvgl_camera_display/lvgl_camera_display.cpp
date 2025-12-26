@@ -46,7 +46,7 @@ void LVGLCameraDisplay::loop() {
       ESP_LOGE(TAG, "Failed to create LVGL timer");
     } else {
       // 🔥 DIAGNOSTIC: Verify timer period after creation
-      uint32_t actual_period = lv_timer_get_period(this->lvgl_timer_);
+      uint32_t actual_period = this->lvgl_timer_->period;
       ESP_LOGW(TAG, "🔥 LVGL Timer created: requested=%ums, actual=%ums",
                this->update_interval_, actual_period);
       ESP_LOGI(TAG, "LVGL Camera Display started");
@@ -75,7 +75,7 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
 
     // Log every 100 callbacks and show current timer period
     if (callback_count % 100 == 0) {
-      uint32_t timer_period = lv_timer_get_period(timer);
+      uint32_t timer_period = timer->period;
       ESP_LOGW(TAG, "🔥 LVGL Timer: interval=%ums (expected: 33ms), period=%ums, count=%u",
                interval, timer_period, callback_count);
     }
