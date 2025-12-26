@@ -268,14 +268,20 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   ppa_srm_oper_config_t srm_config = {};
 
-  // Input dimensions (from sensor)
+  // Input dimensions (from sensor - works for ANY sensor and ANY resolution)
+  // image_width_ and image_height_ are set from V4L2 format (line 1030-1031)
   int input_width = this->image_width_;
   int input_height = this->image_height_;
 
-  // Output dimensions and scaling
+  // Output dimensions and scaling - GENERIC ALGORITHM for all sensors/resolutions
   // CRITICAL: Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
   // - Output dimensions are ALWAYS the FINAL desired dimensions (no swap needed)
   // - Scale factors are SWAPPED for 90°/270° rotation (scale_x uses height, scale_y uses width)
+  //
+  // Examples (works for ANY resolution):
+  //   640x480 + rotation 270° → output 480x640
+  //   800x600 + rotation 270° → output 600x800
+  //   1920x1080 + rotation 90° → output 1080x1920
 
   int output_width, output_height;
   float scale_x, scale_y;
