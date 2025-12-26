@@ -301,19 +301,30 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     }
   } else {
     // No explicit output - APPROACH A: Swap dimensions (ESP-GMF style)
-    // Account for crop offset - output size based on actual block size, not full picture
+    // Output dimensions based on ORIGINAL input size (not cropped size)
+    // to maintain consistent canvas size even with crop offset
+    if (this->rotation_ == 90 || this->rotation_ == 270) {
+      output_width = input_height;   // Swapped
+      output_height = input_width;   // Swapped
+    } else {
+      output_width = input_width;
+      output_height = input_height;
+    }
+
+    // Calculate scale to fit cropped block into original output size
+    // (crop reduces input, so scale > 1.0 to compensate)
     int effective_width = input_width - this->crop_offset_x_;
     int effective_height = input_height - this->crop_offset_y_;
 
-    if (this->rotation_ == 90 || this->rotation_ == 270) {
-      output_width = effective_height;   // Swapped
-      output_height = effective_width;   // Swapped
+    if (this->rotation_ == 0 || this->rotation_ == 180) {
+      // No rotation or 180° - dimensions stay same
+      scale_x = (float)output_width / (float)effective_width;
+      scale_y = (float)output_height / (float)effective_height;
     } else {
-      output_width = effective_width;
-      output_height = effective_height;
+      // 90° or 270° - dimensions are swapped, scale accounts for this
+      scale_x = (float)output_height / (float)effective_width;
+      scale_y = (float)output_width / (float)effective_height;
     }
-    scale_x = 1.0f;
-    scale_y = 1.0f;
   }
 
   // INPUT CONFIG (matching M5Stack implementation)
