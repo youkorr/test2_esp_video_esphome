@@ -850,13 +850,12 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
     // ============================================================================
-  // Custom Format Support (OV02C10 @ 640x480, 800x600, 640x368, 480x640, or 1920x1080)
+  // Custom Format Support (OV02C10 @ 640x480, 800x600, 1288x728, 640x368, 480x640, or 1920x1080)
   // ============================================================================
   if (this->sensor_name_ == "ov02c10") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
     // Sélectionner le format custom selon la résolution
-    // Note: 1288x728 is the native resolution (no custom format needed)
     if (width == 480 && height == 640) {
       // YAML: "480x640" → Portrait capture, LVGL handles rotation
       custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
@@ -867,6 +866,9 @@ bool MipiDSICamComponent::start_streaming() {
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, 25%% horizontal crop)");
+    } else if (width == 1288 && height == 728) {
+      custom_format = &ov02c10_format_1288x728_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 1288x728 RAW10 @ 30fps (16:9, ~12%% horizontal crop - BETTER FOV!)");
     } else if (width == 640 && height == 368) {
       custom_format = &ov02c10_format_640x368_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
