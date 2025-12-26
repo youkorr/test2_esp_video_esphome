@@ -63,7 +63,8 @@ class MipiDSICamComponent : public Component {
   void set_mirror_x(bool enable) { mirror_x_ = enable; }
   void set_mirror_y(bool enable) { mirror_y_ = enable; }
   void set_rotation(int degrees) { rotation_ = degrees; }  // 0, 90, 180, 270
-  void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset (pixels)
+  void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset horizontal (pixels)
+  void set_crop_offset_y(int offset) { crop_offset_y_ = offset; }  // PPA crop offset vertical (pixels)
   void set_output_width(int width) { output_width_ = width; }      // PPA resize output (0 = no resize)
   void set_output_height(int height) { output_height_ = height; }  // PPA resize output
   void set_ppa_enabled(bool enable) { ppa_user_override_ = true; ppa_enabled_ = enable; }  // Explicit PPA control
@@ -188,7 +189,8 @@ class MipiDSICamComponent : public Component {
   bool mirror_x_{false};
   bool mirror_y_{false};
   int rotation_{0};  // 0, 90, 180, 270 degrees
-  int crop_offset_x_{0};  // PPA crop offset in pixels (from left)
+  int crop_offset_x_{0};  // PPA crop offset horizontal in pixels (from left)
+  int crop_offset_y_{0};  // PPA crop offset vertical in pixels (from top)
 
   // PPA resize (optional - downscale only)
   int output_width_{0};   // 0 = no resize (keep capture resolution)

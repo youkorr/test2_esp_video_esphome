@@ -32,7 +32,8 @@ CONF_JPEG_QUALITY = "jpeg_quality"
 CONF_MIRROR_X = "mirror_x"  # Hardware PPA transform (M5Stack-style)
 CONF_MIRROR_Y = "mirror_y"  # Hardware PPA transform
 CONF_ROTATION = "rotation"  # Hardware PPA transform (0/90/180/270)
-CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset (pixels from left)
+CONF_CROP_OFFSET_X = "crop_offset_x"  # Hardware PPA crop offset horizontal (pixels from left)
+CONF_CROP_OFFSET_Y = "crop_offset_y"  # Hardware PPA crop offset vertical (pixels from top)
 CONF_OUTPUT_WIDTH = "output_width"    # Hardware PPA resize output (0 = no resize)
 CONF_OUTPUT_HEIGHT = "output_height"  # Hardware PPA resize output
 CONF_PPA_ENABLED = "ppa_enabled"      # Explicit PPA enable/disable (overrides auto-detection)
@@ -88,8 +89,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_MIRROR_X): cv.boolean,
         cv.Optional(CONF_MIRROR_Y): cv.boolean,
         cv.Optional(CONF_ROTATION): cv.int_,
-        # PPA crop offset (hardware crop via block_offset_x)
+        # PPA crop offset (hardware crop via block_offset_x/y)
         cv.Optional(CONF_CROP_OFFSET_X, default=0): cv.int_range(min=0, max=800),
+        cv.Optional(CONF_CROP_OFFSET_Y, default=0): cv.int_range(min=0, max=600),
         # PPA resize (hardware downscale - 0 = no resize, keep capture resolution)
         cv.Optional(CONF_OUTPUT_WIDTH, default=0): cv.int_range(min=0, max=1920),
         cv.Optional(CONF_OUTPUT_HEIGHT, default=0): cv.int_range(min=0, max=1080),
@@ -136,6 +138,7 @@ async def to_code(config):
 
     # Configuration crop offset (PPA hardware crop)
     cg.add(var.set_crop_offset_x(config[CONF_CROP_OFFSET_X]))
+    cg.add(var.set_crop_offset_y(config[CONF_CROP_OFFSET_Y]))
 
     # Configuration PPA resize (hardware downscale)
     cg.add(var.set_output_width(config[CONF_OUTPUT_WIDTH]))
