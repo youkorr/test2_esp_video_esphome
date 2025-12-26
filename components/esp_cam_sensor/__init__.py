@@ -90,6 +90,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_MIRROR_Y): cv.boolean,
         cv.Optional(CONF_ROTATION): cv.int_,
         # PPA crop offset (hardware crop via block_offset_x/y)
+        # WARNING: Increasing crop_offset creates ZOOM (reduces FOV)
+        # Use small values (0-50) for framing, or 0 for maximum FOV
         cv.Optional(CONF_CROP_OFFSET_X, default=0): cv.int_range(min=0, max=800),
         cv.Optional(CONF_CROP_OFFSET_Y, default=0): cv.int_range(min=0, max=600),
         # PPA resize (hardware downscale - 0 = no resize, keep capture resolution)
