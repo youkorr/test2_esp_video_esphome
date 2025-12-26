@@ -9,6 +9,7 @@
 //   - 640x480 @ 30fps RAW10 (VGA) - full sensor (0-1935 x 4-1091), ISP downscales
 //   - 800x600 @ 30fps RAW10 (SVGA) - full sensor (0-1935 x 4-1091), ISP downscales
 //   - 480x640 @ 30fps RAW10 (VGA rotated 270°) - full sensor, rotation enabled
+//   - 1920x1080 @ 30fps RAW10 (1080P) - full sensor (0-1935 x 4-1091), native resolution
 //
 // Native full sensor: 1920x1080 @ 30fps RAW10 (100% sensor area)
 
@@ -24,6 +25,9 @@ extern const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps;
 
 // Custom format 480x640 @ 30fps RAW10 (VGA rotated 270°)
 extern const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270;
+
+// Custom format 1920x1080 @ 30fps RAW10 (1080P - Full HD)
+extern const esp_cam_sensor_format_t ov02c10_format_1920x1080_raw10_30fps;
 
 #ifdef __cplusplus
 }
