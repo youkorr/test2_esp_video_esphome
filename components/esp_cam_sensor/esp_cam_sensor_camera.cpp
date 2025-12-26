@@ -351,32 +351,29 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.byte_swap = false;
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-  // LOG PPA configuration for debugging
-  ESP_LOGI(TAG, "PPA Config:");
-  ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
-  ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
-  ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
-  ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
-  ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
+  // LOG PPA configuration only once (first frame)
+  static bool ppa_config_logged = false;
+  if (!ppa_config_logged) {
+    ESP_LOGI(TAG, "PPA Config:");
+    ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
+    ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
+    ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
+    ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
+    ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
+    ppa_config_logged = true;
+  }
 
-  // Exécuter transformation hardware (M5Stack API: 2 parameters)
-  ESP_LOGI(TAG, "→ Calling ppa_do_scale_rotate_mirror...");
-  ESP_LOGI(TAG, "  in_buffer=%p, out_buffer=%p", srm_config.in.buffer, srm_config.out.buffer);
-  ESP_LOGI(TAG, "  out_buf_size=%d bytes", srm_config.out.buffer_size);
-
+  // Execute PPA transformation
   esp_err_t ret = ppa_do_scale_rotate_mirror(
       (ppa_client_handle_t)this->ppa_client_handle_,
       &srm_config
   );
-
-  ESP_LOGI(TAG, "← Returned from ppa_do_scale_rotate_mirror");
 
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "❌ PPA transform failed: %s", esp_err_to_name(ret));
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ PPA transform OK");
   return true;
 }
 
