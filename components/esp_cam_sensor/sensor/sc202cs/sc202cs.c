@@ -1324,6 +1324,9 @@ static int sc202cs_get_vts(esp_cam_sensor_device_t *dev)
 
 static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_sensor_format_t *format)
 {
+    // 🔥 BUILD VERIFICATION - This log MUST appear if code was recompiled!
+    ESP_LOGE(TAG, "🔥🔥🔥 SC202CS_SET_FORMAT CALLED - BUILD VERIFIED! 🔥🔥🔥");
+
     ESP_CAM_SENSOR_NULL_POINTER_CHECK(TAG, dev);
     struct sc202cs_cam *cam_sc202cs = (struct sc202cs_cam *)dev->priv;
     esp_err_t ret                   = ESP_OK;
