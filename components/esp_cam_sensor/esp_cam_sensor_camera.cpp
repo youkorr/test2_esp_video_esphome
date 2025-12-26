@@ -272,49 +272,59 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int input_width = this->image_width_;
   int input_height = this->image_height_;
 
-  // Output dimensions (resize if configured, otherwise keep input size)
-  // IMPORTANT: Swap dimensions for 90°/270° rotation!
-  // When rotating 90° or 270°, output dimensions are swapped
-  bool swap_dims = (this->rotation_ == 90 || this->rotation_ == 270);
+  // Output dimensions and scaling
+  // CRITICAL: Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
+  // - Output dimensions are ALWAYS the FINAL desired dimensions (no swap needed)
+  // - Scale factors are SWAPPED for 90°/270° rotation (scale_x uses height, scale_y uses width)
 
   int output_width, output_height;
   float scale_x, scale_y;
 
   if (this->output_width_ > 0 && this->output_height_ > 0) {
-    // User specified explicit output size (FINAL dimensions after rotation)
-    // Do NOT swap user-specified dimensions
+    // User specified explicit output size - use as-is (these are final dimensions)
     output_width = this->output_width_;
     output_height = this->output_height_;
 
-    // Calculate scale based on dimensions BEFORE rotation
-    // For 90/270 rotation: scale calculation must account for pre-rotation dimensions
-    if (swap_dims) {
-      // Output after rotation is WxH, so before rotation it was HxW
-      scale_x = (float)output_height / (float)input_width;
-      scale_y = (float)output_width / (float)input_height;
-    } else {
+    // Calculate scale factors (ESP-GMF style: swap for 90°/270° rotation)
+    if (this->rotation_ == 0 || this->rotation_ == 180) {
       scale_x = (float)output_width / (float)input_width;
       scale_y = (float)output_height / (float)input_height;
+    } else {  // 90° or 270° rotation
+      // For rotation: scale_x uses HEIGHT, scale_y uses WIDTH
+      scale_x = (float)output_height / (float)input_width;
+      scale_y = (float)output_width / (float)input_height;
     }
   } else {
-    // No explicit output size - use input size but swap for rotation
-    output_width = swap_dims ? input_height : input_width;
-    output_height = swap_dims ? input_width : input_height;
+    // No explicit output size - calculate based on input and rotation
+    // For 90°/270°: final dimensions are swapped from input
+    if (this->rotation_ == 90 || this->rotation_ == 270) {
+      output_width = input_height;   // After 90°/270° rotation
+      output_height = input_width;
+    } else {
+      output_width = input_width;    // No dimension change for 0°/180°
+      output_height = input_height;
+    }
     scale_x = 1.0f;
     scale_y = 1.0f;
   }
 
-  // SIMPLE INPUT CONFIG (M5Stack style)
+  // INPUT CONFIG (matching M5Stack implementation)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = input_width;
   srm_config.in.pic_h = input_height;
+  srm_config.in.block_w = input_width;        // Process entire width
+  srm_config.in.block_h = input_height;       // Process entire height
+  srm_config.in.block_offset_x = 0;           // Start at top-left
+  srm_config.in.block_offset_y = 0;           // Start at top-left
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // SIMPLE OUTPUT CONFIG (M5Stack style)
+  // OUTPUT CONFIG (matching M5Stack implementation)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
   srm_config.out.pic_w = output_width;
   srm_config.out.pic_h = output_height;
+  srm_config.out.block_offset_x = 0;          // Write to top-left
+  srm_config.out.block_offset_y = 0;          // Write to top-left
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
   // Transformation configuration
