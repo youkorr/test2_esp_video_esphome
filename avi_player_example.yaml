@@ -51,12 +51,16 @@ touchscreen:
 # AVI Player Component
 avi_player:
   - id: my_avi_player
-    file_path: "/spiffs/video.avi"  # Path to your AVI file
+    file_path: "/sdcard/MJPEG/video.avi"  # Path to your AVI file
     width: 480
     height: 270
-    buffer_size: 61440  # 60KB buffer
-    auto_play: true
-    loop: true
+    buffer_size: 61440          # 60KB buffer
+    auto_play: false            # Auto-start playback
+    loop: false                 # Loop playback
+    show_controls: true         # Show play/stop buttons
+    show_slider: true           # Show progress slider
+    preload_to_memory: false    # Preload file to PSRAM (faster playback)
+    fps: 20                     # Optional: override video FPS
     # parent_id: my_lvgl_screen  # Optional: specify LVGL parent object
 
 # Buttons to control playback (optional)

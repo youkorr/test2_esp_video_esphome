@@ -14,6 +14,10 @@ void AviPlayerComponent::setup() {
   ESP_LOGI(TAG, "Setting up AVI Player");
   ESP_LOGI(TAG, "File: %s, Size: %dx%d, Buffer: %zu bytes",
            file_path_.c_str(), width_, height_, buffer_size_);
+  ESP_LOGI(TAG, "Controls: %s, Slider: %s, Preload: %s",
+           show_controls_ ? "ON" : "OFF",
+           show_slider_ ? "ON" : "OFF",
+           preload_to_memory_ ? "ON" : "OFF");
 
   // Create LVGL image object
   if (parent_ == nullptr) {
@@ -29,12 +33,25 @@ void AviPlayerComponent::setup() {
   lv_obj_set_size(img_, width_, height_);
   lv_obj_center(img_);
 
+  // Create controls if requested
+  if (show_controls_ || show_slider_) {
+    create_controls();
+  }
+
   // Allocate video buffer for MJPEG frames
   video_buffer_ = (lv_color_t *)heap_caps_malloc(width_ * height_ * sizeof(lv_color_t),
                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (video_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate video buffer");
     return;
+  }
+
+  // Preload file to memory if requested
+  if (preload_to_memory_) {
+    if (!load_file_to_memory()) {
+      ESP_LOGE(TAG, "Failed to preload file to memory");
+      return;
+    }
   }
 
   // Initialize AVI player
@@ -68,7 +85,10 @@ void AviPlayerComponent::setup() {
 }
 
 void AviPlayerComponent::loop() {
-  // Nothing to do in loop, callbacks handle playback
+  // Update slider position if enabled
+  if (show_slider_ && slider_ != nullptr && state_ == PlayerState::PLAYING) {
+    update_slider_position();
+  }
 }
 
 void AviPlayerComponent::play() {
@@ -84,13 +104,28 @@ void AviPlayerComponent::play() {
 
   ESP_LOGI(TAG, "Starting playback: %s", file_path_.c_str());
 
-  esp_err_t err = avi_player_play_from_file(avi_handle_, file_path_.c_str());
+  esp_err_t err;
+  if (preload_to_memory_ && memory_buffer_ != nullptr) {
+    ESP_LOGI(TAG, "Playing from memory (%zu bytes)", memory_buffer_size_);
+    err = avi_player_play_from_memory(avi_handle_, memory_buffer_, memory_buffer_size_);
+  } else {
+    err = avi_player_play_from_file(avi_handle_, file_path_.c_str());
+  }
+
   if (err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to play file: %s", esp_err_to_name(err));
+    ESP_LOGE(TAG, "Failed to play: %s", esp_err_to_name(err));
     return;
   }
 
   state_ = PlayerState::PLAYING;
+
+  // Update button states
+  if (play_btn_ != nullptr) {
+    lv_obj_add_state(play_btn_, LV_STATE_DISABLED);
+  }
+  if (stop_btn_ != nullptr) {
+    lv_obj_clear_state(stop_btn_, LV_STATE_DISABLED);
+  }
 }
 
 void AviPlayerComponent::stop() {
@@ -105,6 +140,14 @@ void AviPlayerComponent::stop() {
   ESP_LOGI(TAG, "Stopping playback");
   avi_player_play_stop(avi_handle_);
   state_ = PlayerState::STOPPED;
+
+  // Update button states
+  if (play_btn_ != nullptr) {
+    lv_obj_clear_state(play_btn_, LV_STATE_DISABLED);
+  }
+  if (stop_btn_ != nullptr) {
+    lv_obj_add_state(stop_btn_, LV_STATE_DISABLED);
+  }
 }
 
 void AviPlayerComponent::video_frame_callback(frame_data_t *data, void *arg) {
@@ -151,6 +194,100 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
   // TODO: Add JPEG decoding here
   // For now, just log the frame
   // You can use ESP32's JPEG hardware decoder or a software decoder
+}
+
+void AviPlayerComponent::create_controls() {
+  if (parent_ == nullptr) {
+    return;
+  }
+
+  ESP_LOGI(TAG, "Creating playback controls");
+
+  // Create controls panel
+  if (show_controls_) {
+    controls_panel_ = lv_obj_create(parent_);
+    lv_obj_set_size(controls_panel_, width_, 50);
+    lv_obj_align(controls_panel_, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_opa(controls_panel_, LV_OPA_80, 0);
+
+    // Create play button
+    play_btn_ = lv_btn_create(controls_panel_);
+    lv_obj_set_size(play_btn_, 60, 40);
+    lv_obj_align(play_btn_, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *play_label = lv_label_create(play_btn_);
+    lv_label_set_text(play_label, LV_SYMBOL_PLAY);
+    lv_obj_center(play_label);
+
+    // Create stop button
+    stop_btn_ = lv_btn_create(controls_panel_);
+    lv_obj_set_size(stop_btn_, 60, 40);
+    lv_obj_align(stop_btn_, LV_ALIGN_LEFT_MID, 80, 0);
+    lv_obj_t *stop_label = lv_label_create(stop_btn_);
+    lv_label_set_text(stop_label, LV_SYMBOL_STOP);
+    lv_obj_center(stop_label);
+    lv_obj_add_state(stop_btn_, LV_STATE_DISABLED);
+  }
+
+  // Create slider
+  if (show_slider_) {
+    slider_ = lv_slider_create(parent_);
+    lv_obj_set_width(slider_, width_ - 20);
+    lv_obj_align(slider_, LV_ALIGN_BOTTOM_MID, 0, show_controls_ ? -60 : -10);
+    lv_slider_set_range(slider_, 0, 100);
+    lv_slider_set_value(slider_, 0, LV_ANIM_OFF);
+  }
+}
+
+void AviPlayerComponent::update_slider_position() {
+  if (slider_ == nullptr) {
+    return;
+  }
+
+  // TODO: Get actual playback position from avi_player
+  // For now, this is a placeholder
+  // You'll need to add position tracking to avi_player.c
+}
+
+bool AviPlayerComponent::load_file_to_memory() {
+  ESP_LOGI(TAG, "Loading file to memory: %s", file_path_.c_str());
+
+  FILE *file = fopen(file_path_.c_str(), "rb");
+  if (file == nullptr) {
+    ESP_LOGE(TAG, "Failed to open file: %s", file_path_.c_str());
+    return false;
+  }
+
+  // Get file size
+  fseek(file, 0, SEEK_END);
+  memory_buffer_size_ = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  ESP_LOGI(TAG, "File size: %zu bytes", memory_buffer_size_);
+
+  // Allocate memory buffer in PSRAM
+  memory_buffer_ = (uint8_t *)heap_caps_malloc(memory_buffer_size_,
+                                                MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (memory_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate memory buffer (%zu bytes)", memory_buffer_size_);
+    fclose(file);
+    return false;
+  }
+
+  // Read file into memory
+  size_t bytes_read = fread(memory_buffer_, 1, memory_buffer_size_, file);
+  fclose(file);
+
+  if (bytes_read != memory_buffer_size_) {
+    ESP_LOGE(TAG, "Failed to read file completely (read %zu of %zu bytes)",
+             bytes_read, memory_buffer_size_);
+    heap_caps_free(memory_buffer_);
+    memory_buffer_ = nullptr;
+    memory_buffer_size_ = 0;
+    return false;
+  }
+
+  ESP_LOGI(TAG, "File preloaded to memory successfully");
+  return true;
 }
 
 }  // namespace avi_player

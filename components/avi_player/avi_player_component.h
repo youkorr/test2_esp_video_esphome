@@ -30,6 +30,15 @@ class AviPlayerComponent : public Component {
   void set_buffer_size(size_t size) { buffer_size_ = size; }
   void set_auto_play(bool b) { auto_play_ = b; }
   void set_loop(bool b) { loop_ = b; }
+  void set_show_controls(bool b) { show_controls_ = b; }
+  void set_show_slider(bool b) { show_slider_ = b; }
+  void set_preload_to_memory(bool b) { preload_to_memory_ = b; }
+  void set_fps(float fps) {
+    if (fps > 0 && fps <= 120) {
+      fps_ = fps;
+      fps_override_ = true;
+    }
+  }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
 
   void setup() override;
@@ -48,14 +57,27 @@ class AviPlayerComponent : public Component {
   size_t buffer_size_{60 * 1024};
   bool auto_play_{true};
   bool loop_{false};
+  bool show_controls_{false};
+  bool show_slider_{false};
+  bool preload_to_memory_{false};
+  float fps_{0};
+  bool fps_override_{false};
+
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
   lv_obj_t *img_{nullptr};
+  lv_obj_t *controls_panel_{nullptr};
+  lv_obj_t *play_btn_{nullptr};
+  lv_obj_t *pause_btn_{nullptr};
+  lv_obj_t *stop_btn_{nullptr};
+  lv_obj_t *slider_{nullptr};
 
   PlayerState state_{PlayerState::STOPPED};
   avi_player_handle_t avi_handle_{nullptr};
 
   lv_color_t *video_buffer_{nullptr};
+  uint8_t *memory_buffer_{nullptr};  // For preload_to_memory
+  size_t memory_buffer_size_{0};
 
   static void video_frame_callback(frame_data_t *data, void *arg);
   static void audio_frame_callback(frame_data_t *data, void *arg);
@@ -63,6 +85,9 @@ class AviPlayerComponent : public Component {
   static void play_end_callback(void *arg);
 
   void render_frame(frame_data_t *data);
+  void create_controls();
+  void update_slider_position();
+  bool load_file_to_memory();
 };
 
 // Actions

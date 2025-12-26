@@ -127,13 +127,17 @@ avi_player:
 ```yaml
 avi_player:
   - id: my_video
-    file_path: "/sd/video.avi"         # Chemin du fichier AVI
-    width: 800                          # Largeur de la vidéo
-    height: 480                         # Hauteur de la vidéo
-    buffer_size: 122880                 # Taille du buffer (120KB)
-    auto_play: false                    # Lecture automatique au démarrage
-    loop: true                          # Lecture en boucle
-    parent_id: my_lvgl_container        # Parent LVGL (optionnel)
+    file_path: "/sdcard/MJPEG/video.avi"  # Chemin du fichier AVI
+    width: 800                            # Largeur de la vidéo
+    height: 480                           # Hauteur de la vidéo
+    buffer_size: 122880                   # Taille du buffer (120KB)
+    auto_play: false                      # Lecture automatique au démarrage
+    loop: true                            # Lecture en boucle
+    show_controls: true                   # Afficher contrôles play/stop
+    show_slider: true                     # Afficher slider de progression
+    preload_to_memory: false              # Précharger en PSRAM (SD lente)
+    fps: 25                               # Override FPS
+    parent_id: my_lvgl_container          # Parent LVGL (optionnel)
 ```
 
 ### Paramètres de configuration
@@ -146,6 +150,10 @@ avi_player:
 | `buffer_size` | int | 61440 (60KB) | Taille du buffer interne |
 | `auto_play` | bool | true | Démarrer la lecture automatiquement |
 | `loop` | bool | false | Lecture en boucle |
+| `show_controls` | bool | false | Afficher les boutons play/stop |
+| `show_slider` | bool | false | Afficher le slider de progression |
+| `preload_to_memory` | bool | false | Précharger le fichier en PSRAM |
+| `fps` | float | auto | Override FPS (0-120) |
 | `parent_id` | id | lv_scr_act() | Objet LVGL parent |
 
 ## Actions disponibles

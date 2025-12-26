@@ -20,6 +20,10 @@ CONF_BUFFER_SIZE = "buffer_size"
 CONF_AUTO_PLAY = "auto_play"
 CONF_LOOP = "loop"
 CONF_PARENT_ID = "parent_id"
+CONF_SHOW_CONTROLS = "show_controls"
+CONF_SHOW_SLIDER = "show_slider"
+CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
+CONF_FPS = "fps"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(AviPlayerComponent),
@@ -29,6 +33,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_BUFFER_SIZE, default=60 * 1024): cv.positive_int,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=False): cv.boolean,
+    cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
+    cv.Optional(CONF_SHOW_SLIDER, default=False): cv.boolean,
+    cv.Optional(CONF_PRELOAD_TO_MEMORY, default=False): cv.boolean,
+    cv.Optional(CONF_FPS): cv.positive_float,
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -43,6 +51,12 @@ async def to_code(config):
     cg.add(var.set_buffer_size(config[CONF_BUFFER_SIZE]))
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_loop(config[CONF_LOOP]))
+    cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+    cg.add(var.set_show_slider(config[CONF_SHOW_SLIDER]))
+    cg.add(var.set_preload_to_memory(config[CONF_PRELOAD_TO_MEMORY]))
+
+    if CONF_FPS in config:
+        cg.add(var.set_fps(config[CONF_FPS]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
