@@ -238,6 +238,111 @@ if (ret > 0) {
 
 ---
 
+## 🔍 Comparaison avec M5Stack Tab5
+
+### Approche M5Stack (hal_camera.cpp)
+
+M5Stack utilise une approche **complètement différente** pour résoudre le problème du 1-lane MIPI:
+
+```cpp
+// M5Stack: Blocking I/O avec seulement 2 buffers
+int fd = open(dev, O_RDONLY);  // ⚠️ PAS de O_NONBLOCK!
+
+struct v4l2_requestbuffers req;
+req.count = 2;  // Seulement 2 buffers
+req.memory = V4L2_MEMORY_MMAP;  // MMAP au lieu de USERPTR
+
+// DQBUF bloque jusqu'à ce qu'une frame soit prête
+if (ioctl(fd, VIDIOC_DQBUF, &buf) < 0) {
+    break;  // Pas de gestion EAGAIN - simplement abandonne
+}
+```
+
+### Différences Clés
+
+| Aspect | **ESPHome (Actuel)** | **M5Stack Tab5** |
+|--------|---------------------|------------------|
+| **I/O Mode** | Non-blocking (`O_NONBLOCK`) | **Blocking** (pas de flag) |
+| **Buffers** | 3 (insuffisant) | 2 (suffisant car bloquant) |
+| **Memory** | `V4L2_MEMORY_USERPTR` | `V4L2_MEMORY_MMAP` |
+| **DQBUF** | Retourne EAGAIN si pas prêt | **Attend** jusqu'à frame prête |
+| **Gestion Erreur** | Retry possible | Abandonne immédiatement |
+| **Risque** | Frames perdues (EAGAIN) | **Task bloquée** si problème capteur |
+
+### Pourquoi M5Stack Fonctionne avec 2 Buffers
+
+```
+Mode Bloquant (M5Stack):
+t=0ms:    DQBUF appelé
+          ↓ ATTEND (bloquant)
+t=32ms:   Frame prête → DQBUF retourne succès ✅
+          Affiche frame
+t=33ms:   QBUF + DQBUF suivant
+          ↓ ATTEND
+t=65ms:   Frame prête → succès ✅
+
+Résultat: 30 FPS garanti, mais task bloquée pendant attente
+```
+
+```
+Mode Non-Bloquant (ESPHome Actuel):
+t=0ms:    DQBUF appelé
+          Frame pas prête → EAGAIN ❌
+          return false
+t=33ms:   DQBUF appelé
+          Frame pas prête → EAGAIN ❌
+          return false
+t=66ms:   DQBUF appelé
+          Frame prête → succès ✅
+
+Résultat: 8.93 FPS (beaucoup de EAGAIN)
+```
+
+### Avantages et Inconvénients
+
+#### Mode Bloquant (M5Stack)
+**✅ Avantages**:
+- Moins de buffers nécessaires (2 au lieu de 5)
+- Moins de mémoire PSRAM utilisée
+- Garantit capture de toutes les frames
+- Code plus simple (pas de gestion EAGAIN)
+
+**❌ Inconvénients**:
+- **Bloque la task LVGL** pendant attente frame (~32ms)
+- Peut causer watchdog timeout si capteur défaillant
+- Réduit réactivité interface utilisateur
+- Nécessite task séparée pour éviter blocage UI
+
+#### Mode Non-Bloquant + 5 Buffers (Recommandé)
+**✅ Avantages**:
+- **Ne bloque jamais** LVGL
+- Interface reste réactive
+- Robuste aux problèmes capteur
+- Compatible avec architecture event-driven
+
+**❌ Inconvénients**:
+- Plus de mémoire PSRAM (4.7 MB vs 2.8 MB)
+- Code légèrement plus complexe
+- Peut perdre frames si buffers insuffisants
+
+### Verdict: Pourquoi Garder Mode Non-Bloquant
+
+**Recommandation**: **Augmenter buffers à 5** (Solution #1) plutôt que passer en mode bloquant.
+
+**Raisons**:
+1. **Architecture ESPHome**: Event-driven, incompatible avec blocage prolongé
+2. **LVGL UI**: Ne doit jamais être bloqué pendant 32ms
+3. **Robustesse**: Mode non-bloquant tolère mieux les erreurs capteur
+4. **PSRAM Disponible**: ESP32-P4 a 8 MB PSRAM, 4.7 MB acceptable
+5. **Maintenabilité**: Garder cohérence avec reste du code ESPHome
+
+**Alternative si besoin**: Combiner les deux approches:
+- Blocking I/O dans task séparée (comme M5Stack)
+- Queue de frames vers LVGL
+- Mais **beaucoup plus complexe** que simplement ajouter 2 buffers
+
+---
+
 ## 🎯 Plan d'Action Recommandé
 
 ### Étape 1: Augmenter Buffers (5 min) ⭐ PRIORITÉ
