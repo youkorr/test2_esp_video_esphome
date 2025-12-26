@@ -301,12 +301,16 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     }
   } else {
     // No explicit output - APPROACH A: Swap dimensions (ESP-GMF style)
+    // Account for crop offset - output size based on actual block size, not full picture
+    int effective_width = input_width - this->crop_offset_x_;
+    int effective_height = input_height - this->crop_offset_y_;
+
     if (this->rotation_ == 90 || this->rotation_ == 270) {
-      output_width = input_height;   // 640
-      output_height = input_width;   // 480
+      output_width = effective_height;   // Swapped
+      output_height = effective_width;   // Swapped
     } else {
-      output_width = input_width;
-      output_height = input_height;
+      output_width = effective_width;
+      output_height = effective_height;
     }
     scale_x = 1.0f;
     scale_y = 1.0f;
@@ -316,8 +320,10 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = input_width;
   srm_config.in.pic_h = input_height;
-  srm_config.in.block_w = input_width;        // Process entire width
-  srm_config.in.block_h = input_height;       // Process entire height
+  // Block size must be reduced by offset to stay within picture bounds
+  // (block_w + offset_x must be <= pic_w, same for height)
+  srm_config.in.block_w = input_width - this->crop_offset_x_;   // Process width minus offset
+  srm_config.in.block_h = input_height - this->crop_offset_y_;  // Process height minus offset
   srm_config.in.block_offset_x = this->crop_offset_x_;  // Crop offset horizontal (from left)
   srm_config.in.block_offset_y = this->crop_offset_y_;  // Crop offset vertical (from top)
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
