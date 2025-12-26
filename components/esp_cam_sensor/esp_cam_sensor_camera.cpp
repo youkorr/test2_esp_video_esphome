@@ -268,41 +268,79 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
 
   ppa_srm_oper_config_t srm_config = {};
 
-  // Input dimensions (from sensor)
+  // Input dimensions (from sensor - works for ANY sensor and ANY resolution)
+  // image_width_ and image_height_ are set from V4L2 format (line 1030-1031)
   int input_width = this->image_width_;
   int input_height = this->image_height_;
 
-  // Output dimensions (resize if configured, otherwise keep input size)
-  // IMPORTANT: Do NOT auto-swap dimensions for rotation!
-  // PPA hardware rotates in-place, output buffer dimensions = input dimensions
-  int output_width = (this->output_width_ > 0) ? this->output_width_ : input_width;
-  int output_height = (this->output_height_ > 0) ? this->output_height_ : input_height;
+  // Output dimensions and scaling - GENERIC ALGORITHM for all sensors/resolutions
+  // Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
+  //
+  // TEST BOTH APPROACHES to fix "quadrupled image" issue:
+  // Approach A: Swap dimensions for rotation (ESP-GMF style)
+  // Approach B: Keep dimensions same for rotation
+  //
+  // Currently testing: Approach A (ESP-GMF)
 
-  // Calculate scale factors (1.0 = no scaling)
-  float scale_x = (this->output_width_ > 0) ? (float)output_width / (float)input_width : 1.0f;
-  float scale_y = (this->output_height_ > 0) ? (float)output_height / (float)input_height : 1.0f;
+  int output_width, output_height;
+  float scale_x, scale_y;
 
-  // SIMPLE INPUT CONFIG (M5Stack style)
+  if (this->output_width_ > 0 && this->output_height_ > 0) {
+    // User specified explicit output size
+    output_width = this->output_width_;
+    output_height = this->output_height_;
+
+    // Calculate scale factors (ESP-GMF: swap for 90°/270°)
+    if (this->rotation_ == 0 || this->rotation_ == 180) {
+      scale_x = (float)output_width / (float)input_width;
+      scale_y = (float)output_height / (float)input_height;
+    } else {  // 90° or 270°
+      scale_x = (float)output_height / (float)input_width;
+      scale_y = (float)output_width / (float)input_height;
+    }
+  } else {
+    // No explicit output - APPROACH A: Swap dimensions (ESP-GMF style)
+    if (this->rotation_ == 90 || this->rotation_ == 270) {
+      output_width = input_height;   // 640
+      output_height = input_width;   // 480
+    } else {
+      output_width = input_width;
+      output_height = input_height;
+    }
+    scale_x = 1.0f;
+    scale_y = 1.0f;
+  }
+
+  // INPUT CONFIG (matching M5Stack implementation)
   srm_config.in.buffer = src_buffer;
   srm_config.in.pic_w = input_width;
   srm_config.in.pic_h = input_height;
+  srm_config.in.block_w = input_width;        // Process entire width
+  srm_config.in.block_h = input_height;       // Process entire height
+  srm_config.in.block_offset_x = 0;           // Start at top-left
+  srm_config.in.block_offset_y = 0;           // Start at top-left
   srm_config.in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
-  // SIMPLE OUTPUT CONFIG (M5Stack style)
+  // OUTPUT CONFIG (matching M5Stack implementation)
   srm_config.out.buffer = dst_buffer;
   srm_config.out.buffer_size = output_width * output_height * 2;  // RGB565 = 2 bytes/pixel
   srm_config.out.pic_w = output_width;
   srm_config.out.pic_h = output_height;
+  srm_config.out.block_offset_x = 0;          // Write to top-left
+  srm_config.out.block_offset_y = 0;          // Write to top-left
   srm_config.out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
 
   // Transformation configuration
+  // CRITICAL: PPA angles are INVERTED from logical rotation (from LVGL lvgl_port_v9.c)
+  //   Logical 90° → PPA_SRM_ROTATION_ANGLE_270
+  //   Logical 270° → PPA_SRM_ROTATION_ANGLE_90
   srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
   if (this->rotation_ == 90) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;  // INVERTED!
   } else if (this->rotation_ == 180) {
     srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_180;
   } else if (this->rotation_ == 270) {
-    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_270;
+    srm_config.rotation_angle = PPA_SRM_ROTATION_ANGLE_90;   // INVERTED!
   }
 
   srm_config.scale_x = scale_x;
@@ -313,15 +351,19 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.byte_swap = false;
   srm_config.mode = PPA_TRANS_MODE_BLOCKING;
 
-  // LOG PPA configuration for debugging
-  ESP_LOGI(TAG, "PPA Config:");
-  ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
-  ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
-  ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
-  ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
-  ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
+  // LOG PPA configuration only once (first frame)
+  static bool ppa_config_logged = false;
+  if (!ppa_config_logged) {
+    ESP_LOGI(TAG, "PPA Config:");
+    ESP_LOGI(TAG, "  Input:  %dx%d RGB565", input_width, input_height);
+    ESP_LOGI(TAG, "  Output: %dx%d RGB565", output_width, output_height);
+    ESP_LOGI(TAG, "  Scale:  x=%.3f y=%.3f", scale_x, scale_y);
+    ESP_LOGI(TAG, "  Mirror: x=%d y=%d", this->mirror_x_, this->mirror_y_);
+    ESP_LOGI(TAG, "  Rotate: %d°", this->rotation_);
+    ppa_config_logged = true;
+  }
 
-  // Exécuter transformation hardware (M5Stack API: 2 parameters)
+  // Execute PPA transformation
   esp_err_t ret = ppa_do_scale_rotate_mirror(
       (ppa_client_handle_t)this->ppa_client_handle_,
       &srm_config
@@ -332,7 +374,6 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ PPA transform OK");
   return true;
 }
 
@@ -790,7 +831,7 @@ bool MipiDSICamComponent::start_streaming() {
   }
 
     // ============================================================================
-  // Custom Format Support (OV02C10 @ 640x480, 800x600, or 480x640)
+  // Custom Format Support (OV02C10 @ 640x480, 800x600, 640x368, 480x640, or 1920x1080)
   // ============================================================================
   if (this->sensor_name_ == "ov02c10") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
@@ -803,10 +844,16 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA)");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA 4:3, 25%% horizontal crop)");
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA)");
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, 25%% horizontal crop)");
+    } else if (width == 640 && height == 368) {
+      custom_format = &ov02c10_format_640x368_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
+    } else if (width == 1920 && height == 1080) {
+      custom_format = &ov02c10_format_1920x1080_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
@@ -1107,6 +1154,16 @@ bool MipiDSICamComponent::start_streaming() {
   this->streaming_active_ = true;
   this->frame_sequence_ = 0;
 
+  // Réinitialiser PPA si nécessaire (au cas où stop_streaming() l'a désactivé)
+  // Vérifier si rotation/mirror/crop sont configurés même si ppa_enabled_ est actuellement false
+  if (!this->ppa_enabled_ && (this->mirror_x_ || this->mirror_y_ || this->rotation_ != 0 ||
+                               this->crop_offset_x_ != 0 || this->output_width_ > 0 || this->output_height_ > 0)) {
+    ESP_LOGI(TAG, "Reinitializing PPA (was disabled by previous stop_streaming)");
+    if (!this->init_ppa_()) {
+      ESP_LOGW(TAG, "PPA reinitialization failed");
+    }
+  }
+
   // Allouer buffer séparé pour PPA si mirror/rotate activés
   if (this->ppa_enabled_) {
     this->image_buffer_ = (uint8_t*)heap_caps_malloc(
@@ -1149,8 +1206,8 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
   // IMPORTANT: AWB ne fonctionne PAS sur certains capteurs (Invalid argument)
-  // OV5647, SC202CS gèrent automatiquement la balance des blancs via leurs propres registres
-  if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647") {
+  // OV5647, SC202CS, OV02C10 gèrent automatiquement la balance des blancs via leurs propres registres et IPA JSON
+  if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647" && this->sensor_name_ != "ov02c10") {
     if (this->set_white_balance_mode(true)) {
       ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
     } else {
@@ -1215,6 +1272,12 @@ bool MipiDSICamComponent::capture_frame() {
     // Transform FROM V4L2 buffer TO separate PPA buffer (no in-place transform!)
     if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
       display_buffer = this->image_buffer_;  // Use PPA output for display
+      // Log only once (first frame)
+      static bool ppa_buffer_logged = false;
+      if (!ppa_buffer_logged) {
+        ESP_LOGI(TAG, "✓ Using PPA output buffer at %p", display_buffer);
+        ppa_buffer_logged = true;
+      }
     } else {
       ESP_LOGE(TAG, "PPA transform failed, using original buffer");
     }
@@ -1706,8 +1769,9 @@ image_t* MipiDSICamComponent::get_imlib_image() {
   }
 
   // Initialiser la structure imlib image_t pour pointer vers le buffer V4L2 (zero-copy)
-  this->imlib_image_->w = this->image_width_;
-  this->imlib_image_->h = this->image_height_;
+  // Use getters to account for rotation
+  this->imlib_image_->w = this->get_image_width();
+  this->imlib_image_->h = this->get_image_height();
   this->imlib_image_->pixfmt = PIXFORMAT_RGB565;
   this->imlib_image_->pixels = this->image_buffer_;
   this->imlib_image_valid_ = true;
@@ -1826,7 +1890,12 @@ uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
   if (element == nullptr) {
     return nullptr;
   }
-  return element->data;
+  // CRITICAL: When PPA is enabled, return PPA output buffer instead of V4L2 input buffer!
+  // V4L2 buffer (element->data) is 480x640, but PPA buffer (image_buffer_) is 640x480 after rotation
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    return this->image_buffer_;  // PPA output buffer (rotated/transformed)
+  }
+  return element->data;  // V4L2 input buffer (no transformation)
 }
 
 
@@ -1857,11 +1926,11 @@ bool MipiDSICamComponent::get_current_rgb_frame(SimpleBufferElement **buffer_out
     return false;
   }
 
-  // Extract data and dimensions
+  // Extract data and dimensions (use getters to account for rotation)
   *buffer_out = buffer;
   *data = buffer->data;
-  *width = static_cast<int>(this->image_width_);
-  *height = static_cast<int>(this->image_height_);
+  *width = static_cast<int>(this->get_image_width());
+  *height = static_cast<int>(this->get_image_height());
 
   return true;
 }

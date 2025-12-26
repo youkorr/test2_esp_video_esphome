@@ -120,11 +120,22 @@ class MipiDSICamComponent : public Component {
   // Legacy API (deprecated, utiliser acquire_buffer/release_buffer)
   uint8_t* get_image_data() { return image_buffer_; }
   // Return PPA output size if resize configured, otherwise capture size
+  // IMPORTANT: Account for rotation 90/270 which swaps dimensions
   uint16_t get_image_width() const {
-    return (output_width_ > 0) ? output_width_ : image_width_;
+    if (output_width_ > 0) {
+      return output_width_;  // Explicit resize configured
+    }
+    // No resize - check if rotation swaps dimensions
+    bool swap_dims = (rotation_ == 90 || rotation_ == 270);
+    return swap_dims ? image_height_ : image_width_;
   }
   uint16_t get_image_height() const {
-    return (output_height_ > 0) ? output_height_ : image_height_;
+    if (output_height_ > 0) {
+      return output_height_;  // Explicit resize configured
+    }
+    // No resize - check if rotation swaps dimensions
+    bool swap_dims = (rotation_ == 90 || rotation_ == 270);
+    return swap_dims ? image_width_ : image_height_;
   }
   size_t get_image_size() const {
     if (output_width_ > 0 && output_height_ > 0) {

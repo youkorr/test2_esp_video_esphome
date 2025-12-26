@@ -1107,8 +1107,8 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
  };
 
 // Custom format definitions (exposed via ov02c10_custom_formats.h)
-// Supported formats: 640x480 (VGA), 800x600 (SVGA), 480x640 (VGA rotated 270°)
-// These use centered crop windows from the native sensor active area with ISP downscaling
+// Supported formats: 640x480 (VGA 4:3), 800x600 (SVGA 4:3), 640x368 (near 16:9), 480x640 (portrait), 1920x1080 (1080P)
+// All formats use full sensor with ISP downscaling, 640x368 has near 16:9 aspect ratio with 16-byte alignment
 
 const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
@@ -1161,6 +1161,44 @@ const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
     .isp_info = &ov02c10_isp_info[0],
     .mipi_info = {
         .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+        .lane_num = 1,
+        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+    },
+    .reserved = NULL,
+};
+
+const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
+    .name = "MIPI_1lane_24Minput_RAW10_640x368_30fps",
+    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk = 24000000,
+    .width = 640,
+    .height = 368,
+    .regs = ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps,
+    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps),
+    .fps = 30,
+    .isp_info = &ov02c10_isp_info[0],
+    .mipi_info = {
+        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+        .lane_num = 1,
+        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+    },
+    .reserved = NULL,
+};
+
+const esp_cam_sensor_format_t ov02c10_format_1920x1080_raw10_30fps = {
+    .name = "MIPI_1lane_24Minput_RAW10_1920x1080_30fps",
+    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+    .port = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk = 24000000,
+    .width = 1920,
+    .height = 1080,
+    .regs = ov02c10_input_24M_MIPI_1lane_raw10_1920x1080_30fps,
+    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_1920x1080_30fps),
+    .fps = 30,
+    .isp_info = &ov02c10_isp_info[1],  // Use ISP config for 1080P
+    .mipi_info = {
+        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_1920x1080_30FPS,
         .lane_num = 1,
         .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
     },
