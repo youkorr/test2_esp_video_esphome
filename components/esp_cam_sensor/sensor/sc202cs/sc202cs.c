@@ -1297,6 +1297,31 @@ static esp_err_t sc202cs_query_support_capability(esp_cam_sensor_device_t *dev, 
     return 0;
 }
 
+/* Diagnostic functions to read back HTS/VTS values */
+static int sc202cs_get_hts(esp_cam_sensor_device_t *dev)
+{
+    int hts = 0;
+    uint8_t temp1, temp2;
+
+    sc202cs_read(dev->sccb_handle, 0x320c, &temp1);  // HTS MSB
+    sc202cs_read(dev->sccb_handle, 0x320d, &temp2);  // HTS LSB
+    hts = (temp1 << 8) + temp2;
+    ESP_LOGI(TAG, "SC202CS HTS readback = 0x%04x (%d)", hts, hts);
+    return hts;
+}
+
+static int sc202cs_get_vts(esp_cam_sensor_device_t *dev)
+{
+    int vts = 0;
+    uint8_t temp1, temp2;
+
+    sc202cs_read(dev->sccb_handle, 0x320e, &temp1);  // VTS MSB
+    sc202cs_read(dev->sccb_handle, 0x320f, &temp2);  // VTS LSB
+    vts = (temp1 << 8) + temp2;
+    ESP_LOGI(TAG, "SC202CS VTS readback = 0x%04x (%d)", vts, vts);
+    return vts;
+}
+
 static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_sensor_format_t *format)
 {
     ESP_CAM_SENSOR_NULL_POINTER_CHECK(TAG, dev);
@@ -1313,6 +1338,34 @@ static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Set format regs fail");
         return ESP_CAM_SENSOR_ERR_FAILED_SET_FORMAT;
+    }
+
+    // ✅ DIAGNOSTIC: Read back HTS/VTS to verify timing configuration
+    ESP_LOGI(TAG, "SC202CS Timing Configuration Verification:");
+    ESP_LOGI(TAG, "  Expected: pclk=%u Hz, HTS=%u, VTS=%u, FPS=%u",
+             format->isp_info->isp_v1_info.pclk,
+             format->isp_info->isp_v1_info.hts,
+             format->isp_info->isp_v1_info.vts,
+             format->fps);
+
+    int hts_actual = sc202cs_get_hts(dev);
+    int vts_actual = sc202cs_get_vts(dev);
+
+    if (hts_actual != format->isp_info->isp_v1_info.hts ||
+        vts_actual != format->isp_info->isp_v1_info.vts) {
+        ESP_LOGW(TAG, "⚠️  TIMING MISMATCH DETECTED!");
+        ESP_LOGW(TAG, "  Expected HTS=%u, VTS=%u",
+                 format->isp_info->isp_v1_info.hts,
+                 format->isp_info->isp_v1_info.vts);
+        ESP_LOGW(TAG, "  Actual   HTS=%d, VTS=%d", hts_actual, vts_actual);
+
+        float expected_fps = (float)format->isp_info->isp_v1_info.pclk /
+                            (format->isp_info->isp_v1_info.hts * format->isp_info->isp_v1_info.vts);
+        float actual_fps = (float)format->isp_info->isp_v1_info.pclk / (hts_actual * vts_actual);
+        ESP_LOGW(TAG, "  Expected FPS: %.2f", expected_fps);
+        ESP_LOGW(TAG, "  Actual FPS:   %.2f (based on readback)", actual_fps);
+    } else {
+        ESP_LOGI(TAG, "✓ Timing registers verified correctly");
     }
 
     dev->cur_format = format;
