@@ -1206,8 +1206,8 @@ bool MipiDSICamComponent::start_streaming() {
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
   // IMPORTANT: AWB ne fonctionne PAS sur certains capteurs (Invalid argument)
-  // OV5647, SC202CS gèrent automatiquement la balance des blancs via leurs propres registres
-  if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647") {
+  // OV5647, SC202CS, OV02C10 gèrent automatiquement la balance des blancs via leurs propres registres et IPA JSON
+  if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647" && this->sensor_name_ != "ov02c10") {
     if (this->set_white_balance_mode(true)) {
       ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
     } else {
