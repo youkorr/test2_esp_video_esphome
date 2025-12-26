@@ -1872,7 +1872,12 @@ uint8_t* MipiDSICamComponent::get_buffer_data(SimpleBufferElement *element) {
   if (element == nullptr) {
     return nullptr;
   }
-  return element->data;
+  // CRITICAL: When PPA is enabled, return PPA output buffer instead of V4L2 input buffer!
+  // V4L2 buffer (element->data) is 480x640, but PPA buffer (image_buffer_) is 640x480 after rotation
+  if (this->ppa_enabled_ && this->image_buffer_) {
+    return this->image_buffer_;  // PPA output buffer (rotated/transformed)
+  }
+  return element->data;  // V4L2 input buffer (no transformation)
 }
 
 
