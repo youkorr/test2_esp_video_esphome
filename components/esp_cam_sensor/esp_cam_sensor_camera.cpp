@@ -1266,7 +1266,12 @@ bool MipiDSICamComponent::capture_frame() {
     // Transform FROM V4L2 buffer TO separate PPA buffer (no in-place transform!)
     if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
       display_buffer = this->image_buffer_;  // Use PPA output for display
-      ESP_LOGI(TAG, "✓ Using PPA output buffer at %p", display_buffer);
+      // Log only once (first frame)
+      static bool ppa_buffer_logged = false;
+      if (!ppa_buffer_logged) {
+        ESP_LOGI(TAG, "✓ Using PPA output buffer at %p", display_buffer);
+        ppa_buffer_logged = true;
+      }
     } else {
       ESP_LOGE(TAG, "PPA transform failed, using original buffer");
     }
