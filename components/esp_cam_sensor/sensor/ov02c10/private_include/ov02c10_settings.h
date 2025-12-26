@@ -1217,14 +1217,15 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
 };
 
 // ============================================================================
-// Custom format: 854x480 @ 30fps RAW10 (WVGA 16:9)
+// Custom format: 640x360 @ 30fps RAW10 (nHD 16:9)
 // ============================================================================
-// WVGA 16:9 resolution using ISP downscaling from FULL SENSOR (NO CROP!)
-// Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 854x480
+// nHD 16:9 resolution using ISP downscaling from FULL SENSOR (NO CROP!)
+// Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 640x360
 // This format preserves 16:9 aspect ratio matching sensor, eliminating horizontal crop
+// Dimensions are 8-byte aligned for PPA hardware compatibility (rotation safe!)
 // Perfect for maximum field of view with face recognition
 
-static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_854x480_30fps[] = {
+static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x360_30fps[] = {
     // PLL configuration (IDENTICAL to native)
     {0x0301, 0x08},
     {0x0303, 0x06},
@@ -1309,11 +1310,11 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_854x480_30fps[
     {0x3805, 0x8f},  // X end low = 1935
     {0x3806, 0x04},  // Y end high
     {0x3807, 0x43},  // Y end low = 1091
-    // Output size: 854x480 (16:9 aspect ratio - ISP downscales from 1936x1088)
-    {0x3808, 0x03},  // width high
-    {0x3809, 0x56},  // width low = 854
+    // Output size: 640x360 (16:9 aspect ratio, 8-byte aligned - ISP downscales from 1936x1088)
+    {0x3808, 0x02},  // width high
+    {0x3809, 0x80},  // width low = 640
     {0x380a, 0x01},  // height high
-    {0x380b, 0xe0},  // height low = 480
+    {0x380b, 0x68},  // height low = 360
     // Timing: SAME AS NATIVE
     {0x380c, 0x08},  // HTS high = 2280
     {0x380d, 0xe8},  // HTS low
