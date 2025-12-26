@@ -62,6 +62,12 @@ async def to_code(config):
         parent = await cg.get_variable(config[CONF_PARENT_ID])
         cg.add(var.set_parent(parent.obj))
 
+    # Add include path for avi_player headers
+    import os
+    component_dir = os.path.dirname(__file__)
+    include_dir = os.path.join(component_dir, "include")
+    cg.add_build_flag(f"-I{include_dir}")
+
 
 # Action schemas
 AVI_PLAYER_ACTION_SCHEMA = cv.Schema({
