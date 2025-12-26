@@ -1058,17 +1058,30 @@ bool MipiDSICamComponent::start_streaming() {
   // NOTE: SC202CS 800x600 is now a NATIVE format in the driver (sc202cs.c)
   // No re-application needed - timing registers are set by driver's native format
 
-  // 3. Allouer 3 buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
+  // 3. Allouer buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
   // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
+
+  // ✅ FIX SC202CS 1-lane MIPI: Utiliser 5 buffers au lieu de 3
+  // SC202CS (1-lane MIPI @ 576 MHz) a 2× moins de bande passante que OV5647 (2-lane @ 1.152 GHz)
+  // Avec O_NONBLOCK + 3 buffers, VIDIOC_DQBUF retourne souvent EAGAIN → FPS 8.93
+  // Avec 5 buffers, toujours un buffer prêt → FPS 25-30
+  if (this->sensor_name_ == "sc202cs") {
+    this->buffer_count_ = 5;
+    ESP_LOGI(TAG, "SC202CS detected: Using 5 buffers (1-lane MIPI requires more buffering)");
+  } else {
+    this->buffer_count_ = 3;
+    ESP_LOGI(TAG, "Using 3 buffers (2-lane MIPI sensors)");
+  }
+
   const size_t cache_line_size = 64;
 
   ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
-  ESP_LOGI(TAG, "  Buffers: 3 × %u bytes = %u KB total",
-           this->image_buffer_size_, (this->image_buffer_size_ * 3) / 1024);
+  ESP_LOGI(TAG, "  Buffers: %d × %u bytes = %u KB total",
+           this->buffer_count_, this->image_buffer_size_, (this->image_buffer_size_ * this->buffer_count_) / 1024);
   ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < this->buffer_count_; i++) {
     this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
         cache_line_size,
         this->image_buffer_size_,
@@ -1097,17 +1110,17 @@ bool MipiDSICamComponent::start_streaming() {
   this->current_buffer_index_ = -1;
   this->image_buffer_ = nullptr;
 
-  // 4. Demander 3 buffers V4L2 en mode USERPTR (au lieu de MMAP)
+  // 4. Demander buffers V4L2 en mode USERPTR (au lieu de MMAP)
   struct v4l2_requestbuffers req;
   memset(&req, 0, sizeof(req));
-  req.count = 3;  // 3 buffers pour triple buffering
+  req.count = this->buffer_count_;  // 3 buffers (2-lane MIPI) ou 5 buffers (1-lane MIPI pour SC202CS)
   req.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
   req.memory = V4L2_MEMORY_USERPTR;  // ★ USERPTR au lieu de MMAP!
 
   if (ioctl(this->video_fd_, VIDIOC_REQBUFS, &req) < 0) {
     ESP_LOGE(TAG, "VIDIOC_REQBUFS (USERPTR mode) failed: %s", strerror(errno));
     // Libérer les buffers SPIRAM
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < this->buffer_count_; i++) {
       heap_caps_free(this->simple_buffers_[i].data);
       this->simple_buffers_[i].data = nullptr;
     }
@@ -1119,7 +1132,7 @@ bool MipiDSICamComponent::start_streaming() {
   ESP_LOGI(TAG, "✓ V4L2 USERPTR mode: %u buffers requested", req.count);
 
   // 5. Queuer les buffers avec nos pointeurs SPIRAM
-  for (unsigned int i = 0; i < 3; i++) {
+  for (int i = 0; i < this->buffer_count_; i++) {
     struct v4l2_buffer buf;
     memset(&buf, 0, sizeof(buf));
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1129,9 +1142,9 @@ bool MipiDSICamComponent::start_streaming() {
     buf.length = this->image_buffer_size_;
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-      ESP_LOGE(TAG, "VIDIOC_QBUF[%u] (USERPTR) failed: %s", i, strerror(errno));
+      ESP_LOGE(TAG, "VIDIOC_QBUF[%d] (USERPTR) failed: %s", i, strerror(errno));
       // Libérer les buffers SPIRAM
-      for (int j = 0; j < 3; j++) {
+      for (int j = 0; j < this->buffer_count_; j++) {
         heap_caps_free(this->simple_buffers_[j].data);
         this->simple_buffers_[j].data = nullptr;
       }
@@ -1384,7 +1397,7 @@ void MipiDSICamComponent::stop_streaming() {
   this->current_buffer_index_ = -1;
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
-  for (int i = 0; i < 3; i++) {
+  for (int i = 0; i < this->buffer_count_; i++) {
     if (this->simple_buffers_[i].data != nullptr) {
       heap_caps_free(this->simple_buffers_[i].data);
       this->simple_buffers_[i].data = nullptr;
