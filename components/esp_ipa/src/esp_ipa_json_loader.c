@@ -174,11 +174,30 @@ static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_con
     cJSON *l_thresh = cJSON_GetObjectItem(param, "l_thresh");
     cJSON *h_coeff = cJSON_GetObjectItem(param, "h_coeff");
     cJSON *m_coeff = cJSON_GetObjectItem(param, "m_coeff");
+    cJSON *matrix = cJSON_GetObjectItem(param, "matrix");
 
     if (h_thresh) sharpen_config->h_thresh = h_thresh->valueint;
     if (l_thresh) sharpen_config->l_thresh = l_thresh->valueint;
     if (h_coeff) sharpen_config->h_coeff = (float)h_coeff->valuedouble;
     if (m_coeff) sharpen_config->m_coeff = (float)m_coeff->valuedouble;
+
+    // Parse sharpen matrix (3x3 = 9 elements)
+    if (matrix && cJSON_IsArray(matrix) && cJSON_GetArraySize(matrix) == 9) {
+        for (int i = 0; i < 9; i++) {
+            cJSON *value = cJSON_GetArrayItem(matrix, i);
+            if (value && cJSON_IsNumber(value)) {
+                sharpen_config->matrix[i / 3][i % 3] = (uint8_t)value->valueint;
+            }
+        }
+        sharpen_config->has_matrix = true;
+        ESP_LOGI(TAG, "  Matrix: [%d,%d,%d, %d,%d,%d, %d,%d,%d]",
+                 sharpen_config->matrix[0][0], sharpen_config->matrix[0][1], sharpen_config->matrix[0][2],
+                 sharpen_config->matrix[1][0], sharpen_config->matrix[1][1], sharpen_config->matrix[1][2],
+                 sharpen_config->matrix[2][0], sharpen_config->matrix[2][1], sharpen_config->matrix[2][2]);
+    } else {
+        sharpen_config->has_matrix = false;
+        ESP_LOGW(TAG, "  No valid sharpen matrix in JSON");
+    }
 
     ESP_LOGI(TAG, "✅ Sharpen params loaded:");
     ESP_LOGI(TAG, "  H thresh: %d, L thresh: %d", sharpen_config->h_thresh, sharpen_config->l_thresh);
@@ -447,8 +466,12 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
             .m_coeff = ipa_json_config->sharpen.m_coeff,
         };
 
-        // Use default sharpen matrix if not provided
-        memset(sharpen.matrix, 1, sizeof(sharpen.matrix));
+        // Use sharpen matrix from JSON if available, otherwise use default
+        if (ipa_json_config->sharpen.has_matrix) {
+            memcpy(sharpen.matrix, ipa_json_config->sharpen.matrix, sizeof(sharpen.matrix));
+        } else {
+            memset(sharpen.matrix, 1, sizeof(sharpen.matrix));
+        }
 
         controls.ctrl_class = V4L2_CID_USER_CLASS;
         controls.count = 1;

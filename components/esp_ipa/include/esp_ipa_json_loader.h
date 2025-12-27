@@ -44,6 +44,8 @@ typedef struct {
     uint8_t l_thresh;            /*!< Low threshold */
     float h_coeff;               /*!< High coefficient */
     float m_coeff;               /*!< Medium coefficient */
+    bool has_matrix;             /*!< Matrix is available */
+    uint8_t matrix[3][3];        /*!< 3x3 sharpen matrix */
 } esp_ipa_sharpen_config_t;
 
 /**
