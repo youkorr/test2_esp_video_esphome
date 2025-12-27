@@ -165,6 +165,10 @@ void AviPlayerComponent::stop() {
   avi_player_play_stop(avi_handle_);
   state_ = PlayerState::STOPPED;
 
+  // Reset frame dimensions for next playback
+  actual_width_ = 0;
+  actual_height_ = 0;
+
   // Update button states
   if (play_btn_ != nullptr) {
     lv_obj_clear_state(play_btn_, LV_STATE_DISABLED);
@@ -217,6 +221,40 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
   ESP_LOGV(TAG, "Decoding JPEG frame: %d bytes, size: %dx%d",
            data->data_bytes, data->video_info.width, data->video_info.height);
 
+  // Parse JPEG header to get actual dimensions (first frame only)
+  if (actual_width_ == 0 || actual_height_ == 0) {
+    esp_err_t err = jpeg_decoder_get_info(data->data, data->data_bytes, &frame_info_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to parse JPEG header: %s", esp_err_to_name(err));
+      return;
+    }
+
+    // JPEG decoder aligns dimensions to 16 bytes
+    actual_width_ = (frame_info_.width + 15) & ~15;
+    actual_height_ = (frame_info_.height + 15) & ~15;
+    video_buffer_size_ = actual_width_ * actual_height_ * sizeof(lv_color_t);
+
+    ESP_LOGI(TAG, "JPEG actual size: %dx%d (original: %dx%d), buffer: %u bytes",
+             actual_width_, actual_height_, frame_info_.width, frame_info_.height, video_buffer_size_);
+
+    // Reallocate buffer if needed
+    if (video_buffer_size_ > width_ * height_ * sizeof(lv_color_t)) {
+      if (video_buffer_ != nullptr) {
+        heap_caps_free(video_buffer_);
+      }
+      video_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, video_buffer_size_,
+                                                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (video_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to reallocate video buffer");
+        return;
+      }
+      // Update LVGL image descriptor with actual dimensions
+      lvgl_img_dsc_.header.w = actual_width_;
+      lvgl_img_dsc_.header.h = actual_height_;
+      lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
+    }
+  }
+
   // Decode JPEG to RGB565
   uint32_t out_size = 0;
 
@@ -225,7 +263,7 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
                                         data->data,
                                         data->data_bytes,
                                         (uint8_t *)video_buffer_,
-                                        width_ * height_ * sizeof(lv_color_t),
+                                        video_buffer_size_,
                                         &out_size);
 
   if (err != ESP_OK) {

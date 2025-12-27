@@ -82,6 +82,10 @@ class AviPlayerComponent : public Component {
 
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
   jpeg_decode_cfg_t jpeg_decode_cfg_;  // JPEG decode configuration
+  jpeg_decode_picture_info_t frame_info_;  // Actual frame dimensions from JPEG
+  uint32_t actual_width_{0};   // 16-byte aligned width
+  uint32_t actual_height_{0};  // 16-byte aligned height
+  size_t video_buffer_size_{0};  // Actual buffer size
   lv_img_dsc_t lvgl_img_dsc_;  // LVGL image descriptor
 
   static void video_frame_callback(frame_data_t *data, void *arg);
