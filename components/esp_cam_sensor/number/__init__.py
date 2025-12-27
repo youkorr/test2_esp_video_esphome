@@ -39,26 +39,20 @@ CameraSensorNumber = esp_cam_sensor_ns.class_(
     "CameraSensorNumber", number.Number, cg.Component
 )
 
-# Configuration schema pour chaque type de contrôle ISP
-ISP_CONTROL_SCHEMA = number.number_schema(CameraSensorNumber).extend(
-    {
-        cv.GenerateID(CONF_ESP_CAM_SENSOR_ID): cv.use_id(EspCamSensorComponent),
-    }
-)
-
 # Schema de configuration complet
 CONFIG_SCHEMA = cv.typed_schema(
     {
         CONF_TYPE_ISP: cv.Schema(
             {
-                cv.Optional(CONF_BRIGHTNESS): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_HUE): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_CONTRAST): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_SATURATION): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_FILTER): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_RED): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_GREEN): ISP_CONTROL_SCHEMA,
-                cv.Optional(CONF_BLUE): ISP_CONTROL_SCHEMA,
+                cv.GenerateID(CONF_ESP_CAM_SENSOR_ID): cv.use_id(EspCamSensorComponent),
+                cv.Optional(CONF_BRIGHTNESS): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_HUE): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_CONTRAST): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_SATURATION): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_FILTER): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_RED): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_GREEN): number.number_schema(CameraSensorNumber),
+                cv.Optional(CONF_BLUE): number.number_schema(CameraSensorNumber),
             }
         ),
     },
