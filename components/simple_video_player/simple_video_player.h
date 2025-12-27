@@ -13,6 +13,7 @@
 #include "esp_imgfx_rotate.h"  // Hardware rotation support
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
+#include "freertos/task.h"  // Task creation for decode task
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
@@ -261,6 +262,7 @@ class SimpleVideoPlayer : public Component {
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
   static void esp_timer_cb_(void *arg);  // ESP32 native timer callback for precise framerate
+  static void decode_task_(void *arg);  // Dedicated decode task (runs async like avi_player)
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
 
@@ -414,6 +416,11 @@ class SimpleVideoPlayer : public Component {
   volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
   volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
   volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
+
+  // Decode task infrastructure (like avi_player) - for async decode to improve FPS
+  TaskHandle_t decode_task_handle_{nullptr};  // Handle for dedicated decode task
+  SemaphoreHandle_t decode_sem_{nullptr};  // Semaphore to wake decode task
+  volatile bool decode_task_running_{false};  // Flag to control decode task lifecycle
 
   uint32_t last_frame_time_{0};
   uint32_t frame_interval_{50};  // Default 20 FPS (was 10ms = 100fps - too fast!)

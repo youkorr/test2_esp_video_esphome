@@ -409,6 +409,32 @@ void SimpleVideoPlayer::setup() {
              this->frame_interval_, 1000.0f / this->frame_interval_);
   }
 
+  // Create semaphore for decode task signaling
+  this->decode_sem_ = xSemaphoreCreateBinary();
+  if (this->decode_sem_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create decode semaphore");
+  }
+
+  // Create dedicated decode task (like avi_player) for async decode
+  // This prevents timer callback from blocking, improving FPS performance
+  this->decode_task_running_ = true;
+  BaseType_t task_created = xTaskCreatePinnedToCore(
+    &SimpleVideoPlayer::decode_task_,  // Task function
+    "video_decode",                     // Task name
+    8192,                                // Stack size (8KB)
+    this,                                // Task parameter (this pointer)
+    10,                                  // Priority (moderate-high)
+    &this->decode_task_handle_,         // Task handle
+    1                                    // Pin to core 1 (core 0 runs WiFi/main)
+  );
+
+  if (task_created != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create decode task");
+    this->decode_task_running_ = false;
+  } else {
+    ESP_LOGI(TAG, "Decode task created (async decode like avi_player)");
+  }
+
   if (this->auto_play_) {
     this->play();
   }
@@ -3906,6 +3932,23 @@ void SimpleVideoPlayer::stop() {
     esp_timer_stop(this->playback_timer_);
   }
 
+  // Stop decode task (like avi_player cleanup)
+  if (this->decode_task_handle_ != nullptr) {
+    // Signal task to exit
+    this->decode_task_running_ = false;
+
+    // Wake task one last time so it sees the flag and exits
+    if (this->decode_sem_ != nullptr) {
+      xSemaphoreGive(this->decode_sem_);
+    }
+
+    // Wait briefly for task to exit gracefully
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Task will delete itself via vTaskDelete(nullptr)
+    this->decode_task_handle_ = nullptr;
+  }
+
   // CRITICAL: Wait for any in-progress timer callback to finish
   // The callback checks state_ and will exit quickly, but we must ensure
   // it's not accessing buffers we're about to free
@@ -4101,7 +4144,8 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
 }
 
 // ESP32 native timer callback for precise framerate control
-// This runs in ESP timer task - only decode frames, don't touch LVGL
+// NEW ARCHITECTURE: Timer now just signals decode task (non-blocking, fast!)
+// Decode task does heavy work (read + decode) asynchronously like avi_player
 // LVGL update is done in main thread (loop()) when frame_ready_ flag is set
 void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
@@ -4110,263 +4154,155 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
     return;
   }
 
-  // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
-  // If frame_ready_ is true, main thread hasn't processed the last frame yet
-  // Decoding a new frame would OVERWRITE the previous one → frame drop!
-  if (player->frame_ready_) {
-    player->frames_dropped_++;
-    static uint32_t last_drop_warning = 0;
-    uint32_t now = esp_timer_get_time() / 1000;
-    if (now - last_drop_warning > 1000) {  // Warn max once per second
-      ESP_LOGI(TAG, "Frame drops: %lu frames (system load - consider lowering FPS/resolution)",
-               (unsigned long)player->frames_dropped_);
-      last_drop_warning = now;
-    }
-    return;  // Skip this timer iteration to avoid overwriting unprocessed frame
+  // Signal decode task to wake up and process next frame (non-blocking!)
+  if (player->decode_sem_ != nullptr) {
+    xSemaphoreGive(player->decode_sem_);
   }
 
+  // FPS measurement for performance monitoring
   static uint32_t last_callback_time = 0;
-  uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
-
-  // Log timing for performance debugging (only every 30 frames to avoid spam)
   static int callback_count = 0;
   static uint32_t fps_measure_start = 0;
   static int fps_frame_count = 0;
 
-  if (callback_count++ % 30 == 0) {
-    uint32_t actual_interval = current_time - last_callback_time;
+  uint32_t current_time = esp_timer_get_time() / 1000;
 
-    // Calculate actual FPS over last 30 frames
-    if (fps_measure_start > 0) {
-      uint32_t time_elapsed = current_time - fps_measure_start;
-      float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
-      float avg_interval = time_elapsed / (float)fps_frame_count;
-      ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
-               actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
+  if (callback_count++ % 30 == 0 && fps_measure_start > 0) {
+    uint32_t time_elapsed = current_time - fps_measure_start;
+    float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
+    float avg_interval = time_elapsed / (float)fps_frame_count;
+    ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval) [async decode]",
+             actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
 
-      // Note: With ESP32 native timer, delays can still occur if system is heavily loaded
-      // (e.g., WiFi, audio processing, face detection running concurrently)
-      // This is expected and not a timer issue - just system load
-      if (avg_interval > player->frame_interval_ * 2.0f) {
-        // Only warn if VERY delayed (>2x expected) - indicates serious system overload
-        ESP_LOGI(TAG, "Timer callback delayed: Expected %ums, actual %.1fms (%.0f%% slower)",
-                 player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
-      }
-    }
-
-    // Reset FPS measurement
     fps_measure_start = current_time;
     fps_frame_count = 0;
   }
+
+  if (callback_count == 1) {
+    fps_measure_start = current_time;
+  }
+
   fps_frame_count++;
   last_callback_time = current_time;
 
-  bool got_frame = false;
-  bool end_of_stream = false;  // True only when we've exhausted all samples
+  // That's it! Decode task does the heavy work. Timer stays fast and precise.
+}
 
-  if (player->format_ == MediaFormat::MJPEG) {
-    uint32_t total_start = esp_timer_get_time() / 1000;
+// Dedicated decode task (runs asynchronously like avi_player)
+// This prevents the timer callback from blocking, allowing target FPS to be achieved
+void SimpleVideoPlayer::decode_task_(void *arg) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
+  ESP_LOGI(TAG, "Decode task started");
 
-    // Measure file read time
-    uint32_t read_start = esp_timer_get_time() / 1000;
-    if (player->read_next_mjpeg_frame_()) {
-      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
-
-      // Measure JPEG decode time
-      uint32_t decode_start = esp_timer_get_time() / 1000;
-      if (player->decode_mjpeg_frame_()) {
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
-
-        // Update current time (estimate based on frames and frame interval)
-        player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
-
-        // Estimate total duration for MJPEG if not set
-        if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
-          // Rough estimate: assume average frame size and continue from current position
-          uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
-          uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
-          player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
-        }
-
-        // Signal main thread that frame is ready for LVGL update
-        // Don't call update_display_() here - it must run in main thread to avoid LVGL conflicts
-        player->frame_ready_ = true;
-        uint32_t display_time = 0;  // Will be measured in main thread
-
-        got_frame = true;
-
-        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
-
-        // Detailed performance logging every 30 frames
-        if (callback_count % 30 == 0) {
-          const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
-                                   (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
-          ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
-                   codec_name, player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-          ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
-                   100.0f * display_time / total_time);
-        }
-      }
-      // If decode fails, we just skip this frame and try next one
-    } else {
-      // read_next_mjpeg_frame_() returned false = reached end
-      end_of_stream = true;
+  while (player->decode_task_running_) {
+    // Wait for signal from timer callback (blocking)
+    if (xSemaphoreTake(player->decode_sem_, portMAX_DELAY) != pdTRUE) {
+      continue;
     }
-  } else if (player->format_ == MediaFormat::MP4_H264) {
-    uint32_t total_start = esp_timer_get_time() / 1000;
 
-    uint32_t read_start = esp_timer_get_time() / 1000;
-    if (player->read_next_mp4_sample_()) {
-      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+    // Check if player is still playing
+    if (player->state_ != PlayerState::PLAYING) {
+      continue;
+    }
 
-      // Sample read successfully, try to decode
-      uint32_t decode_start = esp_timer_get_time() / 1000;
-      if (player->decode_h264_frame_()) {
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+    // Check if previous frame is still pending (not yet displayed by loop())
+    if (player->frame_ready_) {
+      player->frames_dropped_++;
+      static uint32_t last_drop_warning = 0;
+      uint32_t now = esp_timer_get_time() / 1000;
+      if (now - last_drop_warning > 1000) {
+        ESP_LOGI(TAG, "Frame drops: %lu frames (LVGL display slow)", (unsigned long)player->frames_dropped_);
+        last_drop_warning = now;
+      }
+      continue;
+    }
 
-        // Update current time from video sample timestamp
-        if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
-          player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
-        }
+    bool got_frame = false;
+    bool end_of_stream = false;
 
-        // Signal main thread that frame is ready for LVGL update
-        player->frame_ready_ = true;
-        uint32_t display_time = 0;  // Will be measured in main thread
-
-        got_frame = true;
-
-        // Reset error counter on success
-        static int consecutive_decode_errors = 0;
-        consecutive_decode_errors = 0;
-
-        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
-        if (callback_count % 30 == 0) {
-#ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
-                   player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-#else
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
-                   player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-#endif
+    // Decode based on format
+    if (player->format_ == MediaFormat::MJPEG) {
+      if (player->read_next_mjpeg_frame_()) {
+        if (player->decode_mjpeg_frame_()) {
+          player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
+          if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
+            uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
+            uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
+            player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
+          }
+          player->frame_ready_ = true;
+          got_frame = true;
         }
       } else {
-        // Decode failed, but we can continue to next frame
-        static int consecutive_decode_errors = 0;
-        consecutive_decode_errors++;
-
-        if (consecutive_decode_errors <= 5) {
-          ESP_LOGE(TAG, "Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
-                   player->current_video_sample_ - 1, consecutive_decode_errors);
-        } else if (consecutive_decode_errors == 10) {
-          ESP_LOGE(TAG, "10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
-        } else if (consecutive_decode_errors % 30 == 0) {
-          ESP_LOGE(TAG, "Still failing: %d consecutive decode errors", consecutive_decode_errors);
-        }
-        // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
+        end_of_stream = true;
       }
-    } else {
-      // read_next_mp4_sample_() returned false = reached end of video
-      end_of_stream = true;
-    }
-    // Audio codec removed (not working)
-    // player->process_audio_();
-  } else if (player->format_ == MediaFormat::MKV_H264) {
-    uint32_t decode_start = esp_timer_get_time() / 1000;
-
-    if (player->read_next_mkv_sample_()) {
-      if (player->decode_h264_frame_()) {
-        // Update current time from MKV sample timestamp
-        if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
-          player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
-        }
-        // Signal main thread that frame is ready for LVGL update
-        player->frame_ready_ = true;
-        got_frame = true;
-
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
-        if (callback_count % 30 == 0) {
-#ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
-#else
-          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
-#endif
+    } else if (player->format_ == MediaFormat::MP4_H264) {
+      if (player->read_next_mp4_sample_()) {
+        if (player->decode_h264_frame_()) {
+          if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
+            player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
+          }
+          player->frame_ready_ = true;
+          got_frame = true;
         }
       } else {
-        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);
-        // Decode failed, but we can continue to next frame
+        end_of_stream = true;
       }
-    } else {
-      // read_next_mkv_sample_() returned false = reached end of video
-      ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
-      end_of_stream = true;
+    } else if (player->format_ == MediaFormat::MKV_H264) {
+      if (player->read_next_mkv_sample_()) {
+        if (player->decode_h264_frame_()) {
+          if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
+            player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
+          }
+          player->frame_ready_ = true;
+          got_frame = true;
+        }
+      } else {
+        end_of_stream = true;
+      }
     }
-    // Audio codec removed (not working)
-    // player->process_audio_();
-  }
 
-  // Hide loading spinner after first frame
-  // Use player member variable instead of static to properly reset on replay
-  if (got_frame && player->loading_spinner_ != nullptr) {
-    // Hide spinner on any successful frame display
-    lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  // Reinitialize rotation handle with actual video dimensions on first frame
-  // (Only do this once - not on every video restart)
-  if (got_frame && player->rotation_ != 0 && player->rotate_handle_ != nullptr && !player->rotation_initialized_) {
-    // Close old rotation handle that was initialized with config dimensions
-    esp_imgfx_rotate_close(player->rotate_handle_);
-    player->rotate_handle_ = nullptr;
-
-    // Create new rotation handle with actual video dimensions
-    esp_imgfx_rotate_cfg_t rotate_cfg = {
-      .in_res = {
-        .width = (uint16_t)player->actual_width_,
-        .height = (uint16_t)player->actual_height_,
-      },
-      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
-      .degree = player->rotation_,
-    };
-
-    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &player->rotate_handle_);
-    if (ret != ESP_IMGFX_ERR_OK) {
-      ESP_LOGE(TAG, "Failed to reinitialize rotation with actual dimensions: %d", ret);
+    // Handle first frame rotation reinitialization
+    if (got_frame && player->rotation_ != 0 && player->rotate_handle_ != nullptr && !player->rotation_initialized_) {
+      esp_imgfx_rotate_close(player->rotate_handle_);
       player->rotate_handle_ = nullptr;
-    } else {
-      ESP_LOGI(TAG, "Rotation reinitialized with actual dimensions: %dx%d -> %d degrees",
-               player->actual_width_, player->actual_height_, player->rotation_);
-      player->rotation_initialized_ = true;  // Mark as initialized
 
-      // Free old rotation buffer - will be reallocated with correct size on next update_display_()
-      if (player->rotate_buffer_ != nullptr) {
-        heap_caps_free(player->rotate_buffer_);
-        player->rotate_buffer_ = nullptr;
-        player->rotate_buffer_size_ = 0;
+      esp_imgfx_rotate_cfg_t rotate_cfg = {
+        .in_res = {
+          .width = (uint16_t)player->actual_width_,
+          .height = (uint16_t)player->actual_height_,
+        },
+        .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+        .degree = player->rotation_,
+      };
+
+      esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &player->rotate_handle_);
+      if (ret != ESP_IMGFX_ERR_OK) {
+        ESP_LOGE(TAG, "Failed to reinitialize rotation: %d", ret);
+        player->rotate_handle_ = nullptr;
+      } else {
+        ESP_LOGI(TAG, "Rotation reinitialized: %dx%d -> %d degrees",
+                 player->actual_width_, player->actual_height_, player->rotation_);
+        player->rotation_initialized_ = true;
+
+        if (player->rotate_buffer_ != nullptr) {
+          heap_caps_free(player->rotate_buffer_);
+          player->rotate_buffer_ = nullptr;
+          player->rotate_buffer_size_ = 0;
+        }
+      }
+    }
+
+    // Handle end of stream
+    if (end_of_stream) {
+      if (!player->loop_) {
+        player->stop_pending_ = true;
       }
     }
   }
 
-  // Only stop if we've reached the actual end of the video stream
-  // Not just because a single frame failed to decode!
-  if (end_of_stream) {
-    // End of video
-    if (!player->loop_) {
-      ESP_LOGI(TAG, "Reached end of video, requesting stop");
-      // CRITICAL: Don't call stop() directly from timer callback (causes LVGL conflicts)
-      // Instead, set flag for main thread to process in loop()
-      player->stop_pending_ = true;
-
-      // NOTE: We do NOT free the HTTP buffer here to allow replay
-      // Buffer will be freed when opening a new video or when component is destroyed
-      // If you want to free memory immediately after playback, call stop() manually
-    }
-  }
+  ESP_LOGI(TAG, "Decode task exiting");
+  vTaskDelete(nullptr);
 }
 
 void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) {
