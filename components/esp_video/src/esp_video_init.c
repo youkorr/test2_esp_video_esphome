@@ -8,11 +8,14 @@
 
 #include <string.h>
 #include <inttypes.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include "hal/gpio_ll.h"
 #include "driver/gpio.h"
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_check.h"
+#include "esp_ipa_json_loader.h"
 
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
 #include "usb/usb_host.h"
@@ -538,6 +541,30 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                         return ret;
                     }
                     ESP_LOGI(TAG, "  ISP pipeline initialized successfully!");
+
+                    // Load and apply JSON IPA configuration for supported sensors (OV02C10, OV5647)
+                    ESP_LOGI(TAG, "Loading JSON IPA configuration for sensor '%s'...", cam_dev->name);
+                    esp_ipa_json_config_t ipa_json_config = {0};
+
+                    if (esp_ipa_load_json_config(cam_dev->name, &ipa_json_config) == ESP_OK) {
+                        ESP_LOGI(TAG, "  JSON IPA config loaded successfully, applying to ISP...");
+
+                        // Open ISP device to apply configuration
+                        int isp_fd = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR);
+                        if (isp_fd >= 0) {
+                            if (esp_ipa_apply_json_to_isp(isp_fd, &ipa_json_config) == ESP_OK) {
+                                ESP_LOGI(TAG, "  JSON IPA configuration applied successfully to ISP!");
+                                ESP_LOGI(TAG, "  Color correction and image quality improvements should now be active");
+                            } else {
+                                ESP_LOGW(TAG, "  Failed to apply JSON IPA configuration to ISP");
+                            }
+                            close(isp_fd);
+                        } else {
+                            ESP_LOGW(TAG, "  Failed to open ISP device for JSON IPA configuration");
+                        }
+                    } else {
+                        ESP_LOGI(TAG, "  No JSON IPA config available for sensor '%s' (this is normal for sensors other than OV02C10/OV5647)", cam_dev->name);
+                    }
                 } else {
                     ESP_LOGW(TAG, "   Failed to get IPA config for sensor '%s' - ISP not initialized", cam_dev->name);
                 }
