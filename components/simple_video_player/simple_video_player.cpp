@@ -3995,6 +3995,29 @@ void SimpleVideoPlayer::play() {
     this->on_play_trigger_->trigger();
   }
 
+  // Recreate decode task if it was stopped (decode task deletes itself in stop())
+  if (this->decode_task_handle_ == nullptr && this->decode_sem_ != nullptr) {
+    ESP_LOGI(TAG, "Recreating decode task after stop...");
+    this->decode_task_running_ = true;
+    BaseType_t task_created = xTaskCreatePinnedToCore(
+      &SimpleVideoPlayer::decode_task_,  // Task function
+      "video_decode",                     // Task name
+      8192,                                // Stack size (8KB)
+      this,                                // Task parameter (this pointer)
+      10,                                  // Priority (moderate-high)
+      &this->decode_task_handle_,         // Task handle
+      1                                    // Pin to core 1 (core 0 runs WiFi/main)
+    );
+
+    if (task_created != pdPASS) {
+      ESP_LOGE(TAG, "Failed to recreate decode task");
+      this->decode_task_running_ = false;
+      return;
+    } else {
+      ESP_LOGI(TAG, "Decode task recreated successfully");
+    }
+  }
+
   if (this->playback_timer_ != nullptr) {
     // Start ESP32 native timer with precise interval
     uint64_t interval_us = (uint64_t)this->frame_interval_ * 1000;  // Convert ms to microseconds
