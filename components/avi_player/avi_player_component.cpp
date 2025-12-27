@@ -286,6 +286,14 @@ void AviPlayerComponent::play_end_callback(void *arg) {
       ESP_LOGI(TAG, "Looping playback");
       delay(100);
       player->play();
+    } else {
+      // Update button states to allow replay
+      if (player->play_btn_ != nullptr) {
+        lv_obj_clear_state(player->play_btn_, LV_STATE_DISABLED);
+      }
+      if (player->stop_btn_ != nullptr) {
+        lv_obj_add_state(player->stop_btn_, LV_STATE_DISABLED);
+      }
     }
   }
 }
