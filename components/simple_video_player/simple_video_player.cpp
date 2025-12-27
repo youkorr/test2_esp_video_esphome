@@ -3691,6 +3691,11 @@ void SimpleVideoPlayer::update_display_() {
   // Called from main thread (via loop()), so no threading conflicts
   lv_obj_invalidate(this->canvas_);
 
+  // Hide loading spinner after first frame is displayed
+  if (this->loading_spinner_ != nullptr && !lv_obj_has_flag(this->loading_spinner_, LV_OBJ_FLAG_HIDDEN)) {
+    lv_obj_add_flag(this->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
+  }
+
   // Update UI controls only every 30 frames (~1 second at 30fps) to minimize overhead
   if (this->frame_count_ % 30 == 0) {
     // Update slider position
