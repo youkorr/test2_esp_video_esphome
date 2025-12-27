@@ -72,6 +72,10 @@ async def to_code(config):
     include_dir = os.path.join(component_dir, "include")
     cg.add_build_flag(f"-I{include_dir}")
 
+    # Add include path for esp_image_effects (for rotation)
+    imgfx_dir = os.path.join(os.path.dirname(component_dir), "esp_image_effects", "include")
+    cg.add_build_flag(f"-I{imgfx_dir}")
+
     # Define version macros (from idf_component.yml version: 2.0.0)
     cg.add_build_flag("-DAVI_PLAYER_VER_MAJOR=2")
     cg.add_build_flag("-DAVI_PLAYER_VER_MINOR=0")
