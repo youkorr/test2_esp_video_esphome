@@ -57,7 +57,7 @@ class AviPlayerComponent : public Component {
   std::string file_path_;
   int width_{480};
   int height_{270};
-  size_t buffer_size_{60 * 1024};
+  size_t buffer_size_{256 * 1024};  // 256 KB default for high quality videos
   bool auto_play_{true};
   bool loop_{false};
   bool show_controls_{false};

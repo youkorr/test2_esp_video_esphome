@@ -31,7 +31,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_FILE_PATH): cv.string,
     cv.Optional(CONF_WIDTH, default=480): cv.positive_int,
     cv.Optional(CONF_HEIGHT, default=270): cv.positive_int,
-    cv.Optional(CONF_BUFFER_SIZE, default=60 * 1024): cv.positive_int,
+    cv.Optional(CONF_BUFFER_SIZE, default=256 * 1024): cv.positive_int,  # 256 KB for high quality videos
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_LOOP, default=False): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=False): cv.boolean,
