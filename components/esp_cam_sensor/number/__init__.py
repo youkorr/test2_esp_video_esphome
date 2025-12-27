@@ -22,6 +22,7 @@ from esphome.const import (
 from .. import (
     esp_cam_sensor_ns,
     CONF_ESP_CAM_SENSOR_ID,
+    EspCamSensorComponent,
 )
 
 # Constants pour les contrôles ISP
@@ -41,9 +42,7 @@ CameraSensorNumber = esp_cam_sensor_ns.class_(
 # Configuration schema pour chaque type de contrôle ISP
 ISP_CONTROL_SCHEMA = number.number_schema(CameraSensorNumber).extend(
     {
-        cv.GenerateID(CONF_ESP_CAM_SENSOR_ID): cv.use_id(
-            cg.MockObjClass("MipiDSICamComponent")
-        ),
+        cv.GenerateID(CONF_ESP_CAM_SENSOR_ID): cv.use_id(EspCamSensorComponent),
     }
 )
 
