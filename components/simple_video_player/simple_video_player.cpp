@@ -3727,6 +3727,9 @@ void SimpleVideoPlayer::play() {
     }
     this->frame_count_ = 0;
     this->current_time_ms_ = 0;
+
+    // Reset rotation flag so it gets reinitialized with actual dimensions on first frame
+    this->rotation_initialized_ = false;
   }
 
   // Reset frame drop counter at start of playback
@@ -4224,6 +4227,41 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
   if (got_frame && player->loading_spinner_ != nullptr) {
     // Hide spinner on any successful frame display
     lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
+  }
+
+  // Reinitialize rotation handle with actual video dimensions on first frame
+  // (Only do this once - not on every video restart)
+  if (got_frame && player->rotation_ != 0 && player->rotate_handle_ != nullptr && !player->rotation_initialized_) {
+    // Close old rotation handle that was initialized with config dimensions
+    esp_imgfx_rotate_close(player->rotate_handle_);
+    player->rotate_handle_ = nullptr;
+
+    // Create new rotation handle with actual video dimensions
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)player->actual_width_,
+        .height = (uint16_t)player->actual_height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = player->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &player->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to reinitialize rotation with actual dimensions: %d", ret);
+      player->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Rotation reinitialized with actual dimensions: %dx%d -> %d degrees",
+               player->actual_width_, player->actual_height_, player->rotation_);
+      player->rotation_initialized_ = true;  // Mark as initialized
+
+      // Free old rotation buffer - will be reallocated with correct size on next update_display_()
+      if (player->rotate_buffer_ != nullptr) {
+        heap_caps_free(player->rotate_buffer_);
+        player->rotate_buffer_ = nullptr;
+        player->rotate_buffer_size_ = 0;
+      }
+    }
   }
 
   // Only stop if we've reached the actual end of the video stream
