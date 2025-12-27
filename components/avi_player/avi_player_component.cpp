@@ -246,6 +246,11 @@ void AviPlayerComponent::audio_frame_callback(frame_data_t *data, void *arg) {
     return;
   }
 
+  // Don't write audio if player is not in PLAYING state
+  if (player->state_ != PlayerState::PLAYING) {
+    return;
+  }
+
   ESP_LOGV(TAG, "Audio frame: %d bytes", data->data_bytes);
 
   // Write PCM audio data to speaker
