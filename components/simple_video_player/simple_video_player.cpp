@@ -3956,6 +3956,7 @@ void SimpleVideoPlayer::play() {
         return;
       }
       this->current_video_sample_ = 0;
+      this->current_audio_sample_ = 0;  // Reset audio position for replay
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
       // Find first keyframe to start playback
@@ -3968,10 +3969,12 @@ void SimpleVideoPlayer::play() {
         }
       }
       this->current_mkv_sample_ = first_keyframe;
+      this->current_audio_sample_ = 0;  // Reset audio position for replay
       this->sps_pps_sent_ = false;
     }
     this->frame_count_ = 0;
     this->current_time_ms_ = 0;
+    this->audio_input_size_ = 0;  // Clear any stale audio data from previous playback
 
     // Reset rotation flag so it gets reinitialized with actual dimensions on first frame
     this->rotation_initialized_ = false;
