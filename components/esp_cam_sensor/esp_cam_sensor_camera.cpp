@@ -829,6 +829,7 @@ bool MipiDSICamComponent::start_streaming() {
       } else {
         ESP_LOGI(TAG, "SC202CS custom format applied successfully!");
         ESP_LOGI(TAG, "   Sensor registers configured for %ux%u centered crop", width, height);
+        custom_format_applied = true;
       }
     }
   }
