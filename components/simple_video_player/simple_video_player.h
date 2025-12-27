@@ -234,11 +234,11 @@ class SimpleVideoPlayer : public Component {
   bool parse_mkv_clusters_();
   bool read_next_mkv_sample_();
 
-  // Audio codec methods removed (not working)
-  // bool init_aac_decoder_();
-  // bool read_next_audio_sample_();
-  // bool decode_audio_frame_();
-  // void process_audio_();
+  // Audio codec methods (AAC decoder for MP4)
+  bool init_aac_decoder_();
+  bool read_next_audio_sample_();
+  bool decode_audio_frame_();
+  void process_audio_();
 
   // PPA hardware YUVRGB conversion (replaces software converter)
   bool init_ppa_color_converter_();
@@ -389,14 +389,14 @@ class SimpleVideoPlayer : public Component {
   Trigger<> *on_play_trigger_{new Trigger<>()};
   Trigger<> *on_stop_trigger_{new Trigger<>()};
 
-  // Audio codec variables removed (not working)
-  // void *aac_decoder_{nullptr};
-  // uint8_t *audio_input_buffer_{nullptr};
-  // uint8_t *audio_output_buffer_{nullptr};
-  // size_t audio_input_size_{0};
-  // size_t audio_output_size_{0};
-  // bool has_audio_{false};
-  // bool aac_decoder_ready_{false};
+  // Audio codec variables (AAC decoder for MP4)
+  void *aac_decoder_{nullptr};
+  uint8_t *audio_input_buffer_{nullptr};
+  uint8_t *audio_output_buffer_{nullptr};
+  size_t audio_input_size_{0};
+  size_t audio_output_size_{0};
+  bool has_audio_{false};
+  bool aac_decoder_ready_{false};
 
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
