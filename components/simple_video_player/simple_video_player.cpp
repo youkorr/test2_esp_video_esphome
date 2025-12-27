@@ -1425,11 +1425,99 @@ bool SimpleVideoPlayer::parse_avi_header_() {
     }
   }
 
-  // Now find the movi list offset
-  // Skip to end of hdrl list (we're currently past avih, need to skip rest of hdrl)
-  // Current position: 12 (RIFF+AVI) + 12 (LIST hdrl) + 8 (avih header) + 56 (avih data) = 88
-  // hdrl ends at: 12 (RIFF+AVI) + 8 (LIST header) + hdrl_size
+  // Parse stream headers (strl) to find audio format
+  // Current position after avih: 12 + 12 + 8 + 56 = 88
+  long current_pos = this->cached_ftell_();
   long hdrl_end = 12 + 8 + hdrl_size;
+
+  // Search for audio stream (LIST strl with auds)
+  while (current_pos < hdrl_end) {
+    uint8_t strl_header[12];
+    if (this->cached_fread_(strl_header, 1, 12) != 12) break;
+
+    // Check for LIST strl
+    if (strl_header[0] == 'L' && strl_header[1] == 'I' &&
+        strl_header[2] == 'S' && strl_header[3] == 'T' &&
+        strl_header[8] == 's' && strl_header[9] == 't' &&
+        strl_header[10] == 'r' && strl_header[11] == 'l') {
+
+      uint32_t strl_size = strl_header[4] | (strl_header[5] << 8) |
+                           (strl_header[6] << 16) | (strl_header[7] << 24);
+      long strl_end = this->cached_ftell_() + strl_size - 4;  // -4 for 'strl' fourcc
+
+      // Read strh (stream header)
+      uint8_t strh_header[8];
+      if (this->cached_fread_(strh_header, 1, 8) == 8) {
+        if (strh_header[0] == 's' && strh_header[1] == 't' &&
+            strh_header[2] == 'r' && strh_header[3] == 'h') {
+
+          uint32_t strh_size = strh_header[4] | (strh_header[5] << 8) |
+                               (strh_header[6] << 16) | (strh_header[7] << 24);
+
+          // Read stream type (first 4 bytes of strh data)
+          uint8_t stream_type[4];
+          if (this->cached_fread_(stream_type, 1, 4) == 4) {
+            // Check if this is audio stream (auds)
+            if (stream_type[0] == 'a' && stream_type[1] == 'u' &&
+                stream_type[2] == 'd' && stream_type[3] == 's') {
+
+              // Skip rest of strh
+              this->cached_fseek_(strh_size - 4, SEEK_CUR);
+
+              // Read strf (stream format) for audio
+              uint8_t strf_header[8];
+              if (this->cached_fread_(strf_header, 1, 8) == 8) {
+                if (strf_header[0] == 's' && strf_header[1] == 't' &&
+                    strf_header[2] == 'r' && strf_header[3] == 'f') {
+
+                  // Read WAVEFORMATEX structure (at least 16 bytes)
+                  uint8_t wave_fmt[16];
+                  if (this->cached_fread_(wave_fmt, 1, 16) == 16) {
+                    // Extract audio format info
+                    uint16_t format_tag = wave_fmt[0] | (wave_fmt[1] << 8);  // 1 = PCM
+                    uint16_t channels = wave_fmt[2] | (wave_fmt[3] << 8);
+                    uint32_t sample_rate = wave_fmt[4] | (wave_fmt[5] << 8) |
+                                          (wave_fmt[6] << 16) | (wave_fmt[7] << 24);
+                    uint16_t bits_per_sample = wave_fmt[14] | (wave_fmt[15] << 8);
+
+                    // Store audio format
+                    this->audio_sample_rate_ = sample_rate;
+                    this->audio_channels_ = channels;
+
+                    ESP_LOGI(TAG, "AVI Audio: %s, %u Hz, %u-bit, %u channel(s)",
+                             format_tag == 1 ? "PCM" : "Unknown",
+                             sample_rate, bits_per_sample, channels);
+
+                    // Check if speaker is configured
+                    if (this->speaker_ != nullptr) {
+                      ESP_LOGI(TAG, "Speaker configured - audio will be played");
+                      ESP_LOGW(TAG, "IMPORTANT: Ensure speaker sample_rate=%u, bits=%u, channels=%u",
+                               sample_rate, bits_per_sample, channels);
+                    } else {
+                      ESP_LOGI(TAG, "No speaker configured - audio will be skipped");
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Skip to end of this strl
+      this->cached_fseek_(strl_end, SEEK_SET);
+    } else {
+      // Not a LIST strl, skip this chunk
+      uint32_t chunk_size = strl_header[4] | (strl_header[5] << 8) |
+                            (strl_header[6] << 16) | (strl_header[7] << 24);
+      this->cached_fseek_(chunk_size, SEEK_CUR);
+    }
+
+    current_pos = this->cached_ftell_();
+  }
+
+  // Now find the movi list offset
+  // Skip to end of hdrl list
   this->cached_fseek_(hdrl_end, SEEK_SET);
 
   // Search for LIST movi
