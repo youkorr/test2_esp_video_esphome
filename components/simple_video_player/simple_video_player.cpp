@@ -121,8 +121,8 @@ void SimpleVideoPlayer::setup() {
     // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
     if (!this->detect_avi_framerate_()) {
       if (!this->fps_override_) {
-        ESP_LOGD(TAG, "AVI framerate not detected, using default: 50 fps");
-        // Keep default frame_interval_ = 20ms (50fps)
+        ESP_LOGD(TAG, "AVI framerate not detected, using default: 20 fps");
+        // Keep default frame_interval_ = 50ms (20fps)
       } else {
         ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
                  1000.0f / this->frame_interval_);
@@ -132,7 +132,7 @@ void SimpleVideoPlayer::setup() {
     // For MP4, use configured dimensions initially (will be updated during parsing)
     // Only set default framerate if user hasn't configured one
     if (!this->fps_override_) {
-      this->frame_interval_ = 20;  // Default: 50 FPS
+      this->frame_interval_ = 50;  // Default: 20 FPS
     }
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;
@@ -440,8 +440,8 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // (parse_avi_header_ now respects fps_override_ when setting frame_interval_)
     if (!this->detect_avi_framerate_()) {
       if (!this->fps_override_) {
-        ESP_LOGD(TAG, "AVI framerate not detected, using default: 50 fps");
-        // Keep default frame_interval_ = 20ms (50fps)
+        ESP_LOGD(TAG, "AVI framerate not detected, using default: 20 fps");
+        // Keep default frame_interval_ = 50ms (20fps)
       } else {
         ESP_LOGI(TAG, "Not an AVI file (raw MJPEG), using user-configured framerate: %.2f fps",
                  1000.0f / this->frame_interval_);
@@ -451,7 +451,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // For MP4, use configured dimensions initially (will be updated during parsing)
     // Only set default framerate if user hasn't configured one
     if (!this->fps_override_) {
-      this->frame_interval_ = 20;  // Default: 50 FPS
+      this->frame_interval_ = 50;  // Default: 20 FPS
     }
     this->actual_width_ = this->width_;
     this->actual_height_ = this->height_;

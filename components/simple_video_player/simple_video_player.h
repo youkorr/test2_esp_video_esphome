@@ -416,7 +416,7 @@ class SimpleVideoPlayer : public Component {
   volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
 
   uint32_t last_frame_time_{0};
-  uint32_t frame_interval_{10};
+  uint32_t frame_interval_{50};  // Default 20 FPS (was 10ms = 100fps - too fast!)
   uint32_t current_time_ms_{0};
   uint32_t total_duration_ms_{0};
 
