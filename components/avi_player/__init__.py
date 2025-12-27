@@ -24,6 +24,7 @@ CONF_SHOW_CONTROLS = "show_controls"
 CONF_SHOW_SLIDER = "show_slider"
 CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
 CONF_FPS = "fps"
+CONF_ROTATION = "rotation"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(AviPlayerComponent),
@@ -37,6 +38,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_SHOW_SLIDER, default=False): cv.boolean,
     cv.Optional(CONF_PRELOAD_TO_MEMORY, default=False): cv.boolean,
     cv.Optional(CONF_FPS): cv.positive_float,
+    cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -57,6 +59,8 @@ async def to_code(config):
 
     if CONF_FPS in config:
         cg.add(var.set_fps(config[CONF_FPS]))
+
+    cg.add(var.set_rotation(config[CONF_ROTATION]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

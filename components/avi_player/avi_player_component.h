@@ -40,6 +40,7 @@ class AviPlayerComponent : public Component {
       fps_override_ = true;
     }
   }
+  void set_rotation(uint16_t rotation) { rotation_ = rotation; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
 
   void setup() override;
@@ -63,6 +64,7 @@ class AviPlayerComponent : public Component {
   bool preload_to_memory_{false};
   float fps_{0};
   bool fps_override_{false};
+  uint16_t rotation_{0};  // Rotation angle: 0, 90, 180, 270
 
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};

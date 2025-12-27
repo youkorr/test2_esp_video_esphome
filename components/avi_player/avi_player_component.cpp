@@ -33,6 +33,14 @@ void AviPlayerComponent::setup() {
   lv_obj_set_size(img_, width_, height_);
   lv_obj_center(img_);
 
+  // Apply rotation if configured
+  if (rotation_ != 0) {
+    lv_img_set_angle(img_, rotation_ * 10);  // LVGL uses tenths of degrees
+    // Enable pivot point at center for rotation
+    lv_img_set_pivot(img_, width_ / 2, height_ / 2);
+    ESP_LOGI(TAG, "Rotation: %d degrees", rotation_);
+  }
+
   // Create controls if requested
   if (show_controls_ || show_slider_) {
     create_controls();
