@@ -180,14 +180,16 @@ static const esp_cam_sensor_format_t sc202cs_custom_format_800x600 = {
  *  Le SC202CS n'a PAS de binning hardware !
  *  Ce mode utilise un CROP centré sur le capteur 1600x1200.
  *
- *  Calculs pour 640x480:
+ *  Calculs pour 640x480 avec offset 4:
  *  - Capteur plein : 1600×1200
- *  - Zone de crop centrée pour 640x480:
+ *  - ROI brut nécessaire: 648×488 (pour accommoder offset=4 de chaque côté)
+ *  - Zone de crop centrée pour 648x488:
  *      Centered ROI on 1600x1200 sensor:
- *      x_start = 480   = 0x01E0  ((1600-640)/2 = 480)
- *      y_start = 360   = 0x0168  ((1200-480)/2 = 360)
- *      x_end   = 1119  = 0x045F  (480 + 640 - 1)
- *      y_end   = 839   = 0x0347  (360 + 480 - 1)
+ *      x_start = 476   = 0x01DC  ((1600-648)/2 = 476)
+ *      y_start = 356   = 0x0164  ((1200-488)/2 = 356)
+ *      x_end   = 1123  = 0x0463  (476 + 648 - 1)
+ *      y_end   = 843   = 0x034B  (356 + 488 - 1)
+ *  - Output avec offset 4: 640×480
  * --------------------------------------------------------------------------*/
 
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_640x480_30fps[] = {
@@ -198,15 +200,15 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_640x480_30fps[] = {
     {0x301f, 0x18},          {0x3031, 0x08},
     {0x3037, 0x00},
 
-    /* Centered ROI 640x480 on 1600x1200 sensor */
-    {0x3200, 0x01},          /* x_start MSB = 480 (0x01E0) */
-    {0x3201, 0xe0},          /* x_start LSB */
-    {0x3202, 0x01},          /* y_start MSB = 360 (0x0168) */
-    {0x3203, 0x68},          /* y_start LSB */
-    {0x3204, 0x04},          /* x_end MSB = 1119 (0x045F) */
-    {0x3205, 0x5f},          /* x_end LSB */
-    {0x3206, 0x03},          /* y_end MSB = 839 (0x0347) */
-    {0x3207, 0x47},          /* y_end LSB */
+    /* Centered ROI 648x488 on 1600x1200 sensor (output 640x480 with offset 4) */
+    {0x3200, 0x01},          /* x_start MSB = 476 (0x01DC) */
+    {0x3201, 0xdc},          /* x_start LSB */
+    {0x3202, 0x01},          /* y_start MSB = 356 (0x0164) */
+    {0x3203, 0x64},          /* y_start LSB */
+    {0x3204, 0x04},          /* x_end MSB = 1123 (0x0463) */
+    {0x3205, 0x63},          /* x_end LSB */
+    {0x3206, 0x03},          /* y_end MSB = 843 (0x034B) */
+    {0x3207, 0x4b},          /* y_end LSB */
     {0x3208, 0x02},          /* output width MSB = 640 (0x0280) */
     {0x3209, 0x80},          /* output width LSB */
     {0x320a, 0x01},          /* output height MSB = 480 (0x01E0) */
