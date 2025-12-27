@@ -20,19 +20,36 @@
 ### 📝 Utilisation dans ESPHome YAML
 
 ```yaml
-esp_video:
-  id: mipi_cam
-  camera_interface: mipi_csi
-  camera_model: ov02c10
-  enable_isp: true
-  width: 1288
-  height: 728
-  frame_rate: 30fps
-  jpeg_quality: 75%
+esp_cam_sensor:
+  id: tab5_cam
+  i2c_id: i2c_bus
+  sensor_type: ov02c10
+  resolution: "1288x728"    # Nouveau format Near HD 16:9
+  pixel_format: "RGB565"
+  framerate: 30
+  jpeg_quality: 15
+  rotation: 270             # Optionnel (0, 90, 180, 270)
+  mirror_x: true            # Optionnel
+  mirror_y: false           # Optionnel
+  crop_offset_x: 0
+  crop_offset_y: 0
+  ppa_enabled: true
 
-  # Format spécifique (optionnel, auto-détecté par width/height)
-  format: ov02c10_format_1288x728_raw10_30fps
+esp_video:
+  i2c_id: bsp_bus
+  xclk_pin: GPIO36
+  xclk_freq: 24000000
+  enable_h264: false
+  enable_jpeg: true
+  enable_isp: true          # Active le pipeline IPA (AWB, CCM, etc.)
+  use_heap_allocator: true
 ```
+
+**Notes importantes** :
+- Le format est automatiquement sélectionné par ESPHome en fonction de la `resolution` spécifiée
+- `esp_cam_sensor` : Configuration du capteur OV02C10 (résolution, framerate, etc.)
+- `esp_video` : Configuration du pipeline vidéo ESP32-P4 (ISP, encodeurs JPEG/H264, etc.)
+- `enable_isp: true` active les algorithmes IPA (AWB, CCM, sharpen, denoise, gamma)
 
 ### 🔧 Utilisation en C++
 
@@ -158,7 +175,8 @@ esp_ipa_pipeline_create(5, ipa_names, &handle);
 Utilisez les méthodes de contrôle manuel disponibles :
 
 ```cpp
-auto cam = id(mipi_cam);
+// Accéder au composant caméra
+auto cam = id(tab5_cam);
 
 // Contrôle manuel de l'exposition
 cam->set_exposure(800);     // Valeur : 100-3000
@@ -288,17 +306,21 @@ Pour charger le JSON IPA, il faudrait qu'Espressif ajoute à `libesp_ipa.a` :
 
 1. **Utiliser le format 1288x728** (maintenant disponible)
    ```yaml
-   width: 1288
-   height: 728
+   esp_cam_sensor:
+     resolution: "1288x728"
+     pixel_format: "RGB565"
+     framerate: 30
    ```
 
 2. **Activer l'ISP** pour bénéficier des algorithmes IPA disponibles
    ```yaml
-   enable_isp: true
+   esp_video:
+     enable_isp: true
    ```
 
 3. **Contrôle manuel de l'exposition et du gain**
    ```cpp
+   auto cam = id(tab5_cam);
    cam->set_exposure(800);  // Ajuster selon l'éclairage
    cam->set_gain(64);       // Ajuster selon le bruit
    ```
