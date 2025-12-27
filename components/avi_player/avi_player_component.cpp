@@ -261,11 +261,9 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
       lvgl_img_dsc_.header.h = actual_height_;
       lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
 
-      // Update LVGL object size to match actual dimensions (with lock)
-      lv_lock();
+      // Update LVGL object size to match actual dimensions
       lv_obj_set_size(img_, actual_width_, actual_height_);
       lv_obj_center(img_);
-      lv_unlock();
     }
   }
 
@@ -287,11 +285,9 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
 
   ESP_LOGV(TAG, "JPEG decoded: output %u bytes", out_size);
 
-  // Update LVGL image (with lock to prevent rendering conflicts)
-  lv_lock();
+  // Update LVGL image
   lv_img_set_src(img_, &lvgl_img_dsc_);
   lv_obj_invalidate(img_);
-  lv_unlock();
 }
 
 // Static callbacks for LVGL button events
