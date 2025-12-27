@@ -97,9 +97,10 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
             return &ipa_config_ov5647;
         } else if (strcmp(cam_name, "SC202CS") == 0 || strcmp(cam_name, "sc202cs") == 0) {
-            // SC202CS: Activer CCM pour correction couleur automatique
-            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
-            return &ipa_config_full;
+            // SC202CS: Désactiver CCM - laisser AWB gérer les couleurs naturellement
+            // Comme M5Stack Tab5 qui n'utilise aucun ajustement manuel
+            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - natural colors)", cam_name);
+            return &ipa_config_ov5647;
         } else if (strcmp(cam_name, "OV02C10") == 0 || strcmp(cam_name, "ov02c10") == 0) {
             // OV02C10: Désactiver CCM pour éviter la teinte verte excessive
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - fixes green tint)", cam_name);

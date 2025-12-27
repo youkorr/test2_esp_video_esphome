@@ -16,7 +16,6 @@ StartStreamingAction = esp_cam_sensor_ns.class_("StartStreamingAction", automati
 StopStreamingAction = esp_cam_sensor_ns.class_("StopStreamingAction", automation.Action)
 
 # Configuration du composant
-CONF_ESP_CAM_SENSOR_ID = "esp_cam_sensor_id"
 CONF_SENSOR_TYPE = "sensor_type"
 CONF_SENSOR = "sensor"  # Alias pour compatibilité arrière
 CONF_I2C_ID = "i2c_id"
