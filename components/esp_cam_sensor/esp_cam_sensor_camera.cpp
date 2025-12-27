@@ -1227,10 +1227,10 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGW(TAG, "Failed to auto-apply CCM RGB gains");
     }
   } else if (this->sensor_name_ == "sc202cs") {
-    // SC202CS: Appliquer gains par défaut pour corriger la teinte bleue excessive
+    // SC202CS: Appliquer gains par défaut plus modérés pour équilibrer les couleurs
     // Ces valeurs peuvent être overridées en configurant rgb_gains dans YAML
-    if (this->set_rgb_gains(1.4f, 1.1f, 0.6f)) {
-      ESP_LOGI(TAG, "✓ SC202CS: Applied default RGB gains (R=1.4, G=1.1, B=0.6) to fix blue tint");
+    if (this->set_rgb_gains(1.15f, 0.95f, 0.85f)) {
+      ESP_LOGI(TAG, "✓ SC202CS: Applied default RGB gains (R=1.15, G=0.95, B=0.85) for balanced colors");
       ESP_LOGI(TAG, "   You can override these in YAML with custom rgb_gains if needed");
     } else {
       ESP_LOGW(TAG, "Failed to apply default SC202CS RGB gains");
