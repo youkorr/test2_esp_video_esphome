@@ -76,6 +76,11 @@ async def to_code(config):
     imgfx_dir = os.path.join(os.path.dirname(component_dir), "esp_image_effects", "include")
     cg.add_build_flag(f"-I{imgfx_dir}")
 
+    # Link esp_image_effects library (prebuilt)
+    imgfx_lib_dir = os.path.join(os.path.dirname(component_dir), "esp_image_effects", "lib", "esp32p4")
+    cg.add_build_flag(f"-L{imgfx_lib_dir}")
+    cg.add_build_flag("-lesp_image_effects")
+
     # Define version macros (from idf_component.yml version: 2.0.0)
     cg.add_build_flag("-DAVI_PLAYER_VER_MAJOR=2")
     cg.add_build_flag("-DAVI_PLAYER_VER_MINOR=0")
