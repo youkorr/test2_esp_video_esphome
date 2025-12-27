@@ -1,0 +1,150 @@
+# Page caméra OV02C10 - Sans Zoom (98% FOV)
+# Configuration: 640×368 + Rotation 270° → Canvas 368×390
+# Évite le crop de 25% de la résolution 640×480
+
+esp_cam_sensor:
+  id: tab5_cam
+  i2c_id: i2c_bus
+  sensor_type: ov02c10
+  resolution: "640x368"      # ← Format 16:9, seulement 2% crop (au lieu de 25%!)
+  pixel_format: "RGB565"
+  framerate: 30
+  jpeg_quality: 15
+  rotation: 270              # → Devient 368×640 après rotation
+  mirror_x: true
+  mirror_y: false
+  crop_offset_x: 0
+  ppa_enabled: true
+
+lvgl:
+  pages:
+    - id: camera_page
+      bg_color: 0x1a1a1a
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Camera page loaded (98%% FOV - NO ZOOM!)");
+            static bool canvas_configured = false;
+            if (!canvas_configured) {
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+                canvas_configured = true;
+                ESP_LOGI("lvgl", "✓ Canvas 368×390 configured (640×368 rotated to 368×640)");
+              }
+            }
+      widgets:
+
+        # ==============================================================
+        # CANVAS - 368×390 pour éviter le zoom (98% FOV au lieu de 75%)
+        # ==============================================================
+        - canvas:
+            id: camera_canvas
+            width: 368       # ← Réduit de 480 → 368 pour éviter upscale
+            height: 390      # ← Garde la même hauteur
+            x: 216           # ← Centré sur écran 800px: (800-368)/2 = 216
+            y: 40
+            bg_color: 0x000000
+
+        # ==============================================================
+        # BOUTONS DE CONTRÔLE (Plus d'espace à droite maintenant)
+        # ==============================================================
+        - button:
+            id: camera_back
+            width: 100
+            height: 40
+            x: 690           # Garde position (plus d'espace entre canvas et bouton)
+            y: 10
+            bg_color: 0xe74c3c
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0xe74c3c
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "🔙 Stopping and returning home");
+                    id(tab5_cam).stop_streaming();
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+
+        - button:
+            id: start_streaming
+            width: 100
+            height: 40
+            x: 690
+            y: 100
+            bg_color: 0xe74c3c
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0xe74c3c
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶️  START STREAMING (640×368 → 98%% FOV)");
+                    if (id(tab5_cam).start_streaming()) {
+                      ESP_LOGI("camera", "✓ Streaming started");
+                    }
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+
+        - button:
+            id: btn_stop_streaming
+            width: 100
+            height: 40
+            x: 690
+            y: 160
+            bg_color: 0xe74c3c
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0xe74c3c
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "⏹️  STOP STREAMING");
+                    id(tab5_cam).stop_streaming();
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+
+# ==============================================================
+# NOTES
+# ==============================================================
+#
+# ✅ AVANTAGES de 640×368 vs 640×480:
+#    - FOV conservé: 98% au lieu de 75% (23% de scène EN PLUS!)
+#    - Pas de zoom: effet de zoom réduit de 1.33x → 1.02x
+#    - Meilleure performance: moins de données à traiter
+#    - Qualité optimale: pas de upscale
+#
+# ⚠️  DIFFÉRENCES:
+#    - Canvas légèrement plus étroit: 368px au lieu de 480px
+#    - Plus d'espace entre canvas et boutons (216px au lieu de 584px)
+#
+# 📐 DIMENSIONS:
+#    - Capture: 640×368 (format 16:9)
+#    - Après rotation 270°: 368×640
+#    - PPA crop vertical: 640 → 390
+#    - Canvas final: 368×390
+#    - Position X centrée: (800-368)/2 = 216
+#
+# 🔍 VÉRIFICATION:
+#    Les logs devraient afficher:
+#    "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2% crop, 16-byte aligned!)"
+#
