@@ -10,6 +10,7 @@
 #include "driver/jpeg_decode.h"
 #include "driver/ppa.h"  // ESP32-P4 Pixel Processing Accelerator for hardware YUVRGB
 #include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
+#include "esp_imgfx_rotate.h"  // Hardware rotation support
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
 #include "esphome/components/speaker/speaker.h"
@@ -95,6 +96,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
+  void set_rotation(uint16_t rotation) { rotation_ = rotation; }
   // Triple buffering is now mandatory for smooth playback (removed setter)
 
   void setup() override;
@@ -336,6 +338,13 @@ class SimpleVideoPlayer : public Component {
   // Falls back to software LUT conversion if PPA unavailable
   ppa_client_handle_t ppa_client_handle_{nullptr};
   bool ppa_color_convert_enabled_{false};
+
+  // Hardware rotation support (esp_imgfx)
+  uint16_t rotation_{0};  // Rotation angle: 0, 90, 180, 270
+  esp_imgfx_rotate_handle_t rotate_handle_{nullptr};
+  lv_color_t *rotate_buffer_{nullptr};
+  size_t rotate_buffer_size_{0};
+  bool rotation_initialized_{false};
 
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;

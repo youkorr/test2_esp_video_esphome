@@ -29,6 +29,7 @@ CONF_MEDIA_PLAYER_ENTITY = "media_player_entity"
 CONF_FPS = "fps"
 CONF_MAX_HTTP_FILE_SIZE = "max_http_file_size"
 CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
+CONF_ROTATION = "rotation"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -45,6 +46,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_FPS): cv.positive_float,
     cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=40 * 1024 * 1024): cv.positive_int,  # 40MB default
     cv.Optional(CONF_PRELOAD_TO_MEMORY, default=False): cv.boolean,  # 🚀 PSRAM cache for fast SD-free playback
+    cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -65,6 +67,7 @@ async def to_code(config):
 
     cg.add(var.set_max_http_file_size(config[CONF_MAX_HTTP_FILE_SIZE]))
     cg.add(var.set_preload_to_memory(config[CONF_PRELOAD_TO_MEMORY]))
+    cg.add(var.set_rotation(config[CONF_ROTATION]))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
@@ -105,6 +108,17 @@ async def to_code(config):
     # esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
     # Now using: PPA hardware (ESP32-P4) + software LUT fallback
     # esp_imgfx caused 42ms delays instead of expected 3-5ms
+
+    # Add include path for esp_image_effects (for rotation only, not color conversion)
+    imgfx_dir = os.path.join(os.path.dirname(component_dir), "esp_image_effects", "include")
+    if os.path.exists(imgfx_dir):
+        cg.add_build_flag(f"-I{imgfx_dir}")
+
+    # Link esp_image_effects library (prebuilt) for hardware rotation
+    imgfx_lib_dir = os.path.join(os.path.dirname(component_dir), "esp_image_effects", "lib", "esp32p4")
+    if os.path.exists(imgfx_lib_dir):
+        cg.add_build_flag(f"-L{imgfx_lib_dir}")
+        cg.add_build_flag("-lesp_image_effects")
 
 
 # Action schemas

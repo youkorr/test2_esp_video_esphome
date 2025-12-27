@@ -361,6 +361,27 @@ void SimpleVideoPlayer::setup() {
     }
   }
 
+  // Initialize hardware rotation if enabled
+  if (this->rotation_ != 0) {
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->width_,
+        .height = (uint16_t)this->height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation handle: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Rotation initialized: %d degrees (will be reinitialized with actual dimensions on first frame)",
+               this->rotation_);
+    }
+  }
+
   // Create UI
   this->create_ui_();
 
@@ -656,6 +677,27 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       ESP_LOGE(TAG, "Failed to initialize JPEG decoder");
       this->mark_failed();
       return;
+    }
+  }
+
+  // Initialize hardware rotation if enabled
+  if (this->rotation_ != 0) {
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->width_,
+        .height = (uint16_t)this->height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation handle: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Rotation initialized: %d degrees (will be reinitialized with actual dimensions on first frame)",
+               this->rotation_);
     }
   }
 
@@ -3341,8 +3383,52 @@ void SimpleVideoPlayer::update_display_() {
     stride_logged = true;
   }
 
-  lv_canvas_set_buffer(this->canvas_, display_buffer,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+  // Apply hardware rotation if enabled
+  uint8_t *final_buffer = display_buffer;
+  uint32_t final_width = this->actual_width_;
+  uint32_t final_height = this->actual_height_;
+
+  if (this->rotation_ != 0 && this->rotate_handle_ != nullptr) {
+    // Get rotated dimensions
+    esp_imgfx_res_t rotated_res;
+    esp_imgfx_err_t ret = esp_imgfx_rotate_get_out_res(this->rotate_handle_, &rotated_res);
+    if (ret == ESP_IMGFX_ERR_OK) {
+      // Allocate rotation buffer on first use
+      if (this->rotate_buffer_ == nullptr) {
+        this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
+        this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
+                                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (this->rotate_buffer_ != nullptr) {
+          ESP_LOGI(TAG, "Allocated rotation buffer: %u bytes, rotated size: %dx%d",
+                   this->rotate_buffer_size_, rotated_res.width, rotated_res.height);
+        }
+      }
+
+      if (this->rotate_buffer_ != nullptr) {
+        // Rotate the frame
+        esp_imgfx_data_t in_image = {
+          .data = display_buffer,
+          .data_len = this->actual_width_ * this->actual_height_ * sizeof(lv_color_t),
+        };
+        esp_imgfx_data_t out_image = {
+          .data = (uint8_t *)this->rotate_buffer_,
+          .data_len = this->rotate_buffer_size_,
+        };
+
+        ret = esp_imgfx_rotate_process(this->rotate_handle_, &in_image, &out_image);
+        if (ret == ESP_IMGFX_ERR_OK) {
+          final_buffer = (uint8_t *)this->rotate_buffer_;
+          final_width = rotated_res.width;
+          final_height = rotated_res.height;
+        } else {
+          ESP_LOGW(TAG, "Rotation failed: %d, using non-rotated frame", ret);
+        }
+      }
+    }
+  }
+
+  lv_canvas_set_buffer(this->canvas_, final_buffer,
+                       final_width, final_height, LV_IMG_CF_TRUE_COLOR);
 
   // Swap buffers for next frame (rotate: 0120 for triple, 010 for double)
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
