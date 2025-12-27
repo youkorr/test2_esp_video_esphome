@@ -825,16 +825,18 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ 800x600)
+  // Custom Format Support (SC202CS @ 640x480 or 800x600)
   // ============================================================================
   if (this->sensor_name_ == "sc202cs") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
-    // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
-    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
-    if (width == 800 && height == 600) {
+    // SC202CS custom formats - VGA and SVGA centered crop modes
+    if (width == 640 && height == 480) {
+      custom_format = &sc202cs_custom_format_640x480;
+      ESP_LOGI(TAG, "Using SC202CS VGA format: 640x480 RAW8 @ 30fps (centered crop)");
+    } else if (width == 800 && height == 600) {
       custom_format = &sc202cs_custom_format_800x600;
-      ESP_LOGI(TAG, "Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
+      ESP_LOGI(TAG, "Using SC202CS SVGA format: 800x600 RAW8 @ 30fps (centered crop)");
     }
 
     // Apply custom format via VIDIOC_S_SENSOR_FMT
@@ -843,8 +845,8 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
         ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
       } else {
-        ESP_LOGI(TAG, "SC202CS 800x600 format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
+        ESP_LOGI(TAG, "SC202CS custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for %dx%d centered crop", width, height);
       }
     }
   }

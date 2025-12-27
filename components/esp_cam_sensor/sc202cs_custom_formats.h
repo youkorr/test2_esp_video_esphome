@@ -1,10 +1,10 @@
 /*
  * SC202CS Custom Format Configurations
- * Support for 1280x720, 1600x1200 and custom 800x600
+ * Support for 1280x720, 1600x1200, custom 800x600, and custom 640x480
  *
  * SC202CS native resolution is 1600×1200.
  * SC202CS does NOT support hardware binning!
- * 800×600 mode uses a CENTERED CROP on the 1600×1200 sensor.
+ * All lower resolution modes use CENTERED CROP on the 1600×1200 sensor.
  */
 
 #pragma once
@@ -166,6 +166,58 @@ static const esp_cam_sensor_format_t sc202cs_custom_format_800x600 = {
     .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_800x600_30fps),
     .fps       = 30,
     .isp_info  = &sc202cs_800x600_isp_info,
+    .mipi_info = {
+        .mipi_clk     = 576000000,  /* 576 Mbps, 1 lane */
+        .lane_num     = 1,
+        .line_sync_en = false,
+    },
+    .reserved  = NULL,
+};
+
+/* --------------------------------------------------------------------------
+ *  Mode 640x480 (VGA) @ 30fps (CROP centré, PAS de binning)
+ *
+ *  Le SC202CS n'a PAS de binning hardware !
+ *  Ce mode utilise un CROP centré sur le capteur 1600x1200.
+ *
+ *  Calculs pour 640x480:
+ *  - Capteur plein : 1600×1200
+ *  - Zone de crop centrée pour 640x480:
+ *      Centered ROI on 1600x1200 sensor:
+ *      x_start = 480   = 0x01E0  ((1600-640)/2 = 480)
+ *      y_start = 360   = 0x0168  ((1200-480)/2 = 360)
+ *      x_end   = 1119  = 0x045F  (480 + 640 - 1)
+ *      y_end   = 839   = 0x0347  (360 + 480 - 1)
+ * --------------------------------------------------------------------------*/
+
+/* ISP info for 640x480 mode - Match M5Stack Tab5 values */
+static const esp_cam_sensor_isp_info_t sc202cs_640x480_isp_info = {
+    .isp_v1_info = {
+        .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
+        .pclk = 72000000,     /* Pixel clock */
+        .hts = 1920,          /* Horizontal Total Size */
+        .vts = 1250,          /* Vertical Total Size */
+        .exp_def = 0x4dc,     /* M5Stack value (1244) - proper exposure */
+        .gain_def = 0,        /* M5Stack value - no extra gain */
+        .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
+    }
+};
+
+/* --------------------------------------------------------------------------
+ *  Descripteur de format esp_video pour le mode 640x480 (VGA)
+ * --------------------------------------------------------------------------*/
+
+static const esp_cam_sensor_format_t sc202cs_custom_format_640x480 = {
+    .name      = "MIPI_1lane_24Minput_RAW8_640x480_30fps",
+    .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
+    .port      = ESP_CAM_SENSOR_MIPI_CSI,
+    .xclk      = 24000000,    /* 24 MHz */
+    .width     = 640,
+    .height    = 480,
+    .regs      = init_reglist_MIPI_1lane_raw8_640x480_30fps,
+    .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_640x480_30fps),
+    .fps       = 30,
+    .isp_info  = &sc202cs_640x480_isp_info,
     .mipi_info = {
         .mipi_clk     = 576000000,  /* 576 Mbps, 1 lane */
         .lane_num     = 1,
