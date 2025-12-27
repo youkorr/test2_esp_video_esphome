@@ -169,6 +169,13 @@ void AviPlayerComponent::play() {
   actual_width_ = 0;
   actual_height_ = 0;
 
+  // Reset rotation buffer to force reallocation (but keep rotation_initialized_ and rotate_handle_)
+  if (rotate_buffer_ != nullptr) {
+    heap_caps_free(rotate_buffer_);
+    rotate_buffer_ = nullptr;
+    rotate_buffer_size_ = 0;
+  }
+
   esp_err_t err;
   if (preload_to_memory_ && memory_buffer_ != nullptr) {
     ESP_LOGI(TAG, "Playing from memory (%zu bytes)", memory_buffer_size_);
@@ -209,6 +216,13 @@ void AviPlayerComponent::stop() {
   // Reset frame dimensions for next playback
   actual_width_ = 0;
   actual_height_ = 0;
+
+  // Reset rotation buffer for next playback
+  if (rotate_buffer_ != nullptr) {
+    heap_caps_free(rotate_buffer_);
+    rotate_buffer_ = nullptr;
+    rotate_buffer_size_ = 0;
+  }
 
   // Update button states
   if (play_btn_ != nullptr) {
@@ -306,7 +320,8 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
              actual_width_, actual_height_, frame_info_.width, frame_info_.height, video_buffer_size_);
 
     // Reinitialize rotation handle with actual video dimensions if rotation is enabled
-    if (rotation_ != 0 && rotate_handle_ != nullptr) {
+    // Only do this once - not on every video restart
+    if (rotation_ != 0 && rotate_handle_ != nullptr && !rotation_initialized_) {
       // Close old rotation handle that was initialized with config dimensions
       esp_imgfx_rotate_close(rotate_handle_);
       rotate_handle_ = nullptr;
@@ -328,6 +343,7 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
       } else {
         ESP_LOGI(TAG, "Rotation reinitialized with actual dimensions: %dx%d -> %d degrees",
                  actual_width_, actual_height_, rotation_);
+        rotation_initialized_ = true;  // Mark as initialized
       }
     }
 

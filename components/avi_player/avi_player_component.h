@@ -96,6 +96,7 @@ class AviPlayerComponent : public Component {
   esp_imgfx_rotate_handle_t rotate_handle_{nullptr};  // Hardware rotation handle
   lv_color_t *rotate_buffer_{nullptr};  // Buffer for rotated frames
   size_t rotate_buffer_size_{0};
+  bool rotation_initialized_{false};  // Track if rotation handle has been reinitialized with actual dimensions
 
   volatile bool frame_ready_{false};  // Flag for thread-safe LVGL update
   volatile bool need_resize_{false};  // Flag to resize object on first frame
