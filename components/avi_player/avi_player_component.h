@@ -55,6 +55,12 @@ class AviPlayerComponent : public Component {
 
   PlayerState get_state() const { return state_; }
 
+  // Triggers
+  Trigger<> *get_on_play_trigger() const { return on_play_trigger_; }
+  Trigger<> *get_on_stop_trigger() const { return on_stop_trigger_; }
+  void set_on_play_trigger(Trigger<> *trigger) { on_play_trigger_ = trigger; }
+  void set_on_stop_trigger(Trigger<> *trigger) { on_stop_trigger_ = trigger; }
+
  protected:
   std::string file_path_;
   int width_{480};
@@ -105,6 +111,9 @@ class AviPlayerComponent : public Component {
   uint32_t audio_sample_rate_{0};      // Audio sample rate from AVI
   uint8_t audio_bits_per_sample_{0};   // Audio bits per sample from AVI
   uint8_t audio_channels_{0};          // Audio channels from AVI
+
+  Trigger<> *on_play_trigger_{new Trigger<>()};
+  Trigger<> *on_stop_trigger_{new Trigger<>()};
 
   static void video_frame_callback(frame_data_t *data, void *arg);
   static void audio_frame_callback(frame_data_t *data, void *arg);

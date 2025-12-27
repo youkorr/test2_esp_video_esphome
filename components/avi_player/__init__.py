@@ -27,6 +27,8 @@ CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
 CONF_FPS = "fps"
 CONF_ROTATION = "rotation"
 CONF_SPEAKER = "speaker"
+CONF_ON_PLAY = "on_play"
+CONF_ON_STOP = "on_stop"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(AviPlayerComponent),
@@ -43,6 +45,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
+    cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
+    cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -72,6 +76,17 @@ async def to_code(config):
     if CONF_SPEAKER in config:
         spk = await cg.get_variable(config[CONF_SPEAKER])
         cg.add(var.set_speaker(spk))
+
+    # Setup triggers
+    if CONF_ON_PLAY in config:
+        await automation.build_automation(
+            var.get_on_play_trigger(), [], config[CONF_ON_PLAY]
+        )
+
+    if CONF_ON_STOP in config:
+        await automation.build_automation(
+            var.get_on_stop_trigger(), [], config[CONF_ON_STOP]
+        )
 
     # Add include path for avi_player headers
     import os

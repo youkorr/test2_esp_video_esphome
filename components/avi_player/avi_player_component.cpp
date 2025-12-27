@@ -165,6 +165,11 @@ void AviPlayerComponent::play() {
 
   ESP_LOGI(TAG, "Starting playback: %s", file_path_.c_str());
 
+  // Trigger on_play callbacks (e.g., to stop microphone)
+  if (on_play_trigger_ != nullptr) {
+    on_play_trigger_->trigger();
+  }
+
   // Reset frame detection flags for new playback
   actual_width_ = 0;
   actual_height_ = 0;
@@ -212,6 +217,11 @@ void AviPlayerComponent::stop() {
   ESP_LOGI(TAG, "Stopping playback");
   avi_player_play_stop(avi_handle_);
   state_ = PlayerState::STOPPED;
+
+  // Trigger on_stop callbacks (e.g., to restart microphone)
+  if (on_stop_trigger_ != nullptr) {
+    on_stop_trigger_->trigger();
+  }
 
   // Reset frame dimensions for next playback
   actual_width_ = 0;
@@ -292,6 +302,11 @@ void AviPlayerComponent::play_end_callback(void *arg) {
       delay(100);
       player->play();
     } else {
+      // Trigger on_stop callbacks when video ends naturally
+      if (player->on_stop_trigger_ != nullptr) {
+        player->on_stop_trigger_->trigger();
+      }
+
       // Update button states to allow replay
       if (player->play_btn_ != nullptr) {
         lv_obj_clear_state(player->play_btn_, LV_STATE_DISABLED);
