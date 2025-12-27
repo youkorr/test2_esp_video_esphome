@@ -90,6 +90,9 @@ class AviPlayerComponent : public Component {
   size_t video_buffer_size_{0};  // Actual buffer size
   lv_img_dsc_t lvgl_img_dsc_;  // LVGL image descriptor
 
+  volatile bool frame_ready_{false};  // Flag for thread-safe LVGL update
+  volatile bool need_resize_{false};  // Flag to resize object on first frame
+
   static void video_frame_callback(frame_data_t *data, void *arg);
   static void audio_frame_callback(frame_data_t *data, void *arg);
   static void audio_set_clock_callback(uint32_t rate, uint32_t bits_cfg, uint32_t ch, void *arg);

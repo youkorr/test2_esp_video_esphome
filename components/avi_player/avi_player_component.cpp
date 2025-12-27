@@ -33,11 +33,11 @@ void AviPlayerComponent::setup() {
   lv_obj_set_size(img_, width_, height_);
   lv_obj_center(img_);
 
-  // Apply rotation if configured
+  // Apply rotation if configured (using LVGL v8+ transform API)
   if (rotation_ != 0) {
-    lv_img_set_angle(img_, rotation_ * 10);  // LVGL uses tenths of degrees
-    // Enable pivot point at center for rotation
-    lv_img_set_pivot(img_, width_ / 2, height_ / 2);
+    lv_obj_set_style_transform_angle(img_, rotation_ * 10, 0);  // LVGL uses tenths of degrees
+    lv_obj_set_style_transform_pivot_x(img_, width_ / 2, 0);
+    lv_obj_set_style_transform_pivot_y(img_, height_ / 2, 0);
     ESP_LOGI(TAG, "Rotation: %d degrees", rotation_);
   }
 
@@ -117,6 +117,21 @@ void AviPlayerComponent::setup() {
 }
 
 void AviPlayerComponent::loop() {
+  // Handle LVGL object resize (thread-safe, only once on first frame)
+  if (need_resize_ && img_ != nullptr) {
+    lv_obj_set_size(img_, actual_width_, actual_height_);
+    lv_obj_center(img_);
+    need_resize_ = false;
+    ESP_LOGI(TAG, "Resized LVGL object to %dx%d", actual_width_, actual_height_);
+  }
+
+  // Handle frame updates (thread-safe, updates LVGL from main loop)
+  if (frame_ready_ && img_ != nullptr) {
+    lv_img_set_src(img_, &lvgl_img_dsc_);
+    lv_obj_invalidate(img_);
+    frame_ready_ = false;
+  }
+
   // Update slider position if enabled
   if (show_slider_ && slider_ != nullptr && state_ == PlayerState::PLAYING) {
     update_slider_position();
@@ -261,9 +276,8 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
       lvgl_img_dsc_.header.h = actual_height_;
       lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
 
-      // Update LVGL object size to match actual dimensions
-      lv_obj_set_size(img_, actual_width_, actual_height_);
-      lv_obj_center(img_);
+      // Set flag to resize object in main loop (thread-safe)
+      need_resize_ = true;
     }
   }
 
@@ -285,9 +299,8 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
 
   ESP_LOGV(TAG, "JPEG decoded: output %u bytes", out_size);
 
-  // Update LVGL image
-  lv_img_set_src(img_, &lvgl_img_dsc_);
-  lv_obj_invalidate(img_);
+  // Set flag to update LVGL in main loop (thread-safe)
+  frame_ready_ = true;
 }
 
 // Static callbacks for LVGL button events
