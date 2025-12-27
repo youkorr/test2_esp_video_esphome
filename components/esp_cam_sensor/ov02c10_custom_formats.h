@@ -6,6 +6,7 @@
 // These formats are defined in the OV02C10 driver (ov02c10.c)
 //
 // Supported resolutions (ALL use FULL SENSOR - NO ZOOM):
+//   - 1288x728 @ 30fps RAW10 (Near HD 16:9) - full sensor, ISP downscales, optimized 16:9 aspect ratio
 //   - 640x480 @ 30fps RAW10 (VGA 4:3) - full sensor (0-1935 x 4-1091), ISP downscales, 25% horizontal crop
 //   - 800x600 @ 30fps RAW10 (SVGA 4:3) - full sensor (0-1935 x 4-1091), ISP downscales, 25% horizontal crop
 //   - 640x368 @ 30fps RAW10 (near 16:9) - full sensor (0-1935 x 4-1091), ISP downscales, ~2% crop, 16-byte aligned (rotation safe!)
@@ -17,6 +18,9 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Custom format 1288x728 @ 30fps RAW10 (Near HD 16:9)
+extern const esp_cam_sensor_format_t ov02c10_format_1288x728_raw10_30fps;
 
 // Custom format 640x480 @ 30fps RAW10 (VGA)
 extern const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps;
