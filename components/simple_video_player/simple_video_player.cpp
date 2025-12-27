@@ -4453,9 +4453,14 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
 
     // Process audio for MP4/MKV formats (AAC audio)
     // Audio is synchronized with video by checking timestamps in process_audio_()
+    // TEMPORARILY DISABLED: Audio processing causes H.264 decode errors for some videos
+    // The file seeking for audio samples interferes with video sample reading
+    // TODO: Fix audio/video interleaving for MP4
+    /*
     if (got_frame && (player->format_ == MediaFormat::MP4_H264 || player->format_ == MediaFormat::MKV_H264)) {
       player->process_audio_();
     }
+    */
 
     // Handle end of stream
     if (end_of_stream) {
