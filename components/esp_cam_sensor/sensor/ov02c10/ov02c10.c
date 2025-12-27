@@ -1032,24 +1032,26 @@ static const ov02c10_gain_t ov02c10_gain_map[] = {
          },
          .reserved = NULL,
      },
-     {
-         .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
-         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-         .port = ESP_CAM_SENSOR_MIPI_CSI,
-         .xclk = 24000000,
-         .width = 800,
-         .height = 600,
-         .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps,
-         .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps),
-         .fps = 30,
-         .isp_info = &ov02c10_isp_info[0],
-         .mipi_info = {
-             .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
-             .lane_num = 1,
-             .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-         },
-         .reserved = NULL,
-     },
+     // DISABLED: 800x600 causes watchdog timeout after 60s - ISP/PPA issue
+     // See OV02C10_800x600_ISSUE.md for details
+     // {
+     //     .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
+     //     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+     //     .port = ESP_CAM_SENSOR_MIPI_CSI,
+     //     .xclk = 24000000,
+     //     .width = 800,
+     //     .height = 600,
+     //     .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps,
+     //     .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps),
+     //     .fps = 30,
+     //     .isp_info = &ov02c10_isp_info[0],
+     //     .mipi_info = {
+     //         .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+     //         .lane_num = 1,
+     //         .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+     //     },
+     //     .reserved = NULL,
+     // },
      {
          .name = "MIPI_1lane_24Minput_RAW10_480x640_30fps_rot270",
          .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1148,24 +1150,27 @@ const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .reserved = NULL,
 };
 
-const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
-    .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
-    .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
-    .port = ESP_CAM_SENSOR_MIPI_CSI,
-    .xclk = 24000000,
-    .width = 800,
-    .height = 600,
-    .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps,
-    .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps),
-    .fps = 30,
-    .isp_info = &ov02c10_isp_info[0],
-    .mipi_info = {
-        .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
-        .lane_num = 1,
-        .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
-    },
-    .reserved = NULL,
-};
+// DISABLED: 800x600 causes watchdog timeout after 60s - ISP/PPA issue
+// See OV02C10_800x600_ISSUE.md for details
+// Use 640x480 (same 4:3 ratio) or 1288x728 (16:9) instead
+// const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
+//     .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
+//     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
+//     .port = ESP_CAM_SENSOR_MIPI_CSI,
+//     .xclk = 24000000,
+//     .width = 800,
+//     .height = 600,
+//     .regs = ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps,
+//     .regs_size = ARRAY_SIZE(ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps),
+//     .fps = 30,
+//     .isp_info = &ov02c10_isp_info[0],
+//     .mipi_info = {
+//         .mipi_clk = OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS,
+//         .lane_num = 1,
+//         .line_sync_en = CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE ? true : false,
+//     },
+//     .reserved = NULL,
+// };
 
 const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
     .name = "MIPI_1lane_24Minput_RAW10_480x640_30fps_rot270",

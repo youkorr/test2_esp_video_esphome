@@ -77,8 +77,10 @@ esp_cam_sensor_format_t config = {
 | **1288x728** | **Near HD** | **16:9** | **30** | **Optimal pour écrans 16:9** |
 | 640x368 | VGA Near 16:9 | ~16:9 | 30 | Bas débit, rotation safe |
 | 640x480 | VGA | 4:3 | 30 | Standard 4:3 |
-| 800x600 | SVGA | 4:3 | 30 | SVGA standard |
+| ~~800x600~~ | ~~SVGA~~ | ~~4:3~~ | ~~30~~ | ❌ **DISABLED - Watchdog timeout** |
 | 1920x1080 | Full HD | 16:9 | 30 | Haute résolution |
+
+**Note** : 800x600 est désactivé car il cause un watchdog timeout après 60s. Utilisez 640x480 (même ratio 4:3) ou 1288x728 (16:9) à la place. Voir `OV02C10_800x600_ISSUE.md` pour détails.
 
 ---
 
