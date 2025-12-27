@@ -27,6 +27,7 @@
 #include "esp_video_isp_ioctl.h"
 #include "esp_video_device_internal.h"
 #include "esp_ipa.h"
+#include "esp_ipa_json_loader.h"
 #include "esp_cam_sensor.h"
 
 #define ISP_METADATA_BUFFER_COUNT   2
@@ -1315,6 +1316,26 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
                       fail_3, TAG, "failed to initialize IPA pipeline");
     ESP_LOGI(TAG, "IPA Pipeline initialized successfully");
     config_isp_and_camera(isp, &metadata);
+
+    // Load and apply JSON IPA configuration if sensor name is provided
+    if (config->sensor_name) {
+        ESP_LOGI(TAG, "Loading JSON IPA configuration for sensor '%s'...", config->sensor_name);
+        esp_ipa_json_config_t ipa_json_config = {0};
+
+        if (esp_ipa_load_json_config(config->sensor_name, &ipa_json_config) == ESP_OK) {
+            ESP_LOGI(TAG, "  JSON IPA config loaded successfully, applying to ISP...");
+
+            // Use the already-opened ISP file descriptor
+            if (esp_ipa_apply_json_to_isp(isp->isp_fd, &ipa_json_config) == ESP_OK) {
+                ESP_LOGI(TAG, "  ✅ JSON IPA configuration applied successfully!");
+                ESP_LOGI(TAG, "     Color correction and image quality improvements are now active");
+            } else {
+                ESP_LOGW(TAG, "  ⚠️  Failed to apply JSON IPA configuration to ISP");
+            }
+        } else {
+            ESP_LOGD(TAG, "  No JSON IPA config for '%s' (normal for non-OV02C10/OV5647 sensors)", config->sensor_name);
+        }
+    }
 
     /**
      * If CONFIG_ISP_PIPELINE_CONTROLLER_TASK_STACK_USE_PSRAM is enabled, the ISP controller task stack
