@@ -112,6 +112,12 @@ class SimpleVideoPlayer : public Component {
   bool is_playing() const { return state_ == PlayerState::PLAYING; }
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
 
+  // Triggers
+  Trigger<> *get_on_play_trigger() const { return on_play_trigger_; }
+  Trigger<> *get_on_stop_trigger() const { return on_stop_trigger_; }
+  void set_on_play_trigger(Trigger<> *trigger) { on_play_trigger_ = trigger; }
+  void set_on_stop_trigger(Trigger<> *trigger) { on_stop_trigger_ = trigger; }
+
  protected:
   MediaFormat detect_format_();
   bool detect_jpeg_resolution_(int &width, int &height);
@@ -377,6 +383,10 @@ class SimpleVideoPlayer : public Component {
 
   speaker::Speaker *speaker_{nullptr};
   std::string media_player_entity_;
+
+  Trigger<> *on_play_trigger_{new Trigger<>()};
+  Trigger<> *on_stop_trigger_{new Trigger<>()};
+
   // Audio codec variables removed (not working)
   // void *aac_decoder_{nullptr};
   // uint8_t *audio_input_buffer_{nullptr};

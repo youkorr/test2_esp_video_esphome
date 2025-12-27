@@ -30,6 +30,8 @@ CONF_FPS = "fps"
 CONF_MAX_HTTP_FILE_SIZE = "max_http_file_size"
 CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
 CONF_ROTATION = "rotation"
+CONF_ON_PLAY = "on_play"
+CONF_ON_STOP = "on_stop"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(SimpleVideoPlayer),
@@ -47,6 +49,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_MAX_HTTP_FILE_SIZE, default=40 * 1024 * 1024): cv.positive_int,  # 40MB default
     cv.Optional(CONF_PRELOAD_TO_MEMORY, default=False): cv.boolean,  # 🚀 PSRAM cache for fast SD-free playback
     cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
+    cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
+    cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -79,6 +83,17 @@ async def to_code(config):
 
     if CONF_MEDIA_PLAYER_ENTITY in config:
         cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
+
+    # Setup triggers
+    if CONF_ON_PLAY in config:
+        await automation.build_automation(
+            var.get_on_play_trigger(), [], config[CONF_ON_PLAY]
+        )
+
+    if CONF_ON_STOP in config:
+        await automation.build_automation(
+            var.get_on_stop_trigger(), [], config[CONF_ON_STOP]
+        )
 
     # esp_audio_codec has been removed (not working)
     import os

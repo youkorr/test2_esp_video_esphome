@@ -3731,6 +3731,12 @@ void SimpleVideoPlayer::play() {
   this->frames_dropped_ = 0;
 
   this->state_ = PlayerState::PLAYING;
+
+  // Trigger on_play callbacks (e.g., to stop microphone)
+  if (this->on_play_trigger_ != nullptr) {
+    this->on_play_trigger_->trigger();
+  }
+
   if (this->playback_timer_ != nullptr) {
     // Start ESP32 native timer with precise interval
     uint64_t interval_us = (uint64_t)this->frame_interval_ * 1000;  // Convert ms to microseconds
@@ -3793,6 +3799,11 @@ void SimpleVideoPlayer::resume() {
 void SimpleVideoPlayer::stop() {
   // CRITICAL: Set state first so timer callback will early-return
   this->state_ = PlayerState::STOPPED;
+
+  // Trigger on_stop callbacks (e.g., to restart microphone)
+  if (this->on_stop_trigger_ != nullptr) {
+    this->on_stop_trigger_->trigger();
+  }
 
   // Clear frame ready flag to prevent LVGL updates after stop
   this->frame_ready_ = false;
