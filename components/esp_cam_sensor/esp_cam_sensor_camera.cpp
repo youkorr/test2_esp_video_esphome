@@ -34,7 +34,7 @@ extern "C" {
 
 // Custom format configurations for all sensors
 #include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
-#include "sc202cs_custom_formats.h"  // SC202CS: 800x600
+#include "sc202cs_custom_formats.h"  // SC202CS: 640x480, 800x600
 #include "ov02c10_custom_formats.h"  // OV02C10: 1280x800, 800x600
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
@@ -806,14 +806,17 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ 800x600)
+  // Custom Format Support (SC202CS @ 640x480 or 800x600)
   // ============================================================================
   if (this->sensor_name_ == "sc202cs") {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
-    // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
-    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
-    if (width == 800 && height == 600) {
+    // SC202CS has custom formats for different resolutions
+    // We need to explicitly apply them via VIDIOC_S_SENSOR_FMT
+    if (width == 640 && height == 480) {
+      custom_format = &sc202cs_custom_format_640x480;
+      ESP_LOGI(TAG, "Using SC202CS CUSTOM format: 640x480 RAW8 @ 30fps (VGA)");
+    } else if (width == 800 && height == 600) {
       custom_format = &sc202cs_custom_format_800x600;
       ESP_LOGI(TAG, "Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
     }
@@ -824,8 +827,8 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
         ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
       } else {
-        ESP_LOGI(TAG, "SC202CS 800x600 format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
+        ESP_LOGI(TAG, "SC202CS custom format applied successfully!");
+        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u centered crop", width, height);
       }
     }
   }
