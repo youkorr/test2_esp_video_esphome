@@ -1187,6 +1187,14 @@ MediaFormat SimpleVideoPlayer::detect_format_() {
     return MediaFormat::MJPEG;
   }
 
+  // Check for GIF header (GIF87a or GIF89a)
+  if (read_size >= 6 &&
+      header[0] == 'G' && header[1] == 'I' && header[2] == 'F' &&
+      header[3] == '8' && (header[4] == '7' || header[4] == '9') && header[5] == 'a') {
+    ESP_LOGI(TAG, "Detected GIF format");
+    return MediaFormat::GIF_ANIMATED;
+  }
+
   return MediaFormat::UNKNOWN;
 }
 
