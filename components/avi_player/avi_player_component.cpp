@@ -33,12 +33,23 @@ void AviPlayerComponent::setup() {
   lv_obj_set_size(img_, width_, height_);
   lv_obj_center(img_);
 
-  // Apply rotation if configured (using LVGL v8+ transform API)
+  // Initialize hardware rotation if configured
   if (rotation_ != 0) {
-    lv_obj_set_style_transform_angle(img_, rotation_ * 10, 0);  // LVGL uses tenths of degrees
-    lv_obj_set_style_transform_pivot_x(img_, width_ / 2, 0);
-    lv_obj_set_style_transform_pivot_y(img_, height_ / 2, 0);
-    ESP_LOGI(TAG, "Rotation: %d degrees", rotation_);
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)width_,
+        .height = (uint16_t)height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation: %d", ret);
+    } else {
+      ESP_LOGI(TAG, "Hardware rotation initialized: %d degrees", rotation_);
+    }
   }
 
   // Create controls if requested
@@ -298,6 +309,49 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
   }
 
   ESP_LOGV(TAG, "JPEG decoded: output %u bytes", out_size);
+
+  // Apply hardware rotation if configured
+  if (rotation_ != 0 && rotate_handle_ != nullptr) {
+    // Allocate rotation buffer on first use
+    if (rotate_buffer_ == nullptr) {
+      esp_imgfx_resolution_t rotated_res;
+      esp_imgfx_rotate_get_rotated_resolution(rotate_handle_, &rotated_res);
+      rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
+      rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, rotate_buffer_size_,
+                                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (rotate_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate rotation buffer");
+        frame_ready_ = true;
+        return;
+      }
+      ESP_LOGI(TAG, "Allocated rotation buffer: %u bytes, rotated size: %dx%d",
+               rotate_buffer_size_, rotated_res.width, rotated_res.height);
+    }
+
+    // Rotate the decoded frame
+    esp_imgfx_data_t in_image = {
+      .data = (uint8_t *)video_buffer_,
+      .data_len = video_buffer_size_,
+    };
+    esp_imgfx_data_t out_image = {
+      .data = (uint8_t *)rotate_buffer_,
+      .data_len = rotate_buffer_size_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_process(rotate_handle_, &in_image, &out_image);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Rotation failed: %d", ret);
+      frame_ready_ = true;
+      return;
+    }
+
+    // Update LVGL descriptor to use rotated buffer
+    esp_imgfx_resolution_t rotated_res;
+    esp_imgfx_rotate_get_rotated_resolution(rotate_handle_, &rotated_res);
+    lvgl_img_dsc_.header.w = rotated_res.width;
+    lvgl_img_dsc_.header.h = rotated_res.height;
+    lvgl_img_dsc_.data = (uint8_t *)rotate_buffer_;
+  }
 
   // Set flag to update LVGL in main loop (thread-safe)
   frame_ready_ = true;

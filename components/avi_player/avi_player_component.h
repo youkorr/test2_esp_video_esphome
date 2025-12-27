@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/jpeg_decode.h"
+#include "esp_imgfx_rotate.h"
 
 extern "C" {
 #include "avi_player.h"
@@ -89,6 +90,10 @@ class AviPlayerComponent : public Component {
   uint32_t actual_height_{0};  // 16-byte aligned height
   size_t video_buffer_size_{0};  // Actual buffer size
   lv_img_dsc_t lvgl_img_dsc_;  // LVGL image descriptor
+
+  esp_imgfx_rotate_handle_t rotate_handle_{nullptr};  // Hardware rotation handle
+  lv_color_t *rotate_buffer_{nullptr};  // Buffer for rotated frames
+  size_t rotate_buffer_size_{0};
 
   volatile bool frame_ready_{false};  // Flag for thread-safe LVGL update
   volatile bool need_resize_{false};  // Flag to resize object on first frame
