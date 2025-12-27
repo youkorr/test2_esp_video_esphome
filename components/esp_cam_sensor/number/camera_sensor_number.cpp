@@ -13,32 +13,22 @@ void CameraSensorNumber::control(float value) {
   }
 
   bool success = false;
-  int int_value = static_cast<int>(value);
 
-  // Appeler la méthode appropriée selon le control_method_
-  if (this->control_method_ == "set_brightness") {
-    success = this->parent_->set_brightness(int_value);
-  } else if (this->control_method_ == "set_hue") {
-    success = this->parent_->set_hue(int_value);
-  } else if (this->control_method_ == "set_contrast") {
-    success = this->parent_->set_contrast(int_value);
-  } else if (this->control_method_ == "set_saturation") {
-    success = this->parent_->set_saturation(int_value);
-  } else if (this->control_method_ == "set_filter") {
-    // TODO: Implémenter set_filter si nécessaire
-    ESP_LOGW(TAG, "Filter control not yet implemented");
-  } else if (this->control_method_ == "set_rgb_gain_red") {
-    // Mettre à jour la valeur rouge et appliquer tous les gains
+  // Contrôles RGB gains via CCM (Color Correction Matrix)
+  // Note: V4L2 controls (brightness, contrast, saturation, hue) ne sont PAS supportés
+  // par l'ISP ESP32-P4 pour les capteurs SC202CS/OV02C10
+  if (this->control_method_ == "set_rgb_gain_red") {
     this->rgb_gain_red_ = value;
     success = this->parent_->set_rgb_gains(this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
+    ESP_LOGI(TAG, "RGB gains: R=%.2f G=%.2f B=%.2f", this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
   } else if (this->control_method_ == "set_rgb_gain_green") {
-    // Mettre à jour la valeur verte et appliquer tous les gains
     this->rgb_gain_green_ = value;
     success = this->parent_->set_rgb_gains(this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
+    ESP_LOGI(TAG, "RGB gains: R=%.2f G=%.2f B=%.2f", this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
   } else if (this->control_method_ == "set_rgb_gain_blue") {
-    // Mettre à jour la valeur bleue et appliquer tous les gains
     this->rgb_gain_blue_ = value;
     success = this->parent_->set_rgb_gains(this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
+    ESP_LOGI(TAG, "RGB gains: R=%.2f G=%.2f B=%.2f", this->rgb_gain_red_, this->rgb_gain_green_, this->rgb_gain_blue_);
   } else {
     ESP_LOGW(TAG, "Unknown control method: %s", this->control_method_.c_str());
   }

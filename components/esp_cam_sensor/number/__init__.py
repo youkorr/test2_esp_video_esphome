@@ -1,13 +1,16 @@
 """
-ESPHome Number Platform for ESP32-P4 Camera ISP Controls
+ESPHome Number Platform for ESP32-P4 Camera RGB Gain Controls
 
-Provides runtime-adjustable ISP (Image Signal Processor) controls for:
+Provides runtime-adjustable RGB gain controls via CCM (Color Correction Matrix) for:
 - SC202CS sensor
 - OV02C10 sensor
 
 NOTE: Not recommended for OV5647 (has excellent default image quality)
 
-Controls: brightness, hue, contrast, saturation, RGB gains (red, green, blue)
+Controls: RGB gains (red, green, blue) - range 0.1 to 4.0
+
+Note: Standard V4L2 controls (brightness, contrast, saturation, hue) are not
+supported by the ESP32-P4 ISP for these sensors. Only RGB gains via CCM work.
 """
 import esphome.codegen as cg
 import esphome.config_validation as cv
@@ -25,13 +28,6 @@ from .. import (
     EspCamSensorComponent,
 )
 
-# Constants pour les contrôles ISP
-CONF_BRIGHTNESS = "brightness"
-CONF_HUE = "hue"
-CONF_CONTRAST = "contrast"
-CONF_SATURATION = "saturation"
-CONF_FILTER = "filter"
-
 CONF_TYPE_ISP = "isp"
 
 # Classe C++ pour le number ISP
@@ -39,17 +35,12 @@ CameraSensorNumber = esp_cam_sensor_ns.class_(
     "CameraSensorNumber", number.Number, cg.Component
 )
 
-# Schema de configuration complet
+# Schema de configuration complet - seulement RGB gains (CCM)
 CONFIG_SCHEMA = cv.typed_schema(
     {
         CONF_TYPE_ISP: cv.Schema(
             {
                 cv.GenerateID(CONF_ESP_CAM_SENSOR_ID): cv.use_id(EspCamSensorComponent),
-                cv.Optional(CONF_BRIGHTNESS): number.number_schema(CameraSensorNumber),
-                cv.Optional(CONF_HUE): number.number_schema(CameraSensorNumber),
-                cv.Optional(CONF_CONTRAST): number.number_schema(CameraSensorNumber),
-                cv.Optional(CONF_SATURATION): number.number_schema(CameraSensorNumber),
-                cv.Optional(CONF_FILTER): number.number_schema(CameraSensorNumber),
                 cv.Optional(CONF_RED): number.number_schema(CameraSensorNumber),
                 cv.Optional(CONF_GREEN): number.number_schema(CameraSensorNumber),
                 cv.Optional(CONF_BLUE): number.number_schema(CameraSensorNumber),
@@ -61,16 +52,13 @@ CONFIG_SCHEMA = cv.typed_schema(
 
 
 async def to_code(config):
-    """Génère le code C++ pour les contrôles ISP"""
+    """Génère le code C++ pour les contrôles RGB gains via CCM"""
     if config[CONF_TYPE] == CONF_TYPE_ISP:
-        # Mappage des contrôles vers les méthodes C++ et leurs paramètres
+        # Mappage des RGB gains vers les méthodes C++ et leurs paramètres
+        # Note: brightness, contrast, saturation, hue ne sont PAS supportés par l'ISP ESP32-P4
+        # Seuls les RGB gains via CCM fonctionnent
         controls = {
-            CONF_BRIGHTNESS: ("set_brightness", -128, 127, 0),  # min, max, default
-            CONF_HUE: ("set_hue", -180, 180, 0),
-            CONF_CONTRAST: ("set_contrast", 0, 255, 128),
-            CONF_SATURATION: ("set_saturation", 0, 255, 128),
-            CONF_FILTER: ("set_filter", 0, 100, 0),
-            CONF_RED: ("set_rgb_gain_red", 0.1, 4.0, 1.0),
+            CONF_RED: ("set_rgb_gain_red", 0.1, 4.0, 1.0),    # min, max, default
             CONF_GREEN: ("set_rgb_gain_green", 0.1, 4.0, 1.0),
             CONF_BLUE: ("set_rgb_gain_blue", 0.1, 4.0, 1.0),
         }
@@ -84,7 +72,7 @@ async def to_code(config):
                     conf,
                     min_value=min_val,
                     max_value=max_val,
-                    step=1 if isinstance(min_val, int) else 0.1,
+                    step=0.01,  # Step de 0.01 pour gains RGB précis
                 )
 
                 # Lier le number à la caméra parent
