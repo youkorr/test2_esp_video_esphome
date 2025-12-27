@@ -1485,8 +1485,43 @@ bool SimpleVideoPlayer::read_next_mjpeg_frame_() {
       // FourCC format: stream_id (2 digits) + 'dc' for video
       bool is_video_chunk = (chunk_header[2] == 'd' && chunk_header[3] == 'c');
 
+      // Check if this is an audio chunk (01wb, etc.)
+      // FourCC format: stream_id (2 digits) + 'wb' for audio (PCM)
+      bool is_audio_chunk = (chunk_header[2] == 'w' && chunk_header[3] == 'b');
+
       chunks_this_frame++;
       total_chunks_read++;
+
+      if (is_audio_chunk && chunk_size > 0 && this->speaker_ != nullptr) {
+        // Read and play audio data (PCM)
+        static uint8_t audio_buffer[8192];  // Temporary buffer for audio chunks
+        size_t chunk_to_read = std::min(chunk_size, (uint32_t)sizeof(audio_buffer));
+        size_t bytes_read = this->cached_fread_(audio_buffer, 1, chunk_to_read);
+
+        // Only write audio if player is actively playing (not paused or stopped)
+        if (bytes_read > 0 && this->state_ == PlayerState::PLAYING) {
+          // Write PCM audio data to speaker
+          size_t bytes_written = this->speaker_->play(audio_buffer, bytes_read);
+
+          if (bytes_written < bytes_read) {
+            ESP_LOGV(TAG, "Audio buffer full, dropped %zu bytes", bytes_read - bytes_written);
+          }
+        }
+
+        // Skip any remaining audio data if chunk was larger than buffer
+        if (chunk_size > chunk_to_read) {
+          this->cached_fseek_(chunk_size - chunk_to_read, SEEK_CUR);
+        }
+
+        // Skip padding byte if chunk size is odd
+        if (chunk_size % 2 != 0) {
+          uint8_t padding;
+          this->cached_fread_(&padding, 1, 1);
+        }
+
+        // Continue to next chunk (don't return - we need video chunk)
+        continue;
+      }
 
       if (is_video_chunk && chunk_size > 0 && chunk_size < this->buffer_size_) {
         // Read JPEG data directly (from cache or SD card via wrapper)
