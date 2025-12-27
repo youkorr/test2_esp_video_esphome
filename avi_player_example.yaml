@@ -1,0 +1,91 @@
+# AVI Player Example Configuration for ESPHome
+# This example shows how to use the avi_player component
+
+esphome:
+  name: avi-player-demo
+  friendly_name: AVI Player Demo
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+    version: 5.4.0
+    platform_version: 6.8.1
+
+# Enable logging
+logger:
+  level: INFO
+
+# WiFi configuration (optional)
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+# LVGL configuration - required for avi_player
+lvgl:
+  displays:
+    - display_id: my_display
+
+  touchscreens:
+    - touchscreen_id: my_touch
+
+# Display configuration (adjust for your hardware)
+display:
+  - platform: ili9xxx  # Change to your display driver
+    id: my_display
+    model: ili9341
+    cs_pin: GPIO10
+    dc_pin: GPIO9
+    reset_pin: GPIO8
+    rotation: 0
+    dimensions:
+      width: 480
+      height: 320
+
+# Touchscreen (optional)
+touchscreen:
+  - platform: gt911  # Change to your touchscreen driver
+    id: my_touch
+    interrupt_pin: GPIO3
+
+# AVI Player Component
+avi_player:
+  - id: my_avi_player
+    file_path: "/sdcard/MJPEG/video.avi"  # Path to your AVI file
+    width: 480
+    height: 270
+    buffer_size: 61440          # 60KB buffer
+    auto_play: false            # Auto-start playback
+    loop: false                 # Loop playback
+    show_controls: true         # Show play/stop buttons
+    show_slider: true           # Show progress slider
+    preload_to_memory: false    # Preload file to PSRAM (faster playback)
+    fps: 20                     # Optional: override video FPS
+    # parent_id: my_lvgl_screen  # Optional: specify LVGL parent object
+
+# Buttons to control playback (optional)
+binary_sensor:
+  - platform: gpio
+    pin: GPIO0
+    name: "Play Button"
+    on_press:
+      then:
+        - avi_player.play: my_avi_player
+
+  - platform: gpio
+    pin: GPIO1
+    name: "Stop Button"
+    on_press:
+      then:
+        - avi_player.stop: my_avi_player
+
+# You can also use Home Assistant automations
+api:
+  services:
+    - service: play_video
+      then:
+        - avi_player.play: my_avi_player
+
+    - service: stop_video
+      then:
+        - avi_player.stop: my_avi_player
