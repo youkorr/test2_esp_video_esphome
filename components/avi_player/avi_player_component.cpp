@@ -162,6 +162,10 @@ void AviPlayerComponent::play() {
 
   ESP_LOGI(TAG, "Starting playback: %s", file_path_.c_str());
 
+  // Reset frame detection flags for new playback
+  actual_width_ = 0;
+  actual_height_ = 0;
+
   esp_err_t err;
   if (preload_to_memory_ && memory_buffer_ != nullptr) {
     ESP_LOGI(TAG, "Playing from memory (%zu bytes)", memory_buffer_size_);
