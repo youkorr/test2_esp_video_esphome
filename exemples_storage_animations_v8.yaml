@@ -1,0 +1,352 @@
+# ============================================================================
+# EXEMPLES: Animations PNG avec Storage Component (LVGL V8 Compatible)
+# ============================================================================
+# Alternative à Lottie pour LVGL V8 - Utilise animimg widget avec PNG sequence
+#
+# Structure SD Card requise:
+# /sdcard/
+#   ├── animations/
+#   │   ├── loading/
+#   │   │   ├── frame_01.png
+#   │   │   ├── frame_02.png
+#   │   │   └── ... (8 frames total)
+#   │   ├── alarm/
+#   │   │   ├── frame_01.png
+#   │   │   └── ... (6 frames)
+#   │   └── heart/
+#   │       ├── frame_01.png
+#   │       └── ... (12 frames)
+#   └── img/
+#       └── sanctuary.jpg
+# ============================================================================
+
+# Configuration Storage avec animations PNG
+storage:
+  platform: sd_direct
+
+  sd_images:
+    # ========== Images statiques (existant) ==========
+    - id: sanctuary
+      file_path: "/img/sanctuary.jpg"
+      resize: 1280x720
+      format: rgb565
+
+    # ========== Animation 1: Loading Spinner (8 frames, 800ms) ==========
+    - id: loading_f01
+      file_path: "/animations/loading/frame_01.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f02
+      file_path: "/animations/loading/frame_02.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f03
+      file_path: "/animations/loading/frame_03.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f04
+      file_path: "/animations/loading/frame_04.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f05
+      file_path: "/animations/loading/frame_05.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f06
+      file_path: "/animations/loading/frame_06.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f07
+      file_path: "/animations/loading/frame_07.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: loading_f08
+      file_path: "/animations/loading/frame_08.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    # ========== Animation 2: Alarm Icon (6 frames, 600ms) ==========
+    - id: alarm_f01
+      file_path: "/animations/alarm/frame_01.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    - id: alarm_f02
+      file_path: "/animations/alarm/frame_02.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    - id: alarm_f03
+      file_path: "/animations/alarm/frame_03.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    - id: alarm_f04
+      file_path: "/animations/alarm/frame_04.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    - id: alarm_f05
+      file_path: "/animations/alarm/frame_05.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    - id: alarm_f06
+      file_path: "/animations/alarm/frame_06.png"
+      resize: 64x64
+      format: rgb565
+      auto_load: true
+
+    # ========== Animation 3: Heart Beat (12 frames, 1200ms) ==========
+    - id: heart_f01
+      file_path: "/animations/heart/frame_01.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f02
+      file_path: "/animations/heart/frame_02.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f03
+      file_path: "/animations/heart/frame_03.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f04
+      file_path: "/animations/heart/frame_04.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f05
+      file_path: "/animations/heart/frame_05.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f06
+      file_path: "/animations/heart/frame_06.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f07
+      file_path: "/animations/heart/frame_07.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f08
+      file_path: "/animations/heart/frame_08.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f09
+      file_path: "/animations/heart/frame_09.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f10
+      file_path: "/animations/heart/frame_10.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f11
+      file_path: "/animations/heart/frame_11.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+    - id: heart_f12
+      file_path: "/animations/heart/frame_12.png"
+      resize: 80x80
+      format: rgb565
+      auto_load: true
+
+
+# ============================================================================
+# EXEMPLES D'UTILISATION DANS LVGL PAGES
+# ============================================================================
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: page_home
+          widgets:
+            # ========== Animation Loading en haut à droite ==========
+            - animimg:
+                id: loading_spinner
+                align: TOP_RIGHT
+                x: -20
+                y: 20
+                width: 100
+                height: 100
+                src:
+                  - loading_f01
+                  - loading_f02
+                  - loading_f03
+                  - loading_f04
+                  - loading_f05
+                  - loading_f06
+                  - loading_f07
+                  - loading_f08
+                duration: 800        # 800ms pour cycle complet
+                repeat_count: -1     # Boucle infinie
+                auto_start: true     # Démarre automatiquement
+
+            # ========== Animation Alarm (conditionnelle) ==========
+            - animimg:
+                id: alarm_icon
+                align: TOP_LEFT
+                x: 20
+                y: 20
+                width: 64
+                height: 64
+                src:
+                  - alarm_f01
+                  - alarm_f02
+                  - alarm_f03
+                  - alarm_f04
+                  - alarm_f05
+                  - alarm_f06
+                duration: 600
+                repeat_count: 3      # 3 cycles puis stop
+                auto_start: false    # Contrôlé par automation
+
+            # ========== Animation Heart avec bouton toggle ==========
+            - obj:
+                id: heart_container
+                align: CENTER
+                width: 120
+                height: 120
+                bg_color: 0x000000
+                bg_opa: TRANSP
+                border_width: 0
+                widgets:
+                  - animimg:
+                      id: heart_beat
+                      align: CENTER
+                      width: 80
+                      height: 80
+                      src:
+                        - heart_f01
+                        - heart_f02
+                        - heart_f03
+                        - heart_f04
+                        - heart_f05
+                        - heart_f06
+                        - heart_f07
+                        - heart_f08
+                        - heart_f09
+                        - heart_f10
+                        - heart_f11
+                        - heart_f12
+                      duration: 1200
+                      repeat_count: -1
+                      auto_start: true
+
+            # ========== Bouton pour contrôler heart animation ==========
+            - button:
+                id: btn_heart_toggle
+                align: BOTTOM_MID
+                y: -20
+                width: 150
+                height: 50
+                checkable: true
+                widgets:
+                  - label:
+                      text: "Toggle Heart"
+                      align: CENTER
+                on_press:
+                  - lvgl.animimg.start:
+                      id: heart_beat
+                on_release:
+                  - lvgl.animimg.stop:
+                      id: heart_beat
+
+
+# ============================================================================
+# EXEMPLES D'AUTOMATIONS POUR CONTRÔLER LES ANIMATIONS
+# ============================================================================
+
+# Exemple 1: Démarrer loading_spinner quand WiFi se connecte
+on_wifi_connecting:
+  - lvgl.animimg.start:
+      id: loading_spinner
+
+on_wifi_connected:
+  - lvgl.animimg.stop:
+      id: loading_spinner
+
+# Exemple 2: Déclencher alarm sur événement sensor
+binary_sensor:
+  - platform: gpio
+    pin: GPIO15
+    name: "Door Sensor"
+    on_press:
+      - lvgl.animimg.start:
+          id: alarm_icon
+
+# Exemple 3: Contrôler animation depuis Home Assistant
+switch:
+  - platform: template
+    name: "Heart Animation"
+    turn_on_action:
+      - lvgl.animimg.start:
+          id: heart_beat
+    turn_off_action:
+      - lvgl.animimg.stop:
+          id: heart_beat
+
+
+# ============================================================================
+# NOTES DE PERFORMANCE
+# ============================================================================
+#
+# RAM Usage (par animation chargée):
+# - 100x100 RGB565 = 20KB par frame
+# - Animation 8 frames = 160KB total
+# - IMPORTANT: Utiliser auto_load: false si mémoire limitée
+#
+# Optimisations:
+# 1. Charger/décharger dynamiquement:
+#    - storage.load_image: loading_f01
+#    - storage.unload_image: loading_f01
+#
+# 2. Réduire le nombre de frames (8→4 frames = 50% moins RAM)
+#
+# 3. Réduire la taille (100x100→64x64 = 60% moins RAM)
+#
+# 4. Utiliser format L8 (grayscale) si possible:
+#    - RGB565 = 2 bytes/pixel
+#    - L8 = 1 byte/pixel (50% moins RAM)
+#
+# ============================================================================

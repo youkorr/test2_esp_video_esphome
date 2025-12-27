@@ -1,0 +1,389 @@
+# ============================================================================
+# CONFIGURATION: page_home avec animations Storage (LVGL V8)
+# ============================================================================
+# Intégration de l'animation "Sandy Loading" dans votre page existante
+# Basé sur votre configuration actuelle
+# ============================================================================
+
+# ÉTAPE 1: Préparer les fichiers sur SD Card
+# -------------------------------------------
+# 1. Convertir Sandy Loading.json en PNG:
+#    python tools/lottie_to_png_sequence.py "Sandy Loading.json" animations/sandy/ --frames 12 --size 100
+#
+# 2. Copier sur SD card:
+#    /sdcard/animations/sandy/frame_01.png → frame_12.png
+#    /sdcard/img/sanctuary.jpg (votre image existante)
+
+# ÉTAPE 2: Configuration Storage
+# --------------------------------
+storage:
+  platform: sd_direct
+
+  sd_images:
+    # ========== Votre image existante ==========
+    - id: sanctuary
+      file_path: "/img/sanctuary.jpg"
+      resize: 1280x720
+      format: rgb565
+
+    # ========== Animation Sandy Loading (12 frames) ==========
+    - id: sandy_f01
+      file_path: "/animations/sandy/frame_01.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f02
+      file_path: "/animations/sandy/frame_02.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f03
+      file_path: "/animations/sandy/frame_03.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f04
+      file_path: "/animations/sandy/frame_04.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f05
+      file_path: "/animations/sandy/frame_05.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f06
+      file_path: "/animations/sandy/frame_06.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f07
+      file_path: "/animations/sandy/frame_07.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f08
+      file_path: "/animations/sandy/frame_08.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f09
+      file_path: "/animations/sandy/frame_09.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f10
+      file_path: "/animations/sandy/frame_10.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f11
+      file_path: "/animations/sandy/frame_11.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+    - id: sandy_f12
+      file_path: "/animations/sandy/frame_12.png"
+      resize: 100x100
+      format: rgb565
+      auto_load: true
+
+
+# ÉTAPE 3: Configuration LVGL
+# -----------------------------
+lvgl:
+  displays:
+    - display_id: my_display
+
+      pages:
+        # ========== PAGE HOME avec animations ==========
+        - id: page_home
+          bg_color: 0x000000
+
+          widgets:
+            # ========== VOTRE CONTENU EXISTANT ==========
+            # (gardez vos widgets existants ici)
+
+            # ========== ANIMATION SANDY - TOP RIGHT ==========
+            # Animation visible en haut à droite
+            - animimg:
+                id: sandy_loader_top
+                align: TOP_RIGHT
+                x: -20
+                y: 20
+                width: 100
+                height: 100
+                src:
+                  - sandy_f01
+                  - sandy_f02
+                  - sandy_f03
+                  - sandy_f04
+                  - sandy_f05
+                  - sandy_f06
+                  - sandy_f07
+                  - sandy_f08
+                  - sandy_f09
+                  - sandy_f10
+                  - sandy_f11
+                  - sandy_f12
+                duration: 1200        # 1.2 secondes par cycle
+                repeat_count: -1      # Boucle infinie
+                auto_start: false     # Contrôlé par automation
+
+            # ========== ANIMATION SANDY - CENTER ==========
+            # Animation centrée pour écran de chargement
+            - obj:
+                id: loading_overlay
+                x: 0
+                y: 0
+                width: 1280
+                height: 720
+                bg_color: 0x000000
+                bg_opa: COVER
+                hidden: true          # Caché par défaut
+
+                widgets:
+                  # Animation au centre
+                  - animimg:
+                      id: sandy_loader_center
+                      align: CENTER
+                      width: 120
+                      height: 120
+                      src:
+                        - sandy_f01
+                        - sandy_f02
+                        - sandy_f03
+                        - sandy_f04
+                        - sandy_f05
+                        - sandy_f06
+                        - sandy_f07
+                        - sandy_f08
+                        - sandy_f09
+                        - sandy_f10
+                        - sandy_f11
+                        - sandy_f12
+                      duration: 1200
+                      repeat_count: -1
+                      auto_start: false
+
+                  # Texte de chargement
+                  - label:
+                      id: loading_text
+                      align: CENTER
+                      y: 90
+                      text: "Chargement..."
+                      text_color: 0xFFFFFF
+                      text_font: montserrat_20
+
+            # ========== BOUTONS DE CONTRÔLE (pour test) ==========
+            - button:
+                id: btn_show_loading
+                align: BOTTOM_LEFT
+                x: 20
+                y: -20
+                width: 200
+                height: 60
+                widgets:
+                  - label:
+                      text: "Show Loading"
+                      align: CENTER
+                on_click:
+                  - lvgl.widget.show: loading_overlay
+                  - lvgl.animimg.start: sandy_loader_center
+
+            - button:
+                id: btn_hide_loading
+                align: BOTTOM_RIGHT
+                x: -20
+                y: -20
+                width: 200
+                height: 60
+                widgets:
+                  - label:
+                      text: "Hide Loading"
+                      align: CENTER
+                on_click:
+                  - lvgl.animimg.stop: sandy_loader_center
+                  - lvgl.widget.hide: loading_overlay
+
+            - button:
+                id: btn_toggle_top
+                align: BOTTOM_MID
+                y: -20
+                width: 200
+                height: 60
+                checkable: true
+                widgets:
+                  - label:
+                      text: "Toggle Top"
+                      align: CENTER
+                on_press:
+                  - lvgl.animimg.start: sandy_loader_top
+                on_release:
+                  - lvgl.animimg.stop: sandy_loader_top
+
+
+# ============================================================================
+# EXEMPLES D'AUTOMATIONS
+# ============================================================================
+
+# EXEMPLE 1: Animation pendant connexion WiFi
+# --------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Démarrer animation quand WiFi se connecte
+  on_connect:
+    - logger.log: "WiFi connecté - arrêt animation"
+    - lvgl.animimg.stop: sandy_loader_top
+    - lvgl.widget.hide: loading_overlay
+
+  # Animation en cours de connexion
+  on_disconnect:
+    - logger.log: "WiFi déconnecté - démarrage animation"
+    - lvgl.animimg.start:
+        id: sandy_loader_top
+        repeat_count: -1
+
+
+# EXEMPLE 2: Animation au démarrage
+# -----------------------------------
+on_boot:
+  priority: -100
+  then:
+    # Afficher écran de chargement
+    - lvgl.widget.show: loading_overlay
+    - lvgl.animimg.start:
+        id: sandy_loader_center
+        repeat_count: -1
+
+    # Simuler chargement
+    - delay: 3s
+
+    # Masquer écran de chargement
+    - lvgl.animimg.stop: sandy_loader_center
+    - lvgl.widget.hide: loading_overlay
+
+
+# EXEMPLE 3: Animation pendant opération longue
+# -----------------------------------------------
+script:
+  - id: long_operation
+    then:
+      # Début opération
+      - lvgl.widget.show: loading_overlay
+      - lvgl.animimg.start: sandy_loader_center
+      - lvgl.label.update:
+          id: loading_text
+          text: "Traitement en cours..."
+
+      # Votre opération ici
+      - delay: 5s
+
+      # Fin opération
+      - lvgl.animimg.stop: sandy_loader_center
+      - lvgl.widget.hide: loading_overlay
+
+
+# EXEMPLE 4: Indicateur camera streaming
+# ----------------------------------------
+# Afficher animation pendant que caméra stream
+binary_sensor:
+  - platform: template
+    name: "Camera Streaming"
+    id: camera_streaming
+
+    on_press:
+      - lvgl.animimg.start:
+          id: sandy_loader_top
+          repeat_count: -1
+
+    on_release:
+      - lvgl.animimg.stop: sandy_loader_top
+
+
+# ============================================================================
+# OPTIMISATION RAM (si nécessaire)
+# ============================================================================
+
+# Si vous manquez de RAM, utilisez le chargement dynamique:
+#
+# 1. Changer auto_load à false dans storage config:
+#    - id: sandy_f01
+#      auto_load: false
+#
+# 2. Charger manuellement avant utilisation:
+#
+# script:
+#   - id: load_sandy_animation
+#     then:
+#       - storage.load_image: sandy_f01
+#       - storage.load_image: sandy_f02
+#       - storage.load_image: sandy_f03
+#       - storage.load_image: sandy_f04
+#       - storage.load_image: sandy_f05
+#       - storage.load_image: sandy_f06
+#       - storage.load_image: sandy_f07
+#       - storage.load_image: sandy_f08
+#       - storage.load_image: sandy_f09
+#       - storage.load_image: sandy_f10
+#       - storage.load_image: sandy_f11
+#       - storage.load_image: sandy_f12
+#
+#   - id: unload_sandy_animation
+#     then:
+#       - storage.unload_image: sandy_f01
+#       # ... (toutes les frames)
+
+
+# ============================================================================
+# USAGE RAM ESTIMÉ
+# ============================================================================
+#
+# Animation Sandy Loading (12 frames × 100x100 RGB565):
+# - Par frame: 100 × 100 × 2 bytes = 20 KB
+# - Total: 12 × 20 KB = 240 KB
+#
+# Si vous avez d'autres animations:
+# - Alarm 6 frames × 64x64 = 49 KB
+# - Heart 12 frames × 80x80 = 154 KB
+# - Total global: ~443 KB
+#
+# Acceptable sur ESP32-P4 avec PSRAM
+#
+# ============================================================================
+
+
+# ============================================================================
+# CHECKLIST DE DÉPLOIEMENT
+# ============================================================================
+#
+# ✅ 1. Convertir Lottie en PNG:
+#       python tools/lottie_to_png_sequence.py "Sandy Loading.json" animations/sandy/ --frames 12 --size 100
+#
+# ✅ 2. Copier sur SD card:
+#       /sdcard/animations/sandy/frame_01.png → frame_12.png
+#
+# ✅ 3. Intégrer cette config dans votre .yaml
+#
+# ✅ 4. Compiler et flasher:
+#       esphome compile votre_config.yaml
+#       esphome upload votre_config.yaml
+#
+# ✅ 5. Tester avec les boutons de contrôle
+#
+# ✅ 6. Adapter les automations à vos besoins
+#
+# ============================================================================
