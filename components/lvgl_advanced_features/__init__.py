@@ -69,7 +69,7 @@ CONFIG_SCHEMA = cv.Schema({
 
     # Performance
     cv.Optional(CONF_DRAW_SW_COMPLEX, default=True): cv.boolean,
-    cv.Optional(CONF_DRAW_SW_ASM, default=False): cv.one_of("none", "neon", "helium"),
+    cv.Optional(CONF_DRAW_SW_ASM, default="none"): cv.one_of("none", "neon", "helium"),
     cv.Optional(CONF_SHADOW_CACHE_SIZE, default=0): cv.int_range(min=0, max=1024),
     cv.Optional(CONF_IMG_CACHE_SIZE, default=0): cv.int_range(min=0, max=1024),
 }).extend(cv.COMPONENT_SCHEMA)
