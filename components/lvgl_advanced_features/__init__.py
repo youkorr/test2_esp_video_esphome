@@ -83,100 +83,81 @@ async def to_code(config):
     if CONF_THORVG in config:
         thorvg_cfg = config[CONF_THORVG]
         if thorvg_cfg.get(CONF_THORVG_INTERNAL, False):
-            cg.add_define("LV_USE_THORVG_INTERNAL", "1")
             cg.add_build_flag("-DLV_USE_THORVG_INTERNAL=1")
             cg.add(var.set_thorvg_internal(True))
         if thorvg_cfg.get(CONF_THORVG_EXTERNAL, False):
-            cg.add_define("LV_USE_THORVG_EXTERNAL", "1")
             cg.add_build_flag("-DLV_USE_THORVG_EXTERNAL=1")
             cg.add(var.set_thorvg_external(True))
 
     # SVG support (requires ThorVG)
     if config.get(CONF_SVG, False):
-        cg.add_define("LV_USE_SVG", "1")
         cg.add_build_flag("-DLV_USE_SVG=1")
         cg.add(var.set_svg_enabled(True))
 
     # Lottie support (requires ThorVG)
     if config.get(CONF_LOTTIE, False):
-        cg.add_define("LV_USE_LOTTIE", "1")
         cg.add_build_flag("-DLV_USE_LOTTIE=1")
         cg.add(var.set_lottie_enabled(True))
 
     # FreeType font rendering
     if config.get(CONF_FREETYPE, False):
-        cg.add_define("LV_USE_FREETYPE", "1")
         cg.add_build_flag("-DLV_USE_FREETYPE=1")
         cg.add(var.set_freetype_enabled(True))
 
     # RLottie (alternative to ThorVG for Lottie)
     if config.get(CONF_RLOTTIE, False):
-        cg.add_define("LV_USE_RLOTTIE", "1")
         cg.add_build_flag("-DLV_USE_RLOTTIE=1")
         cg.add(var.set_rlottie_enabled(True))
 
     # FFmpeg support
     if config.get(CONF_FFMPEG, False):
-        cg.add_define("LV_USE_FFMPEG", "1")
         cg.add_build_flag("-DLV_USE_FFMPEG=1")
         cg.add(var.set_ffmpeg_enabled(True))
 
     # Image format support
     if config.get(CONF_LIBPNG, False):
-        cg.add_define("LV_USE_LIBPNG", "1")
         cg.add_build_flag("-DLV_USE_LIBPNG=1")
         cg.add(var.set_libpng_enabled(True))
 
     if config.get(CONF_LIBJPEG_TURBO, False):
-        cg.add_define("LV_USE_LIBJPEG_TURBO", "1")
         cg.add_build_flag("-DLV_USE_LIBJPEG_TURBO=1")
         cg.add(var.set_libjpeg_turbo_enabled(True))
 
     if config.get(CONF_GIF, False):
-        cg.add_define("LV_USE_GIF", "1")
         cg.add_build_flag("-DLV_USE_GIF=1")
         cg.add(var.set_gif_enabled(True))
 
     if config.get(CONF_BMP, False):
-        cg.add_define("LV_USE_BMP", "1")
         cg.add_build_flag("-DLV_USE_BMP=1")
         cg.add(var.set_bmp_enabled(True))
 
     # Widgets
     if config.get(CONF_QRCODE, False):
-        cg.add_define("LV_USE_QRCODE", "1")
         cg.add_build_flag("-DLV_USE_QRCODE=1")
         cg.add(var.set_qrcode_enabled(True))
 
     if config.get(CONF_BARCODE, False):
-        cg.add_define("LV_USE_BARCODE", "1")
         cg.add_build_flag("-DLV_USE_BARCODE=1")
         cg.add(var.set_barcode_enabled(True))
 
     if config.get(CONF_IME_PINYIN, False):
-        cg.add_define("LV_USE_IME_PINYIN", "1")
         cg.add_build_flag("-DLV_USE_IME_PINYIN=1")
         cg.add(var.set_ime_pinyin_enabled(True))
 
     # Performance optimizations
     if config.get(CONF_DRAW_SW_COMPLEX, False):
-        cg.add_define("LV_DRAW_SW_COMPLEX", "1")
         cg.add_build_flag("-DLV_DRAW_SW_COMPLEX=1")
 
     asm_type = config.get(CONF_DRAW_SW_ASM, "none")
     if asm_type == "neon":
-        cg.add_define("LV_DRAW_SW_ASM", "LV_DRAW_SW_ASM_NEON")
         cg.add_build_flag("-DLV_DRAW_SW_ASM=LV_DRAW_SW_ASM_NEON")
     elif asm_type == "helium":
-        cg.add_define("LV_DRAW_SW_ASM", "LV_DRAW_SW_ASM_HELIUM")
         cg.add_build_flag("-DLV_DRAW_SW_ASM=LV_DRAW_SW_ASM_HELIUM")
 
     if config.get(CONF_SHADOW_CACHE_SIZE, 0) > 0:
         size = config[CONF_SHADOW_CACHE_SIZE]
-        cg.add_define("LV_SHADOW_CACHE_SIZE", str(size))
         cg.add_build_flag(f"-DLV_SHADOW_CACHE_SIZE={size}")
 
     if config.get(CONF_IMG_CACHE_SIZE, 0) > 0:
         size = config[CONF_IMG_CACHE_SIZE]
-        cg.add_define("LV_IMG_CACHE_SIZE", str(size))
         cg.add_build_flag(f"-DLV_IMG_CACHE_SIZE={size}")
