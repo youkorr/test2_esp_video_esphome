@@ -43,7 +43,7 @@ class LVGLCameraDisplay : public Component {
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};
 
-  uint32_t update_interval_{33};
+  uint32_t update_interval_{16};  // 16ms = 60 FPS target (increased from 33ms/30fps)
   uint32_t last_update_{0};
 
   uint32_t frame_count_{0};

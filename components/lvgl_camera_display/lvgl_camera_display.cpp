@@ -178,7 +178,11 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+
+  // Force immediate refresh instead of waiting for next LVGL cycle
+  // This significantly improves FPS by bypassing LVGL scheduler delays
   lv_obj_invalidate(this->canvas_obj_);
+  lv_refr_now(NULL);  // Force immediate redraw (NULL = default display)
 
   // Tracker ce buffer pour le liberer au prochain update
   this->displayed_buffer_ = buffer;
