@@ -846,8 +846,11 @@ bool MipiDSICamComponent::start_streaming() {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA 4:3, 25%% horizontal crop)");
     } else if (width == 800 && height == 600) {
-      custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, 25%% horizontal crop)");
+      // DISABLED: 800x600 causes watchdog timeout after 60s
+      ESP_LOGE(TAG, "❌ 800x600 is DISABLED due to watchdog timeout issue");
+      ESP_LOGE(TAG, "❌ Use 640x480 (same 4:3 ratio) or 1288x728 (16:9) instead");
+      ESP_LOGE(TAG, "❌ See OV02C10_800x600_ISSUE.md for details");
+      return false;
     } else if (width == 640 && height == 368) {
       custom_format = &ov02c10_format_640x368_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
