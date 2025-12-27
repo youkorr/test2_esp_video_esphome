@@ -3389,40 +3389,42 @@ void SimpleVideoPlayer::update_display_() {
   uint32_t final_height = this->actual_height_;
 
   if (this->rotation_ != 0 && this->rotate_handle_ != nullptr) {
-    // Get rotated dimensions
-    esp_imgfx_res_t rotated_res;
-    esp_imgfx_err_t ret = esp_imgfx_rotate_get_out_res(this->rotate_handle_, &rotated_res);
-    if (ret == ESP_IMGFX_ERR_OK) {
-      // Allocate rotation buffer on first use
+    // Allocate rotation buffer on first use
+    if (this->rotate_buffer_ == nullptr) {
+      esp_imgfx_resolution_t rotated_res;
+      esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+      this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
+      this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
+                                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
       if (this->rotate_buffer_ == nullptr) {
-        this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
-        this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
-                                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (this->rotate_buffer_ != nullptr) {
-          ESP_LOGI(TAG, "Allocated rotation buffer: %u bytes, rotated size: %dx%d",
-                   this->rotate_buffer_size_, rotated_res.width, rotated_res.height);
-        }
+        ESP_LOGE(TAG, "Failed to allocate rotation buffer");
+      } else {
+        ESP_LOGI(TAG, "Allocated rotation buffer: %u bytes, rotated size: %dx%d",
+                 this->rotate_buffer_size_, rotated_res.width, rotated_res.height);
       }
+    }
 
-      if (this->rotate_buffer_ != nullptr) {
-        // Rotate the frame
-        esp_imgfx_data_t in_image = {
-          .data = display_buffer,
-          .data_len = this->actual_width_ * this->actual_height_ * sizeof(lv_color_t),
-        };
-        esp_imgfx_data_t out_image = {
-          .data = (uint8_t *)this->rotate_buffer_,
-          .data_len = this->rotate_buffer_size_,
-        };
+    if (this->rotate_buffer_ != nullptr) {
+      // Rotate the frame
+      esp_imgfx_data_t in_image = {
+        .data = display_buffer,
+        .data_len = this->actual_width_ * this->actual_height_ * sizeof(lv_color_t),
+      };
+      esp_imgfx_data_t out_image = {
+        .data = (uint8_t *)this->rotate_buffer_,
+        .data_len = this->rotate_buffer_size_,
+      };
 
-        ret = esp_imgfx_rotate_process(this->rotate_handle_, &in_image, &out_image);
-        if (ret == ESP_IMGFX_ERR_OK) {
-          final_buffer = (uint8_t *)this->rotate_buffer_;
-          final_width = rotated_res.width;
-          final_height = rotated_res.height;
-        } else {
-          ESP_LOGW(TAG, "Rotation failed: %d, using non-rotated frame", ret);
-        }
+      esp_imgfx_err_t ret = esp_imgfx_rotate_process(this->rotate_handle_, &in_image, &out_image);
+      if (ret == ESP_IMGFX_ERR_OK) {
+        // Update dimensions with rotated values
+        esp_imgfx_resolution_t rotated_res;
+        esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+        final_buffer = (uint8_t *)this->rotate_buffer_;
+        final_width = rotated_res.width;
+        final_height = rotated_res.height;
+      } else {
+        ESP_LOGW(TAG, "Rotation failed: %d, using non-rotated frame", ret);
       }
     }
   }
