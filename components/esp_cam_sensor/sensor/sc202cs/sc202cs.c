@@ -966,27 +966,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
 };
 
 static const esp_cam_sensor_format_t sc202cs_format_info[] = {
-    // Index 0: 640x480 (VGA) - Native centered crop mode (NO binning - SC202CS doesn't support it)
-    {
-        .name      = "MIPI_1lane_24Minput_RAW8_640x480_30fps",
-        .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
-        .port      = ESP_CAM_SENSOR_MIPI_CSI,
-        .xclk      = 24000000,
-        .width     = 640,
-        .height    = 480,
-        .regs      = init_reglist_MIPI_1lane_raw8_640x480_30fps,
-        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_640x480_30fps),
-        .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[0],
-        .mipi_info =
-            {
-                .mipi_clk     = 576000000,
-                .lane_num     = 1,
-                .line_sync_en = false,
-            },
-        .reserved = NULL,
-    },
-    // Index 1: 800x600 - Native centered crop mode (NO binning - SC202CS doesn't support it)
+    // Index 0: 800x600 - Native centered crop mode (NO binning - SC202CS doesn't support it)
     {
         .name      = "MIPI_1lane_24Minput_RAW8_800x600_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
@@ -1006,7 +986,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 2: 1280x720 - Standard M5Stack Tab5 mode
+    // Index 1: 1280x720 - Standard M5Stack Tab5 mode
     {
         .name      = "MIPI_1lane_24Minput_RAW8_1280x720_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
@@ -1026,7 +1006,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 3: 1600x1200 RAW8
+    // Index 2: 1600x1200 RAW8
     {
         .name      = "MIPI_1lane_24Minput_RAW8_1600x1200_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
@@ -1046,7 +1026,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 4: 1600x1200 RAW10
+    // Index 3: 1600x1200 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x1200_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1066,7 +1046,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 5: 1600x900 RAW10
+    // Index 4: 1600x900 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x900_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
