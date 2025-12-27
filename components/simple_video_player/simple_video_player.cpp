@@ -2644,8 +2644,8 @@ bool SimpleVideoPlayer::decode_audio_frame_() {
   esp_audio_dec_out_frame_t out_frame = {
     .buffer = this->audio_output_buffer_,
     .len = 16384,
-    .decoded_size = 0,
     .needed_size = 0,
+    .decoded_size = 0,
   };
 
   // Decode AAC to PCM
