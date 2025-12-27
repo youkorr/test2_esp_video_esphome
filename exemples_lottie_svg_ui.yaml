@@ -1,0 +1,799 @@
+# ============================================================================
+# EXEMPLES PRATIQUES - Lottie & SVG UI avec LVGL V9
+# ============================================================================
+# Ce fichier contient des exemples concrets d'utilisation de Lottie et SVG
+# pour créer une interface moderne et fluide sur ESP32-P4.
+#
+# PRÉREQUIS:
+#   - LVGL V9.4 activé (voir lvgl_v9_thorvg_complete_config.yaml)
+#   - lvgl_advanced_features configuré avec thorvg: true, svg: true, lottie: true
+#   - Fichiers Lottie/SVG téléchargés sur carte SD
+# ============================================================================
+
+# ============================================================================
+# EXEMPLE 1 - Page météo animée avec Lottie
+# ============================================================================
+# Interface météo moderne avec animations Lottie basmilius/weather-icons
+# Téléchargez depuis: https://github.com/basmilius/weather-icons/tree/dev/production/lottie
+
+# Dépend de votre configuration existante
+# esphome:
+#   name: esp32p4-weather
+#
+# wifi:
+#   ssid: !secret wifi_ssid
+#   password: !secret wifi_password
+#
+# api:
+#   encryption:
+#     key: !secret api_key
+#
+# time:
+#   - platform: homeassistant
+#     id: ha_time
+
+# Configuration LVGL pour page météo
+lvgl:
+  # ... (votre configuration display existante)
+
+  pages:
+    # ============================================================================
+    # PAGE MÉTÉO PRINCIPALE
+    # ============================================================================
+    - id: weather_page
+      bg_color: 0x1A1A2E  # Bleu nuit moderne
+
+      widgets:
+        # ========================================================================
+        # ANIMATION MÉTÉO PRINCIPALE (Lottie)
+        # ========================================================================
+        # Animation du temps actuel - occupe le centre gauche
+        - lottie:
+            id: current_weather_animation
+            src: "/sdcard/weather/clear-day.json"  # Fichier par défaut
+            width: 250
+            height: 250
+            x: 50
+            y: 80
+            loop: true
+            autoplay: true
+            # Note: Le fichier sera changé dynamiquement selon la météo
+
+        # ========================================================================
+        # INFORMATIONS TEXTUELLES
+        # ========================================================================
+        # Température actuelle (grande police)
+        - label:
+            id: current_temp
+            text: "24°C"
+            x: 320
+            y: 120
+            text_font: montserrat_48
+            text_color: 0xFFFFFF
+
+        # Description météo
+        - label:
+            id: weather_description
+            text: "Ensoleillé"
+            x: 320
+            y: 180
+            text_font: montserrat_24
+            text_color: 0xB8B8D0
+
+        # Ressenti
+        - label:
+            id: feels_like
+            text: "Ressenti: 22°C"
+            x: 320
+            y: 220
+            text_font: montserrat_16
+            text_color: 0x808090
+
+        # ========================================================================
+        # PRÉVISIONS (Icônes SVG)
+        # ========================================================================
+        # Prévision J+1
+        - obj:
+            id: forecast_day1
+            x: 50
+            y: 350
+            width: 120
+            height: 100
+            bg_color: 0x252540
+            radius: 10
+
+            widgets:
+              # Icône météo SVG (vectorielle, scale parfait)
+              - image:
+                  id: forecast_day1_icon
+                  src: "/sdcard/icons/sun.svg"
+                  width: 48
+                  height: 48
+                  x: 36  # Centré dans le container
+                  y: 10
+
+              # Jour de la semaine
+              - label:
+                  id: forecast_day1_label
+                  text: "Lun"
+                  x: 40
+                  y: 65
+                  text_font: montserrat_14
+                  text_color: 0xFFFFFF
+
+              # Température
+              - label:
+                  id: forecast_day1_temp
+                  text: "26°"
+                  x: 45
+                  y: 80
+                  text_font: montserrat_12
+                  text_color: 0xB8B8D0
+
+        # Prévision J+2 (même structure)
+        - obj:
+            id: forecast_day2
+            x: 180
+            y: 350
+            width: 120
+            height: 100
+            bg_color: 0x252540
+            radius: 10
+
+            widgets:
+              - image:
+                  id: forecast_day2_icon
+                  src: "/sdcard/icons/cloud.svg"
+                  width: 48
+                  height: 48
+                  x: 36
+                  y: 10
+
+              - label:
+                  id: forecast_day2_label
+                  text: "Mar"
+                  x: 40
+                  y: 65
+                  text_font: montserrat_14
+                  text_color: 0xFFFFFF
+
+              - label:
+                  id: forecast_day2_temp
+                  text: "24°"
+                  x: 45
+                  y: 80
+                  text_font: montserrat_12
+                  text_color: 0xB8B8D0
+
+        # Prévision J+3
+        - obj:
+            id: forecast_day3
+            x: 310
+            y: 350
+            width: 120
+            height: 100
+            bg_color: 0x252540
+            radius: 10
+
+            widgets:
+              - image:
+                  id: forecast_day3_icon
+                  src: "/sdcard/icons/rain.svg"
+                  width: 48
+                  height: 48
+                  x: 36
+                  y: 10
+
+              - label:
+                  id: forecast_day3_label
+                  text: "Mer"
+                  x: 40
+                  y: 65
+                  text_font: montserrat_14
+                  text_color: 0xFFFFFF
+
+              - label:
+                  id: forecast_day3_temp
+                  text: "19°"
+                  x: 45
+                  y: 80
+                  text_font: montserrat_12
+                  text_color: 0xB8B8D0
+
+        # ========================================================================
+        # INFORMATIONS SUPPLÉMENTAIRES (Icônes SVG + texte)
+        # ========================================================================
+        # Humidité
+        - obj:
+            id: humidity_info
+            x: 500
+            y: 350
+            width: 130
+            height: 40
+            bg_opa: 0  # Transparent
+
+            widgets:
+              - image:
+                  src: "/sdcard/icons/humidity.svg"
+                  width: 32
+                  height: 32
+                  x: 0
+                  y: 4
+
+              - label:
+                  id: humidity_value
+                  text: "65%"
+                  x: 45
+                  y: 0
+                  text_font: montserrat_16
+                  text_color: 0xFFFFFF
+
+              - label:
+                  text: "Humidité"
+                  x: 45
+                  y: 20
+                  text_font: montserrat_12
+                  text_color: 0x808090
+
+        # Vent
+        - obj:
+            id: wind_info
+            x: 650
+            y: 350
+            width: 130
+            height: 40
+            bg_opa: 0
+
+            widgets:
+              - image:
+                  src: "/sdcard/icons/wind.svg"
+                  width: 32
+                  height: 32
+                  x: 0
+                  y: 4
+
+              - label:
+                  id: wind_value
+                  text: "15 km/h"
+                  x: 45
+                  y: 0
+                  text_font: montserrat_16
+                  text_color: 0xFFFFFF
+
+              - label:
+                  text: "Vent"
+                  x: 45
+                  y: 20
+                  text_font: montserrat_12
+                  text_color: 0x808090
+
+        # ========================================================================
+        # QR CODE pour partage météo
+        # ========================================================================
+        - qrcode:
+            id: weather_share_qr
+            text: "https://weather.com/share/location"
+            size: 80
+            x: 700
+            y: 400
+            bg_color: 0xFFFFFF
+            fg_color: 0x000000
+
+# ============================================================================
+# AUTOMATION - Mise à jour météo dynamique
+# ============================================================================
+# Change l'animation Lottie selon l'état météo de Home Assistant
+
+# Sensor pour récupérer l'état météo depuis Home Assistant
+sensor:
+  - platform: homeassistant
+    id: weather_state
+    entity_id: weather.home
+    on_value:
+      then:
+        - lambda: |-
+            std::string state = id(weather_state).state;
+            std::string animation_path = "/sdcard/weather/";
+            std::string icon_path = "/sdcard/icons/";
+
+            // Mapper état météo → fichier Lottie
+            if (state == "sunny" || state == "clear") {
+              // Jour ou nuit?
+              auto time = id(ha_time).now();
+              if (time.hour >= 6 && time.hour < 20) {
+                animation_path += "clear-day.json";
+                icon_path += "sun.svg";
+              } else {
+                animation_path += "clear-night.json";
+                icon_path += "moon.svg";
+              }
+            } else if (state == "partlycloudy") {
+              animation_path += "partly-cloudy-day.json";
+              icon_path += "cloud-sun.svg";
+            } else if (state == "cloudy") {
+              animation_path += "cloudy.json";
+              icon_path += "cloud.svg";
+            } else if (state == "rainy") {
+              animation_path += "rain.json";
+              icon_path += "rain.svg";
+            } else if (state == "pouring") {
+              animation_path += "extreme-rain.json";
+              icon_path += "rain-heavy.svg";
+            } else if (state == "snowy") {
+              animation_path += "snow.json";
+              icon_path += "snow.svg";
+            } else if (state == "lightning" || state == "lightning-rainy") {
+              animation_path += "thunderstorms.json";
+              icon_path += "lightning.svg";
+            } else if (state == "fog") {
+              animation_path += "fog.json";
+              icon_path += "fog.svg";
+            } else if (state == "windy") {
+              animation_path += "wind.json";
+              icon_path += "wind.svg";
+            }
+
+            ESP_LOGI("weather", "Changing animation to: %s", animation_path.c_str());
+
+            // Charger la nouvelle animation Lottie
+            // NOTE: API exacte dépend de l'implémentation LVGL V9
+            // Cette partie nécessite d'ajouter une action dans le composant lvgl
+            // Exemple hypothétique:
+            // id(current_weather_animation).set_src(animation_path);
+
+  - platform: homeassistant
+    id: temperature
+    entity_id: sensor.temperature_home
+    on_value:
+      then:
+        - lambda: |-
+            char temp_str[10];
+            snprintf(temp_str, sizeof(temp_str), "%.0f°C", id(temperature).state);
+            // id(current_temp).set_text(temp_str);
+
+  - platform: homeassistant
+    id: humidity
+    entity_id: sensor.humidity_home
+    on_value:
+      then:
+        - lambda: |-
+            char hum_str[10];
+            snprintf(hum_str, sizeof(hum_str), "%.0f%%", id(humidity).state);
+            // id(humidity_value).set_text(hum_str);
+
+# ============================================================================
+# EXEMPLE 2 - Lecteur média avec contrôles SVG
+# ============================================================================
+# Interface de contrôle vidéo moderne avec icônes SVG
+
+# lvgl:
+#   pages:
+#     - id: video_player_page
+#       bg_color: 0x000000
+#
+#       widgets:
+#         # Zone vidéo (background)
+#         - obj:
+#             id: video_container
+#             width: 800
+#             height: 480
+#             x: 0
+#             y: 0
+#
+#         # Overlay contrôles (apparaît au tap)
+#         - obj:
+#             id: video_controls_overlay
+#             width: 800
+#             height: 120
+#             x: 0
+#             y: 360
+#             bg_color: 0x000000
+#             bg_opa: 180  # Semi-transparent
+#
+#             widgets:
+#               # Bouton play/pause (SVG)
+#               - button:
+#                   id: btn_play_pause
+#                   width: 80
+#                   height: 80
+#                   x: 360
+#                   y: 20
+#                   bg_color: 0x2196F3
+#                   radius: 40  # Rond
+#
+#                   on_click:
+#                     - lambda: |-
+#                         // Toggle play/pause
+#                         static bool playing = false;
+#                         if (playing) {
+#                           // id(video_player).pause();
+#                           // id(play_pause_icon).set_src("/sdcard/icons/play.svg");
+#                         } else {
+#                           // id(video_player).play();
+#                           // id(play_pause_icon).set_src("/sdcard/icons/pause.svg");
+#                         }
+#                         playing = !playing;
+#
+#                   widgets:
+#                     - image:
+#                         id: play_pause_icon
+#                         src: "/sdcard/icons/play.svg"
+#                         width: 48
+#                         height: 48
+#                         x: 16
+#                         y: 16
+#
+#               # Bouton précédent
+#               - button:
+#                   id: btn_previous
+#                   width: 60
+#                   height: 60
+#                   x: 260
+#                   y: 30
+#                   bg_color: 0x424242
+#                   radius: 30
+#
+#                   widgets:
+#                     - image:
+#                         src: "/sdcard/icons/skip-back.svg"
+#                         width: 32
+#                         height: 32
+#                         x: 14
+#                         y: 14
+#
+#               # Bouton suivant
+#               - button:
+#                   id: btn_next
+#                   width: 60
+#                   height: 60
+#                   x: 480
+#                   y: 30
+#                   bg_color: 0x424242
+#                   radius: 30
+#
+#                   widgets:
+#                     - image:
+#                         src: "/sdcard/icons/skip-forward.svg"
+#                         width: 32
+#                         height: 32
+#                         x: 14
+#                         y: 14
+#
+#               # Slider de progression
+#               - slider:
+#                   id: video_progress_slider
+#                   width: 700
+#                   height: 8
+#                   x: 50
+#                   y: 5
+#                   min_value: 0
+#                   max_value: 100
+#                   value: 0
+
+# ============================================================================
+# EXEMPLE 3 - Dashboard smart home avec animations Lottie
+# ============================================================================
+# Tableau de bord avec indicateurs animés
+
+# lvgl:
+#   pages:
+#     - id: dashboard_page
+#       bg_color: 0x0F0F1E
+#
+#       widgets:
+#         # ========================================================================
+#         # CARTE TEMPÉRATURE (Animation Lottie thermomètre)
+#         # ========================================================================
+#         - obj:
+#             id: temperature_card
+#             x: 20
+#             y: 20
+#             width: 180
+#             height: 140
+#             bg_color: 0x1E1E3C
+#             radius: 15
+#
+#             widgets:
+#               # Animation thermomètre
+#               - lottie:
+#                   id: temp_animation
+#                   src: "/sdcard/animations/thermometer.json"
+#                   width: 60
+#                   height: 60
+#                   x: 10
+#                   y: 10
+#                   loop: true
+#                   autoplay: true
+#
+#               # Valeur température
+#               - label:
+#                   id: dash_temp_value
+#                   text: "22.5°C"
+#                   x: 80
+#                   y: 20
+#                   text_font: montserrat_24
+#                   text_color: 0xFFFFFF
+#
+#               # Label
+#               - label:
+#                   text: "Température"
+#                   x: 10
+#                   y: 100
+#                   text_font: montserrat_12
+#                   text_color: 0x8080A0
+#
+#         # ========================================================================
+#         # CARTE HUMIDITÉ (Animation Lottie goutte d'eau)
+#         # ========================================================================
+#         - obj:
+#             id: humidity_card
+#             x: 220
+#             y: 20
+#             width: 180
+#             height: 140
+#             bg_color: 0x1E1E3C
+#             radius: 15
+#
+#             widgets:
+#               - lottie:
+#                   id: humidity_animation
+#                   src: "/sdcard/animations/water-drop.json"
+#                   width: 60
+#                   height: 60
+#                   x: 10
+#                   y: 10
+#                   loop: true
+#                   autoplay: true
+#
+#               - label:
+#                   id: dash_humidity_value
+#                   text: "65%"
+#                   x: 80
+#                   y: 20
+#                   text_font: montserrat_24
+#                   text_color: 0xFFFFFF
+#
+#               - label:
+#                   text: "Humidité"
+#                   x: 10
+#                   y: 100
+#                   text_font: montserrat_12
+#                   text_color: 0x8080A0
+#
+#         # ========================================================================
+#         # CARTE ÉNERGIE (Animation Lottie éclair)
+#         # ========================================================================
+#         - obj:
+#             id: energy_card
+#             x: 420
+#             y: 20
+#             width: 180
+#             height: 140
+#             bg_color: 0x1E1E3C
+#             radius: 15
+#
+#             widgets:
+#               - lottie:
+#                   id: energy_animation
+#                   src: "/sdcard/animations/lightning.json"
+#                   width: 60
+#                   height: 60
+#                   x: 10
+#                   y: 10
+#                   loop: true
+#                   autoplay: true
+#
+#               - label:
+#                   id: dash_energy_value
+#                   text: "1.2 kW"
+#                   x: 80
+#                   y: 20
+#                   text_font: montserrat_24
+#                   text_color: 0xFFFFFF
+#
+#               - label:
+#                   text: "Consommation"
+#                   x: 10
+#                   y: 100
+#                   text_font: montserrat_12
+#                   text_color: 0x8080A0
+#
+#         # ========================================================================
+#         # LOADING SPINNER (Lottie) - Affiché pendant chargement données
+#         # ========================================================================
+#         - lottie:
+#             id: loading_spinner
+#             src: "/sdcard/animations/loading.json"
+#             width: 100
+#             height: 100
+#             x: 350
+#             y: 190
+#             loop: true
+#             autoplay: false  # Contrôlé par automation
+#             # hidden: true par défaut
+
+# ============================================================================
+# EXEMPLE 4 - Notifications avec icônes SVG
+# ============================================================================
+# Toast notifications modernes
+
+# lvgl:
+#   pages:
+#     - id: notifications_overlay
+#       # Layer overlay qui apparaît au-dessus des autres pages
+#
+#       widgets:
+#         # Toast notification success
+#         - obj:
+#             id: toast_success
+#             x: 250
+#             y: 20
+#             width: 300
+#             height: 60
+#             bg_color: 0x4CAF50  # Vert
+#             radius: 10
+#             # hidden: true par défaut
+#
+#             widgets:
+#               # Icône success (SVG)
+#               - image:
+#                   src: "/sdcard/icons/check-circle.svg"
+#                   width: 32
+#                   height: 32
+#                   x: 15
+#                   y: 14
+#
+#               # Message
+#               - label:
+#                   id: toast_success_message
+#                   text: "Opération réussie !"
+#                   x: 55
+#                   y: 20
+#                   text_font: montserrat_16
+#                   text_color: 0xFFFFFF
+#
+#         # Toast notification error
+#         - obj:
+#             id: toast_error
+#             x: 250
+#             y: 20
+#             width: 300
+#             height: 60
+#             bg_color: 0xF44336  # Rouge
+#             radius: 10
+#             # hidden: true par défaut
+#
+#             widgets:
+#               - image:
+#                   src: "/sdcard/icons/alert-circle.svg"
+#                   width: 32
+#                   height: 32
+#                   x: 15
+#                   y: 14
+#
+#               - label:
+#                   id: toast_error_message
+#                   text: "Erreur!"
+#                   x: 55
+#                   y: 20
+#                   text_font: montserrat_16
+#                   text_color: 0xFFFFFF
+
+# Automation pour afficher toast
+# automation:
+#   - id: show_success_toast
+#     trigger:
+#       - platform: ...
+#     action:
+#       - lambda: |-
+#           // Afficher toast
+#           // lv_obj_clear_flag(id(toast_success).obj, LV_OBJ_FLAG_HIDDEN);
+#
+#           // Timer pour masquer après 3s
+#           // set_timeout(3000, []() {
+#           //   lv_obj_add_flag(id(toast_success).obj, LV_OBJ_FLAG_HIDDEN);
+#           // });
+
+# ============================================================================
+# FICHIERS NÉCESSAIRES
+# ============================================================================
+# Organisez vos fichiers SD comme suit:
+#
+# /sdcard/
+#   ├── weather/                      # Animations météo Lottie
+#   │   ├── clear-day.json
+#   │   ├── clear-night.json
+#   │   ├── cloudy.json
+#   │   ├── partly-cloudy-day.json
+#   │   ├── rain.json
+#   │   ├── extreme-rain.json
+#   │   ├── snow.json
+#   │   ├── thunderstorms.json
+#   │   ├── fog.json
+#   │   └── wind.json
+#   │
+#   ├── icons/                        # Icônes SVG vectorielles
+#   │   ├── sun.svg
+#   │   ├── moon.svg
+#   │   ├── cloud.svg
+#   │   ├── cloud-sun.svg
+#   │   ├── rain.svg
+#   │   ├── rain-heavy.svg
+#   │   ├── snow.svg
+#   │   ├── lightning.svg
+#   │   ├── fog.svg
+#   │   ├── wind.svg
+#   │   ├── humidity.svg
+#   │   ├── play.svg
+#   │   ├── pause.svg
+#   │   ├── skip-back.svg
+#   │   ├── skip-forward.svg
+#   │   ├── check-circle.svg
+#   │   └── alert-circle.svg
+#   │
+#   ├── animations/                   # Autres animations Lottie
+#   │   ├── loading.json              # Spinner de chargement
+#   │   ├── thermometer.json          # Animation thermomètre
+#   │   ├── water-drop.json           # Goutte d'eau animée
+#   │   └── lightning.json            # Éclair animé
+#   │
+#   └── video/                        # Vidéos
+#       └── demo.avi
+
+# ============================================================================
+# RESSOURCES POUR TÉLÉCHARGER LES FICHIERS
+# ============================================================================
+#
+# 🌤️ ANIMATIONS MÉTÉO LOTTIE (Basmilius):
+#   https://github.com/basmilius/weather-icons/tree/dev/production/lottie
+#
+# 🎨 ICÔNES SVG GRATUITES:
+#   - Remix Icon: https://remixicon.com/ (2800+ icônes open-source)
+#   - Heroicons: https://heroicons.com/ (minimalistes)
+#   - Lucide: https://lucide.dev/ (modernes)
+#   - Feather Icons: https://feathericons.com/ (simple)
+#
+# 💫 ANIMATIONS LOTTIE GRATUITES:
+#   - LottieFiles: https://lottiefiles.com/
+#   - Lordicon: https://lordicon.com/ (animated icons)
+#
+# 📐 CONVERTIR SVG (si besoin):
+#   - SVGO: https://jakearchibald.github.io/svgomg/ (optimiser SVG)
+#   - SVG to path: pour simplifier les SVG complexes
+
+# ============================================================================
+# TIPS & ASTUCES
+# ============================================================================
+#
+# 1. OPTIMISER LA TAILLE DES FICHIERS LOTTIE:
+#    - Utilisez https://lottiefiles.com/tools/lottie-editor
+#    - Réduisez le FPS à 30 (au lieu de 60)
+#    - Simplifiez les layers inutiles
+#    - Compressez le JSON
+#
+# 2. OPTIMISER LES SVG:
+#    - Passez par SVGO: https://jakearchibald.github.io/svgomg/
+#    - Supprimez les métadonnées
+#    - Convertissez les text en paths
+#    - Utilisez des couleurs simples (pas de gradients complexes)
+#
+# 3. PERFORMANCE:
+#    - Lottie: 1-3 animations max simultanées
+#    - SVG: illimité (rendu très rapide)
+#    - Cache activé dans lvgl_advanced_features: img_cache_size: 16
+#
+# 4. DEBUGGING:
+#    - Activez logs: lvgl: log_level: DEBUG
+#    - Vérifiez chemins fichiers: ls /sdcard/weather/
+#    - Testez fichiers Lottie: https://lottiefiles.com/preview
+#    - Validez SVG: https://validator.w3.org/
+
+# ============================================================================
+# PROCHAINES ÉTAPES
+# ============================================================================
+#
+# 1. Téléchargez les fichiers météo Basmilius et placez dans /sdcard/weather/
+# 2. Téléchargez des icônes SVG et placez dans /sdcard/icons/
+# 3. Testez avec l'exemple 1 (page météo)
+# 4. Adaptez à votre configuration Home Assistant
+# 5. Profitez des animations fluides 60 FPS ! 🎉
