@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/log.h"
 #include "esphome/core/automation.h"
+#include "esphome/components/speaker/speaker.h"
 
 #ifdef USE_ESP_IDF
 
@@ -43,6 +44,7 @@ class AviPlayerComponent : public Component {
   }
   void set_rotation(uint16_t rotation) { rotation_ = rotation; }
   void set_parent(lv_obj_t *parent) { parent_ = parent; }
+  void set_speaker(speaker::Speaker *spk) { speaker_ = spk; }
 
   void setup() override;
   void loop() override;
@@ -97,6 +99,11 @@ class AviPlayerComponent : public Component {
 
   volatile bool frame_ready_{false};  // Flag for thread-safe LVGL update
   volatile bool need_resize_{false};  // Flag to resize object on first frame
+
+  speaker::Speaker *speaker_{nullptr};  // Speaker for audio output
+  uint32_t audio_sample_rate_{0};      // Audio sample rate from AVI
+  uint8_t audio_bits_per_sample_{0};   // Audio bits per sample from AVI
+  uint8_t audio_channels_{0};          // Audio channels from AVI
 
   static void video_frame_callback(frame_data_t *data, void *arg);
   static void audio_frame_callback(frame_data_t *data, void *arg);

@@ -224,12 +224,35 @@ void AviPlayerComponent::video_frame_callback(frame_data_t *data, void *arg) {
 }
 
 void AviPlayerComponent::audio_frame_callback(frame_data_t *data, void *arg) {
-  // Audio playback not implemented yet
+  AviPlayerComponent *player = static_cast<AviPlayerComponent *>(arg);
+  if (player == nullptr || player->speaker_ == nullptr || data == nullptr || data->data == nullptr) {
+    return;
+  }
+
   ESP_LOGV(TAG, "Audio frame: %d bytes", data->data_bytes);
+
+  // Write PCM audio data to speaker
+  size_t bytes_written = player->speaker_->play(data->data, data->data_bytes);
+
+  if (bytes_written < data->data_bytes) {
+    ESP_LOGW(TAG, "Audio buffer full, dropped %zu bytes", data->data_bytes - bytes_written);
+  }
 }
 
 void AviPlayerComponent::audio_set_clock_callback(uint32_t rate, uint32_t bits_cfg, uint32_t ch, void *arg) {
-  ESP_LOGI(TAG, "Audio config: rate=%u, bits=%u, channels=%u", rate, bits_cfg, ch);
+  AviPlayerComponent *player = static_cast<AviPlayerComponent *>(arg);
+  if (player != nullptr) {
+    player->audio_sample_rate_ = rate;
+    player->audio_bits_per_sample_ = bits_cfg;
+    player->audio_channels_ = ch;
+    ESP_LOGI(TAG, "Audio config: rate=%u, bits=%u, channels=%u", rate, bits_cfg, ch);
+
+    if (player->speaker_ != nullptr) {
+      ESP_LOGI(TAG, "Audio output enabled via speaker");
+    } else {
+      ESP_LOGI(TAG, "No speaker configured - audio will not be played");
+    }
+  }
 }
 
 void AviPlayerComponent::play_end_callback(void *arg) {

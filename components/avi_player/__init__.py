@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
+from esphome.components import speaker
 
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
@@ -25,6 +26,7 @@ CONF_SHOW_SLIDER = "show_slider"
 CONF_PRELOAD_TO_MEMORY = "preload_to_memory"
 CONF_FPS = "fps"
 CONF_ROTATION = "rotation"
+CONF_SPEAKER = "speaker"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(AviPlayerComponent),
@@ -40,6 +42,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_FPS): cv.positive_float,
     cv.Optional(CONF_ROTATION, default=0): cv.one_of(0, 90, 180, 270, int=True),
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
+    cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -65,6 +68,10 @@ async def to_code(config):
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
         cg.add(var.set_parent(parent.obj))
+
+    if CONF_SPEAKER in config:
+        spk = await cg.get_variable(config[CONF_SPEAKER])
+        cg.add(var.set_speaker(spk))
 
     # Add include path for avi_player headers
     import os
