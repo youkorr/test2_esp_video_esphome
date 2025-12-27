@@ -844,7 +844,8 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA 4:3, 25%% horizontal crop)");
+      ESP_LOGW(TAG, "⚠️  Using 640x480 RAW10 (VGA 4:3) - WARNING: 25%% horizontal crop (zoom 1.33x, only 75%% FOV visible)");
+      ESP_LOGW(TAG, "⚠️  Consider using 640x368 for 98%% FOV coverage instead - See OV02C10_640x480_ZOOM_FIX.md");
     } else if (width == 800 && height == 600) {
       // DISABLED: 800x600 causes watchdog timeout after 60s
       ESP_LOGE(TAG, "❌ 800x600 is DISABLED due to watchdog timeout issue");

@@ -5,19 +5,26 @@
 // External declarations for OV02C10 custom formats
 // These formats are defined in the OV02C10 driver (ov02c10.c)
 //
+// ⚠️  IMPORTANT: OV02C10 native sensor is 1936×1088 (16:9 ratio)
+//     Formats with 4:3 ratio (640×480) crop 25% of horizontal FOV!
+//     → Use 640×368 for 98% FOV coverage (recommended)
+//
 // Supported resolutions (ALL use FULL SENSOR - NO ZOOM):
-//   - 1288x728 @ 30fps RAW10 (Near HD 16:9) - full sensor, ISP downscales, optimized 16:9 aspect ratio
-//   - 640x480 @ 30fps RAW10 (VGA 4:3) - full sensor (0-1935 x 4-1091), ISP downscales, 25% horizontal crop
-//   - 640x368 @ 30fps RAW10 (near 16:9) - full sensor (0-1935 x 4-1091), ISP downscales, ~2% crop, 16-byte aligned (rotation safe!)
-//   - 480x640 @ 30fps RAW10 (VGA rotated 270°) - full sensor, rotation enabled
-//   - 1920x1080 @ 30fps RAW10 (1080P) - full sensor (0-1935 x 4-1091), native resolution, 0% crop
+//   ✅ RECOMMENDED:
+//     - 640x368 @ 30fps RAW10 (near 16:9) - BEST FOV (98% coverage), ~2% crop, 16-byte aligned (rotation safe!)
+//     - 1920x1080 @ 30fps RAW10 (1080P) - FULL FOV (100% coverage), native resolution, 0% crop
+//
+//   ⚠️  WITH FOV LOSS:
+//     - 640x480 @ 30fps RAW10 (VGA 4:3) - WARNING: 25% horizontal crop (zoom effect 1.33x), only 75% FOV visible!
+//     - 1288x728 @ 30fps RAW10 (Near HD 16:9) - full sensor, ISP downscales, optimized 16:9 aspect ratio
+//     - 480x640 @ 30fps RAW10 (portrait) - full sensor, rotation enabled
 //
 // DISABLED (watchdog timeout issue):
 //   - 800x600 @ 30fps RAW10 (SVGA 4:3) - DISABLED: causes watchdog timeout after 60s
-//     → Use 640x480 (same 4:3 ratio) or 1288x728 (16:9) instead
+//     → Use 640x368 (better FOV) or 640x480 (same 4:3 ratio) instead
 //     → See OV02C10_800x600_ISSUE.md for details
 //
-// Native full sensor: 1920x1080 @ 30fps RAW10 (100% sensor area, 16:9 aspect ratio)
+// See OV02C10_640x480_ZOOM_FIX.md for detailed comparison of formats
 
 #ifdef __cplusplus
 extern "C" {
