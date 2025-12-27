@@ -305,6 +305,32 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
     ESP_LOGI(TAG, "JPEG actual size: %dx%d (original: %dx%d), buffer: %u bytes",
              actual_width_, actual_height_, frame_info_.width, frame_info_.height, video_buffer_size_);
 
+    // Reinitialize rotation handle with actual video dimensions if rotation is enabled
+    if (rotation_ != 0 && rotate_handle_ != nullptr) {
+      // Close old rotation handle that was initialized with config dimensions
+      esp_imgfx_rotate_close(rotate_handle_);
+      rotate_handle_ = nullptr;
+
+      // Create new rotation handle with actual video dimensions
+      esp_imgfx_rotate_cfg_t rotate_cfg = {
+        .in_res = {
+          .width = (uint16_t)actual_width_,
+          .height = (uint16_t)actual_height_,
+        },
+        .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+        .degree = rotation_,
+      };
+
+      esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &rotate_handle_);
+      if (ret != ESP_IMGFX_ERR_OK) {
+        ESP_LOGE(TAG, "Failed to reinitialize rotation with actual dimensions: %d", ret);
+        rotate_handle_ = nullptr;
+      } else {
+        ESP_LOGI(TAG, "Rotation reinitialized with actual dimensions: %dx%d -> %d degrees",
+                 actual_width_, actual_height_, rotation_);
+      }
+    }
+
     // Reallocate buffer if needed
     if (video_buffer_size_ > width_ * height_ * sizeof(lv_color_t)) {
       if (video_buffer_ != nullptr) {
