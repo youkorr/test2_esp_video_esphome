@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include "esp_log.h"
