@@ -266,8 +266,10 @@ void AviPlayerComponent::audio_frame_callback(frame_data_t *data, void *arg) {
   // Write PCM audio data to speaker
   size_t bytes_written = player->speaker_->play(data->data, data->data_bytes);
 
+  // Note: Some audio frames may be dropped if speaker buffer is full
+  // This is normal for real-time playback
   if (bytes_written < data->data_bytes) {
-    ESP_LOGW(TAG, "Audio buffer full, dropped %zu bytes", data->data_bytes - bytes_written);
+    ESP_LOGV(TAG, "Audio buffer full, dropped %zu bytes", data->data_bytes - bytes_written);
   }
 }
 
