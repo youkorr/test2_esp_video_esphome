@@ -38,9 +38,10 @@ void AviPlayerComponent::setup() {
     create_controls();
   }
 
-  // Allocate video buffer for MJPEG frames with proper alignment
+  // Allocate video buffer for MJPEG frames with 64-byte alignment for JPEG decoder
   size_t buffer_size = width_ * height_ * sizeof(lv_color_t);
-  video_buffer_ = (lv_color_t *)jpeg_alloc_decoder_mem(buffer_size, MALLOC_CAP_SPIRAM);
+  video_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, buffer_size,
+                                                          MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
   if (video_buffer_ == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate video buffer");
     return;
