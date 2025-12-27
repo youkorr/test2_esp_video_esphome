@@ -95,7 +95,7 @@ async def to_code(config):
             var.get_on_stop_trigger(), [], config[CONF_ON_STOP]
         )
 
-    # esp_audio_codec has been removed (not working)
+    # Add esp_audio_codec include paths and library for AAC audio decoding
     import os
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
@@ -119,6 +119,26 @@ async def to_code(config):
         for inc_path in h264_inc_paths:
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
+
+    # Enable AAC audio decoder if esp_audio_codec component is available
+    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(esp_audio_codec_dir):
+        # Add esp_audio_codec include paths for decoder headers
+        audio_inc_paths = [
+            os.path.join(esp_audio_codec_dir, "include"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
+        ]
+        for inc_path in audio_inc_paths:
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
+        # Add library path and link audio codec libraries
+        audio_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+        if os.path.exists(audio_lib_dir):
+            cg.add_build_flag(f"-L{audio_lib_dir}")
+            cg.add_build_flag("-lesp_audio_codec")
+            cg.add_build_flag("-lesp_audio_simple_dec")
 
     # esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
     # Now using: PPA hardware (ESP32-P4) + software LUT fallback
