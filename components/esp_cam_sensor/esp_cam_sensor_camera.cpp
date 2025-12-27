@@ -1226,16 +1226,9 @@ bool MipiDSICamComponent::start_streaming() {
     } else {
       ESP_LOGW(TAG, "Failed to auto-apply CCM RGB gains");
     }
-  } else if (this->sensor_name_ == "sc202cs") {
-    // SC202CS: Appliquer gains par défaut plus modérés pour équilibrer les couleurs
-    // Ces valeurs peuvent être overridées en configurant rgb_gains dans YAML
-    if (this->set_rgb_gains(1.15f, 0.95f, 0.85f)) {
-      ESP_LOGI(TAG, "✓ SC202CS: Applied default RGB gains (R=1.15, G=0.95, B=0.85) for balanced colors");
-      ESP_LOGI(TAG, "   You can override these in YAML with custom rgb_gains if needed");
-    } else {
-      ESP_LOGW(TAG, "Failed to apply default SC202CS RGB gains");
-    }
   }
+  // SC202CS: Utilise valeurs RGB par défaut (1.0, 1.0, 1.0) + CCM automatique
+  // Pas de gains RGB par défaut - utilisez rgb_gains dans YAML si ajustement nécessaire
 
   // Auto-activer AWB (Auto White Balance) pour corriger blanc → jaune
   // IMPORTANT: AWB ne fonctionne PAS sur certains capteurs (Invalid argument)
