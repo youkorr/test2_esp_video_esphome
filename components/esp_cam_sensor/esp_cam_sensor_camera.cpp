@@ -1221,10 +1221,19 @@ bool MipiDSICamComponent::start_streaming() {
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
     if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
-      // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
-      //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
+      ESP_LOGI(TAG, "✓ CCM RGB gains applied from YAML: R=%.2f, G=%.2f, B=%.2f",
+               this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
     } else {
       ESP_LOGW(TAG, "Failed to auto-apply CCM RGB gains");
+    }
+  } else if (this->sensor_name_ == "sc202cs") {
+    // SC202CS: Appliquer gains par défaut pour corriger la teinte bleue excessive
+    // Ces valeurs peuvent être overridées en configurant rgb_gains dans YAML
+    if (this->set_rgb_gains(1.4f, 1.1f, 0.6f)) {
+      ESP_LOGI(TAG, "✓ SC202CS: Applied default RGB gains (R=1.4, G=1.1, B=0.6) to fix blue tint");
+      ESP_LOGI(TAG, "   You can override these in YAML with custom rgb_gains if needed");
+    } else {
+      ESP_LOGW(TAG, "Failed to apply default SC202CS RGB gains");
     }
   }
 
