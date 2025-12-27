@@ -238,6 +238,10 @@ void AviPlayerComponent::play_end_callback(void *arg) {
     ESP_LOGI(TAG, "Playback ended");
     player->state_ = PlayerState::STOPPED;
 
+    // Reset dimension detection for next playback
+    player->actual_width_ = 0;
+    player->actual_height_ = 0;
+
     if (player->loop_) {
       ESP_LOGI(TAG, "Looping playback");
       delay(100);
