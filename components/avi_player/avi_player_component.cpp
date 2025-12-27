@@ -130,10 +130,13 @@ void AviPlayerComponent::setup() {
 void AviPlayerComponent::loop() {
   // Handle LVGL object resize (thread-safe, only once on first frame)
   if (need_resize_ && img_ != nullptr) {
-    lv_obj_set_size(img_, actual_width_, actual_height_);
+    // Use rotated dimensions if rotation is enabled, otherwise use actual dimensions
+    uint32_t display_width = lvgl_img_dsc_.header.w;
+    uint32_t display_height = lvgl_img_dsc_.header.h;
+    lv_obj_set_size(img_, display_width, display_height);
     lv_obj_center(img_);
     need_resize_ = false;
-    ESP_LOGI(TAG, "Resized LVGL object to %dx%d", actual_width_, actual_height_);
+    ESP_LOGI(TAG, "Resized LVGL object to %dx%d", display_width, display_height);
   }
 
   // Handle frame updates (thread-safe, updates LVGL from main loop)
@@ -313,13 +316,15 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
         ESP_LOGE(TAG, "Failed to reallocate video buffer");
         return;
       }
-      // Update LVGL image descriptor with actual dimensions
+      // Update LVGL image descriptor with actual dimensions (will be updated again if rotation is enabled)
       lvgl_img_dsc_.header.w = actual_width_;
       lvgl_img_dsc_.header.h = actual_height_;
       lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
 
-      // Set flag to resize object in main loop (thread-safe)
-      need_resize_ = true;
+      // Don't set need_resize_ yet if rotation is enabled - wait until after rotation is applied
+      if (rotation_ == 0) {
+        need_resize_ = true;
+      }
     }
   }
 
@@ -357,6 +362,9 @@ void AviPlayerComponent::render_frame(frame_data_t *data) {
       }
       ESP_LOGI(TAG, "Allocated rotation buffer: %u bytes, rotated size: %dx%d",
                rotate_buffer_size_, rotated_res.width, rotated_res.height);
+
+      // First frame with rotation - will need to resize LVGL object after rotation is applied
+      need_resize_ = true;
     }
 
     // Rotate the decoded frame
