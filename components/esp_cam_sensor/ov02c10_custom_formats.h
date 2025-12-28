@@ -57,7 +57,7 @@ typedef struct {
 // ISP info for custom formats (shared by most custom resolutions)
 // ============================================================================
 
-static const esp_cam_sensor_isp_info_t ov02c10_custom_isp_info = {
+const esp_cam_sensor_isp_info_t ov02c10_custom_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
         .pclk = 81666700,
@@ -81,7 +81,7 @@ static const esp_cam_sensor_isp_info_t ov02c10_custom_isp_info = {
 // Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 640x480
 // This enables proper rotation support and eliminates digital zoom
 
-static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[] = {
+const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[] = {
     // PLL configuration (IDENTICAL to native)
     {0x0301, 0x08},
     {0x0303, 0x06},
@@ -323,7 +323,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x480_30fps[
 // SVGA resolution using ISP downscaling from FULL SENSOR (NO ZOOM)
 // Strategy: Use full sensor crop (0-1935 x 4-1091), ISP downscales to 800x600
 
-static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[] = {
+const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[] = {
     // PLL configuration (IDENTICAL to native)
     {0x0301, 0x08},
     {0x0303, 0x06},
@@ -565,7 +565,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
 // Strategy: Use FULL SENSOR (NO ZOOM), ISP downscales to 480x640
 // Full sensor enables proper rotation support in software/display layer
 
-static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270[] = {
+const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_rot270[] = {
     // PLL configuration (IDENTICAL to native)
     {0x0301, 0x08},
     {0x0303, 0x06},
@@ -813,7 +813,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_480x640_30fps_
 // Dimensions are 16-byte aligned for ISP hardware compatibility (rotation safe!)
 // Perfect for maximum field of view with face recognition
 
-static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps[] = {
+const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps[] = {
     // PLL configuration (IDENTICAL to native)
     {0x0301, 0x08},
     {0x0303, 0x06},
@@ -947,7 +947,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps[
 // Format struct definitions for custom formats
 // ============================================================================
 
-static const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
+const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_640x480_30fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -966,7 +966,7 @@ static const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps = {
     .reserved = NULL,
 };
 
-static const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
+const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_800x600_30fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -985,7 +985,7 @@ static const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps = {
     .reserved = NULL,
 };
 
-static const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
+const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 = {
     .name = "MIPI_1lane_24Minput_RAW10_480x640_30fps_rot270",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -1004,7 +1004,7 @@ static const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270 =
     .reserved = NULL,
 };
 
-static const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
+const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
     .name = "MIPI_1lane_24Minput_RAW10_640x368_30fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
@@ -1023,15 +1023,7 @@ static const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
     .reserved = NULL,
 };
 
-// ============================================================================
-// Original formats (defined in ov02c10.c driver)
-// ============================================================================
-
-// Original format 1288x728 @ 30fps RAW10 (Near HD 16:9)
-extern const esp_cam_sensor_format_t ov02c10_format_1288x728_raw10_30fps;
-
-// Original format 1920x1080 @ 30fps RAW10 (1080P - Full HD)
-extern const esp_cam_sensor_format_t ov02c10_format_1920x1080_raw10_30fps;
+// Note: Original formats (1288x728, 1920x1080) are defined in ov02c10.c
 
 #ifdef __cplusplus
 }
