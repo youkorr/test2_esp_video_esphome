@@ -1350,7 +1350,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_640x368_30fps[
     {0x4051, 0x07},
     {0x4500, 0x38},
     {0x4501, 0x18},
-    {0x4837, 0x17},
+    {0x4837, 0x15},  // FIXED: Changed from 0x17 to 0x15 to match working resolutions and eliminate color noise
     {0x4f00, 0x01},
     {OV02C10_REG_END, 0x00},
 };
@@ -1544,7 +1544,7 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_960x540_30fps[
     {0x4051, 0x07},
     {0x4500, 0x38},
     {0x4501, 0x18},
-    {0x4837, 0x17},
+    {0x4837, 0x15},  // FIXED: Changed from 0x17 to 0x15 to match working resolutions (1920x1080, 1288x728) and eliminate color noise
     {0x4f00, 0x01},
     {OV02C10_REG_END, 0x00},
 };
