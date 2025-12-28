@@ -5,8 +5,8 @@
         "awb":
         {
             "model": 0,
-            "min_red_gain_step": 0.34,
-            "min_blue_gain_step": 0.40,
+            "min_red_gain_step": 0.034,
+            "min_blue_gain_step": 0.034,
             "min_counted": 2000,
             "range":
             {
@@ -34,13 +34,13 @@
         {
             "exposure":
             {
-                "frame_delay": 1,
+                "frame_delay": 3,
                 "adjust_delay": 0
             },
             "gain":
             {
                 "min_step": 0.03,
-                "frame_delay": 1
+                "frame_delay": 3
             },
             "anti_flicker":
             {
@@ -51,12 +51,12 @@
             "f_m0": 0.42,
             "luma_adjust":
             {
-                "target_low": 62,
-                "target_high": 105,
-                "target": 79,
-                "low_threshold": 14,
+                "target_low": 85,
+                "target_high": 140,
+                "target": 130,
+                "low_threshold": 10,
                 "low_regions": 5,
-                "high_threshold": 239,
+                "high_threshold": 240,
                 "high_regions": 3,
                 "weight":
                 [
@@ -70,15 +70,15 @@
             "mode": "high_light_priority",
             "high_light_priority":
             {
-                "low_threshold": 119,
-                "high_threshold": 202,
+                "low_threshold": 141,
+                "high_threshold": 204,
                 "weight_offset": 5,
-                "luma_offset": -1
+                "luma_offset": -3
             },
             "low_light_priority":
             {
-                "low_threshold": 49,
-                "high_threshold": 64,
+                "low_threshold": 65,
+                "high_threshold": 104,
                 "weight_offset": 5,
                 "luma_offset": 1
             },
@@ -129,7 +129,7 @@
             [
                 {
                     "color_temp": 0,
-                    "value": 128
+                    "value": 138
                 }
             ],
             "ccm":
@@ -278,10 +278,10 @@
                 [
                     {
                         "luma": 71.1,
-                        "gamma_param": 0.518
+                        "gamma_param": 0.688
                     }
                 ]
-            },    
+            },
             "sharpen":
             [
                 {

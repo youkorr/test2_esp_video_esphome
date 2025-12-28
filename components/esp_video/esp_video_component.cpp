@@ -164,7 +164,7 @@ void ESPVideoComponent::setup() {
 
   // Recommandation mémoire
   if (free_heap < 512 * 1024) {
-    ESP_LOGW(TAG, "⚠️  Mémoire faible! Recommandé: > 512 KB");
+    ESP_LOGW(TAG, "Mémoire faible! Recommandé: > 512 KB");
     // ESP_LOGW(TAG, "    Considérez réduire la résolution ou la qualité");
   }
 
@@ -211,7 +211,7 @@ void ESPVideoComponent::setup() {
     // Wait for sensor to stabilize with XCLK
     vTaskDelay(pdMS_TO_TICKS(50));  // 50ms delay
   } else if (!this->enable_xclk_init_) {
-    ESP_LOGI(TAG, "ℹ️  XCLK init disabled - assuming BSP or hardware provides XCLK");
+    ESP_LOGI(TAG, "XCLK init disabled - assuming BSP or hardware provides XCLK");
   }
 
   // ESP_LOGI(TAG, "");
@@ -353,7 +353,7 @@ void ESPVideoComponent::setup() {
     ESP_LOGI(TAG, "ISP Pipeline active - IPA algorithms running");
   }
 #else
-  // ESP_LOGW(TAG, "⚠️  ISP not enabled in configuration");
+  // ESP_LOGW(TAG, "ISP not enabled in configuration");
 #endif
 #else
   // ESP_LOGW(TAG, "MIPI-CSI désactivé - esp_video_init() non appelé");

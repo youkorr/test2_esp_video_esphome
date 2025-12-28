@@ -10,6 +10,15 @@
 # Par défaut: CONFIG_LWIP_MAX_SOCKETS=10
 #CONFIG_LWIP_MAX_SOCKETS=16
 
+# ESP-Video ISP Pipeline Controller - CRITICAL for JSON IPA loading
+# This enables the ISP pipeline initialization code in esp_video_init.c
+# which loads and applies the JSON IPA configuration (AWB, CCM, sharpen, etc.)
+CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=y
+
+# OV02C10 Camera sensor - Enable default IPA JSON configuration
+# This loads the ISP tuning parameters from ov02c10_default.json
+CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE=y
+
 # Enable ESP-DL human face detection
 CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1=y
 CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1=y

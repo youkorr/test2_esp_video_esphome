@@ -4,17 +4,20 @@ set(srcs "src/esp_cam_sensor.c"
          "src/driver_spi/spi_slave.c"
          "src/driver_cam/esp_cam_ctlr_spi_cam.c"
          "sensor/ov5647/ov5647.c"
-         "sensor/sc202cs/sc202cs.c")
+         "sensor/sc202cs/sc202cs.c"
+         "sensor/ov02c10/ov02c10.c")
 
 set(include_dirs "include"
                  "sensor/ov5647/include"
-                 "sensor/sc202cs/include")
+                 "sensor/sc202cs/include"
+                 "sensor/ov02c10/include")
 
 set(priv_include_dirs "src"
                       "src/driver_spi"
                       "src/driver_cam"
                       "sensor/ov5647/private_include"
-                      "sensor/sc202cs/include/private_include")
+                      "sensor/sc202cs/include/private_include"
+                      "sensor/ov02c10/private_include")
 
 set(requires "esp_driver_i2c" "esp_driver_gpio" "esp_driver_ledc" "esp_driver_cam")
 set(priv_requires "spi_flash" "driver")
@@ -48,7 +51,21 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC
     CONFIG_CAMERA_OV5647_MAX_SUPPORT=1
 )
 
+# OV02C10 configuration
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    CONFIG_CAMERA_OV02C10=1
+    CONFIG_CAMERA_OV02C10_AUTO_DETECT=1
+    CONFIG_CAMERA_OV02C10_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1
+    CONFIG_CAMERA_OV02C10_MIPI_IF_FORMAT_INDEX_DEFAULT=0
+    CONFIG_CAMERA_OV02C10_CSI_LINESYNC_ENABLE=0
+    CONFIG_CAMERA_OV02C10_ABSOLUTE_GAIN_LIMIT=16000
+    CONFIG_CAMERA_OV02C10_ANA_GAIN_PRIORITY=1
+    CONFIG_CAMERA_OV02C10_DIG_GAIN_PRIORITY=0
+    CONFIG_CAMERA_OV02C10_MAX_SUPPORT=1
+)
+
 # Force linker to include sensor detection functions (prevent optimization)
 # These symbols are defined via ESP_CAM_SENSOR_DETECT_FN macro in sensor source files
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_sc202cs_detect_1")
 target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_ov5647_detect_1")
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-u esp_cam_sensor_detect_fn_ov02c10_detect_1")

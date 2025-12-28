@@ -6,14 +6,24 @@ Ajoute tous les fichiers sources C/C++ des composants ESP-IDF
 import os
 Import("env")
 
+# Force enable ISP Pipeline Controller
+# This define ensures ISP pipeline code is included in the build
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] Adding ISP Pipeline Controller define")
+env.Append(CPPDEFINES=[
+    ("CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER", "1"),
+])
+print("[ESP-Video Build]   - CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1")
+print("[ESP-Video Build] ========================================")
+
 # Obtenir le répertoire du composant (ce script est dans components/esp_video/)
 # Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-# print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
-# print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
+print(f"[ESP-Video Build] Répertoire composant: {component_dir}")
+print(f"[ESP-Video Build] Répertoire parent: {parent_components_dir}")
 
 # Liste de tous les fichiers sources à compiler
 sources_to_add = []
@@ -240,6 +250,7 @@ esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
 esp_ipa_sources = [
     "src/version.c",              # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
     "src/esp_ipa_detect_stubs.c", # Detection array
+    "src/esp_ipa_json_loader.c",  # JSON IPA parser pour charger configs OV02C10/OV5647
 ]
 
 # print("")
@@ -371,8 +382,8 @@ force_rebuild_files = [
     os.path.join(esp_cam_sensor_dir, "src/esp_cam_sensor_detect_stubs.c"),
 ]
 
-# print("[ESP-Video Build] ========================================")
-# print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
+print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] === FORCED REBUILD OF CRITICAL FILES ===")
 
 # Étape 1: Supprimer tous les .o correspondants PARTOUT
 build_root = env.subst("$PROJECT_BUILD_DIR")
@@ -384,9 +395,9 @@ for src_file in force_rebuild_files:
     for obj_file in found_objs:
         try:
             os.remove(obj_file)
-            print(f"[ESP-Video Build] 🗑️  DELETED: {obj_file}")
+            print(f"[ESP-Video Build] DELETED: {obj_file}")
         except Exception as e:
-            print(f"[ESP-Video Build]  Could not delete {obj_file}: {e}")
+            print(f"[ESP-Video Build] Could not delete {obj_file}: {e}")
 
 # Étape 2: Modifier les timestamps des sources
 for src_file in force_rebuild_files:
@@ -394,13 +405,12 @@ for src_file in force_rebuild_files:
         # Modifier le timestamp du fichier pour forcer SCons à le recompiler
         current_time = time_module.time()
         os.utime(src_file, (current_time, current_time))
-        # print(f"[ESP-Video Build] 🔨 FORCED REBUILD: {os.path.basename(src_file)}")
-        # print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
+        print(f"[ESP-Video Build] FORCED REBUILD: {os.path.basename(src_file)}")
+        print(f"[ESP-Video Build]    Updated timestamp to force recompilation")
     else:
-        pass
-        # print(f"[ESP-Video Build]  File not found: {src_file}")
+        print(f"[ESP-Video Build] File not found: {src_file}")
 
-# print("[ESP-Video Build] ========================================")
+print("[ESP-Video Build] ========================================")
 
 # ========================================================================
 # Ajouter toutes les sources à la compilation
@@ -442,7 +452,10 @@ if sources_to_add:
             env.AlwaysBuild(obj)
             # NoCache: Don't use cached version of this object file
             env.NoCache(obj)
+            print(f"[ESP-Video Build] ========================================")
             print(f"[ESP-Video Build] ALWAYS BUILD (NO CACHE): {os.path.basename(src_file)}")
+            print(f"[ESP-Video Build] This file will be recompiled with ISP defines")
+            print(f"[ESP-Video Build] ========================================")
 
         objects.extend(obj)
 
@@ -494,4 +507,8 @@ else:
 
 # Message simple final
 if sources_to_add:
-    print("esp-video: ok")
+    print("[ESP-Video Build] ========================================")
+    print(f"[ESP-Video Build] {len(sources_to_add)} source files compiled")
+    print("[ESP-Video Build] ISP Pipeline Controller: ENABLED")
+    print("[ESP-Video Build] esp-video: ok")
+    print("[ESP-Video Build] ========================================")

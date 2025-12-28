@@ -216,8 +216,8 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Check if user explicitly disabled PPA via YAML
-  if (this->ppa_user_override_ && !this->ppa_enabled_) {
+  // Check if user explicitly disabled PPA via YAML (use saved original value)
+  if (this->ppa_user_override_ && !this->ppa_user_requested_) {
     ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false) - hardware rotation only");
     return true;
   }
@@ -246,11 +246,11 @@ bool MipiDSICamComponent::init_ppa_() {
 
   // Log PPA configuration
   if (this->output_width_ > 0 && this->output_height_ > 0) {
-    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d, resize=%dx%d)",
+    ESP_LOGI(TAG, "PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d, resize=%dx%d)",
              this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_,
              this->output_width_, this->output_height_);
   } else {
-    ESP_LOGI(TAG, "✓ PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
+    ESP_LOGI(TAG, "PPA hardware transform enabled (mirror_x=%d, mirror_y=%d, rotation=%d, crop_offset_x=%d)",
              this->mirror_x_, this->mirror_y_, this->rotation_, this->crop_offset_x_);
   }
 
@@ -382,7 +382,7 @@ void MipiDSICamComponent::cleanup_ppa_() {
     ppa_unregister_client((ppa_client_handle_t)this->ppa_client_handle_);
     this->ppa_client_handle_ = nullptr;
     this->ppa_enabled_ = false;
-    ESP_LOGI(TAG, "✓ PPA hardware transform cleanup");
+    ESP_LOGI(TAG, "PPA hardware transform cleanup");
   }
 }
 
@@ -576,7 +576,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ %u buffers alloués", req.count);
+  ESP_LOGI(TAG, "%u buffers alloués", req.count);
 
   // 4. Mapper et queuer les buffers
   struct {
@@ -615,7 +615,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
       return false;
     }
 
-    ESP_LOGI(TAG, "✓ Buffer[%u] mappé: %u octets @ %p", i, buf.length, buffers[i].start);
+    ESP_LOGI(TAG, "Buffer[%u] mappé: %u octets @ %p", i, buf.length, buffers[i].start);
 
     // Mettre le buffer dans la queue
     if (ioctl(fd, VIDIOC_QBUF, &buf) < 0) {
@@ -630,7 +630,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
     }
   }
 
-  ESP_LOGI(TAG, "✓ Tous les buffers sont dans la queue");
+  ESP_LOGI(TAG, "Tous les buffers sont dans la queue");
 
   // 5. DÉMARRER LE STREAMING ★★★
   int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -711,7 +711,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   if (ioctl(fd, VIDIOC_STREAMOFF, &type) < 0) {
     ESP_LOGW(TAG, "VIDIOC_STREAMOFF a échoué: %s", strerror(errno));
   } else {
-    ESP_LOGI(TAG, "✓ Streaming arrêté");
+    ESP_LOGI(TAG, "Streaming arrêté");
   }
 
   // 10. Libérer les buffers mappés
@@ -750,7 +750,7 @@ bool MipiDSICamComponent::start_streaming() {
   const char *dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME;  // /dev/video0
 
   // ESP_LOGI(TAG, "Device: %s (RGB565 zero-copy mode)", dev);
-  // ESP_LOGW(TAG, "⚠️  Zero-copy mode: léger risque de tearing (généralement imperceptible)");
+  // ESP_LOGW(TAG, "Zero-copy mode: léger risque de tearing (généralement imperceptible)");
 
   // 1. Ouvrir le device
   this->video_fd_ = open(dev, O_RDWR | O_NONBLOCK);
@@ -841,19 +841,25 @@ bool MipiDSICamComponent::start_streaming() {
     if (width == 480 && height == 640) {
       // YAML: "480x640" → Portrait capture, LVGL handles rotation
       custom_format = &ov02c10_format_480x640_raw10_30fps_rot270;
-      ESP_LOGI(TAG, "✅ Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
+      ESP_LOGI(TAG, "Using PORTRAIT format: 480x640 RAW10 @ 30fps (no sensor rotation, LVGL will rotate)");
     } else if (width == 640 && height == 480) {
       custom_format = &ov02c10_format_640x480_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x480 RAW10 @ 30fps (VGA 4:3, 25%% horizontal crop)");
+      ESP_LOGW(TAG, "Using 640x480 RAW10 (VGA 4:3) - WARNING: 25%% horizontal crop (zoom 1.33x, only 75%% FOV visible)");
+      ESP_LOGW(TAG, "Consider using 640x368 for 98%% FOV coverage instead - See OV02C10_640x480_ZOOM_FIX.md");
     } else if (width == 800 && height == 600) {
       custom_format = &ov02c10_format_800x600_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, 25%% horizontal crop)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, based on working 640x480)");
+    } else if (width == 960 && height == 540) {
+      // DISABLED: 960x540 causes persistent watchdog timeout even with 1288x728 config
+      ESP_LOGE(TAG, "❌ 960x540 is DISABLED - resolution incompatible with OV02C10");
+      ESP_LOGE(TAG, "❌ Use 800x600 (SVGA) or 1288x728 (HD) instead");
+      return false;
     } else if (width == 640 && height == 368) {
       custom_format = &ov02c10_format_640x368_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
+      ESP_LOGI(TAG, "Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
     } else if (width == 1920 && height == 1080) {
       custom_format = &ov02c10_format_1920x1080_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");
+      ESP_LOGI(TAG, "Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");
     }
 
     // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
@@ -941,7 +947,7 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGI(TAG, "  RAW8 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
         if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
           size_found = true;
-          ESP_LOGI(TAG, "✓ Found RAW8 %ux%u - ISP will convert to RGB565", width, height);
+          ESP_LOGI(TAG, "Found RAW8 %ux%u - ISP will convert to RGB565", width, height);
         }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW8 Stepwise: %ux%u to %ux%u (step %ux%u)",
@@ -966,7 +972,7 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGI(TAG, "  RAW10 Size[%d]: %ux%u", i, frmsize.discrete.width, frmsize.discrete.height);
         if (frmsize.discrete.width == width && frmsize.discrete.height == height) {
           size_found = true;
-          ESP_LOGI(TAG, "✓ Found RAW10 %ux%u - ISP will convert to RGB565", width, height);
+          ESP_LOGI(TAG, "Found RAW10 %ux%u - ISP will convert to RGB565", width, height);
         }
       } else if (frmsize.type == V4L2_FRMSIZE_TYPE_STEPWISE) {
         ESP_LOGI(TAG, "  RAW10 Stepwise: %ux%u to %ux%u (step %ux%u)",
@@ -1091,7 +1097,7 @@ bool MipiDSICamComponent::start_streaming() {
     }
     this->simple_buffers_[i].allocated = false;
     this->simple_buffers_[i].index = i;
-    ESP_LOGI(TAG, "  ✓ Buffer[%d]: %p (aligned to %u bytes)",
+    ESP_LOGI(TAG, "  Buffer[%d]: %p (aligned to %u bytes)",
              i, this->simple_buffers_[i].data, cache_line_size);
   }
   this->current_buffer_index_ = -1;
@@ -1116,7 +1122,7 @@ bool MipiDSICamComponent::start_streaming() {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode: %u buffers requested", req.count);
+  ESP_LOGI(TAG, "V4L2 USERPTR mode: %u buffers requested", req.count);
 
   // 5. Queuer les buffers avec nos pointeurs SPIRAM
   for (unsigned int i = 0; i < 3; i++) {
@@ -1139,7 +1145,7 @@ bool MipiDSICamComponent::start_streaming() {
       this->video_fd_ = -1;
       return false;
     }
-    ESP_LOGI(TAG, "  ✓ Buffer[%u] queued: userptr=%p, length=%u",
+    ESP_LOGI(TAG, "  Buffer[%u] queued: userptr=%p, length=%u",
              i, (void*)buf.m.userptr, buf.length);
   }
 
@@ -1175,11 +1181,17 @@ bool MipiDSICamComponent::start_streaming() {
       this->stop_streaming();
       return false;
     }
-    ESP_LOGI(TAG, "✓ PPA buffer allocated: %u bytes @ %p", this->image_buffer_size_, this->image_buffer_);
+    ESP_LOGI(TAG, "PPA buffer allocated: %u bytes @ %p", this->image_buffer_size_, this->image_buffer_);
   }
 
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
+  // ★ WORKAROUND: Wait for sensor to complete internal initialization
+  // Some custom formats (especially 800x600) may not generate frames immediately
+  // This prevents watchdog timeout during first frame capture
+  ESP_LOGI(TAG, "Waiting 300ms for sensor initialization...");
+  vTaskDelay(pdMS_TO_TICKS(300));
+  ESP_LOGI(TAG, "Sensor should be ready for capture");
 
   this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
   if (this->isp_fd_ < 0) {
@@ -1187,17 +1199,17 @@ bool MipiDSICamComponent::start_streaming() {
              ESP_VIDEO_ISP1_DEVICE_NAME, strerror(errno));
     ESP_LOGW(TAG, "Brightness/Contrast/Saturation/AWB controls will not be available");
   } else {
-    ESP_LOGI(TAG, "✓ ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
+    ESP_LOGI(TAG, "ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
   }
 
   // Les buffers SPIRAM ont déjà été alloués et passés à V4L2 en mode USERPTR
   // V4L2 écrit maintenant directement dans nos buffers SPIRAM - pas de memcpy nécessaire!
-  ESP_LOGI(TAG, "✓ V4L2 USERPTR mode active - zero-copy to SPIRAM");
+  ESP_LOGI(TAG, "V4L2 USERPTR mode active - zero-copy to SPIRAM");
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
     if (this->set_rgb_gains(this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_)) {
-      // ESP_LOGI(TAG, "✓ CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
+      // ESP_LOGI(TAG, "CCM RGB gains auto-applied: R=%.2f, G=%.2f, B=%.2f",
       //          this->rgb_gains_red_, this->rgb_gains_green_, this->rgb_gains_blue_);
     } else {
       ESP_LOGW(TAG, "Failed to auto-apply CCM RGB gains");
@@ -1209,14 +1221,14 @@ bool MipiDSICamComponent::start_streaming() {
   // OV5647, SC202CS, OV02C10 gèrent automatiquement la balance des blancs via leurs propres registres et IPA JSON
   if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647" && this->sensor_name_ != "ov02c10") {
     if (this->set_white_balance_mode(true)) {
-      ESP_LOGI(TAG, "✓ AWB (Auto White Balance) enabled");
+      ESP_LOGI(TAG, "AWB (Auto White Balance) enabled");
     } else {
       ESP_LOGW(TAG, "Failed to enable AWB, trying manual white balance temperature");
       // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
       this->set_white_balance_temp(5500);
     }
   } else {
-    ESP_LOGI(TAG, "✓ %s: Using sensor built-in AWB (V4L2 AWB not supported)", this->sensor_name_.c_str());
+    ESP_LOGI(TAG, "%s: Using sensor built-in AWB (V4L2 AWB not supported)", this->sensor_name_.c_str());
   }
 
   // NOTE: Brightness/Contrast/Saturation auto-application désactivée
@@ -1275,7 +1287,7 @@ bool MipiDSICamComponent::capture_frame() {
       // Log only once (first frame)
       static bool ppa_buffer_logged = false;
       if (!ppa_buffer_logged) {
-        ESP_LOGI(TAG, "✓ Using PPA output buffer at %p", display_buffer);
+        ESP_LOGI(TAG, "Using PPA output buffer at %p", display_buffer);
         ppa_buffer_logged = true;
       }
     } else {
@@ -1426,7 +1438,7 @@ void MipiDSICamComponent::stop_streaming() {
   this->image_height_ = 0;
   this->image_buffer_size_ = 0;
 
-  // ESP_LOGI(TAG, "✓ Streaming stopped, resources freed");
+  // ESP_LOGI(TAG, "Streaming stopped, resources freed");
 }
 
 
@@ -1449,7 +1461,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
       ESP_LOGE(TAG, "Failed to enable auto exposure: %s", strerror(errno));
       return false;
     }
-    ESP_LOGI(TAG, "✓ Auto exposure enabled (AEC active)");
+    ESP_LOGI(TAG, "Auto exposure enabled (AEC active)");
   } else {
     // Désactiver AEC et définir exposition manuelle
     ctrl.id = V4L2_CID_EXPOSURE_AUTO;
@@ -1468,7 +1480,7 @@ bool MipiDSICamComponent::set_exposure(int value) {
       ESP_LOGE(TAG, "Failed to set exposure to %d: %s", value, strerror(errno));
       return false;
     }
-    ESP_LOGI(TAG, "✓ Manual exposure set to %d (AEC disabled)", value);
+    ESP_LOGI(TAG, "Manual exposure set to %d (AEC disabled)", value);
   }
 
   return true;
@@ -1492,7 +1504,7 @@ bool MipiDSICamComponent::set_gain(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Gain set to %d (%.1fx)", value, value / 1000.0f);
+  ESP_LOGI(TAG, "Gain set to %d (%.1fx)", value, value / 1000.0f);
   return true;
 }
 
@@ -1513,7 +1525,7 @@ bool MipiDSICamComponent::set_white_balance_mode(bool auto_mode) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ White balance: %s", auto_mode ? "AUTO (AWB enabled)" : "MANUAL");
+  ESP_LOGI(TAG, "White balance: %s", auto_mode ? "AUTO (AWB enabled)" : "MANUAL");
   return true;
 }
 
@@ -1534,7 +1546,7 @@ bool MipiDSICamComponent::set_white_balance_temp(int kelvin) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ White balance temperature set to %dK", kelvin);
+  ESP_LOGI(TAG, "White balance temperature set to %dK", kelvin);
   return true;
 }
 
@@ -1574,7 +1586,7 @@ bool MipiDSICamComponent::set_ccm_matrix(float matrix[3][3]) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ CCM matrix configured:");
+  ESP_LOGI(TAG, "CCM matrix configured:");
   ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[0][0], matrix[0][1], matrix[0][2]);
   ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[1][0], matrix[1][1], matrix[1][2]);
   ESP_LOGI(TAG, "  [%.2f, %.2f, %.2f]", matrix[2][0], matrix[2][1], matrix[2][2]);
@@ -1594,7 +1606,7 @@ bool MipiDSICamComponent::set_rgb_gains(float red, float green, float blue) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ RGB gains: R=%.2f, G=%.2f, B=%.2f", red, green, blue);
+  ESP_LOGI(TAG, "RGB gains: R=%.2f, G=%.2f, B=%.2f", red, green, blue);
   return true;
 }
 
@@ -1629,7 +1641,7 @@ bool MipiDSICamComponent::set_wb_gains(float red_gain, float blue_gain) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ WB gains: Red=%.2f, Blue=%.2f (Green=1.0)", red_gain, blue_gain);
+  ESP_LOGI(TAG, "WB gains: Red=%.2f, Blue=%.2f (Green=1.0)", red_gain, blue_gain);
   return true;
 }
 
@@ -1649,7 +1661,7 @@ bool MipiDSICamComponent::set_brightness(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Brightness set to %d", value);
+  ESP_LOGI(TAG, "Brightness set to %d", value);
   return true;
 }
 
@@ -1672,7 +1684,7 @@ bool MipiDSICamComponent::set_contrast(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Contrast set to %d", value);
+  ESP_LOGI(TAG, "Contrast set to %d", value);
   return true;
 }
 
@@ -1695,7 +1707,7 @@ bool MipiDSICamComponent::set_saturation(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Saturation set to %d", value);
+  ESP_LOGI(TAG, "Saturation set to %d", value);
   return true;
 }
 
@@ -1718,7 +1730,7 @@ bool MipiDSICamComponent::set_hue(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Hue set to %d", value);
+  ESP_LOGI(TAG, "Hue set to %d", value);
   return true;
 }
 
@@ -1741,7 +1753,7 @@ bool MipiDSICamComponent::set_sharpness(int value) {
     return false;
   }
 
-  ESP_LOGI(TAG, "✓ Sharpness set to %d", value);
+  ESP_LOGI(TAG, "Sharpness set to %d", value);
   return true;
 }
 

@@ -4,7 +4,22 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v2 */
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v7 */
+
+/*
+ * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
+ * These defines MUST be set for OV02C10 JSON configuration to be loaded.
+ * Without these, the JSON exists in firmware but is never applied to ISP.
+ *
+ * IMPORTANT: Using unconditional #undef to ensure we override ANY previous definition
+ * (whether from build system, sdkconfig, or nowhere). This MUST be the first thing
+ * in the file before ANY #include directives.
+ */
+#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+
+#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
 
 #include <string.h>
 #include <inttypes.h>
@@ -13,6 +28,18 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_check.h"
+
+/*
+ * CRITICAL: Redefine CONFIG values AFTER all #include directives
+ * because esp_log.h or esp_check.h may include sdkconfig.h which
+ * overrides our earlier definitions with values from build system.
+ * This MUST come after ALL includes to ensure it's the final value.
+ */
+#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+
+#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
 
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
 #include "usb/usb_host.h"
@@ -32,9 +59,22 @@
 #if CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE
 #include "esp_private/esp_cam_dvp.h"
 #endif
-#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+
+/*
+ * CRITICAL (v3): Final redefinition of CONFIG values AFTER all non-conditional
+ * #include directives and just BEFORE the conditional #if that depends on it.
+ * This ensures CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 is active
+ * when the preprocessor evaluates the #if on the next line.
+ */
+#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+
+#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
+
+// CRITICAL FIX: Force include ISP pipeline header regardless of CONFIG
+// This is safe for all sensors - the code detects sensor type at runtime
 #include "esp_video_pipeline_isp.h"
-#endif
 
 #if ESP_VIDEO_ENABLE_SCCB_DEVICE
 #define SCCB_NUM_MAX                I2C_NUM_MAX
@@ -329,13 +369,6 @@ static bool sensor_is_detected(esp_cam_sensor_detect_fn_t *p, esp_cam_sensor_dev
  */
 esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
-    ESP_LOGE(TAG, "");
-    ESP_LOGE(TAG, "========================================");
-    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v3)");
-    ESP_LOGE(TAG, "   This confirms our modified version is being used");
-    ESP_LOGE(TAG, "========================================");
-    ESP_LOGE(TAG, "");
-
     esp_err_t ret = ESP_OK;
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
     bool csi_inited = false;
@@ -499,55 +532,32 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             }
 #endif
 
-            ESP_LOGE(TAG, "");
-            ESP_LOGE(TAG, "========================================");
-            ESP_LOGE(TAG, "DEBUG: esp_video_init() reached ISP configuration section");
-            ESP_LOGE(TAG, "  cam_dev=%p", cam_dev);
-            if (cam_dev) {
-                ESP_LOGE(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
-                ESP_LOGE(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
-            }
-#ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");
-#else
-            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=0 (NOT DEFINED)");
-#endif
-            ESP_LOGI(TAG, "========================================");
-
-#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-            ESP_LOGI(TAG, "ISP Pipeline Controller: ENABLED");
-            ESP_LOGI(TAG, "   cam_dev=%p, cur_format=%p", cam_dev, cam_dev ? cam_dev->cur_format : NULL);
-            if (cam_dev && cam_dev->cur_format) {
-                ESP_LOGI(TAG, "   cur_format->isp_info=%p", cam_dev->cur_format->isp_info);
-                ESP_LOGI(TAG, "   cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
-            }
-
-            if (cam_dev->cur_format && cam_dev->cur_format->isp_info) {
+            // ISP Pipeline initialization with IPA (Image Processing Algorithms)
+            // Automatically loads sensor-specific JSON configuration (CCM, AWB, sharpen, denoise)
+            if (cam_dev && cam_dev->cur_format && cam_dev->cur_format->isp_info) {
                 const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(cam_dev->name);
                 if (ipa_config) {
                     esp_video_isp_config_t isp_config = {
                         .cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
                         .isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME,
-                        .ipa_config = ipa_config
+                        .ipa_config = ipa_config,
+                        .sensor_name = cam_dev->name
                     };
 
-                    ESP_LOGI(TAG, "Initializing ISP pipeline with IPA for sensor '%s'...", cam_dev->name);
+                    ESP_LOGI(TAG, "Initializing ISP pipeline with IPA for sensor '%s'", cam_dev->name);
                     ret = esp_video_isp_pipeline_init(&isp_config);
                     if (ret != ESP_OK) {
-                        ESP_LOGE(TAG, "  Failed to create ISP pipeline: %d (%s)", ret, esp_err_to_name(ret));
+                        ESP_LOGE(TAG, "Failed to initialize ISP pipeline: %s", esp_err_to_name(ret));
                         return ret;
                     }
-                    ESP_LOGI(TAG, "  ISP pipeline initialized successfully!");
+                    ESP_LOGI(TAG, "ISP pipeline initialized successfully");
                 } else {
-                    ESP_LOGW(TAG, "   Failed to get IPA config for sensor '%s' - ISP not initialized", cam_dev->name);
+                    ESP_LOGW(TAG, "No IPA config found for sensor '%s' - ISP will use defaults", cam_dev->name);
                 }
             } else {
-                ESP_LOGW(TAG, "  Cannot initialize ISP: cur_format=%p, isp_info=%p",
-                         cam_dev->cur_format, cam_dev->cur_format ? cam_dev->cur_format->isp_info : NULL);
+                ESP_LOGD(TAG, "ISP not available for current format");
             }
-#else
-            ESP_LOGW(TAG, " ISP Pipeline Controller: DISABLED (CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER not set)");
-#endif
+
             csi_inited = true;
         }
 #endif
