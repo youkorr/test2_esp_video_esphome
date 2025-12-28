@@ -35,17 +35,17 @@ extern "C" {
 #define OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS    (OV02C10_IDI_CLOCK_RATE_800x640_50FPS * 4)
 #endif
 
-// ⚠️  IMPORTANT: OV02C10 native sensor is 1936×1088 (16:9 ratio)
+// IMPORTANT: OV02C10 native sensor is 1936×1088 (16:9 ratio)
 //     Formats with 4:3 ratio (640×480, 800x600) crop 25% of horizontal FOV!
 //     → Use 640×368 for 98% FOV coverage (recommended)
 //
 // Supported resolutions (ALL use FULL SENSOR - NO ZOOM):
-//   ✅ RECOMMENDED:
+//   RECOMMENDED:
 //     - 640x368 @ 30fps RAW10 (near 16:9) - BEST FOV (98% coverage), ~2% crop, 16-byte aligned (rotation safe!)
 //     - 1920x1080 @ 30fps RAW10 (1080P) - FULL FOV (100% coverage), native resolution, 0% crop
 //     - 1288x728 @ 30fps RAW10 (Near HD 16:9) - full sensor, ISP downscales, optimized 16:9 aspect ratio
 //
-//   ⚠️  WITH FOV LOSS (4:3 crop):
+//   WITH FOV LOSS (4:3 crop):
 //     - 640x480 @ 30fps RAW10 (VGA 4:3) - WARNING: 25% horizontal crop (zoom effect 1.33x), only 75% FOV visible!
 //     - 800x600 @ 30fps RAW10 (SVGA 4:3) - 25% horizontal crop, based on working 640x480 config
 //     - 480x640 @ 30fps RAW10 (portrait) - full sensor, rotation enabled
