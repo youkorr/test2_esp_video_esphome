@@ -129,7 +129,7 @@
             [
                 {
                     "color_temp": 0,
-                    "value": 95
+                    "value": 136
                 }
             ],
             "ccm":
@@ -151,9 +151,9 @@
                         "color_temp": 0,
                         "matrix":
                         [
-                             2.0000,  -0.5459, -0.4541,
-                            -0.4751,   1.7696, -0.2945,
-                            -0.2002,  -0.7998,  2.0000
+                            1.408,  -0.094, -0.314,
+                            -0.13,    1.28,  -0.15,
+                            -0.072,  -0.173,  1.245
                         ]
                     }
                 ]
@@ -165,7 +165,7 @@
                 {
                     "gain": 1,
                     "param": {
-                        "level": 7,
+                        "level": 3,
                         "matrix":
                         [
                             2, 4, 2,
@@ -177,7 +177,7 @@
                 {
                     "gain": 4,
                     "param": {
-                        "level": 9,
+                        "level": 3,
                         "matrix":
                         [
                             1, 3, 1,
@@ -189,7 +189,7 @@
                 {
                     "gain": 8,
                     "param": {
-                        "level": 11,
+                        "level": 4,
                         "matrix":
                         [
                             1, 3, 1,
@@ -201,7 +201,7 @@
                 {
                     "gain": 16,
                     "param": {
-                        "level": 13,
+                        "level": 5,
                         "matrix":
                         [
                             1, 3, 1,
@@ -213,7 +213,7 @@
                 {
                     "gain": 24,
                     "param": {
-                        "level": 15,
+                        "level": 6,
                         "matrix":
                         [
                             1, 2, 1,
@@ -225,7 +225,7 @@
                 {
                     "gain": 32,
                     "param": {
-                        "level": 17,
+                        "level": 7,
                         "matrix":
                         [
                             1, 2, 1,
@@ -237,7 +237,7 @@
                 {
                     "gain": 64,
                     "param": {
-                        "level": 20,
+                        "level": 7,
                         "matrix":
                         [
                             1, 2, 1,
@@ -245,6 +245,25 @@
                             1, 2, 1
                         ]
                     }
+                }
+            ],
+            "demosaic":
+            [
+                {
+                    "gain": 1,
+                    "gradient_ratio": 1.5
+                },
+                {
+                    "gain": 4,
+                    "gradient_ratio": 1.25
+                },
+                {
+                    "gain": 8,
+                    "gradient_ratio": 1.05
+                },
+                {
+                    "gain": 12,
+                    "gradient_ratio": 1.0
                 }
             ]
         },
@@ -259,24 +278,69 @@
                 [
                     {
                         "luma": 71.1,
-                        "gamma_param": 0.72
+                        "gamma_param": 0.518
                     }
                 ]
-            },    
+            },
             "sharpen":
             [
                 {
                     "gain": 1,
                     "param": {
-                        "h_thresh": 56,
-                        "l_thresh": 10,
-                        "h_coeff": 0.425,
-                        "m_coeff": 0.625,
+                        "h_thresh": 25,
+                        "l_thresh": 5,
+                        "h_coeff": 1.925,
+                        "m_coeff": 1.825,
                         "matrix":
                         [
                             1, 2, 1,
                             2, 2, 2,
                             1, 2, 1
+                        ]
+                    }
+                },
+                {
+                    "gain": 8,
+                    "param": {
+                        "h_thresh": 20,
+                        "l_thresh": 5,
+                        "h_coeff": 1.825,
+                        "m_coeff": 1.425,
+                        "matrix":
+                        [
+                            2, 2, 2,
+                            2, 1, 2,
+                            2, 2, 2
+                        ]
+                    }
+                },
+                {
+                    "gain": 12,
+                    "param": {
+                        "h_thresh": 16,
+                        "l_thresh": 6,
+                        "h_coeff": 1.625,
+                        "m_coeff": 1.325,
+                        "matrix":
+                        [
+                            1, 1, 1,
+                            1, 1, 1,
+                            1, 1, 1
+                        ]
+                    }
+                },
+                {
+                    "gain": 65,
+                    "param": {
+                        "h_thresh": 20,
+                        "l_thresh": 5,
+                        "h_coeff": 1.625,
+                        "m_coeff": 1.225,
+                        "matrix":
+                        [
+                            1, 1, 1,
+                            1, 1, 1,
+                            1, 1, 1
                         ]
                     }
                 }
@@ -285,7 +349,19 @@
             [
                 {
                     "gain": 1,
-                    "value": 134
+                    "value": 132
+                },
+                {
+                    "gain": 16,
+                    "value": 130
+                },
+                {
+                    "gain": 24,
+                    "value": 128
+                },
+                {
+                    "gain": 65,
+                    "value": 126
                 }
             ]
         }
