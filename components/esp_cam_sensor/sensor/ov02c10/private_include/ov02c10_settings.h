@@ -1440,16 +1440,18 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_960x540_30fps[
     {0x37e4, 0x08},
     {0x37e5, 0x02},
     {0x37e6, 0x08},
-    // Crop window: FULL SENSOR (0-1935 x 4-1091) - NO CROP!
-    {0x3800, 0x00},  // X start high
-    {0x3801, 0x00},  // X start low = 0
-    {0x3802, 0x00},  // Y start high
-    {0x3803, 0x04},  // Y start low = 4
-    {0x3804, 0x07},  // X end high
-    {0x3805, 0x8f},  // X end low = 1935
-    {0x3806, 0x04},  // Y end high
-    {0x3807, 0x43},  // Y end low = 1091
-    // Output size: 960x540 (qHD 16:9 - ISP downscales from 1936x1088)
+    // Crop window: CENTERED CROP (485-1450 x 276-818) to avoid ISP 2x downscale issue
+    // Crop size: 966x543 → ISP minor downscale to 960x540 (1.006x like 1288x728)
+    // FIXED: ISP 2x downscale (1936→960) was causing watchdog timeout!
+    {0x3800, 0x01},  // X start high
+    {0x3801, 0xe5},  // X start low = 485
+    {0x3802, 0x01},  // Y start high
+    {0x3803, 0x14},  // Y start low = 276
+    {0x3804, 0x05},  // X end high
+    {0x3805, 0xaa},  // X end low = 1450
+    {0x3806, 0x03},  // Y end high
+    {0x3807, 0x32},  // Y end low = 818
+    // Output size: 960x540 (qHD 16:9 - Minor ISP downscale from 966x543 crop)
     {0x3808, 0x03},  // width high
     {0x3809, 0xc0},  // width low = 960 (0x3C0)
     {0x380a, 0x02},  // height high
