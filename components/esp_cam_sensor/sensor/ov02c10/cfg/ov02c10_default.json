@@ -278,7 +278,7 @@
                 [
                     {
                         "luma": 71.1,
-                        "gamma_param": 0.518
+                        "gamma_param": 0.72
                     }
                 ]
             },    
@@ -287,10 +287,10 @@
                 {
                     "gain": 1,
                     "param": {
-                        "h_thresh": 25,
-                        "l_thresh": 5,
-                        "h_coeff": 1.925,
-                        "m_coeff": 1.825,
+                        "h_thresh": 56,
+                        "l_thresh": 10,
+                        "h_coeff": 0.425,
+                        "m_coeff": 0.625,
                         "matrix":
                         [
                             1, 2, 1,
@@ -349,7 +349,7 @@
             [
                 {
                     "gain": 1,
-                    "value": 132
+                    "value": 134
                 },
                 {
                     "gain": 16,
