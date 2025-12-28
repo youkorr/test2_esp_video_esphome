@@ -1023,7 +1023,15 @@ const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps = {
     .reserved = NULL,
 };
 
-// Note: Original formats (1288x728, 1920x1080) are defined in ov02c10.c
+// ============================================================================
+// Original formats (defined in ov02c10.c driver)
+// ============================================================================
+
+// Original format 1288x728 @ 30fps RAW10 (Near HD 16:9)
+extern const esp_cam_sensor_format_t ov02c10_format_1288x728_raw10_30fps;
+
+// Original format 1920x1080 @ 30fps RAW10 (1080P - Full HD)
+extern const esp_cam_sensor_format_t ov02c10_format_1920x1080_raw10_30fps;
 
 #ifdef __cplusplus
 }
