@@ -6,6 +6,13 @@ Ajoute tous les fichiers sources C/C++ des composants ESP-IDF
 import os
 Import("env")
 
+# Force enable ISP Pipeline Controller and JSON IPA loading
+# These defines ensure JSON configuration is loaded and applied to ISP
+env.Append(CPPDEFINES=[
+    ("CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER", "1"),
+    ("CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE", "1"),
+])
+
 # Obtenir le répertoire du composant (ce script est dans components/esp_video/)
 # Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
 script_dir = Dir('.').srcnode().abspath
