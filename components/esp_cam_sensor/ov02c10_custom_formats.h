@@ -37,9 +37,8 @@ extern const esp_cam_sensor_format_t ov02c10_format_1288x728_raw10_30fps;
 // Custom format 640x480 @ 30fps RAW10 (VGA)
 extern const esp_cam_sensor_format_t ov02c10_format_640x480_raw10_30fps;
 
-// DISABLED: 800x600 causes watchdog timeout - use 640x480 or 1288x728 instead
-// See OV02C10_800x600_ISSUE.md
-// extern const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps;
+// Custom format 800x600 @ 30fps RAW10 (SVGA 4:3 - Based on working 640x480)
+extern const esp_cam_sensor_format_t ov02c10_format_800x600_raw10_30fps;
 
 // Custom format 480x640 @ 30fps RAW10 (VGA rotated 270°)
 extern const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270;
