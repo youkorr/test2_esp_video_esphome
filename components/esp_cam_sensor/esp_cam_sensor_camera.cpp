@@ -1186,6 +1186,12 @@ bool MipiDSICamComponent::start_streaming() {
 
   ESP_LOGI(TAG, "mipi_dsi_cam: streaming started");
 
+  // ★ WORKAROUND: Wait for sensor to complete internal initialization
+  // Some custom formats (especially 800x600) may not generate frames immediately
+  // This prevents watchdog timeout during first frame capture
+  ESP_LOGI(TAG, "⏳ Waiting 300ms for sensor initialization...");
+  vTaskDelay(pdMS_TO_TICKS(300));
+  ESP_LOGI(TAG, "✓ Sensor should be ready for capture");
 
   this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
   if (this->isp_fd_ < 0) {
