@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v5 */
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v6 */
 
 /*
  * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
@@ -29,6 +29,18 @@
 #include "esp_log.h"
 #include "esp_check.h"
 
+/*
+ * CRITICAL: Redefine CONFIG values AFTER all #include directives
+ * because esp_log.h or esp_check.h may include sdkconfig.h which
+ * overrides our earlier definitions with values from build system.
+ * This MUST come after ALL includes to ensure it's the final value.
+ */
+#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+
+#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
+
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
 #include "usb/usb_host.h"
 #endif
@@ -47,6 +59,19 @@
 #if CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE
 #include "esp_private/esp_cam_dvp.h"
 #endif
+
+/*
+ * CRITICAL (v3): Final redefinition of CONFIG values AFTER all non-conditional
+ * #include directives and just BEFORE the conditional #if that depends on it.
+ * This ensures CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 is active
+ * when the preprocessor evaluates the #if on the next line.
+ */
+#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+
+#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
+
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
 #include "esp_video_pipeline_isp.h"
 #endif
@@ -346,9 +371,9 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
     ESP_LOGE(TAG, "");
     ESP_LOGE(TAG, "========================================");
-    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v5)");
+    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v6)");
     ESP_LOGE(TAG, "   This confirms our modified version is being used");
-    ESP_LOGE(TAG, "   CONFIG forced with UNCONDITIONAL #undef + #define");
+    ESP_LOGE(TAG, "   CONFIG redefined 3x: before/after includes/before #if");
     ESP_LOGE(TAG, "========================================");
     ESP_LOGE(TAG, "");
 
