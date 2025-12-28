@@ -1,0 +1,101 @@
+# ============================================================================
+# 🔧 FIX CRITIQUE - YOLO11 120% → 40-50%
+# ============================================================================
+# Problème:
+#   - yolo11_detect_s8_v1.espdl = 2.8 MB sur disque
+#   - Mais prend 19.2 MB (120%) en RAM → IMPOSSIBLE
+#
+# Cause:
+#   - Sans CONFIG_SPIRAM_RODATA, le modèle est COPIÉ en RAM
+#   - Les buffers d'inférence sont en RAM interne
+#
+# Solution:
+#   - Ajouter CONFIG_SPIRAM_RODATA: y
+#   - Le modèle reste en flash (pas de copie)
+#   - Les buffers vont en PSRAM
+# ============================================================================
+
+esp32:
+  board: esp32-p4-function-ev-board
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # PSRAM Base
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_SUPPORT: y
+      CONFIG_SPIRAM_SPEED_200M: y
+
+      # 🔑 LIGNE CRITIQUE - Modèles restent en flash
+      CONFIG_SPIRAM_RODATA: y
+
+      # Allocation
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: y
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: 0
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: 32768
+
+      # Cache
+      CONFIG_CACHE_L2_CACHE_256KB: y
+      CONFIG_CACHE_L2_CACHE_LINE_128B: y
+
+# ============================================================================
+# RÉSULTAT ATTENDU APRÈS CONFIG_SPIRAM_RODATA
+# ============================================================================
+# Avant (SANS CONFIG_SPIRAM_RODATA):
+#   face_detection:     15.5 MB (97%)  ❌
+#   yolo11_detection:   19.2 MB (120%) ❌ IMPOSSIBLE
+#
+# Après (AVEC CONFIG_SPIRAM_RODATA):
+#   face_detection:     4-5 MB (25-30%)   ✅
+#   yolo11_detection:   6-8 MB (40-50%)   ✅
+#   pedestrian:         4-5 MB (25-30%)   ✅
+#
+# Mémoire disponible: ~11-12 MB pour application ✅
+# ============================================================================
+
+# YOLO11 Detection
+yolo11_detection:
+  id: yolo11_detector
+  camera_id: tab5_cam
+  detection_interval: 12       # Toutes les 12 frames
+  score_threshold: 0.45        # Filtre détections faibles
+  nms_threshold: 0.5
+  draw_enabled: true
+
+# Monitoring
+interval:
+  - interval: 15s
+    then:
+      - lambda: |-
+          size_t free_ram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+          size_t total_ram = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+          size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+
+          float pct_ram = (float)free_ram / total_ram * 100;
+          float pct_psram = total_psram > 0 ? (float)free_psram / total_psram * 100 : 0;
+
+          ESP_LOGI("memory", "RAM: %.1f%% libre | PSRAM: %.1f%% libre",
+                   pct_ram, pct_psram);
+
+          // Vérifier si modèle en PSRAM (pas en RAM)
+          size_t used_ram = total_ram - free_ram;
+          size_t used_psram = total_psram - free_psram;
+
+          if (used_psram > used_ram) {
+            ESP_LOGI("memory", "✅ Modèles en PSRAM (%.1f MB PSRAM vs %.1f MB RAM)",
+                     used_psram / (1024.0 * 1024.0),
+                     used_ram / (1024.0 * 1024.0));
+          } else {
+            ESP_LOGW("memory", "⚠️ Modèles peut-être en RAM (%.1f MB RAM vs %.1f MB PSRAM)",
+                     used_ram / (1024.0 * 1024.0),
+                     used_psram / (1024.0 * 1024.0));
+          }
+
+logger:
+  level: INFO
+  logs:
+    memory: INFO
+    yolo11_detection: INFO
