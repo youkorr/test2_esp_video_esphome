@@ -4,7 +4,20 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v2 */
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v3 */
+
+/*
+ * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
+ * These defines MUST be set for OV02C10 JSON configuration to be loaded.
+ * Without these, the JSON exists in firmware but is never applied to ISP.
+ */
+#ifndef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
+#endif
+
+#ifndef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
+#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
+#endif
 
 #include <string.h>
 #include <inttypes.h>
