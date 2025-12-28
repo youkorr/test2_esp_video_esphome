@@ -11,6 +11,7 @@
 //
 // Supported resolutions (ALL use FULL SENSOR - NO ZOOM):
 //   ✅ RECOMMENDED:
+//     - 960x540 @ 30fps RAW10 (qHD 16:9) - ⭐ BEST for rotation 270° + canvas 480×390, BETTER FPS than 1288×728, ~1 MB RAM
 //     - 640x368 @ 30fps RAW10 (near 16:9) - BEST FOV (98% coverage), ~2% crop, 16-byte aligned (rotation safe!)
 //     - 1920x1080 @ 30fps RAW10 (1080P) - FULL FOV (100% coverage), native resolution, 0% crop
 //
@@ -45,6 +46,9 @@ extern const esp_cam_sensor_format_t ov02c10_format_480x640_raw10_30fps_rot270;
 
 // Custom format 640x368 @ 30fps RAW10 (near 16:9 - Best FOV, rotation safe, 16-byte aligned!)
 extern const esp_cam_sensor_format_t ov02c10_format_640x368_raw10_30fps;
+
+// Custom format 960x540 @ 30fps RAW10 (qHD 16:9 - Better FPS than 1288x728, perfect for rotation 270°)
+extern const esp_cam_sensor_format_t ov02c10_format_960x540_raw10_30fps;
 
 // Custom format 1920x1080 @ 30fps RAW10 (1080P - Full HD)
 extern const esp_cam_sensor_format_t ov02c10_format_1920x1080_raw10_30fps;

@@ -855,6 +855,9 @@ bool MipiDSICamComponent::start_streaming() {
     } else if (width == 640 && height == 368) {
       custom_format = &ov02c10_format_640x368_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
+    } else if (width == 960 && height == 540) {
+      custom_format = &ov02c10_format_960x540_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 960x540 RAW10 @ 30fps (qHD 16:9, BETTER FPS than 1288x728, perfect for rotation!)");
     } else if (width == 1920 && height == 1080) {
       custom_format = &ov02c10_format_1920x1080_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");
