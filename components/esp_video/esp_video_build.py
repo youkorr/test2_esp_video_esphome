@@ -6,16 +6,14 @@ Ajoute tous les fichiers sources C/C++ des composants ESP-IDF
 import os
 Import("env")
 
-# Force enable ISP Pipeline Controller and JSON IPA loading
-# These defines ensure JSON configuration is loaded and applied to ISP
+# Force enable ISP Pipeline Controller
+# This define ensures ISP pipeline code is included in the build
 print("[ESP-Video Build] ========================================")
-print("[ESP-Video Build] CRITICAL: Adding ISP Pipeline Controller defines")
+print("[ESP-Video Build] Adding ISP Pipeline Controller define")
 env.Append(CPPDEFINES=[
     ("CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER", "1"),
-    ("CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE", "1"),
 ])
 print("[ESP-Video Build]   - CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1")
-print("[ESP-Video Build]   - CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE=1")
 print("[ESP-Video Build] ========================================")
 
 # Obtenir le répertoire du composant (ce script est dans components/esp_video/)
