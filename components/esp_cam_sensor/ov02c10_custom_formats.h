@@ -61,10 +61,11 @@ static const esp_cam_sensor_isp_info_t ov02c10_custom_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
         .pclk = 81666700,
-        .vts = 1164,
         .hts = 2280,
-        .gain_def = 0x01,
+        .vts = 1164,
         .exp_def = 0x46c,
+        .gain_def = 0x01,
+        .tline_ns = 0,
         .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,
     }
 };
