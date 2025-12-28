@@ -847,17 +847,16 @@ bool MipiDSICamComponent::start_streaming() {
       ESP_LOGW(TAG, "⚠️  Using 640x480 RAW10 (VGA 4:3) - WARNING: 25%% horizontal crop (zoom 1.33x, only 75%% FOV visible)");
       ESP_LOGW(TAG, "⚠️  Consider using 640x368 for 98%% FOV coverage instead - See OV02C10_640x480_ZOOM_FIX.md");
     } else if (width == 800 && height == 600) {
-      // DISABLED: 800x600 causes watchdog timeout after 60s
-      ESP_LOGE(TAG, "❌ 800x600 is DISABLED due to watchdog timeout issue");
-      ESP_LOGE(TAG, "❌ Use 640x480 (same 4:3 ratio) or 1288x728 (16:9) instead");
-      ESP_LOGE(TAG, "❌ See OV02C10_800x600_ISSUE.md for details");
+      custom_format = &ov02c10_format_800x600_raw10_30fps;
+      ESP_LOGI(TAG, "✅ Using CUSTOM format: 800x600 RAW10 @ 30fps (SVGA 4:3, based on working 640x480)");
+    } else if (width == 960 && height == 540) {
+      // DISABLED: 960x540 causes persistent watchdog timeout even with 1288x728 config
+      ESP_LOGE(TAG, "❌ 960x540 is DISABLED - resolution incompatible with OV02C10");
+      ESP_LOGE(TAG, "❌ Use 800x600 (SVGA) or 1288x728 (HD) instead");
       return false;
     } else if (width == 640 && height == 368) {
       custom_format = &ov02c10_format_640x368_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using CUSTOM format: 640x368 RAW10 @ 30fps (near 16:9, ~2%% crop, 16-byte aligned!)");
-    } else if (width == 960 && height == 540) {
-      custom_format = &ov02c10_format_960x540_raw10_30fps;
-      ESP_LOGI(TAG, "✅ Using CUSTOM format: 960x540 RAW10 @ 30fps (qHD 16:9, BETTER FPS than 1288x728, perfect for rotation!)");
     } else if (width == 1920 && height == 1080) {
       custom_format = &ov02c10_format_1920x1080_raw10_30fps;
       ESP_LOGI(TAG, "✅ Using NATIVE format: 1920x1080 RAW10 @ 30fps (1080P - Full Sensor)");

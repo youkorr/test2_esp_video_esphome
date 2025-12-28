@@ -1062,19 +1062,19 @@ static const ov02c10_reginfo_t ov02c10_input_24M_MIPI_1lane_raw10_800x600_30fps[
     {0x37e5, 0x02},
     {0x37e6, 0x08},
     // Crop window: FULL SENSOR (0-1935 x 4-1091) - NO ZOOM
-    {0x3800, 0x00},  // X start high
-    {0x3801, 0x00},  // X start low = 0
-    {0x3802, 0x00},  // Y start high
-    {0x3803, 0x04},  // Y start low = 4
-    {0x3804, 0x07},  // X end high
-    {0x3805, 0x8f},  // X end low = 1935
-    {0x3806, 0x04},  // Y end high
-    {0x3807, 0x43},  // Y end low = 1091
-    // Output size: 800x600 (ISP downscales from 1936x1087)
+    {0x3800, 0x00},
+    {0x3801, 0xf2},  // X start = 242
+    {0x3802, 0x00},
+    {0x3803, 0x04},  // Y start = 4
+    {0x3804, 0x06},
+    {0x3805, 0x9d},  // X end = 1693 (1452 pixels crop)
+    {0x3806, 0x04},
+    {0x3807, 0x43},  // Y end = 1091 (1088 pixels crop)
+    // Output size: 640x480 (ISP downscales from 1936x1087)
     {0x3808, 0x03},  // width high
-    {0x3809, 0x20},  // width low = 800
+    {0x3809, 0x20},  // width low = 800 (0x320)
     {0x380a, 0x02},  // height high
-    {0x380b, 0x58},  // height low = 600
+    {0x380b, 0x58},  // height low = 600 (0x258)
     // Timing: SAME AS NATIVE
     {0x380c, 0x08},  // HTS high = 2280
     {0x380d, 0xe8},  // HTS low
