@@ -1,0 +1,196 @@
+# ============================================================================
+# EXEMPLE: Multi-Détection avec PSRAM
+# ============================================================================
+# Configuration pour ESP32-P4 avec PSRAM (16 Mo + 16 Mo)
+# Permet d'utiliser face_detection + yolo11_detection + pedestrian_detection
+# ============================================================================
+
+esphome:
+  name: esp32-p4-multi-detection
+  friendly_name: "ESP32-P4 Multi Detection"
+
+  platformio_options:
+    # Configuration PSRAM
+    board_build.arduino.memory_type: opi_opi
+    build_flags:
+      # PSRAM Activation
+      - -DBOARD_HAS_PSRAM
+      - -DCONFIG_SPIRAM=1
+      - -DCONFIG_SPIRAM_SPEED_200M=1
+      - -DCONFIG_SPIRAM_USE_CAPS_ALLOC=1
+      - -DCONFIG_SPIRAM_USE_MALLOC=1
+
+      # LVGL Memory Allocation sur PSRAM (style Waveshare)
+      - -DLV_MEM_CUSTOM=1
+      - -DLV_MEM_SIZE=2097152  # 2 MB pour LVGL
+      - '-DLV_MEM_CUSTOM_ALLOC(x)=heap_caps_malloc(x, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)'
+      - '-DLV_MEM_CUSTOM_FREE(x)=heap_caps_free(x)'
+
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          ESP_LOGI("psram", "=== DIAGNOSTIC MÉMOIRE ESP32-P4 ===");
+
+          // RAM Interne
+          size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+          size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+          ESP_LOGI("psram", "RAM Interne: %.2f / %.2f MB",
+                   free_internal / (1024.0 * 1024.0),
+                   total_internal / (1024.0 * 1024.0));
+
+          // PSRAM
+          size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          size_t total_spiram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+
+          if (total_spiram > 0) {
+            ESP_LOGI("psram", "✅ PSRAM: %.2f / %.2f MB",
+                     free_spiram / (1024.0 * 1024.0),
+                     total_spiram / (1024.0 * 1024.0));
+            ESP_LOGI("psram", "🎉 Multi-détection activée !");
+          } else {
+            ESP_LOGE("psram", "❌ PAS DE PSRAM - Limité à 1 détection");
+          }
+
+esp32:
+  board: esp32-p4-function-ev-board
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # PSRAM Configuration
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_SPEED_200M: y
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: y
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: 0
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: 32768
+      CONFIG_SPIRAM_IGNORE_NOTFOUND: n
+
+      # Cache Configuration (optimisé pour PSRAM)
+      CONFIG_CACHE_L2_CACHE_256KB: y
+      CONFIG_CACHE_L2_CACHE_LINE_128B: y
+
+# ============================================================================
+# CAMÉRA CONFIGURATION
+# ============================================================================
+mipi_dsi_cam:
+  id: tab5_cam
+  i2c_id: bsp_bus  # Changez selon votre bus I2C
+  sensor_type: ov02c10
+  sensor_addr: 0x36
+  resolution: "800x480"
+  pixel_format: RGB565
+  framerate: 30
+
+  # PPA Hardware resize (optionnel - réduit charge CPU)
+  output_width: 640
+  output_height: 360
+
+# ============================================================================
+# LVGL DISPLAY
+# ============================================================================
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  update_interval: 100ms
+
+# ============================================================================
+# MULTI-DÉTECTION (avec PSRAM)
+# ============================================================================
+
+# Détection de Visages + Reconnaissance
+face_detection:
+  id: face_detector
+  camera_id: tab5_cam
+  detection_interval: 12        # Toutes les 12 frames
+  score_threshold: 0.35
+  nms_threshold: 0.5
+  recognition_enabled: true
+  face_db_path: "/sdcard/faces.db"
+  recognition_threshold: 0.70
+  draw_enabled: true
+
+  on_face_detected:
+    - lambda: |-
+        ESP_LOGI("face", "👤 %d visage(s) détecté(s)", face_count);
+
+  on_face_recognized:
+    - lambda: |-
+        ESP_LOGI("face", "✅ Visage reconnu: ID=%d, sim=%.2f", face_id, similarity);
+
+# Détection d'Objets YOLO11
+yolo11_detection:
+  id: yolo11_detector
+  camera_id: tab5_cam
+  detection_interval: 15        # Toutes les 15 frames
+  score_threshold: 0.45
+  nms_threshold: 0.5
+  draw_enabled: true
+
+  on_object_detected:
+    - lambda: |-
+        ESP_LOGI("yolo11", "🎯 %d objet(s) détecté(s)", object_count);
+
+# Détection de Piétons (optionnel - décommenter si assez de PSRAM)
+# pedestrian_detection:
+#   id: pedestrian_detector
+#   camera_id: tab5_cam
+#   detection_interval: 10        # Toutes les 10 frames
+#   score_threshold: 0.5
+#   nms_threshold: 0.5
+#   draw_enabled: true
+#
+#   on_pedestrian_detected:
+#     - lambda: |-
+#         ESP_LOGI("pedestrian", "🚶 %d piéton(s) détecté(s)", pedestrian_count);
+
+# ============================================================================
+# MONITORING MÉMOIRE
+# ============================================================================
+interval:
+  # Surveillance mémoire toutes les 30 secondes
+  - interval: 30s
+    then:
+      - lambda: |-
+          size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+          size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          size_t total = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+
+          ESP_LOGI("memory", "💾 RAM: %.2f MB | PSRAM: %.2f MB | Total: %.2f MB",
+                   free_internal / (1024.0 * 1024.0),
+                   free_spiram / (1024.0 * 1024.0),
+                   total / (1024.0 * 1024.0));
+
+          // Alertes si mémoire faible
+          if (free_spiram < 2 * 1024 * 1024) {
+            ESP_LOGW("memory", "⚠️ PSRAM faible (< 2 MB)");
+          }
+          if (free_internal < 1 * 1024 * 1024) {
+            ESP_LOGW("memory", "⚠️ RAM interne faible (< 1 MB)");
+          }
+
+# ============================================================================
+# LOGGER
+# ============================================================================
+logger:
+  level: INFO
+  logs:
+    component: INFO
+    face_detection: INFO
+    yolo11_detection: INFO
+    pedestrian_detection: INFO
+    memory: INFO
+    psram: INFO
+
+# ============================================================================
+# NOTES IMPORTANTES
+# ============================================================================
+# 1. Vérifiez que votre ESP32-P4 a PSRAM physique (16 Mo ou 32 Mo)
+# 2. Appliquez les patches PSRAM aux fichiers __init__.py des composants
+#    (voir dossier PSRAM_PATCHES/)
+# 3. Surveillez les logs mémoire - si PSRAM < 2 MB, désactivez une détection
+# 4. Ajustez detection_interval selon vos besoins en performance
+# 5. Commencez avec 2 détections, ajoutez la 3ème progressivement
+# ============================================================================

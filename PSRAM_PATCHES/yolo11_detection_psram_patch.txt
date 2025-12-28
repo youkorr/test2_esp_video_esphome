@@ -1,0 +1,24 @@
+# Patch pour components/yolo11_detection/__init__.py
+# Ajoutez ces lignes dans la fonction to_code(), après les build flags existants
+
+# ============================================================================
+# PSRAM SUPPORT - Ajoutez après la ligne 69 (après CONFIG_YOLO11_DETECT_MODEL_LOCATION)
+# ============================================================================
+
+    # PSRAM support for ESP32-P4 multi-detection
+    # Uncomment these lines if you have PSRAM and want to run multiple detections
+    # cg.add_build_flag("-DCONFIG_SPIRAM=1")
+    # cg.add_build_flag("-DCONFIG_SPIRAM_USE_MALLOC=1")
+    # cg.add_build_flag("-DCONFIG_SPIRAM_USE_CAPS_ALLOC=1")
+
+    # Force YOLO11 model to use PSRAM instead of internal RAM
+    # cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_PSRAM=1")
+
+# ============================================================================
+# INSTRUCTIONS:
+# 1. Vérifiez que votre ESP32-P4 a PSRAM physique
+# 2. Décommentez les lignes ci-dessus (retirez les #)
+# 3. Ajoutez la configuration PSRAM dans votre fichier YAML principal
+#    (voir PSRAM_CONFIGURATION_GUIDE.md)
+# 4. Recompilez avec esphome compile
+# ============================================================================

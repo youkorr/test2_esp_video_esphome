@@ -1,0 +1,54 @@
+# Configuration pour vérifier PSRAM sur ESP32-P4
+# Ajoutez ceci temporairement à votre config pour diagnostiquer
+
+esphome:
+  name: psram-check
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          ESP_LOGI("psram", "=== DIAGNOSTIC MÉMOIRE ESP32-P4 ===");
+
+          // Mémoire interne (SRAM)
+          size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+          size_t total_internal = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+          ESP_LOGI("psram", "RAM Interne:");
+          ESP_LOGI("psram", "  Total:  %u bytes (%.2f MB)",
+                   total_internal, total_internal / (1024.0 * 1024.0));
+          ESP_LOGI("psram", "  Libre:  %u bytes (%.2f MB)",
+                   free_internal, free_internal / (1024.0 * 1024.0));
+
+          // Mémoire externe (PSRAM/SPIRAM)
+          size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          size_t total_spiram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+
+          if (total_spiram > 0) {
+            ESP_LOGI("psram", "✅ PSRAM Détectée:");
+            ESP_LOGI("psram", "  Total:  %u bytes (%.2f MB)",
+                     total_spiram, total_spiram / (1024.0 * 1024.0));
+            ESP_LOGI("psram", "  Libre:  %u bytes (%.2f MB)",
+                     free_spiram, free_spiram / (1024.0 * 1024.0));
+            ESP_LOGI("psram", "🎉 VOUS POUVEZ UTILISER PLUSIEURS DÉTECTIONS !");
+          } else {
+            ESP_LOGE("psram", "❌ PAS DE PSRAM DÉTECTÉE");
+            ESP_LOGE("psram", "Vous êtes limité à 1 détection à la fois");
+          }
+
+          // Mémoire totale disponible
+          size_t free_total = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+          size_t total_total = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+          ESP_LOGI("psram", "Mémoire Totale (RAM + PSRAM):");
+          ESP_LOGI("psram", "  Total:  %u bytes (%.2f MB)",
+                   total_total, total_total / (1024.0 * 1024.0));
+          ESP_LOGI("psram", "  Libre:  %u bytes (%.2f MB)",
+                   free_total, free_total / (1024.0 * 1024.0));
+
+interval:
+  - interval: 60s
+    then:
+      - lambda: |-
+          size_t free_heap = esp_get_free_heap_size();
+          size_t free_spiram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          ESP_LOGI("memory", "RAM: %.2f MB | PSRAM: %.2f MB",
+                   free_heap / (1024.0 * 1024.0),
+                   free_spiram / (1024.0 * 1024.0));
