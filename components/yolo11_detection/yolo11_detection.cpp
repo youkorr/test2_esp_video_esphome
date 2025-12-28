@@ -42,8 +42,8 @@ void YOLO11DetectionComponent::setup() {
 
 #ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ != nullptr) {
-    ESP_LOGI(TAG, "Waiting for SD card to mount (3 seconds)...");
-    delay(3000);  // Wait for SD card to be mounted
+    ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
+    delay(6000);  // Wait for SD card to be mounted
     ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
     this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
   } else {
