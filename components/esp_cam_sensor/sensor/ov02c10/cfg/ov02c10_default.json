@@ -298,51 +298,6 @@
                             1, 2, 1
                         ]
                     }
-                },
-                {
-                    "gain": 8,
-                    "param": {
-                        "h_thresh": 20,
-                        "l_thresh": 5,
-                        "h_coeff": 1.825,
-                        "m_coeff": 1.425,
-                        "matrix":
-                        [
-                            2, 2, 2,
-                            2, 1, 2,
-                            2, 2, 2
-                        ]
-                    }
-                },
-                {
-                    "gain": 12,
-                    "param": {
-                        "h_thresh": 16,
-                        "l_thresh": 6,
-                        "h_coeff": 1.625,
-                        "m_coeff": 1.325,
-                        "matrix":
-                        [
-                            1, 1, 1,
-                            1, 1, 1,
-                            1, 1, 1
-                        ]
-                    }
-                },
-                {
-                    "gain": 65,
-                    "param": {
-                        "h_thresh": 20,
-                        "l_thresh": 5,
-                        "h_coeff": 1.625,
-                        "m_coeff": 1.225,
-                        "matrix":
-                        [
-                            1, 1, 1,
-                            1, 1, 1,
-                            1, 1, 1
-                        ]
-                    }
                 }
             ],
             "contrast":
@@ -350,18 +305,6 @@
                 {
                     "gain": 1,
                     "value": 134
-                },
-                {
-                    "gain": 16,
-                    "value": 130
-                },
-                {
-                    "gain": 24,
-                    "value": 128
-                },
-                {
-                    "gain": 65,
-                    "value": 126
                 }
             ]
         }
