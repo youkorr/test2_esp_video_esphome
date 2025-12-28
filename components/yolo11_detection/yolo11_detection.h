@@ -23,6 +23,7 @@ class YOLO11DetectionComponent : public Component {
   void setup() override;
   void loop();
   void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::LATE; }  // Setup after SD card
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
