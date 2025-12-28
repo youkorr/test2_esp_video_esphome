@@ -53,6 +53,9 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_ID], var)
         await automation.build_automation(trigger, [(cg.int_, "pedestrian_count")], conf)
 
+    # Set build flag for pedestrian detection model
+    cg.add_build_flag("-DESP_DL_MODEL_PEDESTRIAN=1")
+
     # Add build flags for pedestrian detection
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_PICO_S8_V1=1")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")

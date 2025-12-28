@@ -2,9 +2,11 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// ESP-DL detection component
+// ESP-DL detection component (only for pedestrian detection model)
+#ifdef ESP_DL_MODEL_PEDESTRIAN
 #include "pedestrian_detect.hpp"
 #include "dl_image.hpp"
+#endif
 
 namespace esphome {
 namespace pedestrian_detection {
@@ -13,6 +15,14 @@ static const char *const TAG = "pedestrian_detection";
 
 void PedestrianDetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Pedestrian Detection...");
+
+#ifndef ESP_DL_MODEL_PEDESTRIAN
+  ESP_LOGE(TAG, "Pedestrian Detection component requires ESP_DL_MODEL_PEDESTRIAN flag");
+  ESP_LOGE(TAG, "Pedestrian detection model is not available or not compiled");
+  ESP_LOGE(TAG, "Please ensure a pedestrian detection model file (.espdl) is available and properly configured");
+  this->mark_failed();
+  return;
+#else
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not configured");
@@ -45,6 +55,7 @@ void PedestrianDetectionComponent::setup() {
   ESP_LOGI(TAG, "Pedestrian Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
+#endif
 }
 
 void PedestrianDetectionComponent::loop() {
@@ -86,6 +97,7 @@ void PedestrianDetectionComponent::process_frame_() {
 }
 
 void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_PEDESTRIAN
   if (this->pedestrian_detector_ == nullptr) {
     return;
   }
@@ -125,6 +137,7 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
       callback(ped_results.size());
     }
   }
+#endif
 }
 
 void PedestrianDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -134,6 +147,7 @@ void PedestrianDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t wid
 }
 
 void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_PEDESTRIAN
   if (img_data == nullptr || this->pedestrian_results_mutex_ == nullptr) {
     return;
   }
@@ -162,6 +176,7 @@ void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t wid
 
     xSemaphoreGive(this->pedestrian_results_mutex_);
   }
+#endif
 }
 
 void PedestrianDetectionComponent::dump_config() {
