@@ -14,6 +14,12 @@ CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
 CONF_ON_OBJECT_DETECTED = "on_object_detected"
+CONF_MODEL_LOCATION = "model_location"
+CONF_MODEL_PATH = "model_path"
+
+# Model location types
+MODEL_LOCATION_FLASH = "flash_rodata"
+MODEL_LOCATION_SDCARD = "sdcard"
 
 yolo11_detection_ns = cg.esphome_ns.namespace("yolo11_detection")
 YOLO11DetectionComponent = yolo11_detection_ns.class_("YOLO11DetectionComponent", cg.Component)
@@ -32,6 +38,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+    cv.Optional(CONF_MODEL_LOCATION, default=MODEL_LOCATION_FLASH): cv.one_of(
+        MODEL_LOCATION_FLASH, MODEL_LOCATION_SDCARD, lower=True
+    ),
+    cv.Optional(CONF_MODEL_PATH): cv.string,
     cv.Optional(CONF_ON_OBJECT_DETECTED): automation.validate_automation({
         cv.GenerateID(): cv.declare_id(ObjectDetectedTrigger),
     }),
@@ -65,8 +75,27 @@ async def to_code(config):
     # YOLO11 detection configuration
     cg.add_build_flag("-DCONFIG_YOLO11_DETECT_S8_V1=1")
     cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_TYPE=0")
-    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1")
-    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0")
+
+    # Model location configuration
+    model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
+
+    if model_location == MODEL_LOCATION_SDCARD:
+        # SD card mode
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=0")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=2")  # SDCARD = 2
+
+        # Pass SD card path to C++ component
+        if CONF_MODEL_PATH in config:
+            cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{config[CONF_MODEL_PATH]}"')))
+        else:
+            # Default SD card path
+            cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
+    else:
+        # Flash rodata mode (default)
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=0")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0")  # FLASH_RODATA = 0
 
     # Add include paths
     component_dir = os.path.dirname(__file__)

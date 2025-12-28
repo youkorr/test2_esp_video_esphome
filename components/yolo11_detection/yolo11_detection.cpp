@@ -40,7 +40,20 @@ void YOLO11DetectionComponent::setup() {
   // Initialize YOLO11 object detector
   ESP_LOGI(TAG, "Initializing YOLO11 object detector...");
 
+#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
+    this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
+  } else {
+    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
+    this->mark_failed();
+    return;
+  }
+#else
+  ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata");
   this->object_detector_ = new YOLO11Detect();
+#endif
+
   if (this->object_detector_ != nullptr) {
     this->object_detector_->set_score_thr(this->score_threshold_);
     this->object_detector_->set_nms_thr(this->nms_threshold_);
@@ -224,6 +237,14 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
 
 void YOLO11DetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLO11 Object Detection:");
+#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
+  ESP_LOGCONFIG(TAG, "  Model location: SD card");
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Model path: %s", this->sdcard_model_path_);
+  }
+#else
+  ESP_LOGCONFIG(TAG, "  Model location: Flash rodata");
+#endif
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);

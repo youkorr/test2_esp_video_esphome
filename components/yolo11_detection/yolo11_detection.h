@@ -31,6 +31,7 @@ class YOLO11DetectionComponent : public Component {
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
   void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
+  void set_sdcard_model_path(const char *path) { this->sdcard_model_path_ = path; }
 
   // Getters
   int get_detected_count();
@@ -59,6 +60,7 @@ class YOLO11DetectionComponent : public Component {
   float nms_threshold_{0.5};
   int detection_interval_{8};
   bool draw_enabled_{true};
+  const char *sdcard_model_path_{nullptr};
 
   // State
   uint32_t frame_counter_{0};

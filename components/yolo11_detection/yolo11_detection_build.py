@@ -151,8 +151,23 @@ if os.path.exists(esp_dl_dir):
 # ========================================================================
 # Pack and Embed YOLO11 Detection Model
 # ========================================================================
+# Check if SD card mode is enabled
+sdcard_mode = False
+for define in env.get("CPPDEFINES", []):
+    if isinstance(define, tuple) and define[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_mode = (define[1] == "1")
+        break
+    elif define == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_mode = True
+        break
+
+if sdcard_mode:
+    print("[YOLO11 Detection] SD card mode enabled - skipping model embedding")
+else:
+    print("[YOLO11 Detection] Flash rodata mode - embedding model")
+
 yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
-if os.path.exists(yolo11_detect_dir):
+if os.path.exists(yolo11_detect_dir) and not sdcard_mode:
     models_dir = os.path.join(yolo11_detect_dir, "models", "p4")
     pack_script = os.path.join(yolo11_detect_dir, "pack_model.py")
 
