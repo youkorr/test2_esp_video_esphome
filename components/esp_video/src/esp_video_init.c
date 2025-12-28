@@ -4,23 +4,21 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v4 */
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v5 */
 
 /*
  * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
  * These defines MUST be set for OV02C10 JSON configuration to be loaded.
  * Without these, the JSON exists in firmware but is never applied to ISP.
  *
- * Using #undef first to override any previous definition (even if set to 0)
+ * IMPORTANT: Using unconditional #undef to ensure we override ANY previous definition
+ * (whether from build system, sdkconfig, or nowhere). This MUST be the first thing
+ * in the file before ANY #include directives.
  */
-#ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
 #undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-#endif
 #define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
 
-#ifdef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
 #undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
-#endif
 #define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
 
 #include <string.h>
@@ -348,9 +346,9 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
     ESP_LOGE(TAG, "");
     ESP_LOGE(TAG, "========================================");
-    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v4)");
+    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v5)");
     ESP_LOGE(TAG, "   This confirms our modified version is being used");
-    ESP_LOGE(TAG, "   CONFIG forced with #undef + #define");
+    ESP_LOGE(TAG, "   CONFIG forced with UNCONDITIONAL #undef + #define");
     ESP_LOGE(TAG, "========================================");
     ESP_LOGE(TAG, "");
 
