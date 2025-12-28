@@ -11,8 +11,8 @@
 #include <stdint.h>
 #include "esp_cam_sensor_types.h"
 
-/* Use official OV02C10 types from esp_cam_sensor component */
-#include "sensor/ov02c10/include/ov02c10_types.h"
+/* Forward declaration - ov02c10_reginfo_t is defined in ov02c10_types.h
+ * which is included via ov02c10_settings.h when this header is used */
 
 #ifdef __cplusplus
 extern "C" {
