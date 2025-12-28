@@ -216,8 +216,8 @@ bool MipiDSICamComponent::check_pipeline_health_() {
 // ============================================================================
 
 bool MipiDSICamComponent::init_ppa_() {
-  // Check if user explicitly disabled PPA via YAML
-  if (this->ppa_user_override_ && !this->ppa_enabled_) {
+  // Check if user explicitly disabled PPA via YAML (use saved original value)
+  if (this->ppa_user_override_ && !this->ppa_user_requested_) {
     ESP_LOGI(TAG, "⚠️ PPA explicitly DISABLED by user (ppa_enabled: false) - hardware rotation only");
     return true;
   }

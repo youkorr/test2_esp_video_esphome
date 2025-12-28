@@ -66,7 +66,7 @@ class MipiDSICamComponent : public Component {
   void set_crop_offset_x(int offset) { crop_offset_x_ = offset; }  // PPA crop offset (pixels)
   void set_output_width(int width) { output_width_ = width; }      // PPA resize output (0 = no resize)
   void set_output_height(int height) { output_height_ = height; }  // PPA resize output
-  void set_ppa_enabled(bool enable) { ppa_user_override_ = true; ppa_enabled_ = enable; }  // Explicit PPA control
+  void set_ppa_enabled(bool enable) { ppa_user_override_ = true; ppa_enabled_ = enable; ppa_user_requested_ = enable; }  // Explicit PPA control
 
   // Configuration des gains RGB CCM depuis YAML
   void set_rgb_gains_config(float red, float green, float blue) {
@@ -198,6 +198,7 @@ class MipiDSICamComponent : public Component {
   void *ppa_client_handle_{nullptr};
   bool ppa_enabled_{false};
   bool ppa_user_override_{false};  // True if user explicitly set ppa_enabled in YAML
+  bool ppa_user_requested_{false}; // Saves user's original ppa_enabled value for re-init after cleanup
 
   // Configuration CCM RGB gains depuis YAML
   bool rgb_gains_enabled_{false};
