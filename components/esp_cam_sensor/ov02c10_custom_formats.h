@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include "esp_cam_sensor_types.h"
 
+/* Use official OV02C10 types from esp_cam_sensor component */
+#include "sensor/ov02c10/include/ov02c10_types.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -19,18 +22,18 @@ extern "C" {
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof((arr)[0]))
 #endif
 
-// Type pour registre OV02C10
-typedef struct {
-    uint16_t addr;
-    uint8_t val;
-} ov02c10_reginfo_t;
-
-// OV02C10 register end marker
+/* OV02C10 register markers - must match official definitions */
+#ifndef OV02C10_REG_END
 #define OV02C10_REG_END 0xffff
+#endif
 
-// Clock rates for custom formats
-#define OV02C10_IDI_CLOCK_RATE_800x640_50FPS        (72000000ULL)
+/* Clock rates for custom formats - must match official definitions */
+#ifndef OV02C10_IDI_CLOCK_RATE_800x640_50FPS
+#define OV02C10_IDI_CLOCK_RATE_800x640_50FPS        (100000000ULL)
+#endif
+#ifndef OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS
 #define OV02C10_MIPI_CSI_LINE_RATE_800x640_50FPS    (OV02C10_IDI_CLOCK_RATE_800x640_50FPS * 4)
+#endif
 
 // ⚠️  IMPORTANT: OV02C10 native sensor is 1936×1088 (16:9 ratio)
 //     Formats with 4:3 ratio (640×480, 800x600) crop 25% of horizontal FOV!
