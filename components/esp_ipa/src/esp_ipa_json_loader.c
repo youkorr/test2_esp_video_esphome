@@ -18,11 +18,11 @@
 
 static const char *TAG = "ipa_json";
 
-// Déclarations externes des JSON embarqués
+// Déclarations externes des JSON embarqués (créés par target_add_binary_data)
 extern const char ov02c10_ipa_config_json_start[];
-extern const size_t ov02c10_ipa_config_json_size;
+extern const char ov02c10_ipa_config_json_end[];
 extern const char ov5647_ipa_config_json_start[];
-extern const size_t ov5647_ipa_config_json_size;
+extern const char ov5647_ipa_config_json_end[];
 
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
@@ -296,11 +296,11 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
     // Sélectionner le JSON embarqué selon le capteur
     if (strcmp(sensor_name, "OV02C10") == 0 || strcmp(sensor_name, "ov02c10") == 0) {
         json_data = ov02c10_ipa_config_json_start;
-        json_size = ov02c10_ipa_config_json_size;
+        json_size = ov02c10_ipa_config_json_end - ov02c10_ipa_config_json_start;
         ESP_LOGI(TAG, "  Using OV02C10 JSON (%zu bytes)", json_size);
     } else if (strcmp(sensor_name, "OV5647") == 0 || strcmp(sensor_name, "ov5647") == 0) {
         json_data = ov5647_ipa_config_json_start;
-        json_size = ov5647_ipa_config_json_size;
+        json_size = ov5647_ipa_config_json_end - ov5647_ipa_config_json_start;
         ESP_LOGI(TAG, "  Using OV5647 JSON (%zu bytes)", json_size);
     } else {
         ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);
