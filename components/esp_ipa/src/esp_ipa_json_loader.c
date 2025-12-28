@@ -18,12 +18,14 @@
 
 static const char *TAG = "ipa_json";
 
-// Déclarations externes des JSON embarqués (créés par EMBED_FILES)
-// Symboles: _binary_cfg_<filename>_json_start / _binary_cfg_<filename>_json_end
-extern const uint8_t _binary_cfg_ov02c10_default_json_start[];
-extern const uint8_t _binary_cfg_ov02c10_default_json_end[];
-extern const uint8_t _binary_cfg_ov5647_default_json_start[];
-extern const uint8_t _binary_cfg_ov5647_default_json_end[];
+// Déclarations externes des JSON embarqués (créés par esp_video_build.py)
+// Le script Python génère ces symboles via wrapper C
+extern const char ov02c10_ipa_config_json_start[];
+extern const char *ov02c10_ipa_config_json_end;
+extern const size_t ov02c10_ipa_config_json_size;
+extern const char ov5647_ipa_config_json_start[];
+extern const char *ov5647_ipa_config_json_end;
+extern const size_t ov5647_ipa_config_json_size;
 
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
@@ -296,12 +298,12 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
 
     // Sélectionner le JSON embarqué selon le capteur
     if (strcmp(sensor_name, "OV02C10") == 0 || strcmp(sensor_name, "ov02c10") == 0) {
-        json_data = (const char *)_binary_cfg_ov02c10_default_json_start;
-        json_size = _binary_cfg_ov02c10_default_json_end - _binary_cfg_ov02c10_default_json_start;
+        json_data = ov02c10_ipa_config_json_start;
+        json_size = ov02c10_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV02C10 JSON (%zu bytes)", json_size);
     } else if (strcmp(sensor_name, "OV5647") == 0 || strcmp(sensor_name, "ov5647") == 0) {
-        json_data = (const char *)_binary_cfg_ov5647_default_json_start;
-        json_size = _binary_cfg_ov5647_default_json_end - _binary_cfg_ov5647_default_json_start;
+        json_data = ov5647_ipa_config_json_start;
+        json_size = ov5647_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV5647 JSON (%zu bytes)", json_size);
     } else {
         ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);

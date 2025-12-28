@@ -5,14 +5,11 @@ set(srcs "src/version.c"
          "src/esp_ipa_detect_stubs.c"
          "src/esp_ipa_json_loader.c")
 
-# Embed JSON configuration files from local cfg/ directory
-# Symbols created: _binary_cfg_<filename>_json_start / _binary_cfg_<filename>_json_end
-set(embed_files "cfg/ov02c10_default.json"
-                "cfg/ov5647_default.json")
+# NOTE: JSON embedding is handled by esp_video_build.py for PlatformIO compatibility
+# The Python script generates C wrappers with symbols like ov02c10_ipa_config_json_start
 
 idf_component_register(SRCS ${srcs}
                        INCLUDE_DIRS ${include_dirs}
-                       EMBED_FILES ${embed_files}
                        REQUIRES cJSON)
 
 idf_build_get_property(idf_target IDF_TARGET)
