@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v6 */
+/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v7 */
 
 /*
  * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
@@ -72,9 +72,9 @@
 #undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
 #define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
 
-#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+// CRITICAL FIX: Force include ISP pipeline header regardless of CONFIG
+// This is safe for all sensors - the code detects sensor type at runtime
 #include "esp_video_pipeline_isp.h"
-#endif
 
 #if ESP_VIDEO_ENABLE_SCCB_DEVICE
 #define SCCB_NUM_MAX                I2C_NUM_MAX
@@ -371,9 +371,9 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 {
     ESP_LOGE(TAG, "");
     ESP_LOGE(TAG, "========================================");
-    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v6)");
+    ESP_LOGE(TAG, "CUSTOM esp_video_init() CALLED! (v2025-11-08-v7)");
     ESP_LOGE(TAG, "   This confirms our modified version is being used");
-    ESP_LOGE(TAG, "   CONFIG redefined 3x: before/after includes/before #if");
+    ESP_LOGE(TAG, "   ISP code FORCED to execute (bypass all CONFIG checks)");
     ESP_LOGE(TAG, "========================================");
     ESP_LOGE(TAG, "");
 
@@ -548,22 +548,21 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 ESP_LOGE(TAG, "  cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
                 ESP_LOGE(TAG, "  cam_dev->cur_format=%p", cam_dev->cur_format);
             }
-#ifdef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 (DEFINED)");
-#else
-            ESP_LOGI(TAG, "  CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=0 (NOT DEFINED)");
-#endif
+
+            // CRITICAL FIX: Force ISP pipeline initialization regardless of CONFIG
+            // The code is safe for all sensors - it automatically selects the right JSON
+            ESP_LOGI(TAG, "  ISP Pipeline Controller: FORCED ENABLED (v6 - bypass CONFIG)");
             ESP_LOGI(TAG, "========================================");
 
-#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-            ESP_LOGI(TAG, "ISP Pipeline Controller: ENABLED");
+            // ISP Pipeline initialization - ALWAYS execute (safe for all sensors)
+            ESP_LOGI(TAG, "ISP Pipeline Controller: Executing (sensor-aware JSON selection)");
             ESP_LOGI(TAG, "   cam_dev=%p, cur_format=%p", cam_dev, cam_dev ? cam_dev->cur_format : NULL);
             if (cam_dev && cam_dev->cur_format) {
                 ESP_LOGI(TAG, "   cur_format->isp_info=%p", cam_dev->cur_format->isp_info);
                 ESP_LOGI(TAG, "   cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
             }
 
-            if (cam_dev->cur_format && cam_dev->cur_format->isp_info) {
+            if (cam_dev && cam_dev->cur_format && cam_dev->cur_format->isp_info) {
                 const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(cam_dev->name);
                 if (ipa_config) {
                     esp_video_isp_config_t isp_config = {
@@ -587,9 +586,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 ESP_LOGW(TAG, "  Cannot initialize ISP: cur_format=%p, isp_info=%p",
                          cam_dev->cur_format, cam_dev->cur_format ? cam_dev->cur_format->isp_info : NULL);
             }
-#else
-            ESP_LOGW(TAG, " ISP Pipeline Controller: DISABLED (CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER not set)");
-#endif
+
             csi_inited = true;
         }
 #endif
