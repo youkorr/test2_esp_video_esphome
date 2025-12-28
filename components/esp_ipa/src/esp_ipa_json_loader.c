@@ -79,10 +79,10 @@ static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *c
         ccm_config->matrix[i / 3][i % 3] = (float)value->valuedouble;
     }
 
-    ESP_LOGI(TAG, "CCM Matrix loaded:");
-    ESP_LOGI(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[0][0], ccm_config->matrix[0][1], ccm_config->matrix[0][2]);
-    ESP_LOGI(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[1][0], ccm_config->matrix[1][1], ccm_config->matrix[1][2]);
-    ESP_LOGI(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[2][0], ccm_config->matrix[2][1], ccm_config->matrix[2][2]);
+    ESP_LOGE(TAG, "CCM Matrix loaded:");
+    ESP_LOGE(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[0][0], ccm_config->matrix[0][1], ccm_config->matrix[0][2]);
+    ESP_LOGE(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[1][0], ccm_config->matrix[1][1], ccm_config->matrix[1][2]);
+    ESP_LOGE(TAG, "  [%.3f, %.3f, %.3f]", ccm_config->matrix[2][0], ccm_config->matrix[2][1], ccm_config->matrix[2][2]);
 
     return ESP_OK;
 }
@@ -288,7 +288,7 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGI(TAG, "Loading IPA JSON config for sensor: %s", sensor_name);
+    ESP_LOGE(TAG, "Loading IPA JSON config for sensor: %s", sensor_name);
 
     const char *json_data = NULL;
     size_t json_size = 0;
@@ -297,11 +297,11 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
     if (strcmp(sensor_name, "OV02C10") == 0 || strcmp(sensor_name, "ov02c10") == 0) {
         json_data = ov02c10_ipa_config_json_start;
         json_size = ov02c10_ipa_config_json_end - ov02c10_ipa_config_json_start;
-        ESP_LOGI(TAG, "  Using OV02C10 JSON (%zu bytes)", json_size);
+        ESP_LOGE(TAG, "  Using OV02C10 JSON (%zu bytes)", json_size);
     } else if (strcmp(sensor_name, "OV5647") == 0 || strcmp(sensor_name, "ov5647") == 0) {
         json_data = ov5647_ipa_config_json_start;
         json_size = ov5647_ipa_config_json_end - ov5647_ipa_config_json_start;
-        ESP_LOGI(TAG, "  Using OV5647 JSON (%zu bytes)", json_size);
+        ESP_LOGE(TAG, "  Using OV5647 JSON (%zu bytes)", json_size);
     } else {
         ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);
         return ESP_ERR_NOT_SUPPORTED;
@@ -370,11 +370,11 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
 
     cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "JSON parsing summary:");
-    ESP_LOGI(TAG, "  CCM: %s", ipa_json_config->has_ccm ? "Loaded" : "Not found");
-    ESP_LOGI(TAG, "  AWB: %s", ipa_json_config->has_awb ? "Loaded" : "Not found");
-    ESP_LOGI(TAG, "  Sharpen: %s", ipa_json_config->has_sharpen ? "Loaded" : "Not found");
-    ESP_LOGI(TAG, "  Gamma: %s", ipa_json_config->has_gamma ? "Loaded" : "Not found");
+    ESP_LOGE(TAG, "JSON parsing summary:");
+    ESP_LOGE(TAG, "  CCM: %s", ipa_json_config->has_ccm ? "Loaded" : "Not found");
+    ESP_LOGE(TAG, "  AWB: %s", ipa_json_config->has_awb ? "Loaded" : "Not found");
+    ESP_LOGE(TAG, "  Sharpen: %s", ipa_json_config->has_sharpen ? "Loaded" : "Not found");
+    ESP_LOGE(TAG, "  Gamma: %s", ipa_json_config->has_gamma ? "Loaded" : "Not found");
     ESP_LOGI(TAG, "  Contrast: %s", ipa_json_config->has_contrast ? "Loaded" : "Not found");
 
     return ESP_OK;

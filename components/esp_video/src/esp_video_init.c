@@ -551,15 +551,15 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
             // CRITICAL FIX: Force ISP pipeline initialization regardless of CONFIG
             // The code is safe for all sensors - it automatically selects the right JSON
-            ESP_LOGI(TAG, "  ISP Pipeline Controller: FORCED ENABLED (v6 - bypass CONFIG)");
-            ESP_LOGI(TAG, "========================================");
+            ESP_LOGE(TAG, "  ISP Pipeline Controller: FORCED ENABLED (v6 - bypass CONFIG)");
+            ESP_LOGE(TAG, "========================================");
 
             // ISP Pipeline initialization - ALWAYS execute (safe for all sensors)
-            ESP_LOGI(TAG, "ISP Pipeline Controller: Executing (sensor-aware JSON selection)");
-            ESP_LOGI(TAG, "   cam_dev=%p, cur_format=%p", cam_dev, cam_dev ? cam_dev->cur_format : NULL);
+            ESP_LOGE(TAG, "ISP Pipeline Controller: Executing (sensor-aware JSON selection)");
+            ESP_LOGE(TAG, "   cam_dev=%p, cur_format=%p", cam_dev, cam_dev ? cam_dev->cur_format : NULL);
             if (cam_dev && cam_dev->cur_format) {
-                ESP_LOGI(TAG, "   cur_format->isp_info=%p", cam_dev->cur_format->isp_info);
-                ESP_LOGI(TAG, "   cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
+                ESP_LOGE(TAG, "   cur_format->isp_info=%p", cam_dev->cur_format->isp_info);
+                ESP_LOGE(TAG, "   cam_dev->name=%s", cam_dev->name ? cam_dev->name : "NULL");
             }
 
             if (cam_dev && cam_dev->cur_format && cam_dev->cur_format->isp_info) {
@@ -572,18 +572,18 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                         .sensor_name = cam_dev->name
                     };
 
-                    ESP_LOGI(TAG, "Initializing ISP pipeline with IPA for sensor '%s'...", cam_dev->name);
+                    ESP_LOGE(TAG, "Initializing ISP pipeline with IPA for sensor '%s'...", cam_dev->name);
                     ret = esp_video_isp_pipeline_init(&isp_config);
                     if (ret != ESP_OK) {
                         ESP_LOGE(TAG, "  Failed to create ISP pipeline: %d (%s)", ret, esp_err_to_name(ret));
                         return ret;
                     }
-                    ESP_LOGI(TAG, "  ISP pipeline initialized successfully!");
+                    ESP_LOGE(TAG, "  ISP pipeline initialized successfully!");
                 } else {
-                    ESP_LOGW(TAG, "   Failed to get IPA config for sensor '%s' - ISP not initialized", cam_dev->name);
+                    ESP_LOGE(TAG, "   Failed to get IPA config for sensor '%s' - ISP not initialized", cam_dev->name);
                 }
             } else {
-                ESP_LOGW(TAG, "  Cannot initialize ISP: cur_format=%p, isp_info=%p",
+                ESP_LOGE(TAG, "  Cannot initialize ISP: cur_format=%p, isp_info=%p",
                          cam_dev->cur_format, cam_dev->cur_format ? cam_dev->cur_format->isp_info : NULL);
             }
 
