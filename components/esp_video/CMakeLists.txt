@@ -30,9 +30,9 @@ endif()
 if(CONFIG_ESP_VIDEO_ENABLE_ISP)
     list(APPEND srcs "src/device/esp_video_isp_device.c")
 
-    if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
-        list(APPEND srcs "src/esp_video_isp_pipeline.c")
-    endif()
+    # CRITICAL FIX: Always compile ISP pipeline controller for JSON IPA loading
+    # This is safe for all sensors - the code detects sensor type at runtime
+    list(APPEND srcs "src/esp_video_isp_pipeline.c")
 endif()
 
 idf_component_register(SRCS ${srcs}
@@ -41,8 +41,8 @@ idf_component_register(SRCS ${srcs}
                        PRIV_REQUIRES ${priv_requires}
                        REQUIRES ${requires})
 
-if(CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER)
-    idf_component_optional_requires(PRIVATE "esp_ipa")
-endif()
+# CRITICAL FIX: Always require esp_ipa for JSON IPA loading
+# This is safe for all sensors - the code detects sensor type at runtime
+idf_component_optional_requires(PRIVATE "esp_ipa")
 
 
