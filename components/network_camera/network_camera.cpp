@@ -54,15 +54,31 @@ void NetworkCamera::setup() {
 void NetworkCamera::loop() {
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
+    // Check if we need to wait before attempting connection (retry delay)
+    uint32_t now = millis();
+    if (this->last_connection_attempt_ > 0 &&
+        (now - this->last_connection_attempt_) < this->connection_retry_delay_) {
+      // Still within retry delay period, skip this attempt
+      return;
+    }
+
     // Check WiFi connection before attempting to connect to camera
     auto wifi_component = wifi::global_wifi_component;
     if (wifi_component == nullptr || !wifi_component->is_connected()) {
-      ESP_LOGW(TAG, "WiFi not connected yet, waiting...");
-      this->enabled_ = false;  // Disable temporarily, user can re-enable
+      // Log only on first attempt or every 30 seconds to avoid spam
+      static uint32_t last_wifi_log = 0;
+      if (this->connection_attempts_ == 0 || (now - last_wifi_log) > 30000) {
+        ESP_LOGW(TAG, "WiFi not connected yet, waiting for connection (will auto-retry)...");
+        last_wifi_log = now;
+      }
+      this->last_connection_attempt_ = now;
+      // Don't disable - keep trying automatically
       return;
     }
 
     ESP_LOGI(TAG, "Starting Network Camera display...");
+    this->connection_attempts_++;
+    this->last_connection_attempt_ = now;
 
     bool connected = false;
     if (this->protocol_ == Protocol::MJPEG) {
@@ -72,10 +88,15 @@ void NetworkCamera::loop() {
     }
 
     if (!connected) {
-      ESP_LOGE(TAG, "Failed to connect to stream");
-      this->enabled_ = false;  // Disable to allow retry
+      ESP_LOGE(TAG, "Failed to connect to stream (attempt %u, will retry in %u seconds)",
+               this->connection_attempts_, this->connection_retry_delay_ / 1000);
+      // Don't disable - will retry automatically after delay
       return;
     }
+
+    // Connection successful! Reset retry counter
+    ESP_LOGI(TAG, "Connection established after %u attempt(s)", this->connection_attempts_);
+    this->connection_attempts_ = 0;
 
     this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
     if (this->lvgl_timer_ == nullptr) {

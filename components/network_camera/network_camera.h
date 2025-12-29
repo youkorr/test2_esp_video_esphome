@@ -66,6 +66,11 @@ class NetworkCamera : public Component {
 
   lv_timer_t *lvgl_timer_{nullptr};
 
+  // WiFi connection retry management
+  uint32_t last_connection_attempt_{0};
+  uint32_t connection_retry_delay_{15000};  // 15 seconds initial delay
+  uint8_t connection_attempts_{0};
+
   // JPEG decoder
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
