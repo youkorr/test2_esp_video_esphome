@@ -47,7 +47,7 @@ void FaceDetectionComponent::setup() {
   // Initialize face detector
   ESP_LOGI(TAG, "Initializing face detector...");
 
-#ifdef CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+#if CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ != nullptr) {
     ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
     delay(6000);

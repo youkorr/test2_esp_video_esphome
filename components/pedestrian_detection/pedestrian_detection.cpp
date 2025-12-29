@@ -41,7 +41,7 @@ void PedestrianDetectionComponent::setup() {
   // Initialize pedestrian detector
   ESP_LOGI(TAG, "Initializing pedestrian detector...");
 
-#ifdef CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
+#if CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ != nullptr) {
     ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
     delay(6000);  // Wait for SD card to be mounted
