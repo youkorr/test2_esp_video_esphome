@@ -2535,27 +2535,34 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
       ESP_LOGW(TAG, "  Constraint flags: set0=%d, set1=%d, set2=%d",
                constraint_set0 ? 1 : 0, constraint_set1 ? 1 : 0, constraint_set2 ? 1 : 0);
 
-      // OpenH264 decoder supports ALL H.264 profiles: Baseline, Main, High, High 10, etc.
-      // Note: Using OpenH264 instead of tinyh264 for security camera compatibility
-      // OpenH264 is ~20-30% slower but essential for High Profile streams
-      bool is_supported = (profile_idc == 66  ||  // Baseline (+ Constrained Baseline)
-                           profile_idc == 77  ||  // Main
-                           profile_idc == 88  ||  // Extended
-                           profile_idc == 100 ||  // High (most security cameras!)
-                           profile_idc == 110);   // High 10
+      // OpenH264 decoder supports ALL H.264 profiles including advanced ones
+      // We'll let OpenH264 attempt to decode and report errors if it can't
+      // Better to try and fail than to reject prematurely
+      bool is_common = (profile_idc == 66  ||  // Baseline (+ Constrained Baseline)
+                        profile_idc == 77  ||  // Main
+                        profile_idc == 100);   // High (most security cameras!)
 
-      if (!is_supported) {
-        ESP_LOGW(TAG, "  WARNING: Profile %s (idc=%d) is uncommon - decoder may struggle",
-                 profile_name, profile_idc);
-        ESP_LOGW(TAG, "  Commonly supported: Baseline(66), Main(77), High(100), High10(110)");
+      bool is_advanced = (profile_idc == 88  ||  // Extended
+                          profile_idc == 110 ||  // High 10
+                          profile_idc == 122 ||  // High 4:2:2
+                          profile_idc == 244);   // High 4:4:4
+
+      if (is_common) {
+        ESP_LOGI(TAG, "  ✓ Profile %s is commonly used and well supported", profile_name);
+      } else if (is_advanced) {
+        ESP_LOGW(TAG, "  ⚠ Profile %s is advanced - OpenH264 will attempt decoding", profile_name);
+        ESP_LOGW(TAG, "    Success depends on video complexity and decoder capabilities");
+        if (profile_idc == 244) {
+          ESP_LOGW(TAG, "    High 4:4:4 is very demanding - may not work on all hardware");
+        }
       } else {
-        ESP_LOGI(TAG, "  ✓ Profile %s is supported by OpenH264 decoder", profile_name);
+        ESP_LOGW(TAG, "  ⚠ Profile %s (idc=%d) is uncommon - decoder may reject it",
+                 profile_name, profile_idc);
       }
 
-      // Show performance expectation based on profile
-      if (profile_idc == 100 || profile_idc == 110) {
-        ESP_LOGI(TAG, "  Note: High Profile decoding is ~20-30%% slower than Baseline");
-        ESP_LOGI(TAG, "        but essential for modern security cameras");
+      // Show performance expectation
+      if (profile_idc >= 100) {
+        ESP_LOGI(TAG, "  Note: High/Advanced profiles are slower to decode than Baseline");
       }
     }
 

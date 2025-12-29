@@ -159,7 +159,18 @@ if os.path.exists(esp_h264_dir):
         print("[Simple Video Player]     OpenH264 not found - High Profile videos will FAIL")
 
     if os.path.exists(h264_lib):
-        print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")
+        lib_size_mb = os.path.getsize(h264_lib) / (1024 * 1024)
+        print(f"[Simple Video Player] ========================================")
+        print(f"[Simple Video Player] Using {h264_lib_name} decoder library")
+        print(f"[Simple Video Player]   Path: {h264_lib}")
+        print(f"[Simple Video Player]   Size: {lib_size_mb:.1f} MB")
+        if h264_lib_name == "openh264":
+            print(f"[Simple Video Player]   Profiles: Baseline, Main, High, High10, High422, High444")
+            print(f"[Simple Video Player]   Note: ~20-30% slower but supports ALL H.264 profiles")
+        else:
+            print(f"[Simple Video Player]   Profiles: Constrained Baseline ONLY")
+            print(f"[Simple Video Player]   Note: Faster but security cameras may not work")
+        print(f"[Simple Video Player] ========================================")
 
         # Add library path
         env.Append(LIBPATH=[h264_lib_dir])
