@@ -176,6 +176,17 @@ class SimpleVideoPlayer : public Component {
     }
   }
 
+  inline int cached_fgetc_() {
+    if (file_cache_loaded_) {
+      if (file_cache_pos_ >= file_cache_size_) {
+        return EOF;
+      }
+      return (int)file_cache_buffer_[file_cache_pos_++];
+    } else {
+      return fgetc(file_);
+    }
+  }
+
   // Helper functions for reading big-endian values (cache-aware)
   inline uint32_t read_be32_() {
     uint8_t buf[4];

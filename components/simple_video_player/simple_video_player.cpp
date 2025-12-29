@@ -1260,9 +1260,9 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
   // Read first frame to get dimensions
   // Search for JPEG start marker (FFD8)
   int c1 = 0, c2 = 0;
-  while ((c1 = fgetc(this->file_)) != EOF) {
+  while ((c1 = this->cached_fgetc_()) != EOF) {
     if (c1 == 0xFF) {
-      c2 = fgetc(this->file_);
+      c2 = this->cached_fgetc_();
       if (c2 == 0xD8) {
         break;
       }
@@ -1278,12 +1278,12 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
   // SOF markers: FFC0-FFCF (we care about FFC0, FFC2 mainly)
   while (true) {
     // Find next marker
-    c1 = fgetc(this->file_);
+    c1 = this->cached_fgetc_();
     if (c1 != 0xFF) continue;
 
     // Skip padding 0xFF bytes
     do {
-      c2 = fgetc(this->file_);
+      c2 = this->cached_fgetc_();
     } while (c2 == 0xFF);
 
     if (c2 == EOF) break;
@@ -1293,7 +1293,7 @@ bool SimpleVideoPlayer::detect_jpeg_resolution_(int &width, int &height) {
         (c2 >= 0xC9 && c2 <= 0xCB) || (c2 >= 0xCD && c2 <= 0xCF)) {
       // SOF marker found - read dimensions
       uint16_t length = this->read_be16_();
-      uint8_t precision = fgetc(this->file_);
+      uint8_t precision = this->cached_fgetc_();
       height = this->read_be16_();
       width = this->read_be16_();
 
