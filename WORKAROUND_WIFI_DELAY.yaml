@@ -1,0 +1,100 @@
+# ========================================================================
+# WORKAROUND TEMPORAIRE - Attendre le WiFi dans le bouton START
+# ========================================================================
+# À utiliser en attendant de recompiler avec le nouveau code C++
+# ========================================================================
+
+          - button:
+              id: btn_start_all
+              width: 100
+              height: 40
+              x: 690
+              y: 120
+              bg_color: 0x27ae60
+              bg_opa: COVER
+              radius: 20
+              on_click:
+                then:
+                  # ===== ATTENDRE QUE LE WIFI SOIT CONNECTÉ =====
+                  - wait_until:
+                      condition:
+                        wifi.connected:
+                      timeout: 10s  # Attendre max 10 secondes
+
+                  # Vérifier que le WiFi est bien connecté
+                  - if:
+                      condition:
+                        wifi.connected:
+                      then:
+                        - lambda: |-
+                            ESP_LOGI("security", "✓ WiFi connected, starting camera");
+
+                            // Configurer le canvas
+                            static bool canvas_configured = false;
+                            if (!canvas_configured) {
+                              auto canvas = id(security_canvas);
+                              if (canvas != nullptr) {
+                                lv_coord_t w = lv_obj_get_width(canvas);
+                                lv_coord_t h = lv_obj_get_height(canvas);
+                                if (w > 0 && h > 0) {
+                                  id(security_display).configure_canvas(canvas);
+                                  canvas_configured = true;
+                                  ESP_LOGI("security", "✓ Canvas configured");
+                                }
+                              }
+                            }
+
+                            // Démarrer la caméra
+                            id(security_cam_1).set_enabled(true);
+                            id(cam1_state) = true;
+                      else:
+                        - lambda: |-
+                            ESP_LOGW("security", "⚠ WiFi not ready after 10s timeout!");
+              widgets:
+                - label:
+                    text: "START"
+                    text_color: 0xFFFFFF
+                    text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER
+
+# ========================================================================
+# ALTERNATIVE : Simple delay de 5 secondes
+# ========================================================================
+# Version plus simple avec juste un délai fixe :
+
+          - button:
+              id: btn_start_all_simple
+              on_click:
+                then:
+                  - delay: 5s  # Attendre 5 secondes pour le WiFi
+                  - lambda: |-
+                      ESP_LOGI("security", "Starting camera after delay");
+
+                      // Configurer canvas
+                      static bool canvas_configured = false;
+                      if (!canvas_configured) {
+                        auto canvas = id(security_canvas);
+                        if (canvas != nullptr) {
+                          id(security_display).configure_canvas(canvas);
+                          canvas_configured = true;
+                        }
+                      }
+
+                      // Démarrer caméra
+                      id(security_cam_1).set_enabled(true);
+                      id(cam1_state) = true;
+
+# ========================================================================
+# MEILLEURE SOLUTION : Recompiler avec le nouveau code C++
+# ========================================================================
+# Les modifications dans network_camera.cpp (commit 7907ddb) incluent :
+# - Vérification automatique du WiFi avant connexion
+# - Pas besoin de workaround dans YAML
+# - Comportement propre et réutilisable
+#
+# Pour recompiler :
+# 1. Assurez-vous d'avoir pull les derniers changements
+# 2. Lancez la compilation ESPHome
+# 3. Flashez l'ESP32-P4
+# ========================================================================
