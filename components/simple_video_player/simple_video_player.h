@@ -364,15 +364,18 @@ class SimpleVideoPlayer : public Component {
   std::vector<uint8_t> sps_;
   std::vector<uint8_t> pps_;
   std::vector<uint8_t> sps_patched_;  // Patched SPS for decoder compatibility (converts High profiles to Baseline)
+  std::vector<uint8_t> pps_patched_;  // Patched PPS for decoder compatibility (CAVLC, no CABAC)
   bool sps_pps_sent_{false};
 
   // Helper to patch SPS for unsupported profiles (High 4:2:2, High 4:4:4, etc.)
   void patch_sps_for_decoder_compatibility_();
 
-  // SPS reconstruction helpers
+  // SPS/PPS reconstruction helpers
   void write_exp_golomb_ue_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value);
+  void write_exp_golomb_se_(std::vector<uint8_t>& data, size_t& bit_pos, int32_t value);
   void write_bits_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value, int num_bits);
   std::vector<uint8_t> build_constrained_baseline_sps_(uint16_t width, uint16_t height, uint8_t level_idc);
+  std::vector<uint8_t> build_constrained_baseline_pps_();
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
 

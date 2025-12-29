@@ -2522,6 +2522,60 @@ void SimpleVideoPlayer::write_exp_golomb_ue_(std::vector<uint8_t>& data, size_t&
   write_bits_(data, bit_pos, value, leading_zeros + 1);
 }
 
+// Write signed Exp-Golomb coded value
+void SimpleVideoPlayer::write_exp_golomb_se_(std::vector<uint8_t>& data, size_t& bit_pos, int32_t value) {
+  // Convert signed to unsigned: 0→0, 1→1, -1→2, 2→3, -2→4, etc.
+  uint32_t code_num;
+  if (value <= 0) {
+    code_num = -2 * value;
+  } else {
+    code_num = 2 * value - 1;
+  }
+  write_exp_golomb_ue_(data, bit_pos, code_num);
+}
+
+// Build a minimal Constrained Baseline PPS from scratch
+std::vector<uint8_t> SimpleVideoPlayer::build_constrained_baseline_pps_() {
+  std::vector<uint8_t> pps;
+  size_t bit_pos = 0;
+
+  // NAL header: forbidden_zero_bit(1) + nal_ref_idc(2) + nal_unit_type(5)
+  // PPS: nal_ref_idc=3, nal_unit_type=8
+  write_bits_(pps, bit_pos, 0, 1);       // forbidden_zero_bit = 0
+  write_bits_(pps, bit_pos, 3, 2);       // nal_ref_idc = 3 (highest priority)
+  write_bits_(pps, bit_pos, 8, 5);       // nal_unit_type = 8 (PPS)
+
+  // PPS RBSP - Minimal Constrained Baseline parameters
+  write_exp_golomb_ue_(pps, bit_pos, 0); // pic_parameter_set_id = 0
+  write_exp_golomb_ue_(pps, bit_pos, 0); // seq_parameter_set_id = 0 (refers to SPS 0)
+
+  write_bits_(pps, bit_pos, 0, 1);       // entropy_coding_mode_flag = 0 (CAVLC, NOT CABAC!)
+  write_bits_(pps, bit_pos, 0, 1);       // pic_order_present_flag = 0
+
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_slice_groups_minus1 = 0 (no slice groups)
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_ref_idx_l0_active_minus1 = 0 (1 ref frame)
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_ref_idx_l1_active_minus1 = 0
+
+  write_bits_(pps, bit_pos, 0, 1);       // weighted_pred_flag = 0
+  write_bits_(pps, bit_pos, 0, 2);       // weighted_bipred_idc = 0
+
+  write_exp_golomb_se_(pps, bit_pos, 0); // pic_init_qp_minus26 = 0 (QP = 26)
+  write_exp_golomb_se_(pps, bit_pos, 0); // pic_init_qs_minus26 = 0
+  write_exp_golomb_se_(pps, bit_pos, 0); // chroma_qp_index_offset = 0
+
+  write_bits_(pps, bit_pos, 0, 1);       // deblocking_filter_control_present_flag = 0
+  write_bits_(pps, bit_pos, 0, 1);       // constrained_intra_pred_flag = 0
+  write_bits_(pps, bit_pos, 0, 1);       // redundant_pic_cnt_present_flag = 0
+
+  // RBSP trailing bits (byte alignment)
+  write_bits_(pps, bit_pos, 1, 1);       // rbsp_stop_one_bit = 1
+  while (bit_pos % 8 != 0) {
+    write_bits_(pps, bit_pos, 0, 1);     // rbsp_alignment_zero_bit = 0
+  }
+
+  return pps;
+}
+
 // Build a minimal Constrained Baseline SPS from scratch
 std::vector<uint8_t> SimpleVideoPlayer::build_constrained_baseline_sps_(uint16_t width, uint16_t height, uint8_t level_idc) {
   std::vector<uint8_t> sps;
@@ -2609,33 +2663,48 @@ void SimpleVideoPlayer::patch_sps_for_decoder_compatibility_() {
   }
 
   ESP_LOGW(TAG, "========================================");
-  ESP_LOGW(TAG, "AGGRESSIVE SPS RECONSTRUCTION");
+  ESP_LOGW(TAG, "AGGRESSIVE SPS + PPS RECONSTRUCTION");
   ESP_LOGW(TAG, "Original profile: %d (High family), Level: %d.%d",
            profile_idc, level_idc / 10, level_idc % 10);
   ESP_LOGW(TAG, "Target: Constrained Baseline Profile with 4:2:0 chroma");
   ESP_LOGW(TAG, "");
-  ESP_LOGW(TAG, "Building NEW SPS from scratch:");
+  ESP_LOGW(TAG, "Building NEW SPS + PPS from scratch:");
   ESP_LOGW(TAG, "  Resolution: %dx%d", this->width_, this->height_);
   ESP_LOGW(TAG, "  Profile: 66 (Baseline) + constraint_set1=1");
   ESP_LOGW(TAG, "  Chroma format: 4:2:0 (was 4:4:4)");
   ESP_LOGW(TAG, "  Level: %d.%d (preserved)", level_idc / 10, level_idc % 10);
+  ESP_LOGW(TAG, "  Entropy coding: CAVLC (was CABAC)");
   ESP_LOGW(TAG, "");
-  ESP_LOGW(TAG, "WARNING: This FORCES 4:2:0 subsampling!");
+  ESP_LOGW(TAG, "WARNING: This FORCES 4:2:0 subsampling + CAVLC!");
   ESP_LOGW(TAG, "If frames are actually 4:4:4, colors will be WRONG!");
   ESP_LOGW(TAG, "========================================");
 
   // Build completely new SPS
   this->sps_patched_ = build_constrained_baseline_sps_(this->width_, this->height_, level_idc);
 
+  // Build completely new PPS (must match SPS)
+  this->pps_patched_ = build_constrained_baseline_pps_();
+
   ESP_LOGI(TAG, "SPS REBUILT: %d bytes (was %d bytes)",
            this->sps_patched_.size(), this->sps_.size());
   ESP_LOGI(TAG, "  Profile: %d → 66 (Constrained Baseline)", profile_idc);
   ESP_LOGI(TAG, "  Chroma: 4:4:4 → 4:2:0 (FORCED)");
 
+  ESP_LOGI(TAG, "PPS REBUILT: %d bytes (was %d bytes)",
+           this->pps_patched_.size(), this->pps_.size());
+  ESP_LOGI(TAG, "  Entropy coding: CABAC → CAVLC (FORCED)");
+  ESP_LOGI(TAG, "  Slice groups: disabled");
+
   // Debug: Show first 8 bytes of new SPS
   ESP_LOGD(TAG, "New SPS header (first 8 bytes):");
   for (int i = 0; i < 8 && i < this->sps_patched_.size(); i++) {
     ESP_LOGD(TAG, "  [%d] = 0x%02X", i, this->sps_patched_[i]);
+  }
+
+  // Debug: Show PPS bytes
+  ESP_LOGD(TAG, "New PPS (all %d bytes):", this->pps_patched_.size());
+  for (int i = 0; i < this->pps_patched_.size(); i++) {
+    ESP_LOGD(TAG, "  [%d] = 0x%02X", i, this->pps_patched_[i]);
   }
 }
 
@@ -2804,8 +2873,9 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
-    // Use patched SPS if available (for unsupported profiles), otherwise use original
+    // Use patched SPS/PPS if available (for unsupported profiles), otherwise use original
     const std::vector<uint8_t>& sps_to_send = this->sps_patched_.empty() ? this->sps_ : this->sps_patched_;
+    const std::vector<uint8_t>& pps_to_send = this->pps_patched_.empty() ? this->pps_ : this->pps_patched_;
 
     // Start code
     annexb_data.push_back(0x00);
@@ -2818,7 +2888,7 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x01);
-    annexb_data.insert(annexb_data.end(), this->pps_.begin(), this->pps_.end());
+    annexb_data.insert(annexb_data.end(), pps_to_send.begin(), pps_to_send.end());
 
     this->sps_pps_sent_ = true;
   }
