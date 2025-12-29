@@ -4066,10 +4066,11 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
 
   while (true) {
     // Wait for timer tick or stop event
+    // IMPORTANT: Use pdFALSE to NOT auto-clear bits - we clear manually after processing
     EventBits_t bits = xEventGroupWaitBits(
       player->decode_event_group_,
       EVENT_TIMER_TICK | EVENT_STOP_PLAYBACK,
-      pdTRUE,   // Clear bits on exit
+      pdFALSE,  // DON'T auto-clear - we clear manually to avoid skipping ticks
       pdFALSE,  // Wait for any bit (not all)
       portMAX_DELAY
     );
@@ -4077,6 +4078,7 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
     // Check for stop request first
     if (bits & EVENT_STOP_PLAYBACK) {
       ESP_LOGI(TAG, "Decode task received stop signal");
+      xEventGroupClearBits(player->decode_event_group_, EVENT_STOP_PLAYBACK);
       xEventGroupSetBits(player->decode_event_group_, EVENT_TASK_EXIT);
       break;
     }
@@ -4085,6 +4087,7 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
     if (bits & EVENT_TIMER_TICK) {
       // Check if player is still in PLAYING state
       if (player->state_ != PlayerState::PLAYING) {
+        xEventGroupClearBits(player->decode_event_group_, EVENT_TIMER_TICK);
         continue;
       }
 
@@ -4092,7 +4095,7 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
 
       // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
       // If frame_ready_ is true, main thread hasn't processed the last frame yet
-      // We count it as a drop but DON'T decode a new frame (would overwrite the pending one)
+      // DON'T clear EVENT_TIMER_TICK yet - keep it set so we retry immediately next loop iteration
       if (player->frame_ready_) {
         player->frames_dropped_++;
         static uint32_t last_drop_warning = 0;
@@ -4101,10 +4104,14 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
                    (unsigned long)player->frames_dropped_);
           last_drop_warning = current_time;
         }
-        // DON'T use continue here! That would wait for the NEXT timer tick and double the delay
-        // Just skip the decode work and loop back immediately for the next event
-      } else {
-        // Frame is ready to decode - proceed with normal decode flow
+        // DON'T clear the bit! Leave it set so we retry immediately on next iteration
+        // This allows sub-frame-interval polling instead of waiting full 41ms
+        vTaskDelay(pdMS_TO_TICKS(1));  // Brief 1ms delay to avoid busy-wait
+        continue;
+      }
+
+      // Frame buffer is available - clear the timer tick and proceed with decode
+      xEventGroupClearBits(player->decode_event_group_, EVENT_TIMER_TICK);
 
       // Log timing for performance debugging (only every 30 frames to avoid spam)
       if (callback_count++ % 30 == 0) {
@@ -4306,7 +4313,6 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           // If you want to free memory immediately after playback, call stop() manually
         }
       }
-      }  // End of else (frame decoding block)
     }
   }
 
