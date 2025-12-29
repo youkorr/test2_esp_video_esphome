@@ -2479,8 +2479,116 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   return true;
 }
 
+// ===== SPS Reconstruction Helpers =====
+
+// Write bits to a byte vector at a specific bit position
+void SimpleVideoPlayer::write_bits_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value, int num_bits) {
+  for (int i = num_bits - 1; i >= 0; i--) {
+    size_t byte_pos = bit_pos / 8;
+    size_t bit_offset = 7 - (bit_pos % 8);
+
+    // Ensure byte exists
+    while (data.size() <= byte_pos) {
+      data.push_back(0);
+    }
+
+    // Set bit
+    if ((value >> i) & 1) {
+      data[byte_pos] |= (1 << bit_offset);
+    }
+
+    bit_pos++;
+  }
+}
+
+// Write unsigned Exp-Golomb coded value
+void SimpleVideoPlayer::write_exp_golomb_ue_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value) {
+  value++;  // Exp-Golomb encoding: code_num = value + 1
+
+  // Count leading zeros needed
+  int leading_zeros = 0;
+  uint32_t temp = value;
+  while (temp > 1) {
+    temp >>= 1;
+    leading_zeros++;
+  }
+
+  // Write leading zeros
+  for (int i = 0; i < leading_zeros; i++) {
+    write_bits_(data, bit_pos, 0, 1);
+  }
+
+  // Write value (including the implicit 1 bit)
+  write_bits_(data, bit_pos, value, leading_zeros + 1);
+}
+
+// Build a minimal Constrained Baseline SPS from scratch
+std::vector<uint8_t> SimpleVideoPlayer::build_constrained_baseline_sps_(uint16_t width, uint16_t height, uint8_t level_idc) {
+  std::vector<uint8_t> sps;
+  size_t bit_pos = 0;
+
+  // NAL header: forbidden_zero_bit(1) + nal_ref_idc(2) + nal_unit_type(5)
+  // SPS: nal_ref_idc=3, nal_unit_type=7
+  write_bits_(sps, bit_pos, 0, 1);       // forbidden_zero_bit = 0
+  write_bits_(sps, bit_pos, 3, 2);       // nal_ref_idc = 3 (highest priority)
+  write_bits_(sps, bit_pos, 7, 5);       // nal_unit_type = 7 (SPS)
+
+  // Profile and level
+  write_bits_(sps, bit_pos, 66, 8);      // profile_idc = 66 (Baseline)
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set0_flag = 0
+  write_bits_(sps, bit_pos, 1, 1);       // constraint_set1_flag = 1 (Constrained Baseline!)
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set2_flag = 0
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set3_flag = 0
+  write_bits_(sps, bit_pos, 0, 4);       // reserved_zero_4bits = 0
+  write_bits_(sps, bit_pos, level_idc, 8); // level_idc (from original SPS)
+
+  // SPS RBSP
+  write_exp_golomb_ue_(sps, bit_pos, 0); // seq_parameter_set_id = 0
+  write_exp_golomb_ue_(sps, bit_pos, 0); // log2_max_frame_num_minus4 = 0 (frame_num range: 0-15)
+
+  // Picture order count
+  write_exp_golomb_ue_(sps, bit_pos, 0); // pic_order_cnt_type = 0
+  write_exp_golomb_ue_(sps, bit_pos, 4); // log2_max_pic_order_cnt_lsb_minus4 = 4 (POC range: 0-255)
+
+  write_exp_golomb_ue_(sps, bit_pos, 2); // max_num_ref_frames = 2 (allow B-frames)
+  write_bits_(sps, bit_pos, 0, 1);       // gaps_in_frame_num_value_allowed_flag = 0
+
+  // Picture size in macroblocks (16x16)
+  uint32_t width_in_mbs = (width + 15) / 16;
+  uint32_t height_in_mbs = (height + 15) / 16;
+  write_exp_golomb_ue_(sps, bit_pos, width_in_mbs - 1);  // pic_width_in_mbs_minus1
+  write_exp_golomb_ue_(sps, bit_pos, height_in_mbs - 1); // pic_height_in_map_units_minus1
+
+  write_bits_(sps, bit_pos, 1, 1);       // frame_mbs_only_flag = 1 (progressive, not interlaced)
+  write_bits_(sps, bit_pos, 1, 1);       // direct_8x8_inference_flag = 1
+
+  // Frame cropping (if needed to match exact resolution)
+  uint16_t cropped_width = width_in_mbs * 16;
+  uint16_t cropped_height = height_in_mbs * 16;
+
+  if (cropped_width != width || cropped_height != height) {
+    write_bits_(sps, bit_pos, 1, 1);     // frame_cropping_flag = 1
+    write_exp_golomb_ue_(sps, bit_pos, 0); // frame_crop_left_offset = 0
+    write_exp_golomb_ue_(sps, bit_pos, (cropped_width - width) / 2); // frame_crop_right_offset
+    write_exp_golomb_ue_(sps, bit_pos, 0); // frame_crop_top_offset = 0
+    write_exp_golomb_ue_(sps, bit_pos, (cropped_height - height) / 2); // frame_crop_bottom_offset
+  } else {
+    write_bits_(sps, bit_pos, 0, 1);     // frame_cropping_flag = 0
+  }
+
+  write_bits_(sps, bit_pos, 0, 1);       // vui_parameters_present_flag = 0
+
+  // RBSP trailing bits (byte alignment)
+  write_bits_(sps, bit_pos, 1, 1);       // rbsp_stop_one_bit = 1
+  while (bit_pos % 8 != 0) {
+    write_bits_(sps, bit_pos, 0, 1);     // rbsp_alignment_zero_bit = 0
+  }
+
+  return sps;
+}
+
 // Patch SPS to convert unsupported High profiles to Constrained Baseline
-// This is a compatibility hack to work around decoder profile limitations
+// AGGRESSIVE MODE: Completely reconstruct SPS instead of just patching bytes
 void SimpleVideoPlayer::patch_sps_for_decoder_compatibility_() {
   if (this->sps_.size() < 4) {
     ESP_LOGW(TAG, "SPS too small to patch (%d bytes)", this->sps_.size());
@@ -2501,31 +2609,34 @@ void SimpleVideoPlayer::patch_sps_for_decoder_compatibility_() {
   }
 
   ESP_LOGW(TAG, "========================================");
-  ESP_LOGW(TAG, "EXPERIMENTAL: Patching SPS for decoder compatibility");
+  ESP_LOGW(TAG, "AGGRESSIVE SPS RECONSTRUCTION");
   ESP_LOGW(TAG, "Original profile: %d (High family), Level: %d.%d",
            profile_idc, level_idc / 10, level_idc % 10);
-  ESP_LOGW(TAG, "Target profile: 66 (Constrained Baseline)");
+  ESP_LOGW(TAG, "Target: Constrained Baseline Profile with 4:2:0 chroma");
   ESP_LOGW(TAG, "");
-  ESP_LOGW(TAG, "WARNING: This is a hack to bypass decoder profile validation!");
-  ESP_LOGW(TAG, "Success depends on whether the video uses advanced features:");
-  ESP_LOGW(TAG, "  - If video is simple (no 8x8 transforms, FMO, etc): MAY WORK");
-  ESP_LOGW(TAG, "  - If video uses High Profile features: WILL FAIL or corrupt");
+  ESP_LOGW(TAG, "Building NEW SPS from scratch:");
+  ESP_LOGW(TAG, "  Resolution: %dx%d", this->width_, this->height_);
+  ESP_LOGW(TAG, "  Profile: 66 (Baseline) + constraint_set1=1");
+  ESP_LOGW(TAG, "  Chroma format: 4:2:0 (was 4:4:4)");
+  ESP_LOGW(TAG, "  Level: %d.%d (preserved)", level_idc / 10, level_idc % 10);
+  ESP_LOGW(TAG, "");
+  ESP_LOGW(TAG, "WARNING: This FORCES 4:2:0 subsampling!");
+  ESP_LOGW(TAG, "If frames are actually 4:4:4, colors will be WRONG!");
   ESP_LOGW(TAG, "========================================");
 
-  // Create patched copy
-  this->sps_patched_ = this->sps_;
+  // Build completely new SPS
+  this->sps_patched_ = build_constrained_baseline_sps_(this->width_, this->height_, level_idc);
 
-  // Modify profile to Constrained Baseline
-  this->sps_patched_[1] = 66;  // profile_idc = Baseline
+  ESP_LOGI(TAG, "SPS REBUILT: %d bytes (was %d bytes)",
+           this->sps_patched_.size(), this->sps_.size());
+  ESP_LOGI(TAG, "  Profile: %d → 66 (Constrained Baseline)", profile_idc);
+  ESP_LOGI(TAG, "  Chroma: 4:4:4 → 4:2:0 (FORCED)");
 
-  // Set constraint_set1_flag (bit 6) to make it "Constrained" Baseline
-  // Keep other constraint bits as-is
-  this->sps_patched_[2] = constraints | 0x40;  // Set bit 6
-
-  // Level stays the same (level_idc unchanged)
-
-  ESP_LOGI(TAG, "SPS patched: %d bytes (profile %d → 66, constraints 0x%02X → 0x%02X)",
-           this->sps_patched_.size(), profile_idc, constraints, this->sps_patched_[2]);
+  // Debug: Show first 8 bytes of new SPS
+  ESP_LOGD(TAG, "New SPS header (first 8 bytes):");
+  for (int i = 0; i < 8 && i < this->sps_patched_.size(); i++) {
+    ESP_LOGD(TAG, "  [%d] = 0x%02X", i, this->sps_patched_[i]);
+  }
 }
 
 bool SimpleVideoPlayer::decode_h264_frame_() {
