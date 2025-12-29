@@ -12,6 +12,8 @@
 #include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
+#include "freertos/event_groups.h"  // Event groups for task synchronization
+#include "freertos/task.h"  // FreeRTOS task for decode offloading
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
@@ -254,9 +256,15 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
-  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback for precise framerate
+  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback (ultra-lightweight, just sets event bit)
+  static void decode_task_(void *arg);  // FreeRTOS decode task (offloaded decoding from timer)
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
+
+  // Event bits for decode task synchronization (similar to avi_player)
+  static constexpr EventBits_t EVENT_TIMER_TICK = (1 << 0);  // Timer fired, time to decode next frame
+  static constexpr EventBits_t EVENT_STOP_PLAYBACK = (1 << 1);  // Stop requested
+  static constexpr EventBits_t EVENT_TASK_EXIT = (1 << 2);  // Task should exit (cleanup)
 
   std::string file_path_;
   int width_{800};   // Default/configured width (used if auto-detection fails)
@@ -403,7 +411,9 @@ class SimpleVideoPlayer : public Component {
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
-  volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
+  EventGroupHandle_t decode_event_group_{nullptr};  // Event group for decode task synchronization
+  TaskHandle_t decode_task_handle_{nullptr};  // FreeRTOS task for video decoding (offloaded from timer)
+  volatile bool frame_ready_{false};  // Flag set by decode task, checked by loop() for LVGL update
   volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
   volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
 
