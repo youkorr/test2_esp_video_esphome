@@ -1,6 +1,7 @@
 #include "network_camera.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esphome/components/wifi/wifi_component.h"
 
 #include <cstring>
 #include <algorithm>
@@ -53,6 +54,14 @@ void NetworkCamera::setup() {
 void NetworkCamera::loop() {
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
+    // Check WiFi connection before attempting to connect to camera
+    auto wifi_component = wifi::global_wifi_component;
+    if (wifi_component == nullptr || !wifi_component->is_connected()) {
+      ESP_LOGW(TAG, "WiFi not connected yet, waiting...");
+      this->enabled_ = false;  // Disable temporarily, user can re-enable
+      return;
+    }
+
     ESP_LOGI(TAG, "Starting Network Camera display...");
 
     bool connected = false;
@@ -64,6 +73,7 @@ void NetworkCamera::loop() {
 
     if (!connected) {
       ESP_LOGE(TAG, "Failed to connect to stream");
+      this->enabled_ = false;  // Disable to allow retry
       return;
     }
 
