@@ -28,6 +28,7 @@ class PedestrianDetectionComponent : public Component {
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
@@ -49,6 +50,7 @@ class PedestrianDetectionComponent : public Component {
 
  protected:
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
+  std::string canvas_id_{};
   bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 
   // Detection configuration
