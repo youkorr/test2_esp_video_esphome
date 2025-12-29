@@ -2338,6 +2338,9 @@ bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
   ESP_LOGI(TAG, "avcC: NAL length size=%d, SPS=%d bytes, PPS=%d bytes",
            this->nal_length_size_, this->sps_.size(), this->pps_.size());
 
+  // Patch SPS if needed for unsupported profiles
+  this->patch_sps_for_decoder_compatibility_();
+
   return true;
 }
 
@@ -2474,6 +2477,55 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   this->frame_count_++;
 
   return true;
+}
+
+// Patch SPS to convert unsupported High profiles to Constrained Baseline
+// This is a compatibility hack to work around decoder profile limitations
+void SimpleVideoPlayer::patch_sps_for_decoder_compatibility_() {
+  if (this->sps_.size() < 4) {
+    ESP_LOGW(TAG, "SPS too small to patch (%d bytes)", this->sps_.size());
+    return;
+  }
+
+  uint8_t profile_idc = this->sps_[1];
+  uint8_t constraints = this->sps_[2];
+  uint8_t level_idc = this->sps_[3];
+
+  // Check if this is an unsupported advanced profile
+  bool needs_patching = (profile_idc >= 100);  // High, High 10, High 4:2:2, High 4:4:4
+
+  if (!needs_patching) {
+    ESP_LOGI(TAG, "SPS profile %d doesn't need patching", profile_idc);
+    this->sps_patched_.clear();  // No patching needed
+    return;
+  }
+
+  ESP_LOGW(TAG, "========================================");
+  ESP_LOGW(TAG, "EXPERIMENTAL: Patching SPS for decoder compatibility");
+  ESP_LOGW(TAG, "Original profile: %d (High family), Level: %d.%d",
+           profile_idc, level_idc / 10, level_idc % 10);
+  ESP_LOGW(TAG, "Target profile: 66 (Constrained Baseline)");
+  ESP_LOGW(TAG, "");
+  ESP_LOGW(TAG, "WARNING: This is a hack to bypass decoder profile validation!");
+  ESP_LOGW(TAG, "Success depends on whether the video uses advanced features:");
+  ESP_LOGW(TAG, "  - If video is simple (no 8x8 transforms, FMO, etc): MAY WORK");
+  ESP_LOGW(TAG, "  - If video uses High Profile features: WILL FAIL or corrupt");
+  ESP_LOGW(TAG, "========================================");
+
+  // Create patched copy
+  this->sps_patched_ = this->sps_;
+
+  // Modify profile to Constrained Baseline
+  this->sps_patched_[1] = 66;  // profile_idc = Baseline
+
+  // Set constraint_set1_flag (bit 6) to make it "Constrained" Baseline
+  // Keep other constraint bits as-is
+  this->sps_patched_[2] = constraints | 0x40;  // Set bit 6
+
+  // Level stays the same (level_idc unchanged)
+
+  ESP_LOGI(TAG, "SPS patched: %d bytes (profile %d → 66, constraints 0x%02X → 0x%02X)",
+           this->sps_patched_.size(), profile_idc, constraints, this->sps_patched_[2]);
 }
 
 bool SimpleVideoPlayer::decode_h264_frame_() {
@@ -2641,12 +2693,15 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
+    // Use patched SPS if available (for unsupported profiles), otherwise use original
+    const std::vector<uint8_t>& sps_to_send = this->sps_patched_.empty() ? this->sps_ : this->sps_patched_;
+
     // Start code
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x01);
-    annexb_data.insert(annexb_data.end(), this->sps_.begin(), this->sps_.end());
+    annexb_data.insert(annexb_data.end(), sps_to_send.begin(), sps_to_send.end());
 
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);

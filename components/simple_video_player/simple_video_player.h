@@ -363,7 +363,11 @@ class SimpleVideoPlayer : public Component {
   uint8_t nal_length_size_{4};
   std::vector<uint8_t> sps_;
   std::vector<uint8_t> pps_;
+  std::vector<uint8_t> sps_patched_;  // Patched SPS for decoder compatibility (converts High profiles to Baseline)
   bool sps_pps_sent_{false};
+
+  // Helper to patch SPS for unsupported profiles (High 4:2:2, High 4:4:4, etc.)
+  void patch_sps_for_decoder_compatibility_();
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
 
