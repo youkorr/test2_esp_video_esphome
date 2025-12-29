@@ -105,9 +105,17 @@ async def to_code(config):
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
 
-    # esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
-    # Now using: PPA hardware (ESP32-P4) + software LUT fallback
-    # esp_imgfx caused 42ms delays instead of expected 3-5ms
+    # esp_image_effects (esp_imgfx) - only used for hardware rotation
+    esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
+    if os.path.exists(esp_imgfx_dir):
+        imgfx_inc_path = os.path.join(esp_imgfx_dir, "include")
+        if os.path.exists(imgfx_inc_path):
+            cg.add_build_flag(f"-I{imgfx_inc_path}")
+        # Link esp_image_effects library (prebuilt)
+        imgfx_lib_dir = os.path.join(esp_imgfx_dir, "lib", "esp32p4")
+        if os.path.exists(imgfx_lib_dir):
+            cg.add_build_flag(f"-L{imgfx_lib_dir}")
+            cg.add_build_flag("-lesp_image_effects")
 
 
 # Action schemas
