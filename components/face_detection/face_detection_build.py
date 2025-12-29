@@ -42,12 +42,12 @@ env.Append(CPPDEFINES=[
 ])
 
 # Human face detection configuration
+# Note: CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA and CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION
+# are now defined dynamically in __init__.py based on model_location setting
 env.Append(CPPDEFINES=[
     ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
 ])
 
 # Human face recognition configuration
