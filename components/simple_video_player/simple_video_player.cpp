@@ -2488,6 +2488,32 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     ESP_LOGW(TAG, "  PPS size: %d bytes", this->pps_.size());
     ESP_LOGW(TAG, "  NAL length size: %d", this->nal_length_size_);
     ESP_LOGW(TAG, "  sps_pps_sent: %s", this->sps_pps_sent_ ? "YES" : "NO");
+
+    // Decode SPS header to show H.264 profile
+    if (this->sps_.size() >= 4) {
+      uint8_t profile_idc = this->sps_[1];  // Byte 1 is profile_idc
+      uint8_t constraints = this->sps_[2];  // Byte 2 is constraint flags
+      uint8_t level_idc = this->sps_[3];    // Byte 3 is level_idc
+
+      const char* profile_name = "Unknown";
+      if (profile_idc == 66) profile_name = "Baseline";
+      else if (profile_idc == 77) profile_name = "Main";
+      else if (profile_idc == 88) profile_name = "Extended";
+      else if (profile_idc == 100) profile_name = "High";
+      else if (profile_idc == 110) profile_name = "High 10";
+      else if (profile_idc == 122) profile_name = "High 4:2:2";
+      else if (profile_idc == 244) profile_name = "High 4:4:4";
+
+      ESP_LOGW(TAG, "  H.264 Profile: %s (profile_idc=%d, level=%d.%d)",
+               profile_name, profile_idc, level_idc / 10, level_idc % 10);
+
+      if (profile_idc != 66 && profile_idc != 77) {
+        ESP_LOGE(TAG, "  ERROR: ESP32 H.264 decoder only supports Baseline (66) and Main (77) profiles!");
+        ESP_LOGE(TAG, "  Your video uses profile %d (%s) which is NOT supported", profile_idc, profile_name);
+        ESP_LOGE(TAG, "  Re-encode your video with: ffmpeg -i input.mp4 -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p output.mp4");
+      }
+    }
+
     if (this->sps_.empty() || this->pps_.empty()) {
       ESP_LOGE(TAG, "  ERROR: SPS/PPS not parsed from MP4! Decoder will fail!");
       ESP_LOGE(TAG, "  This means the avcC box was not found or not parsed correctly");
