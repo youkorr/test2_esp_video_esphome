@@ -1759,17 +1759,19 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   // ESP32-P4 H.264 decoder ONLY supports Constrained Baseline Profile
   // See: https://components.espressif.com/components/espressif/esp_h264
   // Constrained Baseline = profile_idc 66 with constraint_set1_flag = 1
+  //
+  // Using AUTO profile detection to let decoder validate stream compatibility
   esp_h264_dec_cfg_sw_t cfg = {
-    .pic_type = ESP_H264_RAW_FMT_I420,           // Software decoder ONLY supports I420
-    .profile_idc = ESP_H264_PROFILE_BASELINE      // REQUIRED: Constrained Baseline (66)
+    .pic_type = ESP_H264_RAW_FMT_I420,        // Software decoder ONLY supports I420
+    .profile_idc = ESP_H264_PROFILE_AUTO      // Auto-detect: decoder validates compatibility
   };
 
-  ESP_LOGI(TAG, "Initializing H.264 decoder with Constrained Baseline profile (idc=66)...");
+  ESP_LOGI(TAG, "Initializing H.264 decoder with AUTO profile detection (will accept Constrained Baseline)...");
 
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
   if (err != ESP_H264_ERR_OK || this->h264_decoder_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create H.264 decoder: err=%d", err);
-    ESP_LOGE(TAG, "This usually means the video profile is not Constrained Baseline");
+    ESP_LOGE(TAG, "Decoder creation failed - check video format");
     return false;
   }
 
