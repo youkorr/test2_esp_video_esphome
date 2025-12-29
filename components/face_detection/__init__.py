@@ -51,7 +51,7 @@ CONFIG_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
-    cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=30),
+    cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=600),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
     cv.Optional(CONF_RECOGNITION_ENABLED, default=False): cv.boolean,
     cv.Optional(CONF_FACE_DB_PATH, default="/sdcard/faces.db"): cv.string,
