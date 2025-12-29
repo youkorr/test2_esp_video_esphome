@@ -21,11 +21,11 @@ env.Append(CPPDEFINES=[
 ])
 
 # Pedestrian detection configuration
+# Note: CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA and CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION
+# are now defined dynamically in __init__.py based on model_location setting
 env.Append(CPPDEFINES=[
     ("CONFIG_PEDESTRIAN_DETECT_PICO_S8_V1", "1"),
     ("CONFIG_PEDESTRIAN_DETECT_MODEL_TYPE", "0"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA", "1"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),
 ])
 
 print("[Pedestrian Detection] CONFIG defines added")
