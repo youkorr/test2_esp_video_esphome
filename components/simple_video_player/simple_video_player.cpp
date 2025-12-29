@@ -3622,6 +3622,8 @@ bool SimpleVideoPlayer::read_next_mkv_sample_() {
       this->sps_pps_sent_ = false;
       this->cached_fseek_(this->mkv_cluster_start_, SEEK_SET);
     } else {
+      ESP_LOGD(TAG, "MKV EOF: current_sample=%zu >= total_samples=%zu",
+               this->current_mkv_sample_, this->mkv_samples_.size());
       return false;
     }
   }
@@ -4070,11 +4072,12 @@ void SimpleVideoPlayer::play() {
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
       // Find first keyframe to start playback
+      ESP_LOGI(TAG, "MKV total samples parsed: %zu", this->mkv_samples_.size());
       size_t first_keyframe = 0;
       for (size_t i = 0; i < this->mkv_samples_.size(); i++) {
         if (this->mkv_samples_[i].is_keyframe) {
           first_keyframe = i;
-          ESP_LOGI(TAG, "Starting playback from first keyframe at sample %zu", first_keyframe);
+          ESP_LOGI(TAG, "Starting playback from first keyframe at sample %zu / %zu total", first_keyframe, this->mkv_samples_.size());
           break;
         }
       }
