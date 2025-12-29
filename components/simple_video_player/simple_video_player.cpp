@@ -2495,22 +2495,47 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
       uint8_t constraints = this->sps_[2];  // Byte 2 is constraint flags
       uint8_t level_idc = this->sps_[3];    // Byte 3 is level_idc
 
+      // Constraint flags (byte 2):
+      // bit 7: constraint_set0_flag
+      // bit 6: constraint_set1_flag  <- REQUIRED for Constrained Baseline
+      // bit 5: constraint_set2_flag
+      bool constraint_set0 = (constraints & 0x80) != 0;
+      bool constraint_set1 = (constraints & 0x40) != 0;  // Required for Constrained Baseline
+      bool constraint_set2 = (constraints & 0x20) != 0;
+
       const char* profile_name = "Unknown";
-      if (profile_idc == 66) profile_name = "Baseline";
-      else if (profile_idc == 77) profile_name = "Main";
+      bool is_constrained_baseline = false;
+
+      if (profile_idc == 66) {
+        if (constraint_set1) {
+          profile_name = "Constrained Baseline";
+          is_constrained_baseline = true;
+        } else {
+          profile_name = "Baseline";
+        }
+      } else if (profile_idc == 77) profile_name = "Main";
       else if (profile_idc == 88) profile_name = "Extended";
       else if (profile_idc == 100) profile_name = "High";
       else if (profile_idc == 110) profile_name = "High 10";
       else if (profile_idc == 122) profile_name = "High 4:2:2";
       else if (profile_idc == 244) profile_name = "High 4:4:4";
 
-      ESP_LOGW(TAG, "  H.264 Profile: %s (profile_idc=%d, level=%d.%d)",
-               profile_name, profile_idc, level_idc / 10, level_idc % 10);
+      ESP_LOGW(TAG, "  H.264 Profile: %s (profile_idc=%d, constraints=0x%02X, level=%d.%d)",
+               profile_name, profile_idc, constraints, level_idc / 10, level_idc % 10);
+      ESP_LOGW(TAG, "  Constraint flags: set0=%d, set1=%d, set2=%d",
+               constraint_set0 ? 1 : 0, constraint_set1 ? 1 : 0, constraint_set2 ? 1 : 0);
 
-      if (profile_idc != 66 && profile_idc != 77) {
-        ESP_LOGE(TAG, "  ERROR: ESP32 H.264 decoder only supports Baseline (66) and Main (77) profiles!");
-        ESP_LOGE(TAG, "  Your video uses profile %d (%s) which is NOT supported", profile_idc, profile_name);
-        ESP_LOGE(TAG, "  Re-encode your video with: ffmpeg -i input.mp4 -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p output.mp4");
+      // ESP32-P4 H.264 decoder ONLY supports Constrained Baseline Profile
+      // See: https://components.espressif.com/components/espressif/esp_h264
+      if (!is_constrained_baseline) {
+        ESP_LOGE(TAG, "  ERROR: ESP32-P4 H.264 decoder ONLY supports Constrained Baseline Profile!");
+        ESP_LOGE(TAG, "  Required: profile_idc=66 AND constraint_set1_flag=1");
+        ESP_LOGE(TAG, "  Your video: profile_idc=%d (%s), constraint_set1_flag=%d",
+                 profile_idc, profile_name, constraint_set1 ? 1 : 0);
+        ESP_LOGE(TAG, "  Re-encode with: ffmpeg -i input.mp4 -c:v libx264 -profile:v baseline -level 3.1 -pix_fmt yuv420p output.mp4");
+        ESP_LOGE(TAG, "  The 'baseline' profile in ffmpeg automatically uses Constrained Baseline");
+      } else {
+        ESP_LOGI(TAG, "  ✓ Profile is compatible with ESP32-P4 decoder");
       }
     }
 
