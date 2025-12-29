@@ -42,41 +42,14 @@ env.Append(CPPDEFINES=[
 ])
 
 # Human face detection configuration
+# Default: flash rodata mode (override with model_location: sdcard in YAML)
 env.Append(CPPDEFINES=[
     ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
 ])
-
-# Check if model location flags are already defined from __init__.py
-has_flash_rodata = False
-has_sdcard = False
-has_location = False
-
-for define in cpp_defines:
-    if isinstance(define, tuple):
-        key, val = define
-    else:
-        key = define
-        val = None
-
-    if key == "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA":
-        has_flash_rodata = True
-    elif key == "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD":
-        has_sdcard = True
-    elif key == "CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION":
-        has_location = True
-
-# Set defaults if not already defined (flash rodata mode)
-if not has_flash_rodata:
-    env.Append(CPPDEFINES=[("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1")])
-    print("[Face Detection] Using default: MODEL_IN_FLASH_RODATA=1")
-if not has_sdcard:
-    env.Append(CPPDEFINES=[("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0")])
-    print("[Face Detection] Using default: MODEL_IN_SDCARD=0")
-if not has_location:
-    env.Append(CPPDEFINES=[("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0")])
-    print("[Face Detection] Using default: MODEL_LOCATION=0")
 
 # Human face recognition configuration
 env.Append(CPPDEFINES=[
