@@ -8,11 +8,18 @@ DEPENDENCIES = ["esp_cam_sensor"]
 AUTO_LOAD = ["esp_cam_sensor"]
 
 CONF_CAMERA_ID = "camera_id"
+CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
 CONF_ON_PEDESTRIAN_DETECTED = "on_pedestrian_detected"
+CONF_MODEL_LOCATION = "model_location"
+CONF_MODEL_PATH = "model_path"
+
+# Model location types
+MODEL_LOCATION_FLASH = "flash_rodata"
+MODEL_LOCATION_SDCARD = "sdcard"
 
 pedestrian_detection_ns = cg.esphome_ns.namespace("pedestrian_detection")
 PedestrianDetectionComponent = pedestrian_detection_ns.class_("PedestrianDetectionComponent", cg.Component)
@@ -26,10 +33,15 @@ MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(PedestrianDetectionComponent),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+    cv.Optional(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
-    cv.Optional(CONF_DETECTION_INTERVAL, default=4): cv.int_range(min=1, max=30),
+    cv.Optional(CONF_DETECTION_INTERVAL, default=4): cv.int_range(min=1, max=600),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+    cv.Optional(CONF_MODEL_LOCATION, default=MODEL_LOCATION_FLASH): cv.one_of(
+        MODEL_LOCATION_FLASH, MODEL_LOCATION_SDCARD, lower=True
+    ),
+    cv.Optional(CONF_MODEL_PATH): cv.string,
     cv.Optional(CONF_ON_PEDESTRIAN_DETECTED): automation.validate_automation({
         cv.GenerateID(): cv.declare_id(PedestrianDetectedTrigger),
     }),
@@ -43,6 +55,9 @@ async def to_code(config):
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
 
+    if CONF_CANVAS_ID in config:
+        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
+
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
     cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))
     cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
@@ -53,12 +68,32 @@ async def to_code(config):
         trigger = cg.new_Pvariable(conf[CONF_ID], var)
         await automation.build_automation(trigger, [(cg.int_, "pedestrian_count")], conf)
 
-    # Add build flags for pedestrian detection
+    # Set build flag for pedestrian detection model
+    cg.add_build_flag("-DESP_DL_MODEL_PEDESTRIAN=1")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_PICO_S8_V1=1")
-    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_TYPE=0")
-    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
+    # Model location configuration
+    model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
+
+    if model_location == MODEL_LOCATION_SDCARD:
+        # SD card mode
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD=1")
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=0")
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=2")
+
+        # Pass SD card path to C++ component
+        if CONF_MODEL_PATH in config:
+            cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{config[CONF_MODEL_PATH]}"')))
+        else:
+            # Default SD card path
+            cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
+    else:
+        # Flash rodata mode (default)
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD=0")
+        cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0")
 
     # Add include paths
     component_dir = os.path.dirname(__file__)

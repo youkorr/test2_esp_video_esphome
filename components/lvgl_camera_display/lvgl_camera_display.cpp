@@ -1,9 +1,15 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
-// Conditionally include face_detection only if it exists
+// Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
+#endif
+#ifdef USE_YOLO11_DETECTION
+#include "esphome/components/yolo11_detection/yolo11_detection.h"
+#endif
+#ifdef USE_PEDESTRIAN_DETECTION
+#include "esphome/components/pedestrian_detection/pedestrian_detection.h"
 #endif
 
 namespace esphome {
@@ -161,10 +167,20 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
-  // Optional: draw face detection results if configured
+  // Optional: draw detection results if configured
 #ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
     this->face_detection_->draw_on_frame(img_data, width, height);
+  }
+#endif
+#ifdef USE_YOLO11_DETECTION
+  if (this->yolo11_detection_ != nullptr) {
+    this->yolo11_detection_->draw_on_frame(img_data, width, height);
+  }
+#endif
+#ifdef USE_PEDESTRIAN_DETECTION
+  if (this->pedestrian_detection_ != nullptr) {
+    this->pedestrian_detection_->draw_on_frame(img_data, width, height);
   }
 #endif
 

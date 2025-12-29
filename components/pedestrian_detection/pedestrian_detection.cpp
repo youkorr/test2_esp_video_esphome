@@ -2,9 +2,11 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// ESP-DL detection component
+// ESP-DL detection component (only for pedestrian detection model)
+#ifdef ESP_DL_MODEL_PEDESTRIAN
 #include "pedestrian_detect.hpp"
 #include "dl_image.hpp"
+#endif
 
 namespace esphome {
 namespace pedestrian_detection {
@@ -13,6 +15,14 @@ static const char *const TAG = "pedestrian_detection";
 
 void PedestrianDetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Pedestrian Detection...");
+
+#ifndef ESP_DL_MODEL_PEDESTRIAN
+  ESP_LOGE(TAG, "Pedestrian Detection component requires ESP_DL_MODEL_PEDESTRIAN flag");
+  ESP_LOGE(TAG, "Pedestrian detection model is not available or not compiled");
+  ESP_LOGE(TAG, "Please ensure a pedestrian detection model file (.espdl) is available and properly configured");
+  this->mark_failed();
+  return;
+#else
 
   if (this->camera_ == nullptr) {
     ESP_LOGE(TAG, "Camera not configured");
@@ -30,7 +40,23 @@ void PedestrianDetectionComponent::setup() {
 
   // Initialize pedestrian detector
   ESP_LOGI(TAG, "Initializing pedestrian detector...");
+
+#if CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
+    delay(6000);  // Wait for SD card to be mounted
+    ESP_LOGI(TAG, "Loading pedestrian detection model from SD card: %s", this->sdcard_model_path_);
+    this->pedestrian_detector_ = new PedestrianDetect(this->sdcard_model_path_);
+  } else {
+    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
+    this->mark_failed();
+    return;
+  }
+#else
+  ESP_LOGI(TAG, "Loading pedestrian detection model from flash rodata");
   this->pedestrian_detector_ = new PedestrianDetect();
+#endif
+
   if (this->pedestrian_detector_ != nullptr) {
     this->pedestrian_detector_->set_score_thr(this->score_threshold_);
     this->pedestrian_detector_->set_nms_thr(this->nms_threshold_);
@@ -45,6 +71,7 @@ void PedestrianDetectionComponent::setup() {
   ESP_LOGI(TAG, "Pedestrian Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
+#endif
 }
 
 void PedestrianDetectionComponent::loop() {
@@ -86,6 +113,7 @@ void PedestrianDetectionComponent::process_frame_() {
 }
 
 void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_PEDESTRIAN
   if (this->pedestrian_detector_ == nullptr) {
     return;
   }
@@ -125,6 +153,7 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
       callback(ped_results.size());
     }
   }
+#endif
 }
 
 void PedestrianDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -134,6 +163,7 @@ void PedestrianDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t wid
 }
 
 void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
+#ifdef ESP_DL_MODEL_PEDESTRIAN
   if (img_data == nullptr || this->pedestrian_results_mutex_ == nullptr) {
     return;
   }
@@ -151,21 +181,36 @@ void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t wid
     std::vector<uint8_t> blue = {0x1F, 0x00};
 
     for (auto &box : this->cached_pedestrian_results_) {
-      // Draw blue bounding box
+      // Clamp bounding box coordinates to valid range
+      int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
+      int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
+      int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
+      int y2 = std::max(y1 + 10, std::min((int)box.y2, (int)height - 3));
+
+      // Draw blue bounding box with 2-pixel thickness
       dl::image::draw_hollow_rectangle(
         img,
-        box.x1, box.y1,
-        box.x2, box.y2,
-        blue, 3
+        x1, y1,
+        x2, y2,
+        blue, 2
       );
     }
 
     xSemaphoreGive(this->pedestrian_results_mutex_);
   }
+#endif
 }
 
 void PedestrianDetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Pedestrian Detection:");
+#ifdef CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
+  ESP_LOGCONFIG(TAG, "  Model location: SD card");
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Model path: %s", this->sdcard_model_path_);
+  }
+#else
+  ESP_LOGCONFIG(TAG, "  Model location: Flash rodata");
+#endif
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);

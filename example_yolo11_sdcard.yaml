@@ -1,0 +1,163 @@
+# ============================================================================
+# 📝 Example Configuration - YOLO11 avec SD Card Loading
+# ============================================================================
+# Cette configuration montre comment utiliser YOLO11 avec chargement depuis SD card
+# Avantages:
+#   - Économise 2.8 MB de flash (pas d'embedding)
+#   - Compilation 10x plus rapide (30 sec vs 10 min)
+#   - Flexible : changez le modèle sans recompiler
+# ============================================================================
+
+esphome:
+  name: esp32-p4-yolo11-sdcard
+  platform: esp32
+  board: esp32-p4-function-ev-board
+
+# ============================================================================
+# ESP32-P4 Configuration avec PSRAM
+# ============================================================================
+esp32:
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      # PSRAM Configuration (16 MB @ 200 MHz)
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_SUPPORT: y
+      CONFIG_SPIRAM_SPEED_200M: y
+      CONFIG_SPIRAM_RODATA: y                    # CRITIQUE : Modèles en PSRAM
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: y
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: 0
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: 32768
+
+      # Cache L2
+      CONFIG_CACHE_L2_CACHE_256KB: y
+      CONFIG_CACHE_L2_CACHE_LINE_128B: y
+
+# ============================================================================
+# WiFi et API
+# ============================================================================
+wifi:
+  ssid: "YourSSID"
+  password: "YourPassword"
+
+api:
+  encryption:
+    key: "your-encryption-key-here"
+
+ota:
+  password: "your-ota-password"
+
+logger:
+  level: INFO
+  logs:
+    yolo11_detection: INFO
+    dl::Model: DEBUG
+    sd_mmc_card: DEBUG
+
+# ============================================================================
+# 📁 SD Card Configuration (4-bit mode pour performance maximale)
+# ============================================================================
+sd_mmc_card:
+  id: sd_card
+  clk_pin: GPIO43
+  cmd_pin: GPIO44
+  data0_pin: GPIO39
+  data1_pin: GPIO40
+  data2_pin: GPIO41
+  data3_pin: GPIO42
+  mode_1bit: false     # Mode 4-bit pour vitesse maximale
+  slot: 0
+
+# ============================================================================
+# 📷 Caméra MIPI DSI (ESP32-P4)
+# ============================================================================
+esp_cam_sensor:
+  id: tab5_cam
+  model: OV5647        # Ou votre modèle de caméra
+  pins:
+    sccb_sda: GPIO8
+    sccb_scl: GPIO7
+    reset: GPIO2
+  resolution: VGA      # 640x480
+  jpeg_quality: 10
+
+# ============================================================================
+# 🎯 YOLO11 Detection - Mode SD Card
+# ============================================================================
+yolo11_detection:
+  id: yolo_detect
+  camera_id: tab5_cam
+
+  # ============ SD CARD CONFIGURATION ============
+  model_location: sdcard    # Charger depuis SD card (pas flash)
+  model_path: "/sdcard"     # Point de montage SD card
+
+  # Si vous avez organisé avec sous-dossier :
+  # model_path: "/sdcard/models"
+
+  # ============ DETECTION PARAMETERS ============
+  score_threshold: 0.45     # Seuil de confiance (0.0 - 1.0)
+  nms_threshold: 0.5        # Non-Maximum Suppression
+  detection_interval: 12    # Détection toutes les 12 frames
+  draw_enabled: true        # Dessiner bounding boxes
+
+  # ============ AUTOMATION EXAMPLE ============
+  on_object_detected:
+    - lambda: |-
+        ESP_LOGI("yolo", "Détecté %d objets", object_count);
+
+# ============================================================================
+# 🔍 Monitoring Mémoire (Optionnel)
+# ============================================================================
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          size_t free_ram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+          size_t total_ram = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+          size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+          size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+
+          float pct_ram = (float)free_ram / total_ram * 100;
+          float pct_psram = total_psram > 0 ? (float)free_psram / total_psram * 100 : 0;
+
+          ESP_LOGI("memory", "RAM: %.1f%% libre | PSRAM: %.1f%% libre",
+                   pct_ram, pct_psram);
+
+# ============================================================================
+# 📋 INSTRUCTIONS
+# ============================================================================
+# 1. Copier le modèle sur votre carte SD :
+#
+#    Linux/Mac:
+#      cp components/yolo11_detect/models/p4/yolo11_detect_s8_v1.espdl /media/sdcard/
+#
+#    Windows:
+#      Copier yolo11_detect_s8_v1.espdl à la racine de la carte SD (E:\ par exemple)
+#
+# 2. Vérifier la structure :
+#    /sdcard/
+#    └── yolo11_detect_s8_v1.espdl  (2.8 MB)
+#
+# 3. Compiler et uploader :
+#    esphome compile example_yolo11_sdcard.yaml
+#    esphome upload example_yolo11_sdcard.yaml
+#
+# 4. Vérifier les logs au démarrage :
+#    [I][yolo11_detection] Loading YOLO11 model from SD card: /sdcard
+#    [I][dl::Model] Model loaded from SDCARD (2.8 MB)
+#    ✅ YOLO11 Object Detection ready
+#
+# ============================================================================
+# 🎯 RÉSULTAT ATTENDU
+# ============================================================================
+# - Flash utilisée : ~5.6 MB / 7.75 MB (72%) au lieu de 104%
+# - Compilation : 30-60 secondes au lieu de 10+ minutes
+# - Chargement modèle au boot : 2-3 secondes depuis SD card
+# - Performance : 8-12 FPS (identique au mode flash)
+# - RAM interne : 2-3 MB (16-20%)
+# - PSRAM : 11-12 MB (69-75%)
+# ============================================================================

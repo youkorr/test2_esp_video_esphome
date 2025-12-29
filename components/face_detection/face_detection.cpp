@@ -46,7 +46,23 @@ void FaceDetectionComponent::setup() {
 
   // Initialize face detector
   ESP_LOGI(TAG, "Initializing face detector...");
+
+#if CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
+    delay(6000);
+    ESP_LOGI(TAG, "Loading face detection model from SD card: %s", this->sdcard_model_path_);
+    this->face_detector_ = new HumanFaceDetect(this->sdcard_model_path_);
+  } else {
+    ESP_LOGW(TAG, "SD card mode enabled but no model_path provided, using default /sdcard");
+    delay(6000);
+    this->face_detector_ = new HumanFaceDetect("/sdcard");
+  }
+#else
+  ESP_LOGI(TAG, "Loading face detection model from flash rodata");
   this->face_detector_ = new HumanFaceDetect();
+#endif
+
   if (this->face_detector_ != nullptr) {
     this->face_detector_->set_score_thr(this->score_threshold_);
     this->face_detector_->set_nms_thr(this->nms_threshold_);
@@ -304,6 +320,14 @@ void FaceDetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);
   ESP_LOGCONFIG(TAG, "  Draw enabled: %s", this->draw_enabled_ ? "YES" : "NO");
+#ifdef CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
+  ESP_LOGCONFIG(TAG, "  Model location: SD card");
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Model path: %s", this->sdcard_model_path_);
+  }
+#else
+  ESP_LOGCONFIG(TAG, "  Model location: flash rodata");
+#endif
   ESP_LOGCONFIG(TAG, "  Recognition enabled: %s", this->recognition_enabled_ ? "YES" : "NO");
   if (this->recognition_enabled_) {
     ESP_LOGCONFIG(TAG, "  Face DB path: %s", this->face_db_path_.c_str());

@@ -42,11 +42,13 @@ env.Append(CPPDEFINES=[
 ])
 
 # Human face detection configuration
+# Default: flash rodata mode (override with model_location: sdcard in YAML)
 env.Append(CPPDEFINES=[
     ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
+    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0"),
     ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
 ])
 

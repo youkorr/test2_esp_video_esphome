@@ -4,10 +4,16 @@
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 
-// Forward declaration
+// Forward declarations
 namespace esphome {
 namespace face_detection {
 class FaceDetectionComponent;
+}
+namespace yolo11_detection {
+class YOLO11DetectionComponent;
+}
+namespace pedestrian_detection {
+class PedestrianDetectionComponent;
 }
 }
 
@@ -27,6 +33,12 @@ class LVGLCameraDisplay : public Component {
 #ifdef USE_FACE_DETECTION
   void set_face_detection(face_detection::FaceDetectionComponent *face_detect) { this->face_detection_ = face_detect; }
 #endif
+#ifdef USE_YOLO11_DETECTION
+  void set_yolo11_detection(yolo11_detection::YOLO11DetectionComponent *yolo11_detect) { this->yolo11_detection_ = yolo11_detect; }
+#endif
+#ifdef USE_PEDESTRIAN_DETECTION
+  void set_pedestrian_detection(pedestrian_detection::PedestrianDetectionComponent *ped_detect) { this->pedestrian_detection_ = ped_detect; }
+#endif
 
   void configure_canvas(lv_obj_t *canvas);
 
@@ -39,6 +51,12 @@ class LVGLCameraDisplay : public Component {
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
 #ifdef USE_FACE_DETECTION
   face_detection::FaceDetectionComponent *face_detection_{nullptr};  // Optional
+#endif
+#ifdef USE_YOLO11_DETECTION
+  yolo11_detection::YOLO11DetectionComponent *yolo11_detection_{nullptr};  // Optional
+#endif
+#ifdef USE_PEDESTRIAN_DETECTION
+  pedestrian_detection::PedestrianDetectionComponent *pedestrian_detection_{nullptr};  // Optional
 #endif
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};

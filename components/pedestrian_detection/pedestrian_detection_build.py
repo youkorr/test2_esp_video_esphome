@@ -21,10 +21,12 @@ env.Append(CPPDEFINES=[
 ])
 
 # Pedestrian detection configuration
+# Default: flash rodata mode (override with model_location: sdcard in YAML)
 env.Append(CPPDEFINES=[
     ("CONFIG_PEDESTRIAN_DETECT_PICO_S8_V1", "1"),
     ("CONFIG_PEDESTRIAN_DETECT_MODEL_TYPE", "0"),
     ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA", "1"),
+    ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD", "0"),
     ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),
 ])
 
@@ -150,7 +152,7 @@ if os.path.exists(esp_dl_dir):
 
     # Files to exclude
     esp_dl_exclude = [
-        "dl_base_dotprod.cpp",  # Use custom implementation
+        "dl_base_dotprod.cpp",  # Use custom implementation (no DSP)
         "dl_image_jpeg.cpp",
         "dl_image_bmp.cpp",
     ]
@@ -205,19 +207,16 @@ if os.path.exists(esp_dl_dir):
         print("[Pedestrian Detection] Added libfbs_model.a")
 
 # ========================================================================
-# Copy stub files from lvgl_camera_display
+# Copy stub files
 # ========================================================================
-lvgl_cam_dir = os.path.join(parent_components_dir, "lvgl_camera_display")
+# Custom dotprod implementation (no DSP version) - shared from face_detection
+face_detection_dir = os.path.join(parent_components_dir, "face_detection")
+dotprod_file = os.path.join(face_detection_dir, "dl_base_dotprod_no_dsp.cpp")
+if os.path.exists(dotprod_file):
+    sources_to_add.append(dotprod_file)
+    print("[Pedestrian Detection] + dl_base_dotprod_no_dsp.cpp (from face_detection)")
 
-# Custom dotprod implementation
-dotprod_src = os.path.join(lvgl_cam_dir, "dl_base_dotprod_no_dsp.cpp")
-dotprod_dst = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
-if os.path.exists(dotprod_src) and not os.path.exists(dotprod_dst):
-    import shutil
-    shutil.copy(dotprod_src, dotprod_dst)
-if os.path.exists(dotprod_dst):
-    sources_to_add.append(dotprod_dst)
-    print("[Pedestrian Detection] + dl_base_dotprod_no_dsp.cpp")
+lvgl_cam_dir = os.path.join(parent_components_dir, "lvgl_camera_display")
 
 # mbedTLS stub
 mbedtls_stub_src = os.path.join(lvgl_cam_dir, "mbedtls_aes_stub.c")

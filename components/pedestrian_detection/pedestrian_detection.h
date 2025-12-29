@@ -28,10 +28,12 @@ class PedestrianDetectionComponent : public Component {
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
   void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
+  void set_sdcard_model_path(const char *path) { this->sdcard_model_path_ = path; }
 
   // Detection API
   int get_detected_pedestrian_count();
@@ -45,16 +47,18 @@ class PedestrianDetectionComponent : public Component {
     this->on_pedestrian_detected_callbacks_.push_back(std::move(callback));
   }
 
-  float get_setup_priority() const override { return setup_priority::LATE; }
+  float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
 
  protected:
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
+  std::string canvas_id_{};
   bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 
   // Detection configuration
   float score_threshold_{0.5f};
   float nms_threshold_{0.5f};
   int detection_interval_{4};  // Run detection every N frames
+  const char *sdcard_model_path_{nullptr};
 
   // Detection model
   PedestrianDetect *pedestrian_detector_{nullptr};
