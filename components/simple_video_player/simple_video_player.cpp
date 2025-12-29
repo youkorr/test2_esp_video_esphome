@@ -1755,13 +1755,21 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   // CRITICAL: Software H264 decoder (esp_h264_dec_sw) ONLY supports I420 format
   // O_UYY_E_VYY format is only for hardware decoder (esp_h264_dec_hw)
   // I420 format requires software LUT conversion (PPA doesn't support I420)
+  //
+  // ESP32-P4 H.264 decoder ONLY supports Constrained Baseline Profile
+  // See: https://components.espressif.com/components/espressif/esp_h264
+  // Constrained Baseline = profile_idc 66 with constraint_set1_flag = 1
   esp_h264_dec_cfg_sw_t cfg = {
-    .pic_type = ESP_H264_RAW_FMT_I420  // Software decoder ONLY supports I420
+    .pic_type = ESP_H264_RAW_FMT_I420,           // Software decoder ONLY supports I420
+    .profile_idc = ESP_H264_PROFILE_BASELINE      // REQUIRED: Constrained Baseline (66)
   };
+
+  ESP_LOGI(TAG, "Initializing H.264 decoder with Constrained Baseline profile (idc=66)...");
 
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
   if (err != ESP_H264_ERR_OK || this->h264_decoder_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create H.264 decoder: err=%d", err);
+    ESP_LOGE(TAG, "This usually means the video profile is not Constrained Baseline");
     return false;
   }
 
