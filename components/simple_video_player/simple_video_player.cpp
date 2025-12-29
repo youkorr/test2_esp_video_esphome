@@ -146,6 +146,36 @@ void SimpleVideoPlayer::setup() {
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
 
+  // Initialize hardware rotation if configured
+  // Only initialize once - not on every video restart
+  if (this->rotation_ != 0 && !this->rotation_initialized_) {
+    // Close any existing rotation handle (from previous video with different dimensions)
+    if (this->rotate_handle_ != nullptr) {
+      esp_imgfx_rotate_close(this->rotate_handle_);
+      this->rotate_handle_ = nullptr;
+    }
+
+    // Create rotation handle with actual video dimensions
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->aligned_width_,
+        .height = (uint16_t)this->aligned_height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation with actual dimensions: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Hardware rotation initialized: %dx%d -> %d degrees",
+               this->aligned_width_, this->aligned_height_, this->rotation_);
+      this->rotation_initialized_ = true;  // Mark as initialized
+    }
+  }
+
   // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
   this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
@@ -443,6 +473,36 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   ESP_LOGI(TAG, "Video resolution: %dx%d (actual) -> %dx%d (aligned)",
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
+
+  // Initialize hardware rotation if configured
+  // Only initialize once - not on every video restart
+  if (this->rotation_ != 0 && !this->rotation_initialized_) {
+    // Close any existing rotation handle (from previous video with different dimensions)
+    if (this->rotate_handle_ != nullptr) {
+      esp_imgfx_rotate_close(this->rotate_handle_);
+      this->rotate_handle_ = nullptr;
+    }
+
+    // Create rotation handle with actual video dimensions
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->aligned_width_,
+        .height = (uint16_t)this->aligned_height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation with actual dimensions: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Hardware rotation initialized: %dx%d -> %d degrees",
+               this->aligned_width_, this->aligned_height_, this->rotation_);
+      this->rotation_initialized_ = true;  // Mark as initialized
+    }
+  }
 
   // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
   this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
@@ -3298,8 +3358,55 @@ void SimpleVideoPlayer::update_display_() {
     stride_logged = true;
   }
 
-  lv_canvas_set_buffer(this->canvas_, display_buffer,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+  // Apply hardware rotation if configured
+  uint16_t canvas_width = this->actual_width_;
+  uint16_t canvas_height = this->actual_height_;
+  uint8_t *canvas_buffer = display_buffer;
+
+  if (this->rotation_ != 0 && this->rotate_handle_ != nullptr) {
+    // Allocate rotation buffer on first use
+    if (this->rotate_buffer_ == nullptr) {
+      esp_imgfx_resolution_t rotated_res;
+      esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+      this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
+      this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
+                                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->rotate_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate rotation buffer");
+      } else {
+        ESP_LOGI(TAG, "Allocated rotation buffer: %zu bytes, rotated size: %dx%d",
+                 this->rotate_buffer_size_, rotated_res.width, rotated_res.height);
+      }
+    }
+
+    // Apply rotation if buffer was allocated
+    if (this->rotate_buffer_ != nullptr) {
+      // Rotate the decoded frame
+      esp_imgfx_data_t in_image = {
+        .data = display_buffer,
+        .data_len = (uint32_t)this->rgb_buffer_size_,
+      };
+      esp_imgfx_data_t out_image = {
+        .data = (uint8_t *)this->rotate_buffer_,
+        .data_len = (uint32_t)this->rotate_buffer_size_,
+      };
+
+      esp_imgfx_err_t ret = esp_imgfx_rotate_process(this->rotate_handle_, &in_image, &out_image);
+      if (ret != ESP_IMGFX_ERR_OK) {
+        ESP_LOGE(TAG, "Rotation failed: %d", ret);
+      } else {
+        // Update canvas buffer and dimensions to use rotated frame
+        esp_imgfx_resolution_t rotated_res;
+        esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+        canvas_width = rotated_res.width;
+        canvas_height = rotated_res.height;
+        canvas_buffer = (uint8_t *)this->rotate_buffer_;
+      }
+    }
+  }
+
+  lv_canvas_set_buffer(this->canvas_, canvas_buffer,
+                       canvas_width, canvas_height, LV_IMG_CF_TRUE_COLOR);
 
   // Swap buffers for next frame (rotate: 0120 for triple, 010 for double)
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
@@ -3760,6 +3867,15 @@ void SimpleVideoPlayer::stop() {
   }
 
   this->rgb_buffer_size_ = 0;
+
+  // Free rotation buffer (but keep rotation handle and rotation_initialized_ for next playback)
+  if (this->rotate_buffer_ != nullptr) {
+    total_freed += this->rotate_buffer_size_;
+    heap_caps_free(this->rotate_buffer_);
+    this->rotate_buffer_ = nullptr;
+    this->rotate_buffer_size_ = 0;
+    ESP_LOGD(TAG, "  Freed rotate_buffer_: %zu bytes", this->rotate_buffer_size_);
+  }
 
   // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
   if (!this->yuv_buffer_.empty()) {
