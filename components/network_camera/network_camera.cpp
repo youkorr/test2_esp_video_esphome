@@ -54,28 +54,43 @@ void NetworkCamera::setup() {
 void NetworkCamera::loop() {
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
-    // Check if we need to wait before attempting connection (retry delay)
     uint32_t now = millis();
+
+    // CRITICAL: Check WiFi FIRST before any connection attempt
+    auto wifi_component = wifi::global_wifi_component;
+    if (wifi_component == nullptr || !wifi_component->is_connected()) {
+      // Log only on first attempt or every 30 seconds to avoid spam
+      static uint32_t last_wifi_log = 0;
+      if (this->connection_attempts_ == 0 || (now - last_wifi_log) > 30000) {
+        ESP_LOGW(TAG, "⏳ WiFi not ready yet, waiting for connection...");
+        last_wifi_log = now;
+      }
+      this->last_connection_attempt_ = now;
+      // Keep trying - don't disable camera
+      return;
+    }
+
+    // Additional check: Verify WiFi has valid IP address
+    if (!wifi_component->has_sta() || wifi_component->get_ip_address().is_set() == false) {
+      static uint32_t last_ip_log = 0;
+      if ((now - last_ip_log) > 30000) {
+        ESP_LOGW(TAG, "⏳ WiFi connected but no IP address yet, waiting...");
+        last_ip_log = now;
+      }
+      this->last_connection_attempt_ = now;
+      return;
+    }
+
+    // Check if we need to wait before attempting connection (retry delay)
     if (this->last_connection_attempt_ > 0 &&
         (now - this->last_connection_attempt_) < this->connection_retry_delay_) {
       // Still within retry delay period, skip this attempt
       return;
     }
 
-    // Check WiFi connection before attempting to connect to camera
-    auto wifi_component = wifi::global_wifi_component;
-    if (wifi_component == nullptr || !wifi_component->is_connected()) {
-      // Log only on first attempt or every 30 seconds to avoid spam
-      static uint32_t last_wifi_log = 0;
-      if (this->connection_attempts_ == 0 || (now - last_wifi_log) > 30000) {
-        ESP_LOGW(TAG, "WiFi not connected yet, waiting for connection (will auto-retry)...");
-        last_wifi_log = now;
-      }
-      this->last_connection_attempt_ = now;
-      // Don't disable - keep trying automatically
-      return;
-    }
-
+    // WiFi is READY with valid IP - proceed with connection
+    ESP_LOGI(TAG, "✓ WiFi ready (IP: %s), starting camera...",
+             wifi_component->get_ip_address().str().c_str());
     ESP_LOGI(TAG, "Starting Network Camera display...");
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
