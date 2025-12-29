@@ -8,6 +8,7 @@ DEPENDENCIES = ["esp_cam_sensor"]
 AUTO_LOAD = ["esp_cam_sensor"]
 
 CONF_CAMERA_ID = "camera_id"
+CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL = "detection_interval"
@@ -26,9 +27,10 @@ MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(PedestrianDetectionComponent),
     cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+    cv.Optional(CONF_CANVAS_ID): cv.string,
     cv.Optional(CONF_SCORE_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
-    cv.Optional(CONF_DETECTION_INTERVAL, default=4): cv.int_range(min=1, max=30),
+    cv.Optional(CONF_DETECTION_INTERVAL, default=4): cv.int_range(min=1, max=600),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
     cv.Optional(CONF_ON_PEDESTRIAN_DETECTED): automation.validate_automation({
         cv.GenerateID(): cv.declare_id(PedestrianDetectedTrigger),
@@ -42,6 +44,9 @@ async def to_code(config):
 
     camera = await cg.get_variable(config[CONF_CAMERA_ID])
     cg.add(var.set_camera(camera))
+
+    if CONF_CANVAS_ID in config:
+        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
 
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
     cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))
