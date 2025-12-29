@@ -15,6 +15,7 @@
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
+#include "esp_imgfx_rotate.h"  // Hardware rotation support
 
 // TODO: ESP-GMF full framework integration (currently using simplified wrapper)
 // #include "esp_gmf_element.h"
@@ -95,6 +96,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
+  void set_rotation(uint16_t rotation) { rotation_ = rotation; }
   // Triple buffering is now mandatory for smooth playback (removed setter)
 
   void setup() override;
@@ -268,6 +270,7 @@ class SimpleVideoPlayer : public Component {
   bool loop_{false};
   bool controls_enabled_{true};
   bool fps_override_{false};
+  uint16_t rotation_{0};  // Rotation angle: 0, 90, 180, 270
 
   PlayerState state_{PlayerState::STOPPED};
   MediaFormat format_{MediaFormat::UNKNOWN};
@@ -336,6 +339,12 @@ class SimpleVideoPlayer : public Component {
   // Falls back to software LUT conversion if PPA unavailable
   ppa_client_handle_t ppa_client_handle_{nullptr};
   bool ppa_color_convert_enabled_{false};
+
+  // Hardware rotation support
+  esp_imgfx_rotate_handle_t rotate_handle_{nullptr};  // Hardware rotation handle
+  lv_color_t *rotate_buffer_{nullptr};  // Buffer for rotated frames
+  size_t rotate_buffer_size_{0};
+  bool rotation_initialized_{false};  // Track if rotation handle has been initialized with actual dimensions
 
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;
