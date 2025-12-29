@@ -43,22 +43,33 @@ env.Append(CPPDEFINES=[
 
 # Human face detection configuration
 # Default: flash rodata mode (override with model_location: sdcard in YAML)
-env.Append(CPPDEFINES=[
-    ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
-    ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0"),
-    ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
-])
+# Only add defaults if not already defined (to avoid redefinition warnings)
+existing_defines = [define[0] if isinstance(define, tuple) else define for define in env.get("CPPDEFINES", [])]
+
+if "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA" not in existing_defines:
+    env.Append(CPPDEFINES=[
+        ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
+        ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0"),
+        ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
+    ])
+    print("[Face Detection] Added default face detection CONFIG defines (flash rodata mode)")
+else:
+    print("[Face Detection] Face detection CONFIG defines already set by YAML (skipping defaults)")
 
 # Human face recognition configuration
-env.Append(CPPDEFINES=[
-    ("CONFIG_HUMAN_FACE_FEAT_MFN_S8_V1", "1"),
-    ("CONFIG_HUMAN_FACE_FEAT_MODEL_TYPE", "0"),
-    ("CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA", "1"),
-    ("CONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION", "0"),
-])
+if "CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA" not in existing_defines:
+    env.Append(CPPDEFINES=[
+        ("CONFIG_HUMAN_FACE_FEAT_MFN_S8_V1", "1"),
+        ("CONFIG_HUMAN_FACE_FEAT_MODEL_TYPE", "0"),
+        ("CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA", "1"),
+        ("CONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION", "0"),
+    ])
+    print("[Face Detection] Added default face recognition CONFIG defines")
+else:
+    print("[Face Detection] Face recognition CONFIG defines already set")
 
 print("[Face Detection] CONFIG defines added")
 
