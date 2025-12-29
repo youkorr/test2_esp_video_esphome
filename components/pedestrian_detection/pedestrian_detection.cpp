@@ -134,6 +134,11 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
     this->cached_pedestrian_results_.clear();
 
     for (auto &result : ped_results) {
+      // Debug: Log detection details
+      ESP_LOGD(TAG, "Detection: category=%d score=%.3f box=[%d,%d,%d,%d]",
+               result.category, result.score,
+               result.box[0], result.box[1], result.box[2], result.box[3]);
+
       PedestrianBox box;
       box.x1 = result.box[0];
       box.y1 = result.box[1];

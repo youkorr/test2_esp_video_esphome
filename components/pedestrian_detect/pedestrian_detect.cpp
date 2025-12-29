@@ -25,6 +25,12 @@ Pico::Pico(const char *model_name)
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
 #endif
+
+    // Debug: Log model input dimensions
+    auto input_shape = m_model->get_input()->shape;
+    ESP_LOGI("pedestrian_detect", "Model input shape: [%d, %d, %d, %d]",
+             input_shape[0], input_shape[1], input_shape[2], input_shape[3]);
+
     // Adjust anchor sizes for close-range pedestrian detection (50cm+)
     // Pico postprocessor supports 3 stages (score0-2, bbox0-2)
     // Lower thresholds: score_thr=0.3, nms_thr=0.3 for better detection
