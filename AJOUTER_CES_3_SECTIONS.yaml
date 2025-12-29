@@ -1,0 +1,36 @@
+# ========================================================================
+# COPIEZ CES 3 SECTIONS DANS VOTRE P4MINI.YAML
+# ========================================================================
+
+# -------- SECTION 1: Variable globale (avant lvgl:) --------
+globals:
+  - id: cam1_state
+    type: bool
+    initial_value: 'false'
+
+
+# -------- SECTION 2: Caméra réseau --------
+network_camera:
+  - id: security_cam_1
+    url: "rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream1"
+    protocol: rtsp
+    width: 320
+    height: 240
+    canvas_id: security_canvas
+    update_interval: 100ms
+
+
+# -------- SECTION 3: Multi-camera display (C'EST CELLE QUI MANQUE!) --------
+multi_camera_display:
+  id: security_display
+  canvas_id: security_canvas
+  cameras:
+    - camera_id: security_cam_1
+
+
+# -------- SECTION 4: external_components (si pas déjà présent) --------
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [network_camera, multi_camera_display]
