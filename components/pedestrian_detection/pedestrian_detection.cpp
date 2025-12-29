@@ -134,11 +134,6 @@ void PedestrianDetectionComponent::detect_pedestrians_(uint8_t *img_data, uint16
     this->cached_pedestrian_results_.clear();
 
     for (auto &result : ped_results) {
-      // Debug: Log detection details
-      ESP_LOGD(TAG, "Detection: category=%d score=%.3f box=[%d,%d,%d,%d]",
-               result.category, result.score,
-               result.box[0], result.box[1], result.box[2], result.box[3]);
-
       PedestrianBox box;
       box.x1 = result.box[0];
       box.y1 = result.box[1];
@@ -186,17 +181,11 @@ void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t wid
     std::vector<uint8_t> blue = {0x1F, 0x00};
 
     for (auto &box : this->cached_pedestrian_results_) {
-      // Log raw coordinates for debugging
-      ESP_LOGD(TAG, "Raw box: x1=%d y1=%d x2=%d y2=%d (image: %dx%d)",
-               box.x1, box.y1, box.x2, box.y2, width, height);
-
       // Clamp bounding box coordinates to valid range
       int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
       int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
       int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
       int y2 = std::max(y1 + 10, std::min((int)box.y2, (int)height - 3));
-
-      ESP_LOGD(TAG, "Clamped box: x1=%d y1=%d x2=%d y2=%d", x1, y1, x2, y2);
 
       // Draw blue bounding box with 2-pixel thickness
       dl::image::draw_hollow_rectangle(
