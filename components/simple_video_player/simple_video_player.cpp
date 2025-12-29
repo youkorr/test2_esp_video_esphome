@@ -4088,22 +4088,23 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
         continue;
       }
 
+      uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+
       // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
       // If frame_ready_ is true, main thread hasn't processed the last frame yet
-      // Decoding a new frame would OVERWRITE the previous one → frame drop!
+      // We count it as a drop but DON'T decode a new frame (would overwrite the pending one)
       if (player->frame_ready_) {
         player->frames_dropped_++;
         static uint32_t last_drop_warning = 0;
-        uint32_t now = esp_timer_get_time() / 1000;
-        if (now - last_drop_warning > 1000) {  // Warn max once per second
+        if (current_time - last_drop_warning > 1000) {  // Warn max once per second
           ESP_LOGI(TAG, "Frame drops: %lu frames (system load - consider lowering FPS/resolution)",
                    (unsigned long)player->frames_dropped_);
-          last_drop_warning = now;
+          last_drop_warning = current_time;
         }
-        continue;  // Skip this iteration to avoid overwriting unprocessed frame
-      }
-
-      uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+        // DON'T use continue here! That would wait for the NEXT timer tick and double the delay
+        // Just skip the decode work and loop back immediately for the next event
+      } else {
+        // Frame is ready to decode - proceed with normal decode flow
 
       // Log timing for performance debugging (only every 30 frames to avoid spam)
       if (callback_count++ % 30 == 0) {
@@ -4305,6 +4306,7 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           // If you want to free memory immediately after playback, call stop() manually
         }
       }
+      }  // End of else (frame decoding block)
     }
   }
 
