@@ -18,6 +18,7 @@ print("[Pedestrian Detection] Build script running...")
 # ========================================================================
 env.Append(CPPDEFINES=[
     ("CONFIG_IDF_TARGET_ESP32P4", "1"),
+    ("CONFIG_ESP32P4_BOOST", "1"),
 ])
 
 # Pedestrian detection configuration
@@ -150,7 +151,6 @@ if os.path.exists(esp_dl_dir):
 
     # Files to exclude
     esp_dl_exclude = [
-        "dl_base_dotprod.cpp",  # Use custom implementation
         "dl_image_jpeg.cpp",
         "dl_image_bmp.cpp",
     ]
@@ -208,16 +208,6 @@ if os.path.exists(esp_dl_dir):
 # Copy stub files from lvgl_camera_display
 # ========================================================================
 lvgl_cam_dir = os.path.join(parent_components_dir, "lvgl_camera_display")
-
-# Custom dotprod implementation
-dotprod_src = os.path.join(lvgl_cam_dir, "dl_base_dotprod_no_dsp.cpp")
-dotprod_dst = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
-if os.path.exists(dotprod_src) and not os.path.exists(dotprod_dst):
-    import shutil
-    shutil.copy(dotprod_src, dotprod_dst)
-if os.path.exists(dotprod_dst):
-    sources_to_add.append(dotprod_dst)
-    print("[Pedestrian Detection] + dl_base_dotprod_no_dsp.cpp")
 
 # mbedTLS stub
 mbedtls_stub_src = os.path.join(lvgl_cam_dir, "mbedtls_aes_stub.c")
