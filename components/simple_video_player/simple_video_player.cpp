@@ -2535,6 +2535,72 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
       ESP_LOGW(TAG, "  Constraint flags: set0=%d, set1=%d, set2=%d",
                constraint_set0 ? 1 : 0, constraint_set1 ? 1 : 0, constraint_set2 ? 1 : 0);
 
+      // Interpret H.264 level capabilities (based on ITU-T H.264 spec and FFmpeg h264_levels.c)
+      const char* level_desc = nullptr;
+      const char* typical_res = nullptr;
+      bool level_warning = false;
+
+      switch (level_idc) {
+        case 10: level_desc = "176x144@15fps"; typical_res = "QCIF"; break;
+        case 11: level_desc = "352x288@7.5fps"; typical_res = "CIF (low)"; break;
+        case 12: level_desc = "352x288@15fps"; typical_res = "CIF"; break;
+        case 13: level_desc = "352x288@30fps"; typical_res = "CIF (high)"; break;
+        case 20: level_desc = "352x288@30fps"; typical_res = "CIF"; break;
+        case 21: level_desc = "528x384@30fps"; typical_res = "HHR"; break;
+        case 22: level_desc = "720x480@15fps"; typical_res = "SD (low)"; break;
+        case 30: level_desc = "720x480@30fps"; typical_res = "SD/NTSC"; break;
+        case 31: level_desc = "1280x720@30fps"; typical_res = "720p HD"; break;
+        case 32: level_desc = "1280x720@60fps"; typical_res = "720p HD (high)"; break;
+        case 40: level_desc = "1920x1080@30fps"; typical_res = "1080p Full HD"; break;
+        case 41: level_desc = "1920x1080@30fps"; typical_res = "1080p Full HD"; break;
+        case 42: level_desc = "1920x1080@60fps"; typical_res = "1080p60 Full HD"; break;
+        case 50:
+          level_desc = "1920x1080@72fps or 3840x2160@30fps";
+          typical_res = "1080p72 or 4K";
+          level_warning = true;
+          break;
+        case 51:
+          level_desc = "3840x2160@30fps";
+          typical_res = "4K UHD";
+          level_warning = true;
+          break;
+        case 52:
+          level_desc = "3840x2160@60fps";
+          typical_res = "4K60 UHD";
+          level_warning = true;
+          break;
+        case 60:
+          level_desc = "7680x4320@30fps";
+          typical_res = "8K UHD";
+          level_warning = true;
+          break;
+        case 61:
+          level_desc = "7680x4320@60fps";
+          typical_res = "8K60 UHD";
+          level_warning = true;
+          break;
+        case 62:
+          level_desc = "7680x4320@120fps";
+          typical_res = "8K120 UHD";
+          level_warning = true;
+          break;
+        default:
+          level_desc = "Unknown level capabilities";
+          typical_res = "Unknown";
+          break;
+      }
+
+      if (level_desc) {
+        ESP_LOGI(TAG, "  H.264 Level %d.%d capabilities: %s (%s)",
+                 level_idc / 10, level_idc % 10, level_desc, typical_res);
+      }
+
+      if (level_warning) {
+        ESP_LOGW(TAG, "  ⚠ Level %d.%d is very demanding - may exceed ESP32-P4 capabilities",
+                 level_idc / 10, level_idc % 10);
+        ESP_LOGW(TAG, "    Decoding success depends on actual video resolution and framerate");
+      }
+
       // OpenH264 decoder supports ALL H.264 profiles including advanced ones
       // We'll let OpenH264 attempt to decode and report errors if it can't
       // Better to try and fail than to reject prematurely
