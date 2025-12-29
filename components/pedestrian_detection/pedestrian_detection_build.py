@@ -22,13 +22,20 @@ env.Append(CPPDEFINES=[
 
 # Pedestrian detection configuration
 # Default: flash rodata mode (override with model_location: sdcard in YAML)
-env.Append(CPPDEFINES=[
-    ("CONFIG_PEDESTRIAN_DETECT_PICO_S8_V1", "1"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_TYPE", "0"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA", "1"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD", "0"),
-    ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),
-])
+# Only add defaults if not already defined (to avoid redefinition warnings)
+existing_defines = [define[0] if isinstance(define, tuple) else define for define in env.get("CPPDEFINES", [])]
+
+if "CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA" not in existing_defines:
+    env.Append(CPPDEFINES=[
+        ("CONFIG_PEDESTRIAN_DETECT_PICO_S8_V1", "1"),
+        ("CONFIG_PEDESTRIAN_DETECT_MODEL_TYPE", "0"),
+        ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA", "1"),
+        ("CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD", "0"),
+        ("CONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION", "0"),
+    ])
+    print("[Pedestrian Detection] Added default CONFIG defines (flash rodata mode)")
+else:
+    print("[Pedestrian Detection] CONFIG defines already set by YAML (skipping defaults)")
 
 print("[Pedestrian Detection] CONFIG defines added")
 

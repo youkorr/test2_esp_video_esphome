@@ -146,6 +146,36 @@ void SimpleVideoPlayer::setup() {
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
 
+  // Initialize hardware rotation if configured
+  // Only initialize once - not on every video restart
+  if (this->rotation_ != 0 && !this->rotation_initialized_) {
+    // Close any existing rotation handle (from previous video with different dimensions)
+    if (this->rotate_handle_ != nullptr) {
+      esp_imgfx_rotate_close(this->rotate_handle_);
+      this->rotate_handle_ = nullptr;
+    }
+
+    // Create rotation handle with actual video dimensions
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->aligned_width_,
+        .height = (uint16_t)this->aligned_height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation with actual dimensions: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Hardware rotation initialized: %dx%d -> %d degrees",
+               this->aligned_width_, this->aligned_height_, this->rotation_);
+      this->rotation_initialized_ = true;  // Mark as initialized
+    }
+  }
+
   // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
   this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
   this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->rgb_buffer_size_,
@@ -443,6 +473,36 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   ESP_LOGI(TAG, "Video resolution: %dx%d (actual) -> %dx%d (aligned)",
            this->actual_width_, this->actual_height_,
            this->aligned_width_, this->aligned_height_);
+
+  // Initialize hardware rotation if configured
+  // Only initialize once - not on every video restart
+  if (this->rotation_ != 0 && !this->rotation_initialized_) {
+    // Close any existing rotation handle (from previous video with different dimensions)
+    if (this->rotate_handle_ != nullptr) {
+      esp_imgfx_rotate_close(this->rotate_handle_);
+      this->rotate_handle_ = nullptr;
+    }
+
+    // Create rotation handle with actual video dimensions
+    esp_imgfx_rotate_cfg_t rotate_cfg = {
+      .in_res = {
+        .width = (uint16_t)this->aligned_width_,
+        .height = (uint16_t)this->aligned_height_,
+      },
+      .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
+      .degree = this->rotation_,
+    };
+
+    esp_imgfx_err_t ret = esp_imgfx_rotate_open(&rotate_cfg, &this->rotate_handle_);
+    if (ret != ESP_IMGFX_ERR_OK) {
+      ESP_LOGE(TAG, "Failed to initialize rotation with actual dimensions: %d", ret);
+      this->rotate_handle_ = nullptr;
+    } else {
+      ESP_LOGI(TAG, "Hardware rotation initialized: %dx%d -> %d degrees",
+               this->aligned_width_, this->aligned_height_, this->rotation_);
+      this->rotation_initialized_ = true;  // Mark as initialized
+    }
+  }
 
   // Allocate RGB buffer with aligned dimensions (matches Espressif video subsystem)
   this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 64);
@@ -1695,13 +1755,23 @@ bool SimpleVideoPlayer::init_h264_decoder_() {
   // CRITICAL: Software H264 decoder (esp_h264_dec_sw) ONLY supports I420 format
   // O_UYY_E_VYY format is only for hardware decoder (esp_h264_dec_hw)
   // I420 format requires software LUT conversion (PPA doesn't support I420)
+  //
+  // ESP32-P4 H.264 decoder ONLY supports Constrained Baseline Profile
+  // See: https://components.espressif.com/components/espressif/esp_h264
+  // Constrained Baseline = profile_idc 66 with constraint_set1_flag = 1
+  //
+  // Using AUTO profile detection to let decoder validate stream compatibility
   esp_h264_dec_cfg_sw_t cfg = {
-    .pic_type = ESP_H264_RAW_FMT_I420  // Software decoder ONLY supports I420
+    .pic_type = ESP_H264_RAW_FMT_I420,        // Software decoder ONLY supports I420
+    .profile_idc = ESP_H264_PROFILE_AUTO      // Auto-detect: decoder validates compatibility
   };
+
+  ESP_LOGI(TAG, "Initializing H.264 decoder with AUTO profile detection (will accept Constrained Baseline)...");
 
   esp_h264_err_t err = esp_h264_dec_sw_new(&cfg, &this->h264_decoder_);
   if (err != ESP_H264_ERR_OK || this->h264_decoder_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create H.264 decoder: err=%d", err);
+    ESP_LOGE(TAG, "Decoder creation failed - check video format");
     return false;
   }
 
@@ -2268,6 +2338,9 @@ bool SimpleVideoPlayer::parse_avcc_(uint32_t size) {
   ESP_LOGI(TAG, "avcC: NAL length size=%d, SPS=%d bytes, PPS=%d bytes",
            this->nal_length_size_, this->sps_.size(), this->pps_.size());
 
+  // Patch SPS if needed for unsupported profiles
+  this->patch_sps_for_decoder_compatibility_();
+
   return true;
 }
 
@@ -2406,6 +2479,235 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   return true;
 }
 
+// ===== SPS Reconstruction Helpers =====
+
+// Write bits to a byte vector at a specific bit position
+void SimpleVideoPlayer::write_bits_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value, int num_bits) {
+  for (int i = num_bits - 1; i >= 0; i--) {
+    size_t byte_pos = bit_pos / 8;
+    size_t bit_offset = 7 - (bit_pos % 8);
+
+    // Ensure byte exists
+    while (data.size() <= byte_pos) {
+      data.push_back(0);
+    }
+
+    // Set bit
+    if ((value >> i) & 1) {
+      data[byte_pos] |= (1 << bit_offset);
+    }
+
+    bit_pos++;
+  }
+}
+
+// Write unsigned Exp-Golomb coded value
+void SimpleVideoPlayer::write_exp_golomb_ue_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value) {
+  value++;  // Exp-Golomb encoding: code_num = value + 1
+
+  // Count leading zeros needed
+  int leading_zeros = 0;
+  uint32_t temp = value;
+  while (temp > 1) {
+    temp >>= 1;
+    leading_zeros++;
+  }
+
+  // Write leading zeros
+  for (int i = 0; i < leading_zeros; i++) {
+    write_bits_(data, bit_pos, 0, 1);
+  }
+
+  // Write value (including the implicit 1 bit)
+  write_bits_(data, bit_pos, value, leading_zeros + 1);
+}
+
+// Write signed Exp-Golomb coded value
+void SimpleVideoPlayer::write_exp_golomb_se_(std::vector<uint8_t>& data, size_t& bit_pos, int32_t value) {
+  // Convert signed to unsigned: 0→0, 1→1, -1→2, 2→3, -2→4, etc.
+  uint32_t code_num;
+  if (value <= 0) {
+    code_num = -2 * value;
+  } else {
+    code_num = 2 * value - 1;
+  }
+  write_exp_golomb_ue_(data, bit_pos, code_num);
+}
+
+// Build a minimal Constrained Baseline PPS from scratch
+std::vector<uint8_t> SimpleVideoPlayer::build_constrained_baseline_pps_() {
+  std::vector<uint8_t> pps;
+  size_t bit_pos = 0;
+
+  // NAL header: forbidden_zero_bit(1) + nal_ref_idc(2) + nal_unit_type(5)
+  // PPS: nal_ref_idc=3, nal_unit_type=8
+  write_bits_(pps, bit_pos, 0, 1);       // forbidden_zero_bit = 0
+  write_bits_(pps, bit_pos, 3, 2);       // nal_ref_idc = 3 (highest priority)
+  write_bits_(pps, bit_pos, 8, 5);       // nal_unit_type = 8 (PPS)
+
+  // PPS RBSP - Minimal Constrained Baseline parameters
+  write_exp_golomb_ue_(pps, bit_pos, 0); // pic_parameter_set_id = 0
+  write_exp_golomb_ue_(pps, bit_pos, 0); // seq_parameter_set_id = 0 (refers to SPS 0)
+
+  write_bits_(pps, bit_pos, 0, 1);       // entropy_coding_mode_flag = 0 (CAVLC, NOT CABAC!)
+  write_bits_(pps, bit_pos, 0, 1);       // pic_order_present_flag = 0
+
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_slice_groups_minus1 = 0 (no slice groups)
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_ref_idx_l0_active_minus1 = 0 (1 ref frame)
+  write_exp_golomb_ue_(pps, bit_pos, 0); // num_ref_idx_l1_active_minus1 = 0
+
+  write_bits_(pps, bit_pos, 0, 1);       // weighted_pred_flag = 0
+  write_bits_(pps, bit_pos, 0, 2);       // weighted_bipred_idc = 0
+
+  write_exp_golomb_se_(pps, bit_pos, 0); // pic_init_qp_minus26 = 0 (QP = 26)
+  write_exp_golomb_se_(pps, bit_pos, 0); // pic_init_qs_minus26 = 0
+  write_exp_golomb_se_(pps, bit_pos, 0); // chroma_qp_index_offset = 0
+
+  write_bits_(pps, bit_pos, 0, 1);       // deblocking_filter_control_present_flag = 0
+  write_bits_(pps, bit_pos, 0, 1);       // constrained_intra_pred_flag = 0
+  write_bits_(pps, bit_pos, 0, 1);       // redundant_pic_cnt_present_flag = 0
+
+  // RBSP trailing bits (byte alignment)
+  write_bits_(pps, bit_pos, 1, 1);       // rbsp_stop_one_bit = 1
+  while (bit_pos % 8 != 0) {
+    write_bits_(pps, bit_pos, 0, 1);     // rbsp_alignment_zero_bit = 0
+  }
+
+  return pps;
+}
+
+// Build a minimal Constrained Baseline SPS from scratch
+std::vector<uint8_t> SimpleVideoPlayer::build_constrained_baseline_sps_(uint16_t width, uint16_t height, uint8_t level_idc) {
+  std::vector<uint8_t> sps;
+  size_t bit_pos = 0;
+
+  // NAL header: forbidden_zero_bit(1) + nal_ref_idc(2) + nal_unit_type(5)
+  // SPS: nal_ref_idc=3, nal_unit_type=7
+  write_bits_(sps, bit_pos, 0, 1);       // forbidden_zero_bit = 0
+  write_bits_(sps, bit_pos, 3, 2);       // nal_ref_idc = 3 (highest priority)
+  write_bits_(sps, bit_pos, 7, 5);       // nal_unit_type = 7 (SPS)
+
+  // Profile and level
+  write_bits_(sps, bit_pos, 66, 8);      // profile_idc = 66 (Baseline)
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set0_flag = 0
+  write_bits_(sps, bit_pos, 1, 1);       // constraint_set1_flag = 1 (Constrained Baseline!)
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set2_flag = 0
+  write_bits_(sps, bit_pos, 0, 1);       // constraint_set3_flag = 0
+  write_bits_(sps, bit_pos, 0, 4);       // reserved_zero_4bits = 0
+  write_bits_(sps, bit_pos, level_idc, 8); // level_idc (from original SPS)
+
+  // SPS RBSP
+  write_exp_golomb_ue_(sps, bit_pos, 0); // seq_parameter_set_id = 0
+  write_exp_golomb_ue_(sps, bit_pos, 0); // log2_max_frame_num_minus4 = 0 (frame_num range: 0-15)
+
+  // Picture order count
+  write_exp_golomb_ue_(sps, bit_pos, 0); // pic_order_cnt_type = 0
+  write_exp_golomb_ue_(sps, bit_pos, 4); // log2_max_pic_order_cnt_lsb_minus4 = 4 (POC range: 0-255)
+
+  write_exp_golomb_ue_(sps, bit_pos, 2); // max_num_ref_frames = 2 (allow B-frames)
+  write_bits_(sps, bit_pos, 0, 1);       // gaps_in_frame_num_value_allowed_flag = 0
+
+  // Picture size in macroblocks (16x16)
+  uint32_t width_in_mbs = (width + 15) / 16;
+  uint32_t height_in_mbs = (height + 15) / 16;
+  write_exp_golomb_ue_(sps, bit_pos, width_in_mbs - 1);  // pic_width_in_mbs_minus1
+  write_exp_golomb_ue_(sps, bit_pos, height_in_mbs - 1); // pic_height_in_map_units_minus1
+
+  write_bits_(sps, bit_pos, 1, 1);       // frame_mbs_only_flag = 1 (progressive, not interlaced)
+  write_bits_(sps, bit_pos, 1, 1);       // direct_8x8_inference_flag = 1
+
+  // Frame cropping (if needed to match exact resolution)
+  uint16_t cropped_width = width_in_mbs * 16;
+  uint16_t cropped_height = height_in_mbs * 16;
+
+  if (cropped_width != width || cropped_height != height) {
+    write_bits_(sps, bit_pos, 1, 1);     // frame_cropping_flag = 1
+    write_exp_golomb_ue_(sps, bit_pos, 0); // frame_crop_left_offset = 0
+    write_exp_golomb_ue_(sps, bit_pos, (cropped_width - width) / 2); // frame_crop_right_offset
+    write_exp_golomb_ue_(sps, bit_pos, 0); // frame_crop_top_offset = 0
+    write_exp_golomb_ue_(sps, bit_pos, (cropped_height - height) / 2); // frame_crop_bottom_offset
+  } else {
+    write_bits_(sps, bit_pos, 0, 1);     // frame_cropping_flag = 0
+  }
+
+  write_bits_(sps, bit_pos, 0, 1);       // vui_parameters_present_flag = 0
+
+  // RBSP trailing bits (byte alignment)
+  write_bits_(sps, bit_pos, 1, 1);       // rbsp_stop_one_bit = 1
+  while (bit_pos % 8 != 0) {
+    write_bits_(sps, bit_pos, 0, 1);     // rbsp_alignment_zero_bit = 0
+  }
+
+  return sps;
+}
+
+// Patch SPS to convert unsupported High profiles to Constrained Baseline
+// AGGRESSIVE MODE: Completely reconstruct SPS instead of just patching bytes
+void SimpleVideoPlayer::patch_sps_for_decoder_compatibility_() {
+  if (this->sps_.size() < 4) {
+    ESP_LOGW(TAG, "SPS too small to patch (%d bytes)", this->sps_.size());
+    return;
+  }
+
+  uint8_t profile_idc = this->sps_[1];
+  uint8_t constraints = this->sps_[2];
+  uint8_t level_idc = this->sps_[3];
+
+  // Check if this is an unsupported advanced profile
+  bool needs_patching = (profile_idc >= 100);  // High, High 10, High 4:2:2, High 4:4:4
+
+  if (!needs_patching) {
+    ESP_LOGI(TAG, "SPS profile %d doesn't need patching", profile_idc);
+    this->sps_patched_.clear();  // No patching needed
+    return;
+  }
+
+  ESP_LOGW(TAG, "========================================");
+  ESP_LOGW(TAG, "AGGRESSIVE SPS + PPS RECONSTRUCTION");
+  ESP_LOGW(TAG, "Original profile: %d (High family), Level: %d.%d",
+           profile_idc, level_idc / 10, level_idc % 10);
+  ESP_LOGW(TAG, "Target: Constrained Baseline Profile with 4:2:0 chroma");
+  ESP_LOGW(TAG, "");
+  ESP_LOGW(TAG, "Building NEW SPS + PPS from scratch:");
+  ESP_LOGW(TAG, "  Resolution: %dx%d", this->width_, this->height_);
+  ESP_LOGW(TAG, "  Profile: 66 (Baseline) + constraint_set1=1");
+  ESP_LOGW(TAG, "  Chroma format: 4:2:0 (was 4:4:4)");
+  ESP_LOGW(TAG, "  Level: %d.%d (preserved)", level_idc / 10, level_idc % 10);
+  ESP_LOGW(TAG, "  Entropy coding: CAVLC (was CABAC)");
+  ESP_LOGW(TAG, "");
+  ESP_LOGW(TAG, "WARNING: This FORCES 4:2:0 subsampling + CAVLC!");
+  ESP_LOGW(TAG, "If frames are actually 4:4:4, colors will be WRONG!");
+  ESP_LOGW(TAG, "========================================");
+
+  // Build completely new SPS
+  this->sps_patched_ = build_constrained_baseline_sps_(this->width_, this->height_, level_idc);
+
+  // Build completely new PPS (must match SPS)
+  this->pps_patched_ = build_constrained_baseline_pps_();
+
+  ESP_LOGI(TAG, "SPS REBUILT: %d bytes (was %d bytes)",
+           this->sps_patched_.size(), this->sps_.size());
+  ESP_LOGI(TAG, "  Profile: %d → 66 (Constrained Baseline)", profile_idc);
+  ESP_LOGI(TAG, "  Chroma: 4:4:4 → 4:2:0 (FORCED)");
+
+  ESP_LOGI(TAG, "PPS REBUILT: %d bytes (was %d bytes)",
+           this->pps_patched_.size(), this->pps_.size());
+  ESP_LOGI(TAG, "  Entropy coding: CABAC → CAVLC (FORCED)");
+  ESP_LOGI(TAG, "  Slice groups: disabled");
+
+  // Debug: Show first 8 bytes of new SPS
+  ESP_LOGD(TAG, "New SPS header (first 8 bytes):");
+  for (int i = 0; i < 8 && i < this->sps_patched_.size(); i++) {
+    ESP_LOGD(TAG, "  [%d] = 0x%02X", i, this->sps_patched_[i]);
+  }
+
+  // Debug: Show PPS bytes
+  ESP_LOGD(TAG, "New PPS (all %d bytes):", this->pps_patched_.size());
+  for (int i = 0; i < this->pps_patched_.size(); i++) {
+    ESP_LOGD(TAG, "  [%d] = 0x%02X", i, this->pps_patched_[i]);
+  }
+}
+
 bool SimpleVideoPlayer::decode_h264_frame_() {
   if (!this->h264_decoder_ready_) {
     ESP_LOGW(TAG, "decode_h264_frame_: decoder not ready!");
@@ -2428,6 +2730,140 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
     ESP_LOGW(TAG, "  PPS size: %d bytes", this->pps_.size());
     ESP_LOGW(TAG, "  NAL length size: %d", this->nal_length_size_);
     ESP_LOGW(TAG, "  sps_pps_sent: %s", this->sps_pps_sent_ ? "YES" : "NO");
+
+    // Decode SPS header to show H.264 profile
+    if (this->sps_.size() >= 4) {
+      uint8_t profile_idc = this->sps_[1];  // Byte 1 is profile_idc
+      uint8_t constraints = this->sps_[2];  // Byte 2 is constraint flags
+      uint8_t level_idc = this->sps_[3];    // Byte 3 is level_idc
+
+      // Constraint flags (byte 2):
+      // bit 7: constraint_set0_flag
+      // bit 6: constraint_set1_flag  <- REQUIRED for Constrained Baseline
+      // bit 5: constraint_set2_flag
+      bool constraint_set0 = (constraints & 0x80) != 0;
+      bool constraint_set1 = (constraints & 0x40) != 0;  // Required for Constrained Baseline
+      bool constraint_set2 = (constraints & 0x20) != 0;
+
+      const char* profile_name = "Unknown";
+      bool is_constrained_baseline = false;
+
+      if (profile_idc == 66) {
+        if (constraint_set1) {
+          profile_name = "Constrained Baseline";
+          is_constrained_baseline = true;
+        } else {
+          profile_name = "Baseline";
+        }
+      } else if (profile_idc == 77) profile_name = "Main";
+      else if (profile_idc == 88) profile_name = "Extended";
+      else if (profile_idc == 100) profile_name = "High";
+      else if (profile_idc == 110) profile_name = "High 10";
+      else if (profile_idc == 122) profile_name = "High 4:2:2";
+      else if (profile_idc == 244) profile_name = "High 4:4:4";
+
+      ESP_LOGW(TAG, "  H.264 Profile: %s (profile_idc=%d, constraints=0x%02X, level=%d.%d)",
+               profile_name, profile_idc, constraints, level_idc / 10, level_idc % 10);
+      ESP_LOGW(TAG, "  Constraint flags: set0=%d, set1=%d, set2=%d",
+               constraint_set0 ? 1 : 0, constraint_set1 ? 1 : 0, constraint_set2 ? 1 : 0);
+
+      // Interpret H.264 level capabilities (based on ITU-T H.264 spec and FFmpeg h264_levels.c)
+      const char* level_desc = nullptr;
+      const char* typical_res = nullptr;
+      bool level_warning = false;
+
+      switch (level_idc) {
+        case 10: level_desc = "176x144@15fps"; typical_res = "QCIF"; break;
+        case 11: level_desc = "352x288@7.5fps"; typical_res = "CIF (low)"; break;
+        case 12: level_desc = "352x288@15fps"; typical_res = "CIF"; break;
+        case 13: level_desc = "352x288@30fps"; typical_res = "CIF (high)"; break;
+        case 20: level_desc = "352x288@30fps"; typical_res = "CIF"; break;
+        case 21: level_desc = "528x384@30fps"; typical_res = "HHR"; break;
+        case 22: level_desc = "720x480@15fps"; typical_res = "SD (low)"; break;
+        case 30: level_desc = "720x480@30fps"; typical_res = "SD/NTSC"; break;
+        case 31: level_desc = "1280x720@30fps"; typical_res = "720p HD"; break;
+        case 32: level_desc = "1280x720@60fps"; typical_res = "720p HD (high)"; break;
+        case 40: level_desc = "1920x1080@30fps"; typical_res = "1080p Full HD"; break;
+        case 41: level_desc = "1920x1080@30fps"; typical_res = "1080p Full HD"; break;
+        case 42: level_desc = "1920x1080@60fps"; typical_res = "1080p60 Full HD"; break;
+        case 50:
+          level_desc = "1920x1080@72fps or 3840x2160@30fps";
+          typical_res = "1080p72 or 4K";
+          level_warning = true;
+          break;
+        case 51:
+          level_desc = "3840x2160@30fps";
+          typical_res = "4K UHD";
+          level_warning = true;
+          break;
+        case 52:
+          level_desc = "3840x2160@60fps";
+          typical_res = "4K60 UHD";
+          level_warning = true;
+          break;
+        case 60:
+          level_desc = "7680x4320@30fps";
+          typical_res = "8K UHD";
+          level_warning = true;
+          break;
+        case 61:
+          level_desc = "7680x4320@60fps";
+          typical_res = "8K60 UHD";
+          level_warning = true;
+          break;
+        case 62:
+          level_desc = "7680x4320@120fps";
+          typical_res = "8K120 UHD";
+          level_warning = true;
+          break;
+        default:
+          level_desc = "Unknown level capabilities";
+          typical_res = "Unknown";
+          break;
+      }
+
+      if (level_desc) {
+        ESP_LOGI(TAG, "  H.264 Level %d.%d capabilities: %s (%s)",
+                 level_idc / 10, level_idc % 10, level_desc, typical_res);
+      }
+
+      if (level_warning) {
+        ESP_LOGW(TAG, "  ⚠ Level %d.%d is very demanding - may exceed ESP32-P4 capabilities",
+                 level_idc / 10, level_idc % 10);
+        ESP_LOGW(TAG, "    Decoding success depends on actual video resolution and framerate");
+      }
+
+      // OpenH264 decoder supports ALL H.264 profiles including advanced ones
+      // We'll let OpenH264 attempt to decode and report errors if it can't
+      // Better to try and fail than to reject prematurely
+      bool is_common = (profile_idc == 66  ||  // Baseline (+ Constrained Baseline)
+                        profile_idc == 77  ||  // Main
+                        profile_idc == 100);   // High (most security cameras!)
+
+      bool is_advanced = (profile_idc == 88  ||  // Extended
+                          profile_idc == 110 ||  // High 10
+                          profile_idc == 122 ||  // High 4:2:2
+                          profile_idc == 244);   // High 4:4:4
+
+      if (is_common) {
+        ESP_LOGI(TAG, "  ✓ Profile %s is commonly used and well supported", profile_name);
+      } else if (is_advanced) {
+        ESP_LOGW(TAG, "  ⚠ Profile %s is advanced - OpenH264 will attempt decoding", profile_name);
+        ESP_LOGW(TAG, "    Success depends on video complexity and decoder capabilities");
+        if (profile_idc == 244) {
+          ESP_LOGW(TAG, "    High 4:4:4 is very demanding - may not work on all hardware");
+        }
+      } else {
+        ESP_LOGW(TAG, "  ⚠ Profile %s (idc=%d) is uncommon - decoder may reject it",
+                 profile_name, profile_idc);
+      }
+
+      // Show performance expectation
+      if (profile_idc >= 100) {
+        ESP_LOGI(TAG, "  Note: High/Advanced profiles are slower to decode than Baseline");
+      }
+    }
+
     if (this->sps_.empty() || this->pps_.empty()) {
       ESP_LOGE(TAG, "  ERROR: SPS/PPS not parsed from MP4! Decoder will fail!");
       ESP_LOGE(TAG, "  This means the avcC box was not found or not parsed correctly");
@@ -2437,18 +2873,22 @@ bool SimpleVideoPlayer::decode_h264_frame_() {
 
   // Add SPS/PPS before first frame or keyframes
   if (!this->sps_pps_sent_ && !this->sps_.empty() && !this->pps_.empty()) {
+    // Use patched SPS/PPS if available (for unsupported profiles), otherwise use original
+    const std::vector<uint8_t>& sps_to_send = this->sps_patched_.empty() ? this->sps_ : this->sps_patched_;
+    const std::vector<uint8_t>& pps_to_send = this->pps_patched_.empty() ? this->pps_ : this->pps_patched_;
+
     // Start code
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x01);
-    annexb_data.insert(annexb_data.end(), this->sps_.begin(), this->sps_.end());
+    annexb_data.insert(annexb_data.end(), sps_to_send.begin(), sps_to_send.end());
 
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x00);
     annexb_data.push_back(0x01);
-    annexb_data.insert(annexb_data.end(), this->pps_.begin(), this->pps_.end());
+    annexb_data.insert(annexb_data.end(), pps_to_send.begin(), pps_to_send.end());
 
     this->sps_pps_sent_ = true;
   }
@@ -3298,8 +3738,55 @@ void SimpleVideoPlayer::update_display_() {
     stride_logged = true;
   }
 
-  lv_canvas_set_buffer(this->canvas_, display_buffer,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+  // Apply hardware rotation if configured
+  uint16_t canvas_width = this->actual_width_;
+  uint16_t canvas_height = this->actual_height_;
+  uint8_t *canvas_buffer = display_buffer;
+
+  if (this->rotation_ != 0 && this->rotate_handle_ != nullptr) {
+    // Allocate rotation buffer on first use and cache rotated dimensions
+    if (this->rotate_buffer_ == nullptr) {
+      esp_imgfx_resolution_t rotated_res;
+      esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+      this->rotated_width_ = rotated_res.width;
+      this->rotated_height_ = rotated_res.height;
+      this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
+      this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
+                                                                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->rotate_buffer_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate rotation buffer");
+      } else {
+        ESP_LOGI(TAG, "Allocated rotation buffer: %zu bytes, rotated size: %dx%d",
+                 this->rotate_buffer_size_, this->rotated_width_, this->rotated_height_);
+      }
+    }
+
+    // Apply rotation if buffer was allocated
+    if (this->rotate_buffer_ != nullptr) {
+      // Rotate the decoded frame
+      esp_imgfx_data_t in_image = {
+        .data = display_buffer,
+        .data_len = (uint32_t)this->rgb_buffer_size_,
+      };
+      esp_imgfx_data_t out_image = {
+        .data = (uint8_t *)this->rotate_buffer_,
+        .data_len = (uint32_t)this->rotate_buffer_size_,
+      };
+
+      esp_imgfx_err_t ret = esp_imgfx_rotate_process(this->rotate_handle_, &in_image, &out_image);
+      if (ret != ESP_IMGFX_ERR_OK) {
+        ESP_LOGE(TAG, "Rotation failed: %d", ret);
+      } else {
+        // Use cached rotated dimensions (no need to query every frame)
+        canvas_width = this->rotated_width_;
+        canvas_height = this->rotated_height_;
+        canvas_buffer = (uint8_t *)this->rotate_buffer_;
+      }
+    }
+  }
+
+  lv_canvas_set_buffer(this->canvas_, canvas_buffer,
+                       canvas_width, canvas_height, LV_IMG_CF_TRUE_COLOR);
 
   // Swap buffers for next frame (rotate: 0120 for triple, 010 for double)
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
@@ -3601,6 +4088,37 @@ void SimpleVideoPlayer::play() {
   // Reset frame drop counter at start of playback
   this->frames_dropped_ = 0;
 
+  // Initialize FreeRTOS decode task infrastructure (similar to avi_player)
+  if (this->decode_event_group_ == nullptr) {
+    this->decode_event_group_ = xEventGroupCreate();
+    if (this->decode_event_group_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to create decode event group");
+      return;
+    }
+    ESP_LOGI(TAG, "Decode event group created");
+  }
+
+  // Create decode task if not already running
+  if (this->decode_task_handle_ == nullptr) {
+    BaseType_t task_created = xTaskCreatePinnedToCore(
+      decode_task_,                      // Task function
+      "video_decode",                    // Task name
+      8192,                              // Stack size (8KB - same as avi_player)
+      this,                              // Task parameter (this pointer)
+      5,                                 // Priority (5 - same as avi_player)
+      &this->decode_task_handle_,        // Task handle
+      1                                  // Core ID (1 - same as avi_player)
+    );
+
+    if (task_created != pdPASS) {
+      ESP_LOGE(TAG, "Failed to create decode task");
+      vEventGroupDelete(this->decode_event_group_);
+      this->decode_event_group_ = nullptr;
+      return;
+    }
+    ESP_LOGI(TAG, "Decode task created on core 1 (priority 5, 8KB stack)");
+  }
+
   this->state_ = PlayerState::PLAYING;
   if (this->playback_timer_ != nullptr) {
     // Start ESP32 native timer with precise interval
@@ -3671,6 +4189,40 @@ void SimpleVideoPlayer::stop() {
   // Stop the ESP32 timer
   if (this->playback_timer_ != nullptr) {
     esp_timer_stop(this->playback_timer_);
+  }
+
+  // Stop decode task if running (similar to avi_player cleanup)
+  if (this->decode_task_handle_ != nullptr) {
+    ESP_LOGI(TAG, "Stopping decode task...");
+
+    // Signal task to stop
+    if (this->decode_event_group_ != nullptr) {
+      xEventGroupSetBits(this->decode_event_group_, EVENT_STOP_PLAYBACK);
+
+      // Wait for task to signal exit (with timeout)
+      EventBits_t bits = xEventGroupWaitBits(
+        this->decode_event_group_,
+        EVENT_TASK_EXIT,
+        pdTRUE,   // Clear bit on exit
+        pdFALSE,  // Wait for this bit only
+        pdMS_TO_TICKS(1000)  // 1 second timeout
+      );
+
+      if (bits & EVENT_TASK_EXIT) {
+        ESP_LOGI(TAG, "Decode task exited cleanly");
+      } else {
+        ESP_LOGW(TAG, "Decode task exit timeout - forcing deletion");
+      }
+    }
+
+    this->decode_task_handle_ = nullptr;
+  }
+
+  // Delete event group
+  if (this->decode_event_group_ != nullptr) {
+    vEventGroupDelete(this->decode_event_group_);
+    this->decode_event_group_ = nullptr;
+    ESP_LOGI(TAG, "Decode event group deleted");
   }
 
   // CRITICAL: Wait for any in-progress timer callback to finish
@@ -3760,6 +4312,17 @@ void SimpleVideoPlayer::stop() {
   }
 
   this->rgb_buffer_size_ = 0;
+
+  // Free rotation buffer (but keep rotation handle and rotation_initialized_ for next playback)
+  if (this->rotate_buffer_ != nullptr) {
+    total_freed += this->rotate_buffer_size_;
+    heap_caps_free(this->rotate_buffer_);
+    this->rotate_buffer_ = nullptr;
+    this->rotate_buffer_size_ = 0;
+    this->rotated_width_ = 0;
+    this->rotated_height_ = 0;
+    ESP_LOGD(TAG, "  Freed rotate_buffer_: %zu bytes", this->rotate_buffer_size_);
+  }
 
   // Free YUV buffer (vector will auto-free, but clear to reclaim immediately)
   if (!this->yuv_buffer_.empty()) {
@@ -3867,237 +4430,277 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
   }
 }
 
-// ESP32 native timer callback for precise framerate control
-// This runs in ESP timer task - only decode frames, don't touch LVGL
-// LVGL update is done in main thread (loop()) when frame_ready_ flag is set
+// FreeRTOS decode task - runs in task context (can be preempted)
+// Waits for timer events and performs heavy decoding work
+// Similar architecture to avi_player for better performance
+void SimpleVideoPlayer::decode_task_(void *arg) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
+
+  ESP_LOGI(TAG, "Decode task started (stack: %u bytes)", uxTaskGetStackHighWaterMark(nullptr));
+
+  // Performance tracking variables
+  uint32_t last_callback_time = 0;
+  int callback_count = 0;
+  uint32_t fps_measure_start = 0;
+  int fps_frame_count = 0;
+
+  while (true) {
+    // Wait for timer tick or stop event
+    EventBits_t bits = xEventGroupWaitBits(
+      player->decode_event_group_,
+      EVENT_TIMER_TICK | EVENT_STOP_PLAYBACK,
+      pdTRUE,   // Auto-clear bits to avoid accumulation
+      pdFALSE,  // Wait for any bit (not all)
+      portMAX_DELAY
+    );
+
+    // Check for stop request first
+    if (bits & EVENT_STOP_PLAYBACK) {
+      ESP_LOGI(TAG, "Decode task received stop signal");
+      xEventGroupSetBits(player->decode_event_group_, EVENT_TASK_EXIT);
+      break;
+    }
+
+    // Process timer tick
+    if (bits & EVENT_TIMER_TICK) {
+      // Check if player is still in PLAYING state
+      if (player->state_ != PlayerState::PLAYING) {
+        continue;
+      }
+
+      uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
+
+      // Track if previous frame is still pending (not yet displayed by loop())
+      // Count as drop but CONTINUE DECODING to maintain timing
+      // Better to overwrite an undisplayed frame than to stop decoding entirely
+      if (player->frame_ready_) {
+        player->frames_dropped_++;
+        static uint32_t last_drop_warning = 0;
+        if (current_time - last_drop_warning > 1000) {  // Warn max once per second
+          ESP_LOGI(TAG, "Frame drops: %lu frames (main thread busy - will overwrite undisplayed frame)",
+                   (unsigned long)player->frames_dropped_);
+          last_drop_warning = current_time;
+        }
+        // CONTINUE to decode - maintains proper timing
+      }
+
+      // Log timing for performance debugging (only every 30 frames to avoid spam)
+      if (callback_count++ % 30 == 0) {
+        uint32_t actual_interval = current_time - last_callback_time;
+
+        // Calculate actual FPS over last 30 frames
+        if (fps_measure_start > 0) {
+          uint32_t time_elapsed = current_time - fps_measure_start;
+          float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
+          float avg_interval = time_elapsed / (float)fps_frame_count;
+          ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
+                   actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
+
+          // Note: With task-based architecture, delays can still occur if system is heavily loaded
+          // (e.g., WiFi, audio processing, face detection running concurrently)
+          // This is expected and not a timer issue - just system load
+          if (avg_interval > player->frame_interval_ * 2.0f) {
+            // Only warn if VERY delayed (>2x expected) - indicates serious system overload
+            ESP_LOGI(TAG, "Decode task delayed: Expected %ums, actual %.1fms (%.0f%% slower)",
+                     player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
+          }
+        }
+
+        // Reset FPS measurement
+        fps_measure_start = current_time;
+        fps_frame_count = 0;
+      }
+      fps_frame_count++;
+      last_callback_time = current_time;
+
+      bool got_frame = false;
+      bool end_of_stream = false;  // True only when we've exhausted all samples
+
+      if (player->format_ == MediaFormat::MJPEG) {
+        uint32_t total_start = esp_timer_get_time() / 1000;
+
+        // Measure file read time
+        uint32_t read_start = esp_timer_get_time() / 1000;
+        if (player->read_next_mjpeg_frame_()) {
+          uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
+          // Measure JPEG decode time
+          uint32_t decode_start = esp_timer_get_time() / 1000;
+          if (player->decode_mjpeg_frame_()) {
+            uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
+            // Update current time (estimate based on frames and frame interval)
+            player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
+
+            // Estimate total duration for MJPEG if not set
+            if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
+              // Rough estimate: assume average frame size and continue from current position
+              uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
+              uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
+              player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
+            }
+
+            // Signal main thread that frame is ready for LVGL update
+            // Don't call update_display_() here - it must run in main thread to avoid LVGL conflicts
+            player->frame_ready_ = true;
+            uint32_t display_time = 0;  // Will be measured in main thread
+
+            got_frame = true;
+
+            uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
+
+            // Detailed performance logging every 30 frames
+            if (callback_count % 30 == 0) {
+              const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
+                                       (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
+              ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
+                       codec_name, player->actual_width_, player->actual_height_,
+                       (unsigned long)total_time, (unsigned long)read_time,
+                       (unsigned long)decode_time, (unsigned long)display_time);
+              ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
+                       100.0f * display_time / total_time);
+            }
+          }
+          // If decode fails, we just skip this frame and try next one
+        } else {
+          // read_next_mjpeg_frame_() returned false = reached end
+          end_of_stream = true;
+        }
+      } else if (player->format_ == MediaFormat::MP4_H264) {
+        uint32_t total_start = esp_timer_get_time() / 1000;
+
+        uint32_t read_start = esp_timer_get_time() / 1000;
+        if (player->read_next_mp4_sample_()) {
+          uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
+          // Sample read successfully, try to decode
+          uint32_t decode_start = esp_timer_get_time() / 1000;
+          if (player->decode_h264_frame_()) {
+            uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
+            // Update current time from video sample timestamp
+            if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
+              player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
+            }
+
+            // Signal main thread that frame is ready for LVGL update
+            player->frame_ready_ = true;
+            uint32_t display_time = 0;  // Will be measured in main thread
+
+            got_frame = true;
+
+            // Reset error counter on success
+            static int consecutive_decode_errors = 0;
+            consecutive_decode_errors = 0;
+
+            uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
+            if (callback_count % 30 == 0) {
+#ifdef CONFIG_ESP_H264_DUAL_TASK
+              ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                       player->actual_width_, player->actual_height_,
+                       (unsigned long)total_time, (unsigned long)read_time,
+                       (unsigned long)decode_time, (unsigned long)display_time);
+#else
+              ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
+                       player->actual_width_, player->actual_height_,
+                       (unsigned long)total_time, (unsigned long)read_time,
+                       (unsigned long)decode_time, (unsigned long)display_time);
+#endif
+            }
+          } else {
+            // Decode failed, but we can continue to next frame
+            static int consecutive_decode_errors = 0;
+            consecutive_decode_errors++;
+
+            if (consecutive_decode_errors <= 5) {
+              ESP_LOGE(TAG, "Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
+                       player->current_video_sample_ - 1, consecutive_decode_errors);
+            } else if (consecutive_decode_errors == 10) {
+              ESP_LOGE(TAG, "10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
+            } else if (consecutive_decode_errors % 30 == 0) {
+              ESP_LOGE(TAG, "Still failing: %d consecutive decode errors", consecutive_decode_errors);
+            }
+            // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
+          }
+        } else {
+          // read_next_mp4_sample_() returned false = reached end of video
+          end_of_stream = true;
+        }
+        // Audio codec removed (not working)
+        // player->process_audio_();
+      } else if (player->format_ == MediaFormat::MKV_H264) {
+        uint32_t decode_start = esp_timer_get_time() / 1000;
+
+        if (player->read_next_mkv_sample_()) {
+          if (player->decode_h264_frame_()) {
+            // Update current time from MKV sample timestamp
+            if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
+              player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
+            }
+            // Signal main thread that frame is ready for LVGL update
+            player->frame_ready_ = true;
+            got_frame = true;
+
+            uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+            if (callback_count % 30 == 0) {
+#ifdef CONFIG_ESP_H264_DUAL_TASK
+              ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
+#else
+              ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
+#endif
+            }
+          } else {
+            ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);
+            // Decode failed, but we can continue to next frame
+          }
+        } else {
+          // read_next_mkv_sample_() returned false = reached end of video
+          ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
+          end_of_stream = true;
+        }
+        // Audio codec removed (not working)
+        // player->process_audio_();
+      }
+
+      // Hide loading spinner after first frame
+      // Use player member variable instead of static to properly reset on replay
+      if (got_frame && player->loading_spinner_ != nullptr) {
+        // Hide spinner on any successful frame display
+        lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
+      }
+
+      // Only stop if we've reached the actual end of the video stream
+      // Not just because a single frame failed to decode!
+      if (end_of_stream) {
+        // End of video
+        if (!player->loop_) {
+          ESP_LOGI(TAG, "Reached end of video, requesting stop");
+          // CRITICAL: Don't call stop() directly from decode task (causes LVGL conflicts)
+          // Instead, set flag for main thread to process in loop()
+          player->stop_pending_ = true;
+
+          // NOTE: We do NOT free the HTTP buffer here to allow replay
+          // Buffer will be freed when opening a new video or when component is destroyed
+          // If you want to free memory immediately after playback, call stop() manually
+        }
+      }
+    }
+  }
+
+  ESP_LOGI(TAG, "Decode task exiting");
+  vTaskDelete(nullptr);
+}
+
+// ESP32 native timer callback - simplified to just signal decode task
+// This runs in interrupt context - MUST be ultra-lightweight (<5μs)
+// All heavy decode work is now in decode_task_() running in FreeRTOS task context
 void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(arg);
 
-  if (player->state_ != PlayerState::PLAYING) {
-    return;
-  }
-
-  // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
-  // If frame_ready_ is true, main thread hasn't processed the last frame yet
-  // Decoding a new frame would OVERWRITE the previous one → frame drop!
-  if (player->frame_ready_) {
-    player->frames_dropped_++;
-    static uint32_t last_drop_warning = 0;
-    uint32_t now = esp_timer_get_time() / 1000;
-    if (now - last_drop_warning > 1000) {  // Warn max once per second
-      ESP_LOGI(TAG, "Frame drops: %lu frames (system load - consider lowering FPS/resolution)",
-               (unsigned long)player->frames_dropped_);
-      last_drop_warning = now;
-    }
-    return;  // Skip this timer iteration to avoid overwriting unprocessed frame
-  }
-
-  static uint32_t last_callback_time = 0;
-  uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
-
-  // Log timing for performance debugging (only every 30 frames to avoid spam)
-  static int callback_count = 0;
-  static uint32_t fps_measure_start = 0;
-  static int fps_frame_count = 0;
-
-  if (callback_count++ % 30 == 0) {
-    uint32_t actual_interval = current_time - last_callback_time;
-
-    // Calculate actual FPS over last 30 frames
-    if (fps_measure_start > 0) {
-      uint32_t time_elapsed = current_time - fps_measure_start;
-      float actual_fps = (fps_frame_count * 1000.0f) / time_elapsed;
-      float avg_interval = time_elapsed / (float)fps_frame_count;
-      ESP_LOGI(TAG, "Performance: %.2f FPS (avg interval %.1fms) | target: %.0f FPS (%.0fms interval)",
-               actual_fps, avg_interval, 1000.0f / player->frame_interval_, (float)player->frame_interval_);
-
-      // Note: With ESP32 native timer, delays can still occur if system is heavily loaded
-      // (e.g., WiFi, audio processing, face detection running concurrently)
-      // This is expected and not a timer issue - just system load
-      if (avg_interval > player->frame_interval_ * 2.0f) {
-        // Only warn if VERY delayed (>2x expected) - indicates serious system overload
-        ESP_LOGI(TAG, "Timer callback delayed: Expected %ums, actual %.1fms (%.0f%% slower)",
-                 player->frame_interval_, avg_interval, 100.0f * (avg_interval / player->frame_interval_ - 1.0f));
-      }
-    }
-
-    // Reset FPS measurement
-    fps_measure_start = current_time;
-    fps_frame_count = 0;
-  }
-  fps_frame_count++;
-  last_callback_time = current_time;
-
-  bool got_frame = false;
-  bool end_of_stream = false;  // True only when we've exhausted all samples
-
-  if (player->format_ == MediaFormat::MJPEG) {
-    uint32_t total_start = esp_timer_get_time() / 1000;
-
-    // Measure file read time
-    uint32_t read_start = esp_timer_get_time() / 1000;
-    if (player->read_next_mjpeg_frame_()) {
-      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
-
-      // Measure JPEG decode time
-      uint32_t decode_start = esp_timer_get_time() / 1000;
-      if (player->decode_mjpeg_frame_()) {
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
-
-        // Update current time (estimate based on frames and frame interval)
-        player->current_time_ms_ = player->frame_count_ * player->frame_interval_;
-
-        // Estimate total duration for MJPEG if not set
-        if (player->total_duration_ms_ == 0 && player->file_size_ > 0) {
-          // Rough estimate: assume average frame size and continue from current position
-          uint32_t avg_frame_size = player->input_size_ > 0 ? player->input_size_ : 50000;
-          uint32_t estimated_total_frames = player->file_size_ / avg_frame_size;
-          player->total_duration_ms_ = estimated_total_frames * player->frame_interval_;
-        }
-
-        // Signal main thread that frame is ready for LVGL update
-        // Don't call update_display_() here - it must run in main thread to avoid LVGL conflicts
-        player->frame_ready_ = true;
-        uint32_t display_time = 0;  // Will be measured in main thread
-
-        got_frame = true;
-
-        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
-
-        // Detailed performance logging every 30 frames
-        if (callback_count % 30 == 0) {
-          const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
-                                   (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
-          ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
-                   codec_name, player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-          ESP_LOGI(TAG, "Bottleneck analysis: Display/Total = %.1f%% (should be <30%% for good perf)",
-                   100.0f * display_time / total_time);
-        }
-      }
-      // If decode fails, we just skip this frame and try next one
-    } else {
-      // read_next_mjpeg_frame_() returned false = reached end
-      end_of_stream = true;
-    }
-  } else if (player->format_ == MediaFormat::MP4_H264) {
-    uint32_t total_start = esp_timer_get_time() / 1000;
-
-    uint32_t read_start = esp_timer_get_time() / 1000;
-    if (player->read_next_mp4_sample_()) {
-      uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
-
-      // Sample read successfully, try to decode
-      uint32_t decode_start = esp_timer_get_time() / 1000;
-      if (player->decode_h264_frame_()) {
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
-
-        // Update current time from video sample timestamp
-        if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
-          player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
-        }
-
-        // Signal main thread that frame is ready for LVGL update
-        player->frame_ready_ = true;
-        uint32_t display_time = 0;  // Will be measured in main thread
-
-        got_frame = true;
-
-        // Reset error counter on success
-        static int consecutive_decode_errors = 0;
-        consecutive_decode_errors = 0;
-
-        uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
-        if (callback_count % 30 == 0) {
-#ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (dual-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
-                   player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-#else
-          ESP_LOGI(TAG, "H264 timing (%dx%d) (single-core): TOTAL=%lums [SD read=%lums, H264 decode=%lums, LVGL=%lums]",
-                   player->actual_width_, player->actual_height_,
-                   (unsigned long)total_time, (unsigned long)read_time,
-                   (unsigned long)decode_time, (unsigned long)display_time);
-#endif
-        }
-      } else {
-        // Decode failed, but we can continue to next frame
-        static int consecutive_decode_errors = 0;
-        consecutive_decode_errors++;
-
-        if (consecutive_decode_errors <= 5) {
-          ESP_LOGE(TAG, "Frame %u decode FAILED (consecutive errors: %d) - skipping to next frame",
-                   player->current_video_sample_ - 1, consecutive_decode_errors);
-        } else if (consecutive_decode_errors == 10) {
-          ESP_LOGE(TAG, "10 consecutive decode failures! Video may be corrupted or AVCC conversion broken");
-        } else if (consecutive_decode_errors % 30 == 0) {
-          ESP_LOGE(TAG, "Still failing: %d consecutive decode errors", consecutive_decode_errors);
-        }
-        // IMPORTANT: Don't set end_of_stream here! We just skip this bad frame and continue
-      }
-    } else {
-      // read_next_mp4_sample_() returned false = reached end of video
-      end_of_stream = true;
-    }
-    // Audio codec removed (not working)
-    // player->process_audio_();
-  } else if (player->format_ == MediaFormat::MKV_H264) {
-    uint32_t decode_start = esp_timer_get_time() / 1000;
-
-    if (player->read_next_mkv_sample_()) {
-      if (player->decode_h264_frame_()) {
-        // Update current time from MKV sample timestamp
-        if (player->current_mkv_sample_ > 0 && player->current_mkv_sample_ <= player->mkv_samples_.size()) {
-          player->current_time_ms_ = player->mkv_samples_[player->current_mkv_sample_ - 1].timestamp_ns / 1000000;
-        }
-        // Signal main thread that frame is ready for LVGL update
-        player->frame_ready_ = true;
-        got_frame = true;
-
-        uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
-        if (callback_count % 30 == 0) {
-#ifdef CONFIG_ESP_H264_DUAL_TASK
-          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (optimized dual-core decoder)", (unsigned long)decode_time);
-#else
-          ESP_LOGI(TAG, "MKV H.264 decode time: %lu ms (software single-core decoder)", (unsigned long)decode_time);
-#endif
-        }
-      } else {
-        ESP_LOGW(TAG, "MKV H.264 decode failed for sample %zu - skipping", player->current_mkv_sample_ - 1);
-        // Decode failed, but we can continue to next frame
-      }
-    } else {
-      // read_next_mkv_sample_() returned false = reached end of video
-      ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
-      end_of_stream = true;
-    }
-    // Audio codec removed (not working)
-    // player->process_audio_();
-  }
-
-  // Hide loading spinner after first frame
-  // Use player member variable instead of static to properly reset on replay
-  if (got_frame && player->loading_spinner_ != nullptr) {
-    // Hide spinner on any successful frame display
-    lv_obj_add_flag(player->loading_spinner_, LV_OBJ_FLAG_HIDDEN);
-  }
-
-  // Only stop if we've reached the actual end of the video stream
-  // Not just because a single frame failed to decode!
-  if (end_of_stream) {
-    // End of video
-    if (!player->loop_) {
-      ESP_LOGI(TAG, "Reached end of video, requesting stop");
-      // CRITICAL: Don't call stop() directly from timer callback (causes LVGL conflicts)
-      // Instead, set flag for main thread to process in loop()
-      player->stop_pending_ = true;
-
-      // NOTE: We do NOT free the HTTP buffer here to allow replay
-      // Buffer will be freed when opening a new video or when component is destroyed
-      // If you want to free memory immediately after playback, call stop() manually
-    }
+  // Ultra-lightweight: just signal the decode task to process next frame
+  // Similar to avi_player architecture for optimal performance
+  if (player->decode_event_group_ != nullptr) {
+    xEventGroupSetBits(player->decode_event_group_, EVENT_TIMER_TICK);
   }
 }
 

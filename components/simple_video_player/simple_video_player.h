@@ -12,9 +12,12 @@
 #include "esp_timer.h"   // ESP32 native high-resolution timer for precise framerate control
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"  // Mutex for thread-safe LVGL access from ESP timer
+#include "freertos/event_groups.h"  // Event groups for task synchronization
+#include "freertos/task.h"  // FreeRTOS task for decode offloading
 #include "esphome/components/speaker/speaker.h"
 #include "yuv_rgb_convert.h"  // Software YUVRGB with lookup tables (fallback only)
 #include "gmf_ppa_simple.h"   // ESP-GMF PPA wrapper for 2D-DMA + PPA hardware acceleration
+#include "esp_imgfx_rotate.h"  // Hardware rotation support
 
 // TODO: ESP-GMF full framework integration (currently using simplified wrapper)
 // #include "esp_gmf_element.h"
@@ -95,6 +98,7 @@ class SimpleVideoPlayer : public Component {
   }
   void set_max_http_file_size(size_t size) { max_http_file_size_ = size; }
   void set_preload_to_memory(bool enable) { use_file_cache_ = enable; }
+  void set_rotation(uint16_t rotation) { rotation_ = rotation; }
   // Triple buffering is now mandatory for smooth playback (removed setter)
 
   void setup() override;
@@ -252,9 +256,15 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
-  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback for precise framerate
+  static void esp_timer_cb_(void *arg);  // ESP32 native timer callback (ultra-lightweight, just sets event bit)
+  static void decode_task_(void *arg);  // FreeRTOS decode task (offloaded decoding from timer)
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
+
+  // Event bits for decode task synchronization (similar to avi_player)
+  static constexpr EventBits_t EVENT_TIMER_TICK = (1 << 0);  // Timer fired, time to decode next frame
+  static constexpr EventBits_t EVENT_STOP_PLAYBACK = (1 << 1);  // Stop requested
+  static constexpr EventBits_t EVENT_TASK_EXIT = (1 << 2);  // Task should exit (cleanup)
 
   std::string file_path_;
   int width_{800};   // Default/configured width (used if auto-detection fails)
@@ -268,6 +278,7 @@ class SimpleVideoPlayer : public Component {
   bool loop_{false};
   bool controls_enabled_{true};
   bool fps_override_{false};
+  uint16_t rotation_{0};  // Rotation angle: 0, 90, 180, 270
 
   PlayerState state_{PlayerState::STOPPED};
   MediaFormat format_{MediaFormat::UNKNOWN};
@@ -337,6 +348,14 @@ class SimpleVideoPlayer : public Component {
   ppa_client_handle_t ppa_client_handle_{nullptr};
   bool ppa_color_convert_enabled_{false};
 
+  // Hardware rotation support
+  esp_imgfx_rotate_handle_t rotate_handle_{nullptr};  // Hardware rotation handle
+  lv_color_t *rotate_buffer_{nullptr};  // Buffer for rotated frames
+  size_t rotate_buffer_size_{0};
+  bool rotation_initialized_{false};  // Track if rotation handle has been initialized with actual dimensions
+  uint16_t rotated_width_{0};   // Cached rotated width (to avoid repeated queries)
+  uint16_t rotated_height_{0};  // Cached rotated height (to avoid repeated queries)
+
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;
   size_t current_video_sample_{0};
@@ -344,7 +363,19 @@ class SimpleVideoPlayer : public Component {
   uint8_t nal_length_size_{4};
   std::vector<uint8_t> sps_;
   std::vector<uint8_t> pps_;
+  std::vector<uint8_t> sps_patched_;  // Patched SPS for decoder compatibility (converts High profiles to Baseline)
+  std::vector<uint8_t> pps_patched_;  // Patched PPS for decoder compatibility (CAVLC, no CABAC)
   bool sps_pps_sent_{false};
+
+  // Helper to patch SPS for unsupported profiles (High 4:2:2, High 4:4:4, etc.)
+  void patch_sps_for_decoder_compatibility_();
+
+  // SPS/PPS reconstruction helpers
+  void write_exp_golomb_ue_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value);
+  void write_exp_golomb_se_(std::vector<uint8_t>& data, size_t& bit_pos, int32_t value);
+  void write_bits_(std::vector<uint8_t>& data, size_t& bit_pos, uint32_t value, int num_bits);
+  std::vector<uint8_t> build_constrained_baseline_sps_(uint16_t width, uint16_t height, uint8_t level_idc);
+  std::vector<uint8_t> build_constrained_baseline_pps_();
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
 
@@ -392,7 +423,9 @@ class SimpleVideoPlayer : public Component {
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
-  volatile bool frame_ready_{false};  // Flag set by timer, checked by loop() for LVGL update
+  EventGroupHandle_t decode_event_group_{nullptr};  // Event group for decode task synchronization
+  TaskHandle_t decode_task_handle_{nullptr};  // FreeRTOS task for video decoding (offloaded from timer)
+  volatile bool frame_ready_{false};  // Flag set by decode task, checked by loop() for LVGL update
   volatile bool stop_pending_{false};  // Flag to request stop from timer (processed in loop())
   volatile uint32_t frames_dropped_{0};  // Counter for dropped frames (timer skipped due to slow processing)
 

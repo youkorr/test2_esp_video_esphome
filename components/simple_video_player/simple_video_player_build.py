@@ -139,22 +139,38 @@ if os.path.exists(esp_h264_dir):
     # Add esp_h264 library path for ESP32-P4
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
 
-    # CRITICAL: Use tinyh264 for ESP32 dual-task support!
-    # OpenH264 uses generic C++ threading (WelsTaskThread) which is SLOWER
-    # TinyH264 uses ESP32-optimized dual-task (espCreateFilterTask) which is FASTER
-    h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
-    h264_lib_name = "tinyh264"
+    # CRITICAL: Use OpenH264 for FULL H.264 profile support (Baseline, Main, High)!
+    # This is REQUIRED for security cameras which often use High Profile.
+    # Trade-off: OpenH264 is ~20-30% slower than tinyh264 but supports ALL profiles.
+    #
+    # TinyH264: Faster (ESP32 dual-task) but ONLY Constrained Baseline
+    # OpenH264: Slower (generic threading) but supports Baseline/Main/High/High10/etc
+    #
+    # Security cameras compatibility > performance optimization
+    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    h264_lib_name = "openh264"
 
     if not os.path.exists(h264_lib):
-        # Fallback to openh264 if tinyh264 not available
-        # NOTE: OpenH264 does NOT support ESP32 dual-task optimization!
-        h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
-        h264_lib_name = "openh264"
-        print("[Simple Video Player]  WARNING: Using openh264 (no ESP32 dual-task support)")
-        print("[Simple Video Player]     TinyH264 not found - performance will be degraded")
+        # Fallback to tinyh264 if openh264 not available
+        # NOTE: TinyH264 ONLY supports Constrained Baseline (security cameras won't work!)
+        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+        h264_lib_name = "tinyh264"
+        print("[Simple Video Player]  WARNING: Using tinyh264 (ONLY Constrained Baseline)")
+        print("[Simple Video Player]     OpenH264 not found - High Profile videos will FAIL")
 
     if os.path.exists(h264_lib):
-        print(f"[Simple Video Player] Found {h264_lib_name} library: {h264_lib}")
+        lib_size_mb = os.path.getsize(h264_lib) / (1024 * 1024)
+        print(f"[Simple Video Player] ========================================")
+        print(f"[Simple Video Player] Using {h264_lib_name} decoder library")
+        print(f"[Simple Video Player]   Path: {h264_lib}")
+        print(f"[Simple Video Player]   Size: {lib_size_mb:.1f} MB")
+        if h264_lib_name == "openh264":
+            print(f"[Simple Video Player]   Profiles: Baseline, Main, High, High10, High422, High444")
+            print(f"[Simple Video Player]   Note: ~20-30% slower but supports ALL H.264 profiles")
+        else:
+            print(f"[Simple Video Player]   Profiles: Constrained Baseline ONLY")
+            print(f"[Simple Video Player]   Note: Faster but security cameras may not work")
+        print(f"[Simple Video Player] ========================================")
 
         # Add library path
         env.Append(LIBPATH=[h264_lib_dir])
