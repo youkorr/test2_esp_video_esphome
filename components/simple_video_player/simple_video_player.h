@@ -345,6 +345,8 @@ class SimpleVideoPlayer : public Component {
   lv_color_t *rotate_buffer_{nullptr};  // Buffer for rotated frames
   size_t rotate_buffer_size_{0};
   bool rotation_initialized_{false};  // Track if rotation handle has been initialized with actual dimensions
+  uint16_t rotated_width_{0};   // Cached rotated width (to avoid repeated queries)
+  uint16_t rotated_height_{0};  // Cached rotated height (to avoid repeated queries)
 
   std::vector<Mp4Sample> video_samples_;
   std::vector<AudioSample> audio_samples_;

@@ -3364,10 +3364,12 @@ void SimpleVideoPlayer::update_display_() {
   uint8_t *canvas_buffer = display_buffer;
 
   if (this->rotation_ != 0 && this->rotate_handle_ != nullptr) {
-    // Allocate rotation buffer on first use
+    // Allocate rotation buffer on first use and cache rotated dimensions
     if (this->rotate_buffer_ == nullptr) {
       esp_imgfx_resolution_t rotated_res;
       esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
+      this->rotated_width_ = rotated_res.width;
+      this->rotated_height_ = rotated_res.height;
       this->rotate_buffer_size_ = rotated_res.width * rotated_res.height * sizeof(lv_color_t);
       this->rotate_buffer_ = (lv_color_t *)heap_caps_aligned_alloc(64, this->rotate_buffer_size_,
                                                                     MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -3375,7 +3377,7 @@ void SimpleVideoPlayer::update_display_() {
         ESP_LOGE(TAG, "Failed to allocate rotation buffer");
       } else {
         ESP_LOGI(TAG, "Allocated rotation buffer: %zu bytes, rotated size: %dx%d",
-                 this->rotate_buffer_size_, rotated_res.width, rotated_res.height);
+                 this->rotate_buffer_size_, this->rotated_width_, this->rotated_height_);
       }
     }
 
@@ -3395,11 +3397,9 @@ void SimpleVideoPlayer::update_display_() {
       if (ret != ESP_IMGFX_ERR_OK) {
         ESP_LOGE(TAG, "Rotation failed: %d", ret);
       } else {
-        // Update canvas buffer and dimensions to use rotated frame
-        esp_imgfx_resolution_t rotated_res;
-        esp_imgfx_rotate_get_rotated_resolution(this->rotate_handle_, &rotated_res);
-        canvas_width = rotated_res.width;
-        canvas_height = rotated_res.height;
+        // Use cached rotated dimensions (no need to query every frame)
+        canvas_width = this->rotated_width_;
+        canvas_height = this->rotated_height_;
         canvas_buffer = (uint8_t *)this->rotate_buffer_;
       }
     }
@@ -3874,6 +3874,8 @@ void SimpleVideoPlayer::stop() {
     heap_caps_free(this->rotate_buffer_);
     this->rotate_buffer_ = nullptr;
     this->rotate_buffer_size_ = 0;
+    this->rotated_width_ = 0;
+    this->rotated_height_ = 0;
     ESP_LOGD(TAG, "  Freed rotate_buffer_: %zu bytes", this->rotate_buffer_size_);
   }
 
