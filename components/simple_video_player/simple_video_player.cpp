@@ -4066,11 +4066,10 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
 
   while (true) {
     // Wait for timer tick or stop event
-    // IMPORTANT: Use pdFALSE to NOT auto-clear bits - we clear manually after processing
     EventBits_t bits = xEventGroupWaitBits(
       player->decode_event_group_,
       EVENT_TIMER_TICK | EVENT_STOP_PLAYBACK,
-      pdFALSE,  // DON'T auto-clear - we clear manually to avoid skipping ticks
+      pdTRUE,   // Auto-clear bits to avoid accumulation
       pdFALSE,  // Wait for any bit (not all)
       portMAX_DELAY
     );
@@ -4078,7 +4077,6 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
     // Check for stop request first
     if (bits & EVENT_STOP_PLAYBACK) {
       ESP_LOGI(TAG, "Decode task received stop signal");
-      xEventGroupClearBits(player->decode_event_group_, EVENT_STOP_PLAYBACK);
       xEventGroupSetBits(player->decode_event_group_, EVENT_TASK_EXIT);
       break;
     }
@@ -4087,31 +4085,24 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
     if (bits & EVENT_TIMER_TICK) {
       // Check if player is still in PLAYING state
       if (player->state_ != PlayerState::PLAYING) {
-        xEventGroupClearBits(player->decode_event_group_, EVENT_TIMER_TICK);
         continue;
       }
 
       uint32_t current_time = esp_timer_get_time() / 1000;  // microseconds to milliseconds
 
-      // CRITICAL: Check if previous frame is still pending (not yet displayed by loop())
-      // If frame_ready_ is true, main thread hasn't processed the last frame yet
-      // DON'T clear EVENT_TIMER_TICK yet - keep it set so we retry immediately next loop iteration
+      // Track if previous frame is still pending (not yet displayed by loop())
+      // Count as drop but CONTINUE DECODING to maintain timing
+      // Better to overwrite an undisplayed frame than to stop decoding entirely
       if (player->frame_ready_) {
         player->frames_dropped_++;
         static uint32_t last_drop_warning = 0;
         if (current_time - last_drop_warning > 1000) {  // Warn max once per second
-          ESP_LOGI(TAG, "Frame drops: %lu frames (system load - consider lowering FPS/resolution)",
+          ESP_LOGI(TAG, "Frame drops: %lu frames (main thread busy - will overwrite undisplayed frame)",
                    (unsigned long)player->frames_dropped_);
           last_drop_warning = current_time;
         }
-        // DON'T clear the bit! Leave it set so we retry immediately on next iteration
-        // This allows sub-frame-interval polling instead of waiting full 41ms
-        vTaskDelay(pdMS_TO_TICKS(1));  // Brief 1ms delay to avoid busy-wait
-        continue;
+        // CONTINUE to decode - maintains proper timing
       }
-
-      // Frame buffer is available - clear the timer tick and proceed with decode
-      xEventGroupClearBits(player->decode_event_group_, EVENT_TIMER_TICK);
 
       // Log timing for performance debugging (only every 30 frames to avoid spam)
       if (callback_count++ % 30 == 0) {
