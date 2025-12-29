@@ -40,7 +40,23 @@ void PedestrianDetectionComponent::setup() {
 
   // Initialize pedestrian detector
   ESP_LOGI(TAG, "Initializing pedestrian detector...");
+
+#ifdef CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
+    delay(6000);  // Wait for SD card to be mounted
+    ESP_LOGI(TAG, "Loading pedestrian detection model from SD card: %s", this->sdcard_model_path_);
+    this->pedestrian_detector_ = new PedestrianDetect(this->sdcard_model_path_);
+  } else {
+    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
+    this->mark_failed();
+    return;
+  }
+#else
+  ESP_LOGI(TAG, "Loading pedestrian detection model from flash rodata");
   this->pedestrian_detector_ = new PedestrianDetect();
+#endif
+
   if (this->pedestrian_detector_ != nullptr) {
     this->pedestrian_detector_->set_score_thr(this->score_threshold_);
     this->pedestrian_detector_->set_nms_thr(this->nms_threshold_);
@@ -181,6 +197,14 @@ void PedestrianDetectionComponent::draw_results_(uint8_t *img_data, uint16_t wid
 
 void PedestrianDetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "Pedestrian Detection:");
+#ifdef CONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD
+  ESP_LOGCONFIG(TAG, "  Model location: SD card");
+  if (this->sdcard_model_path_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Model path: %s", this->sdcard_model_path_);
+  }
+#else
+  ESP_LOGCONFIG(TAG, "  Model location: Flash rodata");
+#endif
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);

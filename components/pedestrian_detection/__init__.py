@@ -14,6 +14,12 @@ CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
 CONF_ON_PEDESTRIAN_DETECTED = "on_pedestrian_detected"
+CONF_MODEL_LOCATION = "model_location"
+CONF_MODEL_PATH = "model_path"
+
+# Model location types
+MODEL_LOCATION_FLASH = "flash_rodata"
+MODEL_LOCATION_SDCARD = "sdcard"
 
 pedestrian_detection_ns = cg.esphome_ns.namespace("pedestrian_detection")
 PedestrianDetectionComponent = pedestrian_detection_ns.class_("PedestrianDetectionComponent", cg.Component)
@@ -32,6 +38,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=4): cv.int_range(min=1, max=600),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+    cv.Optional(CONF_MODEL_LOCATION, default=MODEL_LOCATION_FLASH): cv.one_of(
+        MODEL_LOCATION_FLASH, MODEL_LOCATION_SDCARD, lower=True
+    ),
+    cv.Optional(CONF_MODEL_PATH): cv.string,
     cv.Optional(CONF_ON_PEDESTRIAN_DETECTED): automation.validate_automation({
         cv.GenerateID(): cv.declare_id(PedestrianDetectedTrigger),
     }),
@@ -60,13 +70,34 @@ async def to_code(config):
 
     # Set build flag for pedestrian detection model
     cg.add_build_flag("-DESP_DL_MODEL_PEDESTRIAN=1")
-
-    # Add build flags for pedestrian detection
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_PICO_S8_V1=1")
-    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1")
     cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_TYPE=0")
-    cg.add_build_flag("-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
+    # Model location configuration
+    model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
+
+    if model_location == MODEL_LOCATION_SDCARD:
+        # SD card mode - use platformio build_flags to ensure propagation
+        cg.add_platformio_option("build_flags", [
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD=1",
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=0",
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=2"
+        ])
+
+        # Pass SD card path to C++ component
+        if CONF_MODEL_PATH in config:
+            cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{config[CONF_MODEL_PATH]}"')))
+        else:
+            # Default SD card path
+            cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
+    else:
+        # Flash rodata mode (default) - use platformio build_flags
+        cg.add_platformio_option("build_flags", [
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_FLASH_RODATA=1",
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_IN_SDCARD=0",
+            "-DCONFIG_PEDESTRIAN_DETECT_MODEL_LOCATION=0"
+        ])
 
     # Add include paths
     component_dir = os.path.dirname(__file__)
