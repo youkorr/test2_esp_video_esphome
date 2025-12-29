@@ -80,12 +80,10 @@ async def to_code(config):
     model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
 
     if model_location == MODEL_LOCATION_SDCARD:
-        # SD card mode - use platformio build_flags to ensure propagation
-        cg.add_platformio_option("build_flags", [
-            "-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1",
-            "-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=0",
-            "-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=2"
-        ])
+        # SD card mode
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=0")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=2")
 
         # Pass SD card path to C++ component
         if CONF_MODEL_PATH in config:
@@ -94,12 +92,10 @@ async def to_code(config):
             # Default SD card path
             cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
     else:
-        # Flash rodata mode (default) - use platformio build_flags
-        cg.add_platformio_option("build_flags", [
-            "-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1",
-            "-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=0",
-            "-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0"
-        ])
+        # Flash rodata mode (default)
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=0")
+        cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0")
 
     # Add include paths
     component_dir = os.path.dirname(__file__)
