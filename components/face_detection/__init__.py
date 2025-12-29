@@ -19,11 +19,17 @@ CONF_ON_FACE_DETECTED = "on_face_detected"
 CONF_ON_FACE_RECOGNIZED = "on_face_recognized"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
+CONF_MODEL_LOCATION = "model_location"
+CONF_MODEL_PATH = "model_path"
 
 # Available model types
 MODEL_TYPE_FACE = "face_recognition"
 MODEL_TYPE_YOLO11 = "yolo11"
 MODEL_TYPE_POSE = "pose_detection"
+
+# Model location types
+MODEL_LOCATION_FLASH = "flash_rodata"
+MODEL_LOCATION_SDCARD = "sdcard"
 
 face_detection_ns = cg.esphome_ns.namespace("face_detection")
 FaceDetectionComponent = face_detection_ns.class_("FaceDetectionComponent", cg.Component)
@@ -56,6 +62,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_RECOGNITION_ENABLED, default=False): cv.boolean,
     cv.Optional(CONF_FACE_DB_PATH, default="/sdcard/faces.db"): cv.string,
     cv.Optional(CONF_RECOGNITION_THRESHOLD, default=0.7): cv.float_range(min=0.0, max=1.0),
+    cv.Optional(CONF_MODEL_LOCATION, default=MODEL_LOCATION_FLASH): cv.one_of(
+        MODEL_LOCATION_FLASH, MODEL_LOCATION_SDCARD, lower=True
+    ),
+    cv.Optional(CONF_MODEL_PATH): cv.string,
     cv.Optional(CONF_ON_FACE_DETECTED): automation.validate_automation({
         cv.GenerateID(): cv.declare_id(FaceDetectedTrigger),
     }),
@@ -105,10 +115,33 @@ async def to_code(config):
 
     # Add build flags for face detection models
     cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1=1")
-    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=1")
     cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_TYPE=0")
-    cg.add_build_flag("-DCONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION=0")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+
+    # Model location configuration
+    model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
+
+    if model_location == MODEL_LOCATION_SDCARD:
+        # SD card mode - use platformio build_flags to ensure propagation
+        cg.add_platformio_option("build_flags", [
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD=1",
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=0",
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION=2"
+        ])
+
+        # Pass SD card path to C++ component
+        if CONF_MODEL_PATH in config:
+            cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{config[CONF_MODEL_PATH]}"')))
+        else:
+            # Default SD card path
+            cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
+    else:
+        # Flash rodata mode (default) - use platformio build_flags
+        cg.add_platformio_option("build_flags", [
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA=1",
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD=0",
+            "-DCONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION=0"
+        ])
 
     # Add build flags for face recognition if enabled
     if config[CONF_RECOGNITION_ENABLED]:

@@ -47,6 +47,7 @@ class FaceDetectionComponent : public Component {
   void set_face_db_path(const std::string &path) { this->face_db_path_ = path; }
   void set_recognition_threshold(float threshold) { this->recognition_threshold_ = threshold; }
   void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
+  void set_sdcard_model_path(const char *path) { this->sdcard_model_path_ = path; }
 
   // Get canvas ID for LVGL integration
   const std::string &get_canvas_id() { return this->canvas_id_; }
@@ -80,7 +81,7 @@ class FaceDetectionComponent : public Component {
     this->on_face_recognized_callbacks_.push_back(std::move(callback));
   }
 
-  float get_setup_priority() const override { return setup_priority::LATE; }
+  float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
 
  protected:
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
@@ -91,6 +92,7 @@ class FaceDetectionComponent : public Component {
   float score_threshold_{0.3f};
   float nms_threshold_{0.5f};
   int detection_interval_{8};  // Run detection every N frames
+  const char *sdcard_model_path_{nullptr};
 
   // Recognition configuration
   bool recognition_enabled_{false};
