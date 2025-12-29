@@ -923,9 +923,13 @@ bool NetworkCamera::fetch_rtp_frame_() {
       // Don't add PPS to main buffer - it will be prepended to I-frames
     } else if (nal_type >= 1 && nal_type <= 23) {
       // Picture NAL unit (I-frame, P-frame, etc.)
-      // If this is an I-frame (IDR), prepend cached SPS/PPS
-      if (nal_type == 5 && this->has_sps_ && this->has_pps_) {
-        // Prepend SPS and PPS to the buffer before the I-frame
+
+      // CRITICAL FIX: Send SPS/PPS with the FIRST frame received (not just I-frames)
+      // Without this, if stream starts with P-frames, decoder never gets param sets
+      static bool param_sets_sent = false;
+
+      if (!param_sets_sent && this->has_sps_ && this->has_pps_) {
+        // Send SPS/PPS with first frame (I-frame OR P-frame)
         if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
           // Add SPS
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
@@ -933,7 +937,23 @@ bool NetworkCamera::fetch_rtp_frame_() {
           // Add PPS
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
           this->h264_data_len_ += this->pps_len_;
-          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame", this->sps_len_, this->pps_len_);
+
+          ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST frame (NAL type %u)",
+                   this->sps_len_, this->pps_len_, nal_type);
+          param_sets_sent = true;
+        }
+      }
+
+      // Also prepend SPS/PPS to each I-frame for recovery after packet loss
+      if (nal_type == 5 && this->has_sps_ && this->has_pps_ && param_sets_sent) {
+        if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
+          // Add SPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+          this->h264_data_len_ += this->sps_len_;
+          // Add PPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+          this->h264_data_len_ += this->pps_len_;
+          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame for recovery", this->sps_len_, this->pps_len_);
         }
       }
 
@@ -946,6 +966,18 @@ bool NetworkCamera::fetch_rtp_frame_() {
         this->h264_buffer_[this->h264_data_len_++] = 0x01;
         memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data, nal_len);
         this->h264_data_len_ += nal_len;
+
+        // Log first 10 frames for debugging
+        static uint32_t frame_count = 0;
+        if (frame_count++ < 10) {
+          const char *frame_type = nal_type == 5 ? "I-frame (IDR)" :
+                                   nal_type == 1 ? "P-frame" :
+                                   nal_type == 2 ? "P-frame (partition A)" :
+                                   nal_type == 3 ? "P-frame (partition B)" :
+                                   nal_type == 4 ? "P-frame (partition C)" : "Other";
+          ESP_LOGI(TAG, "Frame #%u: NAL type %u (%s), size %u bytes",
+                   frame_count, nal_type, frame_type, nal_len);
+        }
       }
     } else if (nal_type == 28) {
       // FU-A (Fragmentation Unit)
@@ -959,8 +991,11 @@ bool NetworkCamera::fetch_rtp_frame_() {
         // Start of fragmented NAL
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
 
-        // If this is a fragmented I-frame, prepend SPS/PPS
-        if (fu_type == 5 && this->has_sps_ && this->has_pps_) {
+        // CRITICAL FIX: Send SPS/PPS with first fragmented frame too
+        static bool param_sets_sent_fua = false;
+
+        if (!param_sets_sent_fua && this->has_sps_ && this->has_pps_ && (fu_type >= 1 && fu_type <= 23)) {
+          // Send SPS/PPS with first fragmented picture frame
           if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
             // Add SPS
             memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
@@ -968,7 +1003,22 @@ bool NetworkCamera::fetch_rtp_frame_() {
             // Add PPS
             memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
             this->h264_data_len_ += this->pps_len_;
-            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame", this->sps_len_, this->pps_len_);
+            ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
+                     this->sps_len_, this->pps_len_, fu_type);
+            param_sets_sent_fua = true;
+          }
+        }
+
+        // Also prepend SPS/PPS to fragmented I-frames for recovery
+        if (fu_type == 5 && this->has_sps_ && this->has_pps_ && param_sets_sent_fua) {
+          if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
+            // Add SPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+            this->h264_data_len_ += this->sps_len_;
+            // Add PPS
+            memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+            this->h264_data_len_ += this->pps_len_;
+            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame for recovery", this->sps_len_, this->pps_len_);
           }
         }
 
@@ -980,6 +1030,15 @@ bool NetworkCamera::fetch_rtp_frame_() {
           this->h264_buffer_[this->h264_data_len_++] = reconstructed;
           memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data + 2, nal_len - 2);
           this->h264_data_len_ += nal_len - 2;
+
+          // Log first 10 fragmented frames for debugging
+          static uint32_t frag_count = 0;
+          if (frag_count++ < 10) {
+            const char *frame_type = fu_type == 5 ? "I-frame (IDR)" :
+                                     fu_type == 1 ? "P-frame" : "Other";
+            ESP_LOGI(TAG, "Fragmented frame #%u: FU type %u (%s), fragment size %u bytes",
+                     frag_count, fu_type, frame_type, nal_len - 2);
+          }
         }
       } else {
         // Continuation
@@ -1021,15 +1080,30 @@ bool NetworkCamera::decode_h264_to_yuv_() {
 
   // Process all NAL units in the buffer
   bool frame_decoded = false;
+  static bool first_decode_success = false;
+
   while (in_frame.raw_data.len > 0) {
     esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
     if (ret != ESP_H264_ERR_OK) {
       // Log decode error for debugging
       static uint32_t error_count = 0;
       error_count++;
-      if (error_count <= 5 || error_count % 100 == 0) {
-        ESP_LOGE(TAG, "H264 decode error: %d (NAL size: %u bytes, total errors: %u)",
+      if (error_count <= 10 || error_count % 100 == 0) {
+        ESP_LOGE(TAG, "H264 decode error: %d (NAL size: %u bytes, error #%u)",
                  ret, in_frame.raw_data.len, error_count);
+
+        // Explain error code
+        if (ret == -1) ESP_LOGE(TAG, "  → ESP_H264_ERR_FAIL (general decode failure)");
+        if (ret == -2) ESP_LOGE(TAG, "  → ESP_H264_ERR_ARG (invalid arguments)");
+        if (ret == -3) ESP_LOGE(TAG, "  → ESP_H264_ERR_MEM (out of memory)");
+        if (ret == -5) ESP_LOGE(TAG, "  → ESP_H264_ERR_UNSUPPORTED (profile incompatible or feature not supported)");
+        if (ret == -6) ESP_LOGE(TAG, "  → ESP_H264_ERR_TIMEOUT");
+        if (ret == -7) ESP_LOGE(TAG, "  → ESP_H264_ERR_OVERFLOW");
+
+        if (!first_decode_success) {
+          ESP_LOGE(TAG, "  ⚠ No frames decoded yet - check if SPS/PPS were sent with first frame");
+          ESP_LOGE(TAG, "  ⚠ If error = -5, H264 profile may be incompatible (High Profile not fully supported)");
+        }
       }
       break;
     }
@@ -1043,6 +1117,14 @@ bool NetworkCamera::decode_h264_to_yuv_() {
       }
       memcpy(this->yuv_buffer_, out_frame.outbuf, copy_size);
       frame_decoded = true;
+
+      // Log first successful decode
+      if (!first_decode_success) {
+        ESP_LOGI(TAG, "✓ First frame decoded successfully! Decoder initialized and working.");
+        ESP_LOGI(TAG, "  Decoded YUV size: %u bytes (expected: %u bytes)",
+                 out_frame.out_size, this->yuv_buffer_size_);
+        first_decode_success = true;
+      }
     }
 
     // Move to next NAL unit
