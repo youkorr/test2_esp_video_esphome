@@ -988,6 +988,13 @@ bool NetworkCamera::decode_h264_to_yuv_() {
   while (in_frame.raw_data.len > 0) {
     esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
     if (ret != ESP_H264_ERR_OK) {
+      // Log decode error for debugging
+      static uint32_t error_count = 0;
+      error_count++;
+      if (error_count <= 5 || error_count % 100 == 0) {
+        ESP_LOGE(TAG, "H264 decode error: %d (NAL size: %u bytes, total errors: %u)",
+                 ret, in_frame.raw_data.len, error_count);
+      }
       break;
     }
 
