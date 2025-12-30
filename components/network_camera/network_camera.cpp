@@ -359,7 +359,7 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   esp_http_client_config_t config = {};
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
-  config.buffer_size = 8192;  // Increased from 4096 to reduce HTTP round-trips
+  config.buffer_size = 4096;  // Conservative size to avoid memory issues
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -408,8 +408,10 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  uint8_t temp_buffer[8192];  // Increased from 4096 for better throughput
-  static uint8_t parse_buffer[16384];  // Increased from 8192 to handle larger frames
+  // CRITICAL: Use static buffers to avoid stack overflow on loopTask
+  // Stack-allocated buffers cause "Stack protection fault" crashes
+  static uint8_t temp_buffer[4096];     // Static to avoid stack allocation
+  static uint8_t parse_buffer[12288];   // 12KB parse buffer (reduced from 16KB)
   static size_t parse_buffer_len = 0;
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
