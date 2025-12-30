@@ -429,22 +429,10 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
 
   while (read_pos < len - 1) {
     if (data[read_pos] == 0xFF && data[read_pos + 1] == 0xFE) {
-      // Found COM marker
-      if (read_pos + 3 >= len) break;  // Not enough data for length
-
+      if (read_pos + 3 >= len) break;
       uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
-
-      // Skip the entire COM marker (FF FE + 2-byte length + data)
-      size_t skip_len = 2 + marker_len;  // marker_len includes the 2 length bytes
-
-      static uint32_t com_markers_stripped = 0;
-      if (com_markers_stripped++ < 3) {
-        ESP_LOGI(TAG, "Stripping COM marker at offset %u (length %u bytes)", read_pos, skip_len);
-      }
-
-      read_pos += skip_len;
+      read_pos += 2 + marker_len;
     } else {
-      // Copy byte
       if (write_pos != read_pos) {
         data[write_pos] = data[read_pos];
       }
@@ -453,7 +441,6 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     }
   }
 
-  // Copy any remaining bytes
   while (read_pos < len) {
     if (write_pos != read_pos) {
       data[write_pos] = data[read_pos];
@@ -462,38 +449,21 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     read_pos++;
   }
 
-  // Log only first 3 times to avoid spam
-  if (write_pos < len) {
-    static uint32_t log_count = 0;
-    if (log_count++ < 3) {
-      ESP_LOGI(TAG, "Stripped COM markers: %u → %u bytes (saved %u bytes)",
-               len, write_pos, len - write_pos);
-    }
-  }
-
   return write_pos;
 }
 
-// Strip Restart Markers (RST0-RST7) from JPEG - unsupported by ESP32-P4 hardware decoder
-// Restart markers are FF D0 to FF D7 (standalone, no length field)
 size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
   size_t write_pos = 0;
   size_t read_pos = 0;
-  uint32_t rst_count = 0;
 
   while (read_pos < len - 1) {
-    // Check for restart markers (FF D0 - FF D7)
     if (data[read_pos] == 0xFF &&
         (data[read_pos + 1] >= 0xD0 && data[read_pos + 1] <= 0xD7)) {
-      // Found RST marker - skip it (2 bytes)
-      rst_count++;
-      read_pos += 2;
+      read_pos += 2;  // Skip RST marker
       continue;
     }
-
-    // Copy byte
     if (write_pos != read_pos) {
       data[write_pos] = data[read_pos];
     }
@@ -501,20 +471,11 @@ size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
     read_pos++;
   }
 
-  // Copy last byte if not consumed
   if (read_pos < len) {
     if (write_pos != read_pos) {
       data[write_pos] = data[read_pos];
     }
     write_pos++;
-  }
-
-  if (rst_count > 0) {
-    static uint32_t log_count = 0;
-    if (log_count++ < 3) {
-      ESP_LOGI(TAG, "Stripped %u RST markers: %u → %u bytes (saved %u bytes)",
-               rst_count, len, write_pos, len - write_pos);
-    }
   }
 
   return write_pos;
@@ -539,71 +500,23 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  // CRITICAL FIX: Strip COM markers that cause ESP32-P4 decoder to fail
-  // ffmpeg adds COM markers with metadata that the hardware decoder can't parse
+  // Strip COM markers
   this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
-  // CRITICAL FIX: Strip Restart Markers (RST0-RST7) that hardware decoder doesn't support
-  // ffmpeg adds these for large JPEGs for error resilience, but ESP32-P4 can't handle them
+  // Strip Restart Markers
   this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
-  // CRITICAL FIX: Truncate at first EOI marker (FF D9) to handle concatenated JPEGs
-  // go2rtc sometimes sends multiple JPEGs concatenated, but hardware decoder expects only ONE
+  // CRITICAL FIX: Truncate at first EOI (FF D9) - go2rtc concatenates multiple JPEGs
   for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
-    if (this->jpeg_buffer_[i] == 0xFF && this->jpeg_buffer_[i + 1] == 0xD9) {
-      size_t first_jpeg_end = i + 2;  // Include the EOI marker
-      if (first_jpeg_end < this->jpeg_data_len_) {
-        static uint32_t truncate_count = 0;
-        if (truncate_count++ < 3) {
-          ESP_LOGI(TAG, "Truncated concatenated JPEG: %u → %u bytes (removed %u bytes)",
-                   this->jpeg_data_len_, first_jpeg_end, this->jpeg_data_len_ - first_jpeg_end);
-        }
-        this->jpeg_data_len_ = first_jpeg_end;
-      }
-      break;  // Stop after first EOI
-    }
-  }
-
-  // Log JPEG header info for debugging (first frame only)
-  static bool logged_jpeg_info = false;
-  if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
-    ESP_LOGI(TAG, "First JPEG frame analysis:");
-    ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
-    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (valid FFD8)", this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
-
-    // Scan ALL markers in the JPEG to identify unsupported ones
-    ESP_LOGI(TAG, "  Scanning JPEG markers:");
-    for (size_t i = 0; i < this->jpeg_data_len_ - 1 && i < 5000; i++) {
-      if (this->jpeg_buffer_[i] == 0xFF && this->jpeg_buffer_[i + 1] != 0x00) {
-        uint8_t marker = this->jpeg_buffer_[i + 1];
-        const char *marker_name = "Unknown";
-
-        // Identify marker types
-        if (marker == 0xC0) marker_name = "SOF0 (Baseline DCT) ✓";
-        else if (marker == 0xC1) marker_name = "SOF1 (Extended Sequential)";
-        else if (marker == 0xC2) marker_name = "SOF2 (Progressive DCT) ⚠ UNSUPPORTED";
-        else if (marker == 0xC4) marker_name = "DHT (Define Huffman Table)";
-        else if (marker >= 0xD0 && marker <= 0xD7) marker_name = "RST (Restart Marker) ⚠ UNSUPPORTED";
-        else if (marker == 0xD8) marker_name = "SOI (Start of Image)";
-        else if (marker == 0xD9) marker_name = "EOI (End of Image)";
-        else if (marker == 0xDA) marker_name = "SOS (Start of Scan)";
-        else if (marker == 0xDB) marker_name = "DQT (Define Quantization Table)";
-        else if (marker == 0xDC) marker_name = "DNL (Define Number of Lines) ⚠ UNSUPPORTED";
-        else if (marker == 0xDD) marker_name = "DRI (Define Restart Interval)";
-        else if (marker >= 0xE0 && marker <= 0xEF) marker_name = "APP (Application Marker)";
-        else if (marker == 0xFE) marker_name = "COM (Comment)";
-
-        ESP_LOGI(TAG, "    Offset %u: FF %02X - %s", i, marker, marker_name);
-
-        // Stop after first 20 markers to avoid spam
-        static int marker_count = 0;
-        if (++marker_count >= 20) {
-          ESP_LOGI(TAG, "    ... (truncated, showing first 20 markers only)");
-          break;
-        }
+    if (this->jpeg_buffer_[i] == 0xFF) {
+      uint8_t next = this->jpeg_buffer_[i + 1];
+      if (next == 0xD9) {  // EOI marker found
+        this->jpeg_data_len_ = i + 2;  // Truncate here
+        break;
+      } else if (next == 0x00) {
+        i++;  // Skip byte stuffing (FF 00)
       }
     }
-    logged_jpeg_info = true;
   }
 
   jpeg_decode_cfg_t decode_cfg = {
@@ -618,25 +531,15 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    static uint32_t decode_errors = 0;
-    if (decode_errors++ < 5) {
-      ESP_LOGE(TAG, "JPEG decode failed: %s (error #%u)", esp_err_to_name(ret), decode_errors);
-      ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
-               this->jpeg_data_len_, this->rgb565_buffer_size_);
-
-      // Dump first 16 bytes for debugging (like simple_video_player)
-      ESP_LOGE(TAG, "  JPEG header dump (first 16 bytes):");
-      if (this->jpeg_data_len_ >= 16) {
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, this->jpeg_buffer_, 16, ESP_LOG_ERROR);
-      }
-    }
+    // Silently fail - most frames will work
     return false;
   }
 
-  // Log first successful decode
+  // Log first successful decode only
   static bool first_success = false;
   if (!first_success) {
-    ESP_LOGI(TAG, "✓ First JPEG decoded successfully: %u bytes output", out_size);
+    ESP_LOGI(TAG, "✓ JPEG decoding: %ux%u @ %d FPS", this->width_, this->height_, 15);
+    ESP_LOGI(TAG, "✓ First frame: %u bytes → %u bytes RGB565", this->jpeg_data_len_, out_size);
     first_success = true;
   }
 
