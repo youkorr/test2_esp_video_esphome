@@ -495,6 +495,10 @@ bool NetworkCamera::fetch_jpeg_frame_() {
 size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
+  // CRITICAL DEBUG: Log ALL markers found in first 3 JPEGs
+  static uint32_t jpeg_count = 0;
+  bool debug_markers = (jpeg_count++ < 3);
+
   size_t write_pos = 0;
   size_t read_pos = 0;
 
@@ -503,15 +507,17 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     data[write_pos++] = 0xFF;
     data[write_pos++] = 0xD8;
     read_pos = 2;
+    if (debug_markers) ESP_LOGI(TAG, "  [KEEP] SOI (FF D8)");
   }
 
-  bool in_scan_data = false;  // Track if we're in compressed scan data
+  bool in_scan_data = false;
+  uint16_t sof_width = 0, sof_height = 0;
 
   while (read_pos < len - 1) {
     if (data[read_pos] == 0xFF) {
       uint8_t marker = data[read_pos + 1];
 
-      // Check for byte stuffing (FF 00) - keep it if in scan data
+      // Check for byte stuffing (FF 00)
       if (marker == 0x00) {
         if (in_scan_data) {
           data[write_pos++] = 0xFF;
@@ -521,40 +527,54 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // SOS marker - start of scan data (keep it and everything after until next marker)
+      // SOS marker - start of scan data
       if (marker == 0xDA) {
         in_scan_data = true;
-        // Copy SOS marker and its length
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
         if (read_pos + total_len > len) break;
 
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] SOS (FF DA) - %u bytes", total_len);
         memcpy(data + write_pos, data + read_pos, total_len);
         write_pos += total_len;
         read_pos += total_len;
         continue;
       }
 
-      // EOI marker - end of image (keep it)
+      // EOI marker
       if (marker == 0xD9) {
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] EOI (FF D9)");
         data[write_pos++] = 0xFF;
         data[write_pos++] = 0xD9;
-        break;  // Done!
+        break;
       }
 
-      // RST markers (FF D0-D7) - REMOVE (not supported by hardware)
+      // RST markers - REMOVE
       if (marker >= 0xD0 && marker <= 0xD7) {
+        if (debug_markers) ESP_LOGI(TAG, "  [REMOVE] RST%d (FF %02X)", marker - 0xD0, marker);
         read_pos += 2;
         continue;
       }
 
-      // Essential markers to KEEP: DQT, DHT, SOF0, SOF2
-      if (marker == 0xDB || marker == 0xC4 || marker == 0xC0 || marker == 0xC2) {
+      // SOF0/SOF2 - KEEP but extract resolution
+      if (marker == 0xC0 || marker == 0xC2) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
         if (read_pos + total_len > len) break;
+
+        // Extract resolution from SOF (offset +5 for height, +7 for width)
+        if (read_pos + 9 < len) {
+          sof_height = (data[read_pos + 5] << 8) | data[read_pos + 6];
+          sof_width = (data[read_pos + 7] << 8) | data[read_pos + 8];
+        }
+
+        if (debug_markers) {
+          const char *sof_name = (marker == 0xC0) ? "SOF0 (Baseline)" : "SOF2 (Progressive)";
+          ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %ux%u - %u bytes",
+                   sof_name, marker, sof_width, sof_height, total_len);
+        }
 
         memcpy(data + write_pos, data + read_pos, total_len);
         write_pos += total_len;
@@ -562,22 +582,48 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // ALL other markers: APP0-15 (E0-EF), COM (FE), DRI (DD), DNL (DC), etc. - REMOVE
-      if ((marker >= 0xE0 && marker <= 0xEF) ||  // APP markers
-          marker == 0xFE ||                        // COM
-          marker == 0xDD ||                        // DRI
-          marker == 0xDC ||                        // DNL
-          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC2 && marker != 0xC4)) {  // Other SOF
+      // DQT, DHT - KEEP
+      if (marker == 0xDB || marker == 0xC4) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
-        read_pos += 2 + marker_len;  // Skip entire marker
+        size_t total_len = 2 + marker_len;
+        if (read_pos + total_len > len) break;
+
+        const char *marker_name = (marker == 0xDB) ? "DQT" : "DHT";
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %u bytes", marker_name, marker, total_len);
+
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
         continue;
       }
 
-      // Unknown marker - skip it
+      // ALL other markers - REMOVE
+      if ((marker >= 0xE0 && marker <= 0xEF) ||  // APP
+          marker == 0xFE ||                        // COM
+          marker == 0xDD ||                        // DRI
+          marker == 0xDC ||                        // DNL
+          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC2 && marker != 0xC4)) {
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+
+        if (debug_markers) {
+          const char *marker_name =
+            (marker >= 0xE0 && marker <= 0xEF) ? "APP" :
+            (marker == 0xFE) ? "COM" :
+            (marker == 0xDD) ? "DRI" :
+            (marker == 0xDC) ? "DNL" : "OTHER_SOF";
+          ESP_LOGI(TAG, "  [REMOVE] %s (FF %02X) - %u bytes", marker_name, marker, marker_len);
+        }
+
+        read_pos += 2 + marker_len;
+        continue;
+      }
+
+      // Unknown marker
+      if (debug_markers) ESP_LOGW(TAG, "  [SKIP] Unknown (FF %02X)", marker);
       read_pos += 2;
     } else {
-      // Regular data (scan data or other)
       data[write_pos++] = data[read_pos++];
     }
   }
@@ -585,6 +631,14 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   // Copy remaining bytes
   while (read_pos < len) {
     data[write_pos++] = data[read_pos++];
+  }
+
+  // Log resolution mismatch warning
+  if (debug_markers && (sof_width != 0 || sof_height != 0)) {
+    ESP_LOGI(TAG, "  JPEG resolution: %ux%u (configured: 640x480)", sof_width, sof_height);
+    if (sof_width != 640 || sof_height != 480) {
+      ESP_LOGW(TAG, "  ⚠️ RESOLUTION MISMATCH! Decoder expects 640x480");
+    }
   }
 
   return write_pos;
