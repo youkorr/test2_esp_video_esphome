@@ -812,6 +812,13 @@ void NetworkCamera::disconnect_rtsp_stream_() {
   }
   this->stream_connected_ = false;
   this->rtsp_session_.clear();
+
+  // CRITICAL: Reset SPS/PPS sent flags so they get sent again on reconnect
+  this->param_sets_sent_ = false;
+  this->param_sets_sent_fua_ = false;
+  this->has_sps_ = false;
+  this->has_pps_ = false;
+  this->h264_data_len_ = 0;
 }
 
 bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::string &url,
@@ -1009,9 +1016,7 @@ bool NetworkCamera::fetch_rtp_frame_() {
 
       // CRITICAL FIX: Send SPS/PPS with the FIRST frame received (not just I-frames)
       // Without this, if stream starts with P-frames, decoder never gets param sets
-      static bool param_sets_sent = false;
-
-      if (!param_sets_sent && this->has_sps_ && this->has_pps_) {
+      if (!this->param_sets_sent_ && this->has_sps_ && this->has_pps_) {
         // Send SPS/PPS with first frame (I-frame OR P-frame)
         if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
           // Add SPS
@@ -1023,12 +1028,12 @@ bool NetworkCamera::fetch_rtp_frame_() {
 
           ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST frame (NAL type %u)",
                    this->sps_len_, this->pps_len_, nal_type);
-          param_sets_sent = true;
+          this->param_sets_sent_ = true;
         }
       }
 
       // Also prepend SPS/PPS to each I-frame for recovery after packet loss
-      if (nal_type == 5 && this->has_sps_ && this->has_pps_ && param_sets_sent) {
+      if (nal_type == 5 && this->has_sps_ && this->has_pps_ && this->param_sets_sent_) {
         if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
           // Add SPS
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
@@ -1075,11 +1080,9 @@ bool NetworkCamera::fetch_rtp_frame_() {
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
 
         // CRITICAL FIX: Send SPS/PPS with first fragmented frame (but not twice!)
-        static bool param_sets_sent_fua = false;
-
         // Only prepend SPS/PPS if we haven't sent them yet
         // This handles both first frame AND subsequent I-frames
-        if (!param_sets_sent_fua && this->has_sps_ && this->has_pps_ && (fu_type >= 1 && fu_type <= 23)) {
+        if (!this->param_sets_sent_fua_ && this->has_sps_ && this->has_pps_ && (fu_type >= 1 && fu_type <= 23)) {
           // Send SPS/PPS with first fragmented picture frame
           if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
             // Add SPS
@@ -1090,7 +1093,7 @@ bool NetworkCamera::fetch_rtp_frame_() {
             this->h264_data_len_ += this->pps_len_;
             ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
                      this->sps_len_, this->pps_len_, fu_type);
-            param_sets_sent_fua = true;
+            this->param_sets_sent_fua_ = true;
           } else {
             ESP_LOGW(TAG, "⚠ Buffer too small to add SPS+PPS (need %u bytes, buffer has %u free)",
                      this->sps_len_ + this->pps_len_ + nal_len + 3,
