@@ -420,6 +420,57 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   return false;
 }
 
+// Strip COM (comment) markers from JPEG that cause ESP32-P4 hardware decoder to fail
+// COM marker format: FF FE [2-byte length] [data]
+size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
+  if (len < 4) return len;
+
+  size_t write_pos = 0;
+  size_t read_pos = 0;
+
+  while (read_pos < len - 1) {
+    if (data[read_pos] == 0xFF && data[read_pos + 1] == 0xFE) {
+      // Found COM marker
+      if (read_pos + 3 >= len) break;  // Not enough data for length
+
+      uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+
+      // Skip the entire COM marker (FF FE + 2-byte length + data)
+      size_t skip_len = 2 + marker_len;  // marker_len includes the 2 length bytes
+
+      static uint32_t com_markers_stripped = 0;
+      if (com_markers_stripped++ < 3) {
+        ESP_LOGI(TAG, "Stripping COM marker at offset %u (length %u bytes)", read_pos, skip_len);
+      }
+
+      read_pos += skip_len;
+    } else {
+      // Copy byte
+      if (write_pos != read_pos) {
+        data[write_pos] = data[read_pos];
+      }
+      write_pos++;
+      read_pos++;
+    }
+  }
+
+  // Copy any remaining bytes
+  while (read_pos < len) {
+    if (write_pos != read_pos) {
+      data[write_pos] = data[read_pos];
+    }
+    write_pos++;
+    read_pos++;
+  }
+
+  if (write_pos < len) {
+    ESP_LOGD(TAG, "Stripped COM markers: %u → %u bytes (saved %u bytes)",
+             len, write_pos, len - write_pos);
+  }
+
+  return write_pos;
+}
+
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
   if (this->jpeg_data_len_ == 0 || this->jpeg_decoder_ == nullptr) {
     return false;
@@ -438,6 +489,10 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     }
     return false;
   }
+
+  // CRITICAL FIX: Strip COM markers that cause ESP32-P4 decoder to fail
+  // ffmpeg adds COM markers with metadata that the hardware decoder can't parse
+  this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
   // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;
