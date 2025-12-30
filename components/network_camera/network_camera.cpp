@@ -1020,9 +1020,11 @@ bool NetworkCamera::fetch_rtp_frame_() {
         // Start of fragmented NAL
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
 
-        // CRITICAL FIX: Send SPS/PPS with first fragmented frame too
+        // CRITICAL FIX: Send SPS/PPS with first fragmented frame (but not twice!)
         static bool param_sets_sent_fua = false;
 
+        // Only prepend SPS/PPS if we haven't sent them yet
+        // This handles both first frame AND subsequent I-frames
         if (!param_sets_sent_fua && this->has_sps_ && this->has_pps_ && (fu_type >= 1 && fu_type <= 23)) {
           // Send SPS/PPS with first fragmented picture frame
           if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
@@ -1035,21 +1037,14 @@ bool NetworkCamera::fetch_rtp_frame_() {
             ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
                      this->sps_len_, this->pps_len_, fu_type);
             param_sets_sent_fua = true;
+          } else {
+            ESP_LOGW(TAG, "⚠ Buffer too small to add SPS+PPS (need %u bytes, buffer has %u free)",
+                     this->sps_len_ + this->pps_len_ + nal_len + 3,
+                     this->h264_buffer_size_ - this->h264_data_len_);
           }
         }
-
-        // Also prepend SPS/PPS to fragmented I-frames for recovery
-        if (fu_type == 5 && this->has_sps_ && this->has_pps_ && param_sets_sent_fua) {
-          if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
-            // Add SPS
-            memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
-            this->h264_data_len_ += this->sps_len_;
-            // Add PPS
-            memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
-            this->h264_data_len_ += this->pps_len_;
-            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame for recovery", this->sps_len_, this->pps_len_);
-          }
-        }
+        // Note: We removed the second SPS/PPS prepending block to avoid double prepending
+        // I-frames will get SPS/PPS from the first block when param_sets_sent_fua is false
 
         if (this->h264_data_len_ + nal_len + 3 < this->h264_buffer_size_) {
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
