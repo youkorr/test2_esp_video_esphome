@@ -397,8 +397,8 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
   // OPTIMIZATION: Larger receive buffer for better throughput (from webdavbox3 pattern)
-  // Match our JPEG chunk size for efficient streaming
-  config.buffer_size = 16384;  // 16KB - matches CHUNK_SIZE in fetch_jpeg_frame_()
+  // Increased to 64KB to handle MJPEG stream overhead and prevent truncation
+  config.buffer_size = 65536;  // 64KB - large enough for complete JPEG frames
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -430,11 +430,13 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   // NOTE: Socket-level optimizations (TCP_NODELAY, SO_RCVBUF) are not available
   // because esp_http_client doesn't expose the underlying socket descriptor.
   // The esp_http_client_config_t provides timeout_ms and buffer_size options,
-  // which are already configured above (timeout=5s, buffer=4KB).
+  // which are already configured above (timeout=5s, buffer=64KB).
   //
-  // OPTIMIZATION APPLIED: Larger chunk size (16KB) in fetch_jpeg_frame_()
-  // compensates for lack of direct socket tuning.
-  ESP_LOGI(TAG, "MJPEG stream connected (using %u byte JPEG buffer)", this->jpeg_buffer_size_);
+  // OPTIMIZATIONS APPLIED:
+  // - HTTP client buffer: 64KB (increased from 4KB)
+  // - Parse buffer: 64KB in fetch_jpeg_frame_()
+  // - Read chunks: 16KB
+  ESP_LOGI(TAG, "MJPEG stream connected (HTTP buffer: 64KB, JPEG buffer: %u bytes)", this->jpeg_buffer_size_);
 
   this->stream_connected_ = true;
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
@@ -456,17 +458,18 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  // OPTIMIZATION: Use larger chunk size for better throughput (from webdavbox3)
-  // Previous: 4KB chunks
-  // New: 16KB chunks for 640x480 (reduce read() syscall overhead)
-  static const size_t CHUNK_SIZE = 16 * 1024;  // 16KB chunks
+  // OPTIMIZATION: Use larger buffers for better throughput and prevent JPEG truncation
+  // CRITICAL: parse_buffer must be large enough to hold complete JPEG + MJPEG overhead
+  // Typical 640x480 JPEG: 10-30KB, but we need margin for HTTP headers and boundaries
+  static const size_t CHUNK_SIZE = 16 * 1024;     // 16KB chunks for reading
+  static const size_t PARSE_BUFFER_SIZE = 64 * 1024;  // 64KB parse buffer (was 16KB)
 
   // CRITICAL: Use static buffers to avoid stack overflow on loopTask
   // Stack-allocated buffers cause "Stack protection fault" crashes
-  static uint8_t temp_buffer[CHUNK_SIZE];     // 16KB chunk buffer
-  static uint8_t parse_buffer[CHUNK_SIZE];    // 16KB parse buffer
+  static uint8_t temp_buffer[CHUNK_SIZE];           // 16KB chunk buffer
+  static uint8_t parse_buffer[PARSE_BUFFER_SIZE];   // 64KB parse buffer (increased from 16KB)
   static size_t parse_buffer_len = 0;
-  static uint32_t total_bytes_read = 0;       // Track total for periodic yielding
+  static uint32_t total_bytes_read = 0;             // Track total for periodic yielding
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
@@ -487,8 +490,17 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   }
 
   // Append to parse buffer
-  if (parse_buffer_len + read_len > sizeof(parse_buffer)) {
-    parse_buffer_len = 0;
+  if (parse_buffer_len + read_len > PARSE_BUFFER_SIZE) {
+    // CRITICAL: Buffer overflow protection - keep last half of buffer
+    // This prevents losing JPEG data in progress
+    static uint32_t overflow_count = 0;
+    if (overflow_count++ < 5) {
+      ESP_LOGW(TAG, "Parse buffer overflow (%u + %d > %u), keeping last %u bytes",
+               parse_buffer_len, read_len, PARSE_BUFFER_SIZE, PARSE_BUFFER_SIZE / 2);
+    }
+    // Keep second half of buffer, discard first half
+    memmove(parse_buffer, parse_buffer + PARSE_BUFFER_SIZE / 2, PARSE_BUFFER_SIZE / 2);
+    parse_buffer_len = PARSE_BUFFER_SIZE / 2;
   }
   memcpy(parse_buffer + parse_buffer_len, temp_buffer, read_len);
   parse_buffer_len += read_len;
