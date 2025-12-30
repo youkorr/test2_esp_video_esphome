@@ -547,6 +547,23 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   // ffmpeg adds these for large JPEGs for error resilience, but ESP32-P4 can't handle them
   this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
+  // CRITICAL FIX: Truncate at first EOI marker (FF D9) to handle concatenated JPEGs
+  // go2rtc sometimes sends multiple JPEGs concatenated, but hardware decoder expects only ONE
+  for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
+    if (this->jpeg_buffer_[i] == 0xFF && this->jpeg_buffer_[i + 1] == 0xD9) {
+      size_t first_jpeg_end = i + 2;  // Include the EOI marker
+      if (first_jpeg_end < this->jpeg_data_len_) {
+        static uint32_t truncate_count = 0;
+        if (truncate_count++ < 3) {
+          ESP_LOGI(TAG, "Truncated concatenated JPEG: %u → %u bytes (removed %u bytes)",
+                   this->jpeg_data_len_, first_jpeg_end, this->jpeg_data_len_ - first_jpeg_end);
+        }
+        this->jpeg_data_len_ = first_jpeg_end;
+      }
+      break;  // Stop after first EOI
+    }
+  }
+
   // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;
   if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
