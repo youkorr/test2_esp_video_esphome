@@ -462,9 +462,13 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     read_pos++;
   }
 
+  // Log only first 3 times to avoid spam
   if (write_pos < len) {
-    ESP_LOGD(TAG, "Stripped COM markers: %u → %u bytes (saved %u bytes)",
-             len, write_pos, len - write_pos);
+    static uint32_t log_count = 0;
+    if (log_count++ < 3) {
+      ESP_LOGI(TAG, "Stripped COM markers: %u → %u bytes (saved %u bytes)",
+               len, write_pos, len - write_pos);
+    }
   }
 
   return write_pos;
@@ -547,7 +551,8 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     first_success = true;
   }
 
-  ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
+  // Removed: ESP_LOGD spam - uncomment if debugging needed
+  // ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
   return true;
 }
 
