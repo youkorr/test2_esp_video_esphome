@@ -17,8 +17,11 @@ namespace network_camera {
 
 static const char *const TAG = "network_camera";
 
-// Maximum buffer sizes
-static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG
+// Maximum buffer sizes - adaptive based on resolution
+// Small resolution (640x480): 128KB JPEG buffer
+// Medium resolution (1280x720): 256KB JPEG buffer
+// Large resolution (1920x1080): 512KB JPEG buffer
+static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG (max)
 static const size_t MAX_H264_SIZE = 256 * 1024;  // 256KB for H264 NAL units
 
 void NetworkCamera::setup() {
@@ -283,16 +286,48 @@ bool NetworkCamera::init_buffers_() {
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
 
   if (this->protocol_ == Protocol::MJPEG) {
-    // Allocate JPEG receive buffer - CRITICAL: 64-byte aligned for DMA2D
-    this->jpeg_buffer_size_ = MAX_JPEG_SIZE;
-    this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
-                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // OPTIMIZATION: Adaptive buffer sizing based on resolution (from webdavbox3 pattern)
+    // 640x480 (307K pixels): 128KB buffer
+    // 1280x720 (922K pixels): 256KB buffer
+    // 1920x1080+ (2M+ pixels): 512KB buffer
+    uint32_t pixel_count = this->width_ * this->height_;
+    if (pixel_count <= 640 * 480) {
+      this->jpeg_buffer_size_ = 128 * 1024;  // 128KB for small resolution
+    } else if (pixel_count <= 1280 * 720) {
+      this->jpeg_buffer_size_ = 256 * 1024;  // 256KB for medium resolution
+    } else {
+      this->jpeg_buffer_size_ = 512 * 1024;  // 512KB for large resolution
+    }
+
+    ESP_LOGI(TAG, "Adaptive JPEG buffer size for %ux%u: %u bytes",
+             this->width_, this->height_, this->jpeg_buffer_size_);
+
+    // OPTIMIZATION: PSRAM-first allocation strategy with fallback (from webdavbox3)
+    bool using_psram = false;
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    if (free_psram > this->jpeg_buffer_size_) {
+      this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
+                                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      using_psram = true;
+    }
+
+    // Fallback to internal RAM if PSRAM allocation failed
+    if (this->jpeg_buffer_ == nullptr) {
+      ESP_LOGW(TAG, "PSRAM allocation failed (free: %u bytes), trying internal RAM fallback", free_psram);
+      this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
+                                                               MALLOC_CAP_8BIT);
+      using_psram = false;
+    }
 
     if (this->jpeg_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes)", this->jpeg_buffer_size_);
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes) in both PSRAM and internal RAM",
+               this->jpeg_buffer_size_);
       return false;
     }
-    ESP_LOGI(TAG, "Allocated 64-byte aligned JPEG buffer in SPIRAM: %u bytes", this->jpeg_buffer_size_);
+
+    ESP_LOGI(TAG, "Allocated 64-byte aligned JPEG buffer in %s: %u bytes (free PSRAM: %u bytes)",
+             using_psram ? "PSRAM" : "internal RAM", this->jpeg_buffer_size_, free_psram);
   } else {
     // Allocate H264 and YUV buffers
     this->h264_buffer_size_ = MAX_H264_SIZE;
@@ -390,6 +425,36 @@ bool NetworkCamera::connect_mjpeg_stream_() {
     return false;
   }
 
+  // OPTIMIZATION: Socket optimization for better throughput (from webdavbox3)
+  int sockfd = esp_http_client_get_socket(this->http_client_);
+  if (sockfd >= 0) {
+    // Set receive buffer size based on JPEG buffer size
+    // 640x480: 128KB buffer
+    int recv_buf = this->jpeg_buffer_size_;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &recv_buf, sizeof(recv_buf)) == 0) {
+      ESP_LOGI(TAG, "Socket receive buffer set to %d bytes", recv_buf);
+    } else {
+      ESP_LOGW(TAG, "Failed to set socket receive buffer size");
+    }
+
+    // Enable TCP_NODELAY to reduce latency
+    int opt = 1;
+    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) == 0) {
+      ESP_LOGI(TAG, "TCP_NODELAY enabled for low-latency streaming");
+    } else {
+      ESP_LOGW(TAG, "Failed to enable TCP_NODELAY");
+    }
+
+    // Set socket timeouts (5 minutes for long-running streams)
+    struct timeval tv;
+    tv.tv_sec = 300;  // 5 minutes
+    tv.tv_usec = 0;
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  } else {
+    ESP_LOGW(TAG, "Could not get socket descriptor for optimization");
+  }
+
   this->stream_connected_ = true;
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
 
@@ -410,11 +475,17 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
+  // OPTIMIZATION: Use larger chunk size for better throughput (from webdavbox3)
+  // Previous: 4KB chunks
+  // New: 16KB chunks for 640x480 (reduce read() syscall overhead)
+  static const size_t CHUNK_SIZE = 16 * 1024;  // 16KB chunks
+
   // CRITICAL: Use static buffers to avoid stack overflow on loopTask
   // Stack-allocated buffers cause "Stack protection fault" crashes
-  static uint8_t temp_buffer[4096];     // Static to avoid stack allocation
-  static uint8_t parse_buffer[12288];   // 12KB parse buffer (reduced from 16KB)
+  static uint8_t temp_buffer[CHUNK_SIZE];     // 16KB chunk buffer
+  static uint8_t parse_buffer[CHUNK_SIZE];    // 16KB parse buffer
   static size_t parse_buffer_len = 0;
+  static uint32_t total_bytes_read = 0;       // Track total for periodic yielding
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
@@ -424,6 +495,14 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   }
   if (read_len == 0) {
     return false;
+  }
+
+  // OPTIMIZATION: Periodic CPU yielding during large transfers (from webdavbox3)
+  // Yield every 64KB to prevent watchdog timeout and allow other tasks to run
+  total_bytes_read += read_len;
+  if (total_bytes_read >= 64 * 1024) {
+    taskYIELD();
+    total_bytes_read = 0;
   }
 
   // Append to parse buffer
