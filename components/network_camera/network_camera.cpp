@@ -581,7 +581,7 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // SOF0/SOF2 - KEEP but extract resolution
+      // SOF0/SOF2 - KEEP but extract resolution and validate sampling factors
       if (marker == 0xC0 || marker == 0xC2) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
@@ -596,8 +596,44 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
 
         if (debug_markers) {
           const char *sof_name = (marker == 0xC0) ? "SOF0 (Baseline)" : "SOF2 (Progressive)";
-          ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %ux%u - %u bytes",
-                   sof_name, marker, sof_width, sof_height, total_len);
+
+          // CRITICAL: Log sampling factors to diagnose decoder rejection
+          // SOF format: FF C0/C2 [length] [precision] [height] [width] [num_components] [component_data...]
+          uint8_t num_components = (read_pos + 9 < len) ? data[read_pos + 9] : 0;
+
+          ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %ux%u - %u components - %u bytes",
+                   sof_name, marker, sof_width, sof_height, num_components, total_len);
+
+          // Log sampling factors for each component
+          size_t component_offset = 10;
+          for (uint8_t i = 0; i < num_components && read_pos + component_offset + 2 < len; i++) {
+            uint8_t component_id = data[read_pos + component_offset];
+            uint8_t sampling = data[read_pos + component_offset + 1];
+            uint8_t h_factor = (sampling >> 4) & 0x0F;
+            uint8_t v_factor = sampling & 0x0F;
+            uint8_t quant_table = data[read_pos + component_offset + 2];
+
+            ESP_LOGI(TAG, "    Component %u: H=%u V=%u (sampling %ux%u) QT=%u",
+                     component_id, h_factor, v_factor, h_factor, v_factor, quant_table);
+            component_offset += 3;
+          }
+
+          // Determine chroma subsampling format
+          if (num_components == 3 && read_pos + 11 + 1 < len) {
+            uint8_t y_sampling = data[read_pos + 11];
+            uint8_t y_h = (y_sampling >> 4) & 0x0F;
+            uint8_t y_v = y_sampling & 0x0F;
+
+            if (y_h == 2 && y_v == 2) {
+              ESP_LOGI(TAG, "    📊 Chroma subsampling: 4:2:0 (YUV420) ✅ Standard");
+            } else if (y_h == 2 && y_v == 1) {
+              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:2:2 (YUV422) ⚠️ May not be supported");
+            } else if (y_h == 1 && y_v == 1) {
+              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:4:4 (YUV444) ⚠️ May not be supported");
+            } else {
+              ESP_LOGW(TAG, "    📊 Non-standard chroma subsampling: %ux%u ⚠️", y_h, y_v);
+            }
+          }
         }
 
         memcpy(data + write_pos, data + read_pos, total_len);
