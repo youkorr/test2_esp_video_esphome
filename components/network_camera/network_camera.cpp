@@ -396,7 +396,9 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   esp_http_client_config_t config = {};
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
-  config.buffer_size = 4096;  // Conservative size to avoid memory issues
+  // OPTIMIZATION: Larger receive buffer for better throughput (from webdavbox3 pattern)
+  // Match our JPEG chunk size for efficient streaming
+  config.buffer_size = 16384;  // 16KB - matches CHUNK_SIZE in fetch_jpeg_frame_()
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -425,35 +427,14 @@ bool NetworkCamera::connect_mjpeg_stream_() {
     return false;
   }
 
-  // OPTIMIZATION: Socket optimization for better throughput (from webdavbox3)
-  int sockfd = esp_http_client_get_socket(this->http_client_);
-  if (sockfd >= 0) {
-    // Set receive buffer size based on JPEG buffer size
-    // 640x480: 128KB buffer
-    int recv_buf = this->jpeg_buffer_size_;
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &recv_buf, sizeof(recv_buf)) == 0) {
-      ESP_LOGI(TAG, "Socket receive buffer set to %d bytes", recv_buf);
-    } else {
-      ESP_LOGW(TAG, "Failed to set socket receive buffer size");
-    }
-
-    // Enable TCP_NODELAY to reduce latency
-    int opt = 1;
-    if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt)) == 0) {
-      ESP_LOGI(TAG, "TCP_NODELAY enabled for low-latency streaming");
-    } else {
-      ESP_LOGW(TAG, "Failed to enable TCP_NODELAY");
-    }
-
-    // Set socket timeouts (5 minutes for long-running streams)
-    struct timeval tv;
-    tv.tv_sec = 300;  // 5 minutes
-    tv.tv_usec = 0;
-    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-  } else {
-    ESP_LOGW(TAG, "Could not get socket descriptor for optimization");
-  }
+  // NOTE: Socket-level optimizations (TCP_NODELAY, SO_RCVBUF) are not available
+  // because esp_http_client doesn't expose the underlying socket descriptor.
+  // The esp_http_client_config_t provides timeout_ms and buffer_size options,
+  // which are already configured above (timeout=5s, buffer=4KB).
+  //
+  // OPTIMIZATION APPLIED: Larger chunk size (16KB) in fetch_jpeg_frame_()
+  // compensates for lack of direct socket tuning.
+  ESP_LOGI(TAG, "MJPEG stream connected (using %u byte JPEG buffer)", this->jpeg_buffer_size_);
 
   this->stream_connected_ = true;
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
