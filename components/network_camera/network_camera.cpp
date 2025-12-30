@@ -518,8 +518,34 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     if (data[read_pos] == 0xFF) {
       uint8_t marker = data[read_pos + 1];
 
+      // Check for byte stuffing (FF 00) - always handle this first
+      if (marker == 0x00) {
+        if (in_scan_data) {
+          data[write_pos++] = 0xFF;
+          data[write_pos++] = 0x00;
+        }
+        read_pos += 2;
+        continue;
+      }
+
+      // EOI marker - end of scan data and JPEG
+      if (marker == 0xD9) {
+        in_scan_data = false;  // Exit scan data mode
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] EOI (FF D9)");
+        data[write_pos++] = 0xFF;
+        data[write_pos++] = 0xD9;
+        break;  // End of JPEG
+      }
+
+      // CRITICAL: When in scan data, ONLY handle EOI and byte stuffing
+      // All other bytes (including FF D8) are compressed image data, not markers
+      if (in_scan_data) {
+        data[write_pos++] = data[read_pos++];
+        continue;
+      }
+
       // CRITICAL: Detect second SOI - means concatenated JPEGs from FFmpeg
-      // Stop parsing at second JPEG and truncate
+      // Only check this OUTSIDE scan data (before SOS or after EOI)
       if (marker == 0xD8 && read_pos > 2) {
         if (debug_markers) {
           ESP_LOGW(TAG, "  ⚠️ CONCATENATED JPEG detected at offset %u - truncating here", read_pos);
@@ -530,16 +556,6 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         data[write_pos++] = 0xD9;
         if (debug_markers) ESP_LOGI(TAG, "  [ADDED] EOI (FF D9) to close first JPEG");
         break;  // Stop processing - only use first JPEG
-      }
-
-      // Check for byte stuffing (FF 00)
-      if (marker == 0x00) {
-        if (in_scan_data) {
-          data[write_pos++] = 0xFF;
-          data[write_pos++] = 0x00;
-        }
-        read_pos += 2;
-        continue;
       }
 
       // SOS marker - start of scan data
@@ -556,14 +572,6 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         write_pos += total_len;
         read_pos += total_len;
         continue;
-      }
-
-      // EOI marker
-      if (marker == 0xD9) {
-        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] EOI (FF D9)");
-        data[write_pos++] = 0xFF;
-        data[write_pos++] = 0xD9;
-        break;  // End of JPEG
       }
 
       // RST markers - REMOVE
