@@ -122,6 +122,8 @@ class NetworkCamera : public Component {
   size_t pps_len_{0};
   bool has_sps_{false};
   bool has_pps_{false};
+  bool param_sets_sent_{false};      // Track if SPS/PPS sent for normal NAL units
+  bool param_sets_sent_fua_{false};  // Track if SPS/PPS sent for fragmented units
 
   // YUV buffer for H264 output
   uint8_t *yuv_buffer_{nullptr};
