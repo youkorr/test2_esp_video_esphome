@@ -547,6 +547,23 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   // ffmpeg adds these for large JPEGs for error resilience, but ESP32-P4 can't handle them
   this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
+  // CRITICAL FIX: Truncate at first EOI marker (FF D9) to handle concatenated JPEGs
+  // go2rtc sometimes sends multiple JPEGs concatenated, but hardware decoder expects only ONE
+  for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
+    if (this->jpeg_buffer_[i] == 0xFF && this->jpeg_buffer_[i + 1] == 0xD9) {
+      size_t first_jpeg_end = i + 2;  // Include the EOI marker
+      if (first_jpeg_end < this->jpeg_data_len_) {
+        static uint32_t truncate_count = 0;
+        if (truncate_count++ < 3) {
+          ESP_LOGI(TAG, "Truncated concatenated JPEG: %u → %u bytes (removed %u bytes)",
+                   this->jpeg_data_len_, first_jpeg_end, this->jpeg_data_len_ - first_jpeg_end);
+        }
+        this->jpeg_data_len_ = first_jpeg_end;
+      }
+      break;  // Stop after first EOI
+    }
+  }
+
   // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;
   if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
@@ -554,14 +571,36 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
     ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (valid FFD8)", this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
 
-    // Look for SOF (Start of Frame) markers to identify JPEG type
-    for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
-      if (this->jpeg_buffer_[i] == 0xFF) {
+    // Scan ALL markers in the JPEG to identify unsupported ones
+    ESP_LOGI(TAG, "  Scanning JPEG markers:");
+    for (size_t i = 0; i < this->jpeg_data_len_ - 1 && i < 5000; i++) {
+      if (this->jpeg_buffer_[i] == 0xFF && this->jpeg_buffer_[i + 1] != 0x00) {
         uint8_t marker = this->jpeg_buffer_[i + 1];
-        if (marker == 0xC0) ESP_LOGI(TAG, "  Format: Baseline DCT (SOF0) - fully supported ✓");
-        if (marker == 0xC1) ESP_LOGW(TAG, "  Format: Extended Sequential (SOF1)");
-        if (marker == 0xC2) ESP_LOGW(TAG, "  Format: Progressive DCT (SOF2) - NOT SUPPORTED BY HARDWARE!");
-        if (marker == 0xC3) ESP_LOGW(TAG, "  Format: Lossless (SOF3)");
+        const char *marker_name = "Unknown";
+
+        // Identify marker types
+        if (marker == 0xC0) marker_name = "SOF0 (Baseline DCT) ✓";
+        else if (marker == 0xC1) marker_name = "SOF1 (Extended Sequential)";
+        else if (marker == 0xC2) marker_name = "SOF2 (Progressive DCT) ⚠ UNSUPPORTED";
+        else if (marker == 0xC4) marker_name = "DHT (Define Huffman Table)";
+        else if (marker >= 0xD0 && marker <= 0xD7) marker_name = "RST (Restart Marker) ⚠ UNSUPPORTED";
+        else if (marker == 0xD8) marker_name = "SOI (Start of Image)";
+        else if (marker == 0xD9) marker_name = "EOI (End of Image)";
+        else if (marker == 0xDA) marker_name = "SOS (Start of Scan)";
+        else if (marker == 0xDB) marker_name = "DQT (Define Quantization Table)";
+        else if (marker == 0xDC) marker_name = "DNL (Define Number of Lines) ⚠ UNSUPPORTED";
+        else if (marker == 0xDD) marker_name = "DRI (Define Restart Interval)";
+        else if (marker >= 0xE0 && marker <= 0xEF) marker_name = "APP (Application Marker)";
+        else if (marker == 0xFE) marker_name = "COM (Comment)";
+
+        ESP_LOGI(TAG, "    Offset %u: FF %02X - %s", i, marker, marker_name);
+
+        // Stop after first 20 markers to avoid spam
+        static int marker_count = 0;
+        if (++marker_count >= 20) {
+          ESP_LOGI(TAG, "    ... (truncated, showing first 20 markers only)");
+          break;
+        }
       }
     }
     logged_jpeg_info = true;
