@@ -731,6 +731,17 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   if (debug_this_frame) {
     ESP_LOGI(TAG, "=== JPEG Processing Debug ===");
     ESP_LOGI(TAG, "Original size: %u bytes", original_len);
+
+    // CRITICAL: Hex dump first 64 bytes to see exact marker structure
+    ESP_LOGI(TAG, "First 64 bytes (hex):");
+    for (size_t i = 0; i < 64 && i < this->jpeg_data_len_; i += 16) {
+      char hex_line[64];
+      int pos = 0;
+      for (size_t j = 0; j < 16 && (i + j) < this->jpeg_data_len_; j++) {
+        pos += snprintf(hex_line + pos, sizeof(hex_line) - pos, "%02X ", this->jpeg_buffer_[i + j]);
+      }
+      ESP_LOGI(TAG, "  %04X: %s", i, hex_line);
+    }
   }
 
   // CRITICAL FIX: Truncate at first EOI (FF D9) BEFORE stripping markers
