@@ -247,7 +247,7 @@ bool NetworkCamera::init_buffers_() {
 bool NetworkCamera::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t decode_eng_cfg = {
       .intr_priority = 0,
-      .timeout_ms = 100,  // 100ms timeout - same as simple_video_player (was 40ms - too short for network streams!)
+      .timeout_ms = 200,  // 200ms timeout - increased for network streams with variable latency
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&decode_eng_cfg, &this->jpeg_decoder_);
@@ -256,7 +256,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=100ms, optimized for network streams)");
+  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=200ms, optimized for network streams)");
   return true;
 }
 
@@ -293,7 +293,7 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   esp_http_client_config_t config = {};
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
-  config.buffer_size = 4096;
+  config.buffer_size = 8192;  // Increased from 4096 to reduce HTTP round-trips
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -342,8 +342,8 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  uint8_t temp_buffer[4096];
-  static uint8_t parse_buffer[8192];
+  uint8_t temp_buffer[8192];  // Increased from 4096 for better throughput
+  static uint8_t parse_buffer[16384];  // Increased from 8192 to handle larger frames
   static size_t parse_buffer_len = 0;
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
@@ -419,66 +419,113 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   return false;
 }
 
-// Strip COM (comment) markers from JPEG that cause ESP32-P4 hardware decoder to fail
-// COM marker format: FF FE [2-byte length] [data]
+// Strip ALL unsupported markers from JPEG for ESP32-P4 hardware decoder
+// ESP32-P4 JPEG hardware decoder only supports these markers:
+// - SOI (FF D8), DQT (FF DB), DHT (FF C4), SOF0 (FF C0), SOS (FF DA), EOI (FF D9)
+// - Scan data (between SOS and EOI)
+// ALL other markers must be removed: APP0-15, COM, DRI, RST, etc.
 size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
   size_t write_pos = 0;
   size_t read_pos = 0;
 
+  // Keep SOI
+  if (data[0] == 0xFF && data[1] == 0xD8) {
+    data[write_pos++] = 0xFF;
+    data[write_pos++] = 0xD8;
+    read_pos = 2;
+  }
+
+  bool in_scan_data = false;  // Track if we're in compressed scan data
+
   while (read_pos < len - 1) {
-    if (data[read_pos] == 0xFF && data[read_pos + 1] == 0xFE) {
-      if (read_pos + 3 >= len) break;
-      uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
-      read_pos += 2 + marker_len;
-    } else {
-      if (write_pos != read_pos) {
-        data[write_pos] = data[read_pos];
+    if (data[read_pos] == 0xFF) {
+      uint8_t marker = data[read_pos + 1];
+
+      // Check for byte stuffing (FF 00) - keep it if in scan data
+      if (marker == 0x00) {
+        if (in_scan_data) {
+          data[write_pos++] = 0xFF;
+          data[write_pos++] = 0x00;
+        }
+        read_pos += 2;
+        continue;
       }
-      write_pos++;
-      read_pos++;
+
+      // SOS marker - start of scan data (keep it and everything after until next marker)
+      if (marker == 0xDA) {
+        in_scan_data = true;
+        // Copy SOS marker and its length
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t total_len = 2 + marker_len;
+        if (read_pos + total_len > len) break;
+
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
+        continue;
+      }
+
+      // EOI marker - end of image (keep it)
+      if (marker == 0xD9) {
+        data[write_pos++] = 0xFF;
+        data[write_pos++] = 0xD9;
+        break;  // Done!
+      }
+
+      // RST markers (FF D0-D7) - REMOVE (not supported by hardware)
+      if (marker >= 0xD0 && marker <= 0xD7) {
+        read_pos += 2;
+        continue;
+      }
+
+      // Essential markers to KEEP: DQT, DHT, SOF0, SOF2
+      if (marker == 0xDB || marker == 0xC4 || marker == 0xC0 || marker == 0xC2) {
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t total_len = 2 + marker_len;
+        if (read_pos + total_len > len) break;
+
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
+        continue;
+      }
+
+      // ALL other markers: APP0-15 (E0-EF), COM (FE), DRI (DD), DNL (DC), etc. - REMOVE
+      if ((marker >= 0xE0 && marker <= 0xEF) ||  // APP markers
+          marker == 0xFE ||                        // COM
+          marker == 0xDD ||                        // DRI
+          marker == 0xDC ||                        // DNL
+          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC2 && marker != 0xC4)) {  // Other SOF
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        read_pos += 2 + marker_len;  // Skip entire marker
+        continue;
+      }
+
+      // Unknown marker - skip it
+      read_pos += 2;
+    } else {
+      // Regular data (scan data or other)
+      data[write_pos++] = data[read_pos++];
     }
   }
 
+  // Copy remaining bytes
   while (read_pos < len) {
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
-    }
-    write_pos++;
-    read_pos++;
+    data[write_pos++] = data[read_pos++];
   }
 
   return write_pos;
 }
 
 size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
-  if (len < 4) return len;
-
-  size_t write_pos = 0;
-  size_t read_pos = 0;
-
-  while (read_pos < len - 1) {
-    if (data[read_pos] == 0xFF &&
-        (data[read_pos + 1] >= 0xD0 && data[read_pos + 1] <= 0xD7)) {
-      read_pos += 2;  // Skip RST marker
-      continue;
-    }
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
-    }
-    write_pos++;
-    read_pos++;
-  }
-
-  if (read_pos < len) {
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
-    }
-    write_pos++;
-  }
-
-  return write_pos;
+  // This function is now integrated into strip_jpeg_com_markers_
+  // Keep for compatibility but it does nothing
+  return len;
 }
 
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
@@ -486,8 +533,7 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  // CRITICAL: Validate JPEG markers BEFORE decoding (like simple_video_player)
-  // This prevents crashes from corrupted/incomplete JPEG data
+  // CRITICAL: Validate JPEG markers BEFORE decoding
   if (this->jpeg_data_len_ < 4 ||
       this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8) {
     static uint32_t validation_errors = 0;
@@ -503,39 +549,21 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   // DEBUG: Track sizes through processing pipeline
   static uint32_t debug_count = 0;
   size_t original_len = this->jpeg_data_len_;
-  bool debug_this_frame = (debug_count++ < 3);  // Debug first 3 frames only
+  bool debug_this_frame = (debug_count++ < 5);  // Debug first 5 frames
 
   if (debug_this_frame) {
     ESP_LOGI(TAG, "=== JPEG Processing Debug ===");
     ESP_LOGI(TAG, "Original size: %u bytes", original_len);
-    ESP_LOGI(TAG, "Last 4 bytes (original): %02X %02X %02X %02X",
-             this->jpeg_buffer_[original_len - 4],
-             this->jpeg_buffer_[original_len - 3],
-             this->jpeg_buffer_[original_len - 2],
-             this->jpeg_buffer_[original_len - 1]);
   }
 
-  // Strip COM markers
-  this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
-  if (debug_this_frame) {
-    ESP_LOGI(TAG, "After COM stripping: %u bytes", this->jpeg_data_len_);
-  }
-
-  // Strip Restart Markers
-  this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
-  if (debug_this_frame) {
-    ESP_LOGI(TAG, "After RST stripping: %u bytes", this->jpeg_data_len_);
-  }
-
-  // CRITICAL FIX: Truncate at first EOI (FF D9) - go2rtc concatenates multiple JPEGs
+  // CRITICAL FIX: Truncate at first EOI (FF D9) BEFORE stripping markers
+  // go2rtc concatenates multiple JPEGs - we need only the first one
   bool eoi_found = false;
-  size_t eoi_position = 0;
   for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
     if (this->jpeg_buffer_[i] == 0xFF) {
       uint8_t next = this->jpeg_buffer_[i + 1];
       if (next == 0xD9) {  // EOI marker found
         eoi_found = true;
-        eoi_position = i;
         this->jpeg_data_len_ = i + 2;  // Truncate here
         break;
       } else if (next == 0x00) {
@@ -545,18 +573,34 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   }
 
   if (debug_this_frame) {
-    if (eoi_found) {
-      ESP_LOGI(TAG, "EOI found at offset: %u", eoi_position);
-      ESP_LOGI(TAG, "After EOI truncation: %u bytes", this->jpeg_data_len_);
-    } else {
+    if (!eoi_found) {
       ESP_LOGW(TAG, "⚠️ NO EOI MARKER FOUND!");
     }
-    ESP_LOGI(TAG, "Last 4 bytes (final): %02X %02X %02X %02X",
-             this->jpeg_buffer_[this->jpeg_data_len_ - 4],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 3],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 2],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 1]);
+    ESP_LOGI(TAG, "After EOI truncation: %u bytes", this->jpeg_data_len_);
+  }
+
+  // Strip ALL unsupported markers (APP, COM, DRI, RST, etc.)
+  // This is the CRITICAL FIX for ESP32-P4 hardware decoder
+  size_t cleaned_len = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+
+  if (debug_this_frame) {
+    ESP_LOGI(TAG, "After marker cleanup: %u bytes (removed %d bytes)",
+             cleaned_len, (int)(this->jpeg_data_len_ - cleaned_len));
+    ESP_LOGI(TAG, "Final: SOI=%02X%02X EOI=%02X%02X",
+             this->jpeg_buffer_[0], this->jpeg_buffer_[1],
+             this->jpeg_buffer_[cleaned_len - 2], this->jpeg_buffer_[cleaned_len - 1]);
     ESP_LOGI(TAG, "=============================");
+  }
+
+  this->jpeg_data_len_ = cleaned_len;
+
+  // Validate we still have a valid JPEG after cleanup
+  if (this->jpeg_data_len_ < 4 ||
+      this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8 ||
+      this->jpeg_buffer_[this->jpeg_data_len_ - 2] != 0xFF ||
+      this->jpeg_buffer_[this->jpeg_data_len_ - 1] != 0xD9) {
+    ESP_LOGW(TAG, "JPEG corrupted after cleanup");
+    return false;
   }
 
   jpeg_decode_cfg_t decode_cfg = {
@@ -571,20 +615,32 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    // Silently fail - most frames will work
+    // Log decode errors for first 10 frames, then only every 100th error
+    static uint32_t decode_errors = 0;
+    decode_errors++;
+    if (decode_errors <= 10 || decode_errors % 100 == 0) {
+      ESP_LOGE(TAG, "❌ JPEG decode failed (error #%u): %s",
+               decode_errors, esp_err_to_name(ret));
+      ESP_LOGE(TAG, "   JPEG size: %u bytes, RGB buffer: %u bytes",
+               this->jpeg_data_len_, this->rgb565_buffer_size_);
+
+      // Provide helpful diagnostic info
+      if (decode_errors <= 3) {
+        ESP_LOGE(TAG, "   💡 If errors persist, the JPEG may contain unsupported features");
+        ESP_LOGE(TAG, "   💡 Try adjusting camera JPEG quality or resolution");
+      }
+    }
     return false;
   }
 
   // Log first successful decode only
   static bool first_success = false;
   if (!first_success) {
-    ESP_LOGI(TAG, "✓ JPEG decoding: %ux%u @ %d FPS", this->width_, this->height_, 15);
-    ESP_LOGI(TAG, "✓ First frame: %u bytes → %u bytes RGB565", this->jpeg_data_len_, out_size);
+    ESP_LOGI(TAG, "✅ JPEG decoder working! %ux%u resolution", this->width_, this->height_);
+    ESP_LOGI(TAG, "✅ First frame: %u bytes JPEG → %u bytes RGB565", this->jpeg_data_len_, out_size);
     first_success = true;
   }
 
-  // Removed: ESP_LOGD spam - uncomment if debugging needed
-  // ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
   return true;
 }
 
