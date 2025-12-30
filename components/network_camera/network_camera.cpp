@@ -283,14 +283,16 @@ bool NetworkCamera::init_buffers_() {
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
 
   if (this->protocol_ == Protocol::MJPEG) {
-    // Allocate JPEG receive buffer
+    // Allocate JPEG receive buffer - CRITICAL: 64-byte aligned for DMA2D
     this->jpeg_buffer_size_ = MAX_JPEG_SIZE;
-    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(this->jpeg_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
+                                                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
     if (this->jpeg_buffer_ == nullptr) {
       ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes)", this->jpeg_buffer_size_);
       return false;
     }
+    ESP_LOGI(TAG, "Allocated 64-byte aligned JPEG buffer in SPIRAM: %u bytes", this->jpeg_buffer_size_);
   } else {
     // Allocate H264 and YUV buffers
     this->h264_buffer_size_ = MAX_H264_SIZE;
@@ -581,8 +583,8 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // SOF0/SOF2 - KEEP but extract resolution and validate sampling factors
-      if (marker == 0xC0 || marker == 0xC2) {
+      // SOF0 ONLY - ESP32-P4 hardware decoder only supports baseline JPEG, NOT progressive!
+      if (marker == 0xC0) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
@@ -658,12 +660,12 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // ALL other markers - REMOVE
+      // ALL other markers - REMOVE (including SOF2 progressive JPEG)
       if ((marker >= 0xE0 && marker <= 0xEF) ||  // APP
           marker == 0xFE ||                        // COM
           marker == 0xDD ||                        // DRI
           marker == 0xDC ||                        // DNL
-          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC2 && marker != 0xC4)) {
+          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC4)) {  // Remove SOF1-15 except SOF0 and DHT
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
 
