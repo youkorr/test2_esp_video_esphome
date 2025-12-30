@@ -474,6 +474,52 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   return write_pos;
 }
 
+// Strip Restart Markers (RST0-RST7) from JPEG - unsupported by ESP32-P4 hardware decoder
+// Restart markers are FF D0 to FF D7 (standalone, no length field)
+size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
+  if (len < 4) return len;
+
+  size_t write_pos = 0;
+  size_t read_pos = 0;
+  uint32_t rst_count = 0;
+
+  while (read_pos < len - 1) {
+    // Check for restart markers (FF D0 - FF D7)
+    if (data[read_pos] == 0xFF &&
+        (data[read_pos + 1] >= 0xD0 && data[read_pos + 1] <= 0xD7)) {
+      // Found RST marker - skip it (2 bytes)
+      rst_count++;
+      read_pos += 2;
+      continue;
+    }
+
+    // Copy byte
+    if (write_pos != read_pos) {
+      data[write_pos] = data[read_pos];
+    }
+    write_pos++;
+    read_pos++;
+  }
+
+  // Copy last byte if not consumed
+  if (read_pos < len) {
+    if (write_pos != read_pos) {
+      data[write_pos] = data[read_pos];
+    }
+    write_pos++;
+  }
+
+  if (rst_count > 0) {
+    static uint32_t log_count = 0;
+    if (log_count++ < 3) {
+      ESP_LOGI(TAG, "Stripped %u RST markers: %u → %u bytes (saved %u bytes)",
+               rst_count, len, write_pos, len - write_pos);
+    }
+  }
+
+  return write_pos;
+}
+
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
   if (this->jpeg_data_len_ == 0 || this->jpeg_decoder_ == nullptr) {
     return false;
@@ -496,6 +542,10 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   // CRITICAL FIX: Strip COM markers that cause ESP32-P4 decoder to fail
   // ffmpeg adds COM markers with metadata that the hardware decoder can't parse
   this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+
+  // CRITICAL FIX: Strip Restart Markers (RST0-RST7) that hardware decoder doesn't support
+  // ffmpeg adds these for large JPEGs for error resilience, but ESP32-P4 can't handle them
+  this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
   // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;

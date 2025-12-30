@@ -140,6 +140,7 @@ class NetworkCamera : public Component {
   void disconnect_mjpeg_stream_();
   bool fetch_jpeg_frame_();
   size_t strip_jpeg_com_markers_(uint8_t *data, size_t len);  // Strip COM markers from JPEG
+  size_t strip_jpeg_restart_markers_(uint8_t *data, size_t len);  // Strip RST markers (unsupported by hardware)
   bool decode_jpeg_to_rgb565_();
 
   // RTSP methods
