@@ -500,23 +500,63 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
+  // DEBUG: Track sizes through processing pipeline
+  static uint32_t debug_count = 0;
+  size_t original_len = this->jpeg_data_len_;
+  bool debug_this_frame = (debug_count++ < 3);  // Debug first 3 frames only
+
+  if (debug_this_frame) {
+    ESP_LOGI(TAG, "=== JPEG Processing Debug ===");
+    ESP_LOGI(TAG, "Original size: %u bytes", original_len);
+    ESP_LOGI(TAG, "Last 4 bytes (original): %02X %02X %02X %02X",
+             this->jpeg_buffer_[original_len - 4],
+             this->jpeg_buffer_[original_len - 3],
+             this->jpeg_buffer_[original_len - 2],
+             this->jpeg_buffer_[original_len - 1]);
+  }
+
   // Strip COM markers
   this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+  if (debug_this_frame) {
+    ESP_LOGI(TAG, "After COM stripping: %u bytes", this->jpeg_data_len_);
+  }
 
   // Strip Restart Markers
   this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+  if (debug_this_frame) {
+    ESP_LOGI(TAG, "After RST stripping: %u bytes", this->jpeg_data_len_);
+  }
 
   // CRITICAL FIX: Truncate at first EOI (FF D9) - go2rtc concatenates multiple JPEGs
+  bool eoi_found = false;
+  size_t eoi_position = 0;
   for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
     if (this->jpeg_buffer_[i] == 0xFF) {
       uint8_t next = this->jpeg_buffer_[i + 1];
       if (next == 0xD9) {  // EOI marker found
+        eoi_found = true;
+        eoi_position = i;
         this->jpeg_data_len_ = i + 2;  // Truncate here
         break;
       } else if (next == 0x00) {
         i++;  // Skip byte stuffing (FF 00)
       }
     }
+  }
+
+  if (debug_this_frame) {
+    if (eoi_found) {
+      ESP_LOGI(TAG, "EOI found at offset: %u", eoi_position);
+      ESP_LOGI(TAG, "After EOI truncation: %u bytes", this->jpeg_data_len_);
+    } else {
+      ESP_LOGW(TAG, "⚠️ NO EOI MARKER FOUND!");
+    }
+    ESP_LOGI(TAG, "Last 4 bytes (final): %02X %02X %02X %02X",
+             this->jpeg_buffer_[this->jpeg_data_len_ - 4],
+             this->jpeg_buffer_[this->jpeg_data_len_ - 3],
+             this->jpeg_buffer_[this->jpeg_data_len_ - 2],
+             this->jpeg_buffer_[this->jpeg_data_len_ - 1]);
+    ESP_LOGI(TAG, "=============================");
   }
 
   jpeg_decode_cfg_t decode_cfg = {
