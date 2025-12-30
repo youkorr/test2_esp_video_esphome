@@ -71,6 +71,11 @@ class NetworkCamera : public Component {
   uint32_t connection_retry_delay_{15000};  // 15 seconds initial delay
   uint8_t connection_attempts_{0};
 
+  // Network quality adaptation
+  uint32_t last_quality_check_{0};
+  uint32_t quality_check_interval_{5000};  // Check every 5 seconds
+  uint8_t current_quality_level_{1};  // 0=low, 1=medium, 2=high
+
   // JPEG decoder
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
@@ -134,6 +139,8 @@ class NetworkCamera : public Component {
   bool init_jpeg_decoder_();
   void update_canvas_();
   void swap_buffers_();
+  void check_network_quality_();  // Monitor network conditions
+  void adapt_to_network_();
 
   // MJPEG methods
   bool connect_mjpeg_stream_();

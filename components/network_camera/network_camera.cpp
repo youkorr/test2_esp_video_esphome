@@ -136,11 +136,77 @@ void NetworkCamera::loop() {
   }
 }
 
+void NetworkCamera::check_network_quality_() {
+  // Check network quality periodically
+  uint32_t now = millis();
+  if (now - this->last_quality_check_ < this->quality_check_interval_) {
+    return;
+  }
+  this->last_quality_check_ = now;
+
+  // Get WiFi RSSI as network quality indicator
+  auto wifi_component = wifi::global_wifi_component;
+  if (wifi_component == nullptr || !wifi_component->is_connected()) {
+    return;
+  }
+
+  int32_t rssi = wifi_component->wifi_rssi();
+  uint8_t old_level = this->current_quality_level_;
+
+  // Classify network quality based on RSSI
+  // Excellent (>= -50 dBm), Good (-50 to -70 dBm), Poor (< -70 dBm)
+  if (rssi >= -50) {
+    this->current_quality_level_ = 2;  // High quality
+  } else if (rssi >= -70) {
+    this->current_quality_level_ = 1;  // Medium quality
+  } else {
+    this->current_quality_level_ = 0;  // Low quality
+  }
+
+  // Log quality changes
+  if (old_level != this->current_quality_level_) {
+    const char *quality_names[] = {"LOW", "MEDIUM", "HIGH"};
+    ESP_LOGI(TAG, "Network quality changed: %s → %s (RSSI: %d dBm)",
+             quality_names[old_level], quality_names[this->current_quality_level_], rssi);
+    this->adapt_to_network_();
+  }
+}
+
+void NetworkCamera::adapt_to_network_() {
+  // Adapt update interval based on network quality
+  // This reduces CPU load and network bandwidth on poor connections
+  uint32_t old_interval = this->update_interval_;
+
+  switch (this->current_quality_level_) {
+    case 0:  // Low quality - reduce frame rate
+      this->update_interval_ = 200;  // ~5 FPS
+      ESP_LOGI(TAG, "Adapting to LOW network: 5 FPS");
+      break;
+    case 1:  // Medium quality - normal frame rate
+      this->update_interval_ = 100;  // ~10 FPS
+      ESP_LOGI(TAG, "Adapting to MEDIUM network: 10 FPS");
+      break;
+    case 2:  // High quality - maximum frame rate
+      this->update_interval_ = 66;   // ~15 FPS
+      ESP_LOGI(TAG, "Adapting to HIGH network: 15 FPS");
+      break;
+  }
+
+  // Update LVGL timer period if active
+  if (this->lvgl_timer_ != nullptr && old_interval != this->update_interval_) {
+    lv_timer_set_period(this->lvgl_timer_, this->update_interval_);
+    ESP_LOGI(TAG, "Timer period updated: %u ms → %u ms", old_interval, this->update_interval_);
+  }
+}
+
 void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
   NetworkCamera *cam = static_cast<NetworkCamera *>(timer->user_data);
   if (cam == nullptr || !cam->stream_connected_) {
     return;
   }
+
+  // Check and adapt to network quality
+  cam->check_network_quality_();
 
   bool frame_ready = false;
 
