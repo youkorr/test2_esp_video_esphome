@@ -248,7 +248,7 @@ bool NetworkCamera::init_buffers_() {
 bool NetworkCamera::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t decode_eng_cfg = {
       .intr_priority = 0,
-      .timeout_ms = 40,
+      .timeout_ms = 100,  // 100ms timeout - same as simple_video_player (was 40ms - too short for network streams!)
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&decode_eng_cfg, &this->jpeg_decoder_);
@@ -257,7 +257,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "JPEG hardware decoder initialized");
+  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=100ms, optimized for network streams)");
   return true;
 }
 
@@ -425,22 +425,35 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  // Log JPEG header info for debugging
+  // CRITICAL: Validate JPEG markers BEFORE decoding (like simple_video_player)
+  // This prevents crashes from corrupted/incomplete JPEG data
+  if (this->jpeg_data_len_ < 4 ||
+      this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8) {
+    static uint32_t validation_errors = 0;
+    if (validation_errors++ < 5) {
+      ESP_LOGW(TAG, "Invalid JPEG header: size=%u, markers=0x%02X%02X (expected FF D8)",
+               this->jpeg_data_len_,
+               this->jpeg_data_len_ > 0 ? this->jpeg_buffer_[0] : 0,
+               this->jpeg_data_len_ > 1 ? this->jpeg_buffer_[1] : 0);
+    }
+    return false;
+  }
+
+  // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;
   if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
-    ESP_LOGI(TAG, "JPEG Header Analysis:");
+    ESP_LOGI(TAG, "First JPEG frame analysis:");
     ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
-    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (should be FFD8)",
-             this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
+    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (valid FFD8)", this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
 
     // Look for SOF (Start of Frame) markers to identify JPEG type
     for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
       if (this->jpeg_buffer_[i] == 0xFF) {
         uint8_t marker = this->jpeg_buffer_[i + 1];
-        if (marker == 0xC0) ESP_LOGI(TAG, "  Found SOF0 (Baseline DCT) at offset %u", i);
-        if (marker == 0xC1) ESP_LOGW(TAG, "  Found SOF1 (Extended Sequential) at offset %u", i);
-        if (marker == 0xC2) ESP_LOGW(TAG, "  Found SOF2 (Progressive DCT) at offset %u - NOT SUPPORTED BY HARDWARE!", i);
-        if (marker == 0xC3) ESP_LOGW(TAG, "  Found SOF3 (Lossless) at offset %u", i);
+        if (marker == 0xC0) ESP_LOGI(TAG, "  Format: Baseline DCT (SOF0) - fully supported ✓");
+        if (marker == 0xC1) ESP_LOGW(TAG, "  Format: Extended Sequential (SOF1)");
+        if (marker == 0xC2) ESP_LOGW(TAG, "  Format: Progressive DCT (SOF2) - NOT SUPPORTED BY HARDWARE!");
+        if (marker == 0xC3) ESP_LOGW(TAG, "  Format: Lossless (SOF3)");
       }
     }
     logged_jpeg_info = true;
@@ -458,13 +471,29 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
-    ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
-             this->jpeg_data_len_, this->rgb565_buffer_size_);
+    static uint32_t decode_errors = 0;
+    if (decode_errors++ < 5) {
+      ESP_LOGE(TAG, "JPEG decode failed: %s (error #%u)", esp_err_to_name(ret), decode_errors);
+      ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
+               this->jpeg_data_len_, this->rgb565_buffer_size_);
+
+      // Dump first 16 bytes for debugging (like simple_video_player)
+      ESP_LOGE(TAG, "  JPEG header dump (first 16 bytes):");
+      if (this->jpeg_data_len_ >= 16) {
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, this->jpeg_buffer_, 16, ESP_LOG_ERROR);
+      }
+    }
     return false;
   }
 
-  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
+  // Log first successful decode
+  static bool first_success = false;
+  if (!first_success) {
+    ESP_LOGI(TAG, "✓ First JPEG decoded successfully: %u bytes output", out_size);
+    first_success = true;
+  }
+
+  ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
   return true;
 }
 
