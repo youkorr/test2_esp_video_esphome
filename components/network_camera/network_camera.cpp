@@ -71,10 +71,10 @@ void NetworkCamera::loop() {
     }
 
     // Additional check: Verify WiFi has valid IP address
-    if (!wifi_component->has_sta() || wifi_component->get_ip_address().is_set() == false) {
+    if (!wifi_component->has_sta()) {
       static uint32_t last_ip_log = 0;
       if ((now - last_ip_log) > 30000) {
-        ESP_LOGW(TAG, "⏳ WiFi connected but no IP address yet, waiting...");
+        ESP_LOGW(TAG, "⏳ WiFi connected but no STA interface yet, waiting...");
         last_ip_log = now;
       }
       this->last_connection_attempt_ = now;
@@ -88,9 +88,8 @@ void NetworkCamera::loop() {
       return;
     }
 
-    // WiFi is READY with valid IP - proceed with connection
-    ESP_LOGI(TAG, "✓ WiFi ready (IP: %s), starting camera...",
-             wifi_component->get_ip_address().str().c_str());
+    // WiFi is READY - proceed with connection
+    ESP_LOGI(TAG, "✓ WiFi ready, starting camera...");
     ESP_LOGI(TAG, "Starting Network Camera display...");
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
