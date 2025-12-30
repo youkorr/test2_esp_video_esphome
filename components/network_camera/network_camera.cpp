@@ -511,11 +511,26 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   }
 
   bool in_scan_data = false;
+  bool found_sos = false;
   uint16_t sof_width = 0, sof_height = 0;
 
   while (read_pos < len - 1) {
     if (data[read_pos] == 0xFF) {
       uint8_t marker = data[read_pos + 1];
+
+      // CRITICAL: Detect second SOI - means concatenated JPEGs from FFmpeg
+      // Stop parsing at second JPEG and truncate
+      if (marker == 0xD8 && read_pos > 2) {
+        if (debug_markers) {
+          ESP_LOGW(TAG, "  ⚠️ CONCATENATED JPEG detected at offset %u - truncating here", read_pos);
+          ESP_LOGW(TAG, "  FFmpeg is sending multiple JPEGs glued together!");
+        }
+        // Add EOI marker to close first JPEG properly
+        data[write_pos++] = 0xFF;
+        data[write_pos++] = 0xD9;
+        if (debug_markers) ESP_LOGI(TAG, "  [ADDED] EOI (FF D9) to close first JPEG");
+        break;  // Stop processing - only use first JPEG
+      }
 
       // Check for byte stuffing (FF 00)
       if (marker == 0x00) {
@@ -530,6 +545,7 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
       // SOS marker - start of scan data
       if (marker == 0xDA) {
         in_scan_data = true;
+        found_sos = true;
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
@@ -547,7 +563,7 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         if (debug_markers) ESP_LOGI(TAG, "  [KEEP] EOI (FF D9)");
         data[write_pos++] = 0xFF;
         data[write_pos++] = 0xD9;
-        break;
+        break;  // End of JPEG
       }
 
       // RST markers - REMOVE
@@ -626,11 +642,6 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
     } else {
       data[write_pos++] = data[read_pos++];
     }
-  }
-
-  // Copy remaining bytes
-  while (read_pos < len) {
-    data[write_pos++] = data[read_pos++];
   }
 
   // Log resolution mismatch warning
