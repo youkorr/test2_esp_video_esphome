@@ -1,12 +1,14 @@
 # Optimisations webdavbox3 appliquées pour réduire la latence JPEG
 
-**Commit:** `7f8646b`
+**Dernier commit:** `b83903a`
 **Branche:** `claude/fix-camera-latency-MdsV8`
 **Date:** 2025-12-30
 
 ## Résumé
 
-J'ai appliqué 5 optimisations majeures du composant `webdavbox3` au composant `network_camera` pour améliorer les performances du streaming MJPEG à 640x480 depuis votre caméra Tapo C500 via go2rtc.
+J'ai appliqué 4 optimisations majeures du composant `webdavbox3` au composant `network_camera` pour améliorer les performances du streaming MJPEG à 640x480 depuis votre caméra Tapo C500 via go2rtc.
+
+**Note:** L'optimisation socket directe (TCP_NODELAY, SO_RCVBUF) n'est pas possible car l'API `esp_http_client` n'expose pas le descripteur de socket. À la place, le buffer HTTP client a été augmenté de 4KB à 16KB.
 
 ---
 
@@ -70,45 +72,26 @@ if (jpeg_buffer_ == nullptr) {
 
 ---
 
-## 3. 🌐 Optimisation socket pour faible latence
+## 3. 🌐 Buffer HTTP client augmenté
 
-### Optimisations appliquées
+### Limitation de l'API
+L'API `esp_http_client` n'expose pas le descripteur de socket sous-jacent, donc les optimisations socket directes (TCP_NODELAY, SO_RCVBUF, SO_SNDTIMEO) ne sont **pas possibles**.
 
-#### a) **TCP_NODELAY activé**
+### Solution de contournement
+
+#### **Buffer HTTP client augmenté de 4KB à 16KB**
 ```cpp
-int opt = 1;
-setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &opt, sizeof(opt));
+esp_http_client_config_t config = {};
+config.buffer_size = 16384;  // 16KB - matches CHUNK_SIZE in fetch_jpeg_frame_()
 ```
-- Désactive l'algorithme de Nagle
-- Envoie immédiatement les paquets (pas de buffering)
-- **Réduit la latence réseau de 20-40ms**
-
-#### b) **Buffer de réception adaptatif**
-```cpp
-// Pour 640x480: 128KB de buffer
-int recv_buf = jpeg_buffer_size_;  // 128KB
-setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &recv_buf, sizeof(recv_buf));
-```
-- Buffer TCP optimisé pour la résolution
-- Moins de pertes de paquets
-- Meilleur débit
-
-#### c) **Timeouts socket allongés**
-```cpp
-struct timeval tv;
-tv.tv_sec = 300;  // 5 minutes
-setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-```
-- Évite les déconnexions intempestives
-- Adapté aux flux longue durée
 
 ### Bénéfices
-- ✅ **Réduction significative de la latence réseau**
-- ✅ Meilleur débit (moins de retransmissions TCP)
-- ✅ Connexion plus stable
-- ✅ Moins de coupures d'image
+- ✅ **4x plus de capacité de buffering** (4KB → 16KB)
+- ✅ Moins d'overhead de fragmentation HTTP
+- ✅ Synchronisé avec CHUNK_SIZE (16KB) pour efficacité maximale
+- ✅ Meilleur débit de réception
 
-**Fichier:** `network_camera.cpp:428-456`
+**Fichier:** `network_camera.cpp:399-401`
 
 ---
 
@@ -175,8 +158,8 @@ if (total_bytes_read >= 64 * 1024) {
 - ✅ Meilleur taux de frames décodées
 - ✅ Moins de reboots watchdog
 - ✅ **Seulement 128KB PSRAM utilisés** (75% économie)
-- ✅ TCP_NODELAY = moins de latence réseau
-- ✅ Chunks 16KB = meilleur débit
+- ✅ Buffer HTTP 16KB = meilleur débit
+- ✅ Chunks 16KB = moins d'appels système
 
 ---
 
@@ -192,8 +175,7 @@ Vous devriez voir:
 ```
 [network_camera] Adaptive JPEG buffer size for 640x480: 131072 bytes
 [network_camera] Allocated 64-byte aligned JPEG buffer in PSRAM: 131072 bytes (free PSRAM: XXXXX bytes)
-[network_camera] Socket receive buffer set to 131072 bytes
-[network_camera] TCP_NODELAY enabled for low-latency streaming
+[network_camera] MJPEG stream connected (using 131072 byte JPEG buffer)
 ```
 
 ### 3. Vérifier la performance
@@ -263,13 +245,20 @@ Si la latence reste trop élevée malgré ces optimisations:
 
 ## ✅ Validation
 
-Commit appliqué et poussé:
+Commits appliqués et poussés:
 ```bash
-git log --oneline -1
+git log --oneline -3
+b83903a Fix compilation: remove socket optimizations, increase HTTP client buffer to 16KB
+5870be3 Add documentation for webdavbox3 optimizations
 7f8646b Apply webdavbox3 optimizations to reduce JPEG latency for 640x480
 ```
 
 Branche: `claude/fix-camera-latency-MdsV8`
+
+### Historique des modifications
+- **7f8646b**: Implémentation initiale des optimisations webdavbox3
+- **5870be3**: Ajout de la documentation
+- **b83903a**: Fix de compilation - suppression optimisations socket, augmentation buffer HTTP
 
 ---
 
