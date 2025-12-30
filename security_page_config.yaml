@@ -1,0 +1,358 @@
+# ========================================================================
+# CONFIGURATION MULTI-CAMÉRAS DE SÉCURITÉ POUR ESP32-P4
+# ========================================================================
+# Ce fichier contient la configuration complète pour afficher 4 caméras
+# de sécurité en grille 2x2 avec vue plein écran
+# ========================================================================
+
+# ========== CAMERAS RESEAU ==========
+network_camera:
+  - id: security_cam_1
+    url: "rtsp://admin:password@192.168.1.56:554/stream1"  # ← Modifiez avec votre URL
+    protocol: rtsp  # ou mjpeg si vos caméras supportent MJPEG
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas  # Sera remplacé par multi_camera_display
+
+  - id: security_cam_2
+    url: "rtsp://admin:password@192.168.1.57:554/stream1"  # ← Modifiez avec votre URL
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+  - id: security_cam_3
+    url: "rtsp://admin:password@192.168.1.58:554/stream1"  # ← Modifiez avec votre URL
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+  - id: security_cam_4
+    url: "rtsp://admin:password@192.168.1.59:554/stream1"  # ← Modifiez avec votre URL
+    protocol: rtsp
+    width: 320
+    height: 240
+    update_interval: 100ms
+    canvas_id: security_canvas
+
+# ========== AFFICHAGE MULTI-CAMERAS ==========
+multi_camera_display:
+  id: security_display
+  canvas_id: security_canvas
+  cameras:
+    - camera_id: security_cam_1
+    - camera_id: security_cam_2
+    - camera_id: security_cam_3
+    - camera_id: security_cam_4
+
+# ========== SWITCHES POUR ACTIVER/DESACTIVER LES CAMERAS ==========
+switch:
+  - platform: network_camera
+    name: "Security Camera 1"
+    camera_id: security_cam_1
+
+  - platform: network_camera
+    name: "Security Camera 2"
+    camera_id: security_cam_2
+
+  - platform: network_camera
+    name: "Security Camera 3"
+    camera_id: security_cam_3
+
+  - platform: network_camera
+    name: "Security Camera 4"
+    camera_id: security_cam_4
+
+# ========== PAGE LVGL SECURITE ==========
+# Ajoutez cette page à votre section lvgl: -> pages:
+#
+# lvgl:
+#   pages:
+#     - id: security_page
+#       ... (configuration ci-dessous)
+
+# PAGE SECURITE (à ajouter dans votre section lvgl -> pages)
+- id: security_page
+  bg_color: 0x1a1a1a  # Fond gris foncé comme camera_page
+  on_load:
+    - lambda: |-
+        ESP_LOGI("security", "🔒 Security page loaded");
+        static bool canvas_configured = false;
+        if (!canvas_configured) {
+          auto canvas = id(security_canvas);
+          if (canvas != nullptr) {
+            id(security_display).configure_canvas(canvas);
+            canvas_configured = true;
+            ESP_LOGI("security", "✓ Security canvas configured");
+          }
+        }
+  widgets:
+
+    # ==============================================================
+    # CANVAS - Grille 2x2 pour 4 caméras (ou plein écran)
+    # ==============================================================
+    - canvas:
+        id: security_canvas
+        width: 640   # Ajustez selon votre écran
+        height: 480  # Grille 2x2: chaque caméra sera 320x240
+        x: 10
+        y: 10
+        bg_color: 0x000000
+
+    # ==============================================================
+    # TITRE DE LA PAGE
+    # ==============================================================
+    - label:
+        id: security_title
+        text: "🔒 SECURITY"
+        x: 660
+        y: 10
+        text_color: 0xFFFFFF
+        text_font: nunito_24  # Utilisez votre police
+        text_align: LEFT
+
+    # ==============================================================
+    # BOUTON RETOUR
+    # ==============================================================
+    - button:
+        id: security_back
+        width: 100
+        height: 40
+        x: 690
+        y: 60
+        bg_color: 0xe74c3c
+        bg_opa: COVER
+        radius: 20
+        shadow_width: 6
+        shadow_color: 0xe74c3c
+        shadow_opa: 80%
+        on_click:
+          then:
+            - lambda: |-
+                ESP_LOGI("security", "🔙 Stopping all cameras and returning home");
+                id(security_cam_1).set_enabled(false);
+                id(security_cam_2).set_enabled(false);
+                id(security_cam_3).set_enabled(false);
+                id(security_cam_4).set_enabled(false);
+            - lvgl.page.show: page_home
+        widgets:
+          - label:
+              text: "BACK"
+              text_color: 0xFFFFFF
+              text_font: nunito_24
+              text_align: CENTER
+              align: CENTER
+
+    # ==============================================================
+    # BOUTON START ALL
+    # ==============================================================
+    - button:
+        id: btn_start_all
+        width: 100
+        height: 40
+        x: 690
+        y: 120
+        bg_color: 0x27ae60  # Vert
+        bg_opa: COVER
+        radius: 20
+        shadow_width: 6
+        shadow_color: 0x27ae60
+        shadow_opa: 80%
+        on_click:
+          then:
+            - lambda: |-
+                ESP_LOGI("security", "▶ Starting all cameras");
+                id(security_cam_1).set_enabled(true);
+                id(security_cam_2).set_enabled(true);
+                id(security_cam_3).set_enabled(true);
+                id(security_cam_4).set_enabled(true);
+        widgets:
+          - label:
+              text: "START"
+              text_color: 0xFFFFFF
+              text_font: nunito_24
+              text_align: CENTER
+              align: CENTER
+
+    # ==============================================================
+    # BOUTON STOP ALL
+    # ==============================================================
+    - button:
+        id: btn_stop_all
+        width: 100
+        height: 40
+        x: 690
+        y: 180
+        bg_color: 0xe74c3c  # Rouge
+        bg_opa: COVER
+        radius: 20
+        shadow_width: 6
+        shadow_color: 0xe74c3c
+        shadow_opa: 80%
+        on_click:
+          then:
+            - lambda: |-
+                ESP_LOGI("security", "■ Stopping all cameras");
+                id(security_cam_1).set_enabled(false);
+                id(security_cam_2).set_enabled(false);
+                id(security_cam_3).set_enabled(false);
+                id(security_cam_4).set_enabled(false);
+        widgets:
+          - label:
+              text: "STOP"
+              text_color: 0xFFFFFF
+              text_font: nunito_24
+              text_align: CENTER
+              align: CENTER
+
+    # ==============================================================
+    # BOUTONS INDIVIDUELS (OPTIONNEL)
+    # ==============================================================
+    - button:
+        id: btn_cam1_toggle
+        width: 80
+        height: 30
+        x: 690
+        y: 240
+        bg_color: 0x3498db
+        bg_opa: COVER
+        radius: 15
+        on_click:
+          then:
+            - lambda: |-
+                bool current = id(security_cam_1).is_enabled();
+                id(security_cam_1).set_enabled(!current);
+                ESP_LOGI("security", "Camera 1: %s", !current ? "ON" : "OFF");
+        widgets:
+          - label:
+              text: "CAM 1"
+              text_color: 0xFFFFFF
+              text_font: nunito_20
+              text_align: CENTER
+              align: CENTER
+
+    - button:
+        id: btn_cam2_toggle
+        width: 80
+        height: 30
+        x: 690
+        y: 280
+        bg_color: 0x3498db
+        bg_opa: COVER
+        radius: 15
+        on_click:
+          then:
+            - lambda: |-
+                bool current = id(security_cam_2).is_enabled();
+                id(security_cam_2).set_enabled(!current);
+                ESP_LOGI("security", "Camera 2: %s", !current ? "ON" : "OFF");
+        widgets:
+          - label:
+              text: "CAM 2"
+              text_color: 0xFFFFFF
+              text_font: nunito_20
+              text_align: CENTER
+              align: CENTER
+
+    - button:
+        id: btn_cam3_toggle
+        width: 80
+        height: 30
+        x: 690
+        y: 320
+        bg_color: 0x3498db
+        bg_opa: COVER
+        radius: 15
+        on_click:
+          then:
+            - lambda: |-
+                bool current = id(security_cam_3).is_enabled();
+                id(security_cam_3).set_enabled(!current);
+                ESP_LOGI("security", "Camera 3: %s", !current ? "ON" : "OFF");
+        widgets:
+          - label:
+              text: "CAM 3"
+              text_color: 0xFFFFFF
+              text_font: nunito_20
+              text_align: CENTER
+              align: CENTER
+
+    - button:
+        id: btn_cam4_toggle
+        width: 80
+        height: 30
+        x: 690
+        y: 360
+        bg_color: 0x3498db
+        bg_opa: COVER
+        radius: 15
+        on_click:
+          then:
+            - lambda: |-
+                bool current = id(security_cam_4).is_enabled();
+                id(security_cam_4).set_enabled(!current);
+                ESP_LOGI("security", "Camera 4: %s", !current ? "ON" : "OFF");
+        widgets:
+          - label:
+              text: "CAM 4"
+              text_color: 0xFFFFFF
+              text_font: nunito_20
+              text_align: CENTER
+              align: CENTER
+
+# ========================================================================
+# INSTRUCTIONS D'INTÉGRATION
+# ========================================================================
+#
+# 1. Copiez la configuration des caméras (network_camera) dans votre YAML
+# 2. Copiez la configuration multi_camera_display dans votre YAML
+# 3. Ajoutez la page security_page dans votre section lvgl -> pages
+# 4. Ajoutez un bouton sur votre page_home pour accéder à security_page:
+#
+#    - button:
+#        id: btn_to_security
+#        width: 150
+#        height: 45
+#        x: 400  # Ajustez selon votre layout
+#        y: 400
+#        bg_color: 0xe74c3c
+#        bg_opa: COVER
+#        radius: 20
+#        on_click:
+#          then:
+#            - lambda: |-
+#                ESP_LOGI("security", "Opening security page");
+#                // Démarrer les caméras automatiquement
+#                id(security_cam_1).set_enabled(true);
+#                id(security_cam_2).set_enabled(true);
+#                id(security_cam_3).set_enabled(true);
+#                id(security_cam_4).set_enabled(true);
+#            - lvgl.page.show: security_page
+#        widgets:
+#          - label:
+#              text: "SECURITY"
+#              text_color: 0xFFFFFF
+#              text_font: nunito_24
+#              text_align: CENTER
+#              align: CENTER
+#
+# 5. Modifiez les URLs des caméras avec vos vraies adresses IP
+# 6. Ajustez les dimensions du canvas selon votre écran
+#
+# ========================================================================
+# NOTES IMPORTANTES
+# ========================================================================
+#
+# - Pour RTSP/H264: utilisez protocol: rtsp
+# - Pour MJPEG: utilisez protocol: mjpeg
+# - La grille 2x2 affichera 4 caméras simultanément
+# - Cliquez sur une caméra pour la voir en plein écran
+# - Cliquez sur "BACK" dans la vue plein écran pour retourner à la grille
+# - Les boutons individuels permettent d'activer/désactiver chaque caméra
+# - Les caméras sont automatiquement arrêtées en quittant la page
+#
+# ========================================================================

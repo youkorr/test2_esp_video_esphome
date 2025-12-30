@@ -1,0 +1,262 @@
+# ========================================================================
+# SOLUTION TEMPORAIRE : Délai de 15 secondes pour attendre le WiFi
+# ========================================================================
+# À utiliser EN ATTENDANT de recompiler avec le nouveau code C++
+# ========================================================================
+
+# IMPORTANT : Retournez à RTSP (pas MJPEG - Tapo ne le supporte pas)
+
+network_camera:
+  - id: security_cam_1
+    url: "rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream2"
+    protocol: rtsp  # ← PAS mjpeg ! Tapo ne supporte pas MJPEG
+    width: 320
+    height: 240
+    canvas_id: security_canvas
+    update_interval: 100ms
+
+# ========================================================================
+# VERSION 1 : Bouton START avec délai de 15 secondes
+# ========================================================================
+
+      - id: security_page
+        bg_color: 0x1a1a1a
+        on_load:
+          - lambda: |-
+              ESP_LOGI("security", "Security page loaded");
+        widgets:
+
+          - canvas:
+              id: security_canvas
+              width: 640
+              height: 480
+              x: 10
+              y: 10
+              bg_color: 0x000000
+
+          - label:
+              id: security_title
+              text: "SECURITY"
+              x: 660
+              y: 10
+              text_color: 0xFFFFFF
+              text_font: nunito_24
+              text_align: LEFT
+
+          # LABEL DE STATUT
+          - label:
+              id: start_status
+              text: ""
+              x: 660
+              y: 40
+              text_color: 0xFFFFFF
+              text_font: nunito_20
+              text_align: LEFT
+
+          # BOUTON START avec délai 15s
+          - button:
+              id: btn_start_all
+              width: 100
+              height: 40
+              x: 690
+              y: 120
+              bg_color: 0x27ae60
+              bg_opa: COVER
+              radius: 20
+              on_click:
+                then:
+                  # Indiquer qu'on attend
+                  - lambda: |-
+                      lv_label_set_text(id(start_status), "Waiting WiFi...");
+                      lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFFFF00), 0);
+
+                  # DÉLAI DE 15 SECONDES
+                  - delay: 15s
+
+                  # Vérifier que le WiFi est connecté
+                  - if:
+                      condition:
+                        wifi.connected:
+                      then:
+                        - lambda: |-
+                            ESP_LOGI("security", "✓ WiFi ready after delay");
+                            lv_label_set_text(id(start_status), "WiFi: OK");
+                            lv_obj_set_style_text_color(id(start_status), lv_color_hex(0x00FF00), 0);
+
+                            // Configurer le canvas
+                            static bool canvas_configured = false;
+                            if (!canvas_configured) {
+                              auto canvas = id(security_canvas);
+                              if (canvas != nullptr) {
+                                lv_coord_t w = lv_obj_get_width(canvas);
+                                lv_coord_t h = lv_obj_get_height(canvas);
+                                ESP_LOGI("security", "Canvas size: %dx%d", w, h);
+
+                                if (w > 0 && h > 0) {
+                                  id(security_display).configure_canvas(canvas);
+                                  canvas_configured = true;
+                                  ESP_LOGI("security", "✓ Canvas configured");
+                                  lv_label_set_text(id(start_status), "Starting...");
+                                }
+                              }
+                            }
+
+                            // Démarrer la caméra
+                            id(security_cam_1).set_enabled(true);
+                            id(cam1_state) = true;
+
+                            // Mettre à jour le statut
+                            lv_label_set_text(id(start_status), "Camera ON");
+                            lv_obj_set_style_text_color(id(start_status), lv_color_hex(0x00FF00), 0);
+                      else:
+                        - lambda: |-
+                            ESP_LOGE("security", "⚠ WiFi still not ready after 15s!");
+                            lv_label_set_text(id(start_status), "WiFi: FAIL");
+                            lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFF0000), 0);
+              widgets:
+                - label:
+                    text: "START"
+                    text_color: 0xFFFFFF
+                    text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER
+
+          # BOUTON BACK
+          - button:
+              id: security_back
+              width: 100
+              height: 40
+              x: 690
+              y: 60
+              bg_color: 0xe74c3c
+              bg_opa: COVER
+              radius: 20
+              on_click:
+                then:
+                  - lambda: |-
+                      id(security_cam_1).set_enabled(false);
+                      id(cam1_state) = false;
+                  - lvgl.page.show: page_home
+              widgets:
+                - label:
+                    text: "BACK"
+                    text_color: 0xFFFFFF
+                    text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER
+
+          # BOUTON STOP
+          - button:
+              id: btn_stop_all
+              width: 100
+              height: 40
+              x: 690
+              y: 180
+              bg_color: 0xe74c3c
+              bg_opa: COVER
+              radius: 20
+              on_click:
+                then:
+                  - lambda: |-
+                      id(security_cam_1).set_enabled(false);
+                      id(cam1_state) = false;
+                      lv_label_set_text(id(start_status), "Camera OFF");
+                      lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFF0000), 0);
+              widgets:
+                - label:
+                    text: "STOP"
+                    text_color: 0xFFFFFF
+                    text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER
+
+          # BOUTON TOGGLE CAM 1
+          - button:
+              id: btn_cam1_toggle
+              width: 80
+              height: 30
+              x: 690
+              y: 240
+              bg_color: 0x3498db
+              bg_opa: COVER
+              radius: 15
+              on_click:
+                then:
+                  - lambda: |-
+                      id(cam1_state) = !id(cam1_state);
+                      id(security_cam_1).set_enabled(id(cam1_state));
+                      ESP_LOGI("security", "Camera 1: %s", id(cam1_state) ? "ON" : "OFF");
+              widgets:
+                - label:
+                    text: "CAM 1"
+                    text_color: 0xFFFFFF
+                    text_font: nunito_20
+                    text_align: CENTER
+                    align: CENTER
+
+# ========================================================================
+# VERSION 2 : Démarrage automatique 15s après le boot
+# ========================================================================
+# Si vous voulez que la caméra démarre automatiquement 15s après le boot :
+
+esphome:
+  on_boot:
+    priority: -100  # Après tout le reste
+    then:
+      - delay: 15s  # Attendre 15 secondes
+      - lambda: |-
+          auto wifi_component = wifi::global_wifi_component;
+          if (wifi_component != nullptr && wifi_component->is_connected()) {
+            ESP_LOGI("boot", "✓ WiFi ready after 15s, auto-starting camera");
+            // Démarrer la caméra automatiquement
+            // id(security_cam_1).set_enabled(true);
+          } else {
+            ESP_LOGW("boot", "⚠ WiFi still not ready after 15s delay");
+          }
+
+# ========================================================================
+# IMPORTANT : CONFIGURATION REQUISE
+# ========================================================================
+
+# 1. VARIABLE GLOBALE
+globals:
+  - id: cam1_state
+    type: bool
+    initial_value: 'false'
+
+# 2. NETWORK CAMERA (RTSP, PAS MJPEG!)
+network_camera:
+  - id: security_cam_1
+    url: "rtsp://Tapoone:Tapoone132@192.168.1.56:554/stream2"
+    protocol: rtsp  # ← RTSP, pas mjpeg !
+    width: 320
+    height: 240
+    canvas_id: security_canvas
+    update_interval: 100ms
+
+# 3. MULTI CAMERA DISPLAY
+multi_camera_display:
+  id: security_display
+  canvas_id: security_canvas
+  cameras:
+    - camera_id: security_cam_1
+
+# ========================================================================
+# NOTES IMPORTANTES
+# ========================================================================
+#
+# ⚠️ MJPEG NE FONCTIONNE PAS avec les caméras Tapo
+#    Erreur: ESP_ERR_HTTP_INVALID_TRANSPORT
+#    → Utilisez RTSP à la place
+#
+# ⚠️ Ce délai de 15s est une SOLUTION TEMPORAIRE
+#    → La vraie solution est de recompiler avec le nouveau code C++
+#    → Le code C++ vérifie automatiquement le WiFi (commit 7907ddb)
+#
+# ⚠️ Après avoir cliqué sur START, attendez 15 secondes
+#    → Le label "Waiting WiFi..." s'affichera
+#    → Puis "WiFi: OK" quand le WiFi est prêt
+#    → Puis "Starting..." pendant la connexion
+#    → Puis "Camera ON" quand c'est démarré
+#
+# ========================================================================

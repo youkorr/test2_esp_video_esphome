@@ -1,0 +1,314 @@
+# ========================================================================
+# CONFIGURATION FINALE - Avec go2rtc Baseline Profile
+# ========================================================================
+# Cette configuration utilise votre stream go2rtc frigate1_esp32
+# qui est déjà configuré avec Baseline Profile compatible ESP32-P4
+# ========================================================================
+
+# ========================================================================
+# 1. VARIABLE GLOBALE
+# ========================================================================
+
+globals:
+  - id: cam1_state
+    type: bool
+    initial_value: 'false'
+
+# ========================================================================
+# 2. NETWORK CAMERA - Avec stream go2rtc
+# ========================================================================
+
+network_camera:
+  - id: security_cam_1
+    # ⭐ IMPORTANT : Remplacez 192.168.1.XXX par l'IP de votre serveur go2rtc/Home Assistant
+    url: "rtsp://192.168.1.XXX:8554/frigate1_esp32"
+    protocol: rtsp
+
+    # Résolution qui correspond à votre stream go2rtc (640x480)
+    width: 640
+    height: 480
+
+    canvas_id: security_canvas
+    update_interval: 100ms
+
+# ========================================================================
+# 3. MULTI CAMERA DISPLAY
+# ========================================================================
+
+multi_camera_display:
+  id: security_display
+  canvas_id: security_canvas
+  cameras:
+    - camera_id: security_cam_1
+
+# ========================================================================
+# 4. PAGE SECURITY LVGL
+# ========================================================================
+
+lvgl:
+  pages:
+    - id: security_page
+      bg_color: 0x1a1a1a
+      on_load:
+        - lambda: |-
+            ESP_LOGI("security", "Security page loaded");
+      widgets:
+
+        # CANVAS - Ajusté pour 640x480
+        - canvas:
+            id: security_canvas
+            width: 640
+            height: 480
+            x: 10
+            y: 10
+            bg_color: 0x000000
+
+        # TITRE
+        - label:
+            id: security_title
+            text: "SECURITY"
+            x: 660
+            y: 10
+            text_color: 0xFFFFFF
+            text_font: nunito_24
+            text_align: LEFT
+
+        # LABEL DE STATUT
+        - label:
+            id: start_status
+            text: ""
+            x: 660
+            y: 40
+            text_color: 0xFFFFFF
+            text_font: nunito_20
+            text_align: LEFT
+
+        # BOUTON BACK
+        - button:
+            id: security_back
+            width: 100
+            height: 40
+            x: 690
+            y: 60
+            bg_color: 0xe74c3c
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0xe74c3c
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("security", "Stopping camera");
+                    id(security_cam_1).set_enabled(false);
+                    id(cam1_state) = false;
+                    lv_label_set_text(id(start_status), "Camera OFF");
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+                  align: CENTER
+
+        # BOUTON START
+        - button:
+            id: btn_start_all
+            width: 100
+            height: 40
+            x: 690
+            y: 120
+            bg_color: 0x27ae60
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0x27ae60
+            shadow_opa: 80%
+            on_click:
+              then:
+                # Afficher statut d'attente
+                - lambda: |-
+                    lv_label_set_text(id(start_status), "Starting...");
+                    lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFFFF00), 0);
+
+                # Petit délai pour laisser LVGL se stabiliser
+                - delay: 500ms
+
+                # Vérifier WiFi
+                - if:
+                    condition:
+                      wifi.connected:
+                    then:
+                      - lambda: |-
+                          ESP_LOGI("security", "✓ WiFi connected, starting camera");
+
+                          // Configurer le canvas
+                          static bool canvas_configured = false;
+                          if (!canvas_configured) {
+                            auto canvas = id(security_canvas);
+                            if (canvas != nullptr) {
+                              lv_coord_t w = lv_obj_get_width(canvas);
+                              lv_coord_t h = lv_obj_get_height(canvas);
+                              ESP_LOGI("security", "Canvas size: %dx%d", w, h);
+
+                              if (w > 0 && h > 0) {
+                                id(security_display).configure_canvas(canvas);
+                                canvas_configured = true;
+                                ESP_LOGI("security", "✓ Canvas configured");
+                              }
+                            }
+                          }
+
+                          // Démarrer la caméra
+                          id(security_cam_1).set_enabled(true);
+                          id(cam1_state) = true;
+
+                          // Mettre à jour le statut
+                          lv_label_set_text(id(start_status), "Camera ON");
+                          lv_obj_set_style_text_color(id(start_status), lv_color_hex(0x00FF00), 0);
+                    else:
+                      - lambda: |-
+                          ESP_LOGW("security", "⚠ WiFi not connected!");
+                          lv_label_set_text(id(start_status), "No WiFi!");
+                          lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFF0000), 0);
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+                  align: CENTER
+
+        # BOUTON STOP
+        - button:
+            id: btn_stop_all
+            width: 100
+            height: 40
+            x: 690
+            y: 180
+            bg_color: 0xe74c3c
+            bg_opa: COVER
+            radius: 20
+            shadow_width: 6
+            shadow_color: 0xe74c3c
+            shadow_opa: 80%
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("security", "■ Stopping camera");
+                    id(security_cam_1).set_enabled(false);
+                    id(cam1_state) = false;
+                    lv_label_set_text(id(start_status), "Camera OFF");
+                    lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFF0000), 0);
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_24
+                  text_align: CENTER
+                  align: CENTER
+
+        # BOUTON TOGGLE CAM 1
+        - button:
+            id: btn_cam1_toggle
+            width: 80
+            height: 30
+            x: 690
+            y: 240
+            bg_color: 0x3498db
+            bg_opa: COVER
+            radius: 15
+            on_click:
+              then:
+                - lambda: |-
+                    id(cam1_state) = !id(cam1_state);
+                    id(security_cam_1).set_enabled(id(cam1_state));
+                    ESP_LOGI("security", "Camera 1: %s", id(cam1_state) ? "ON" : "OFF");
+
+                    if (id(cam1_state)) {
+                      lv_label_set_text(id(start_status), "Camera ON");
+                      lv_obj_set_style_text_color(id(start_status), lv_color_hex(0x00FF00), 0);
+                    } else {
+                      lv_label_set_text(id(start_status), "Camera OFF");
+                      lv_obj_set_style_text_color(id(start_status), lv_color_hex(0xFF0000), 0);
+                    }
+            widgets:
+              - label:
+                  text: "CAM 1"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+                  align: CENTER
+
+# ========================================================================
+# INSTRUCTIONS D'INSTALLATION
+# ========================================================================
+#
+# 1. ⭐ IMPORTANT : Trouvez l'IP de votre serveur go2rtc/Home Assistant
+#    - Dans Home Assistant : Paramètres → Système → Réseau
+#    - Ou utilisez : hostname -I
+#
+# 2. Remplacez dans la configuration ci-dessus :
+#    url: "rtsp://192.168.1.XXX:8554/frigate1_esp32"
+#    Par votre vraie IP, par exemple :
+#    url: "rtsp://192.168.1.100:8554/frigate1_esp32"
+#
+# 3. Copiez cette configuration dans votre p4mini.yaml
+#
+# 4. Recompilez et flashez votre ESP32-P4
+#
+# 5. Testez :
+#    - Allez sur security_page
+#    - Cliquez sur START
+#    - Attendez 2-3 secondes
+#    - 🎉 Vous devriez voir l'image de la caméra !
+#
+# ========================================================================
+# LOGS ATTENDUS (SUCCÈS)
+# ========================================================================
+#
+# [I][network_camera]: Starting Network Camera display...
+# [I][network_camera]: Connecting to RTSP: 192.168.1.XXX:8554/frigate1_esp32
+# [I][network_camera]: TCP connection established
+# [I][network_camera]: RTSP stream connected
+# [I][network_camera]: Cached SPS: XX bytes
+# [I][network_camera]: Cached PPS: XX bytes
+# [I][network_camera]: Frame decoded successfully  ← Vous devriez voir ça !
+# [I][network_camera]: Frames: 100 - FPS: 15.2     ← Et ça !
+#
+# ========================================================================
+# DÉPANNAGE
+# ========================================================================
+#
+# Si "Connection refused" :
+#   → Vérifiez que go2rtc tourne : http://IP-HOMEASSISTANT:1984
+#   → Vérifiez le port 8554 (RTSP)
+#
+# Si "No H264 frames decoded" :
+#   → Vérifiez la configuration go2rtc (profile=baseline)
+#   → Redémarrez l'addon go2rtc
+#
+# Si "Host unreachable" :
+#   → Vérifiez l'IP du serveur go2rtc
+#   → Vérifiez que ESP32 et go2rtc sont sur le même réseau
+#
+# ========================================================================
+# POUR AJOUTER D'AUTRES CAMÉRAS
+# ========================================================================
+#
+# Dans go2rtc.yaml :
+#   frigate2_esp32:
+#     - "ffmpeg:rtsp://user:pass@IP:554/stream2#video=h264#profile=baseline#width=640#height=480"
+#
+# Dans p4mini.yaml :
+#   network_camera:
+#     - id: security_cam_2
+#       url: "rtsp://IP-HOMEASSISTANT:8554/frigate2_esp32"
+#
+#   multi_camera_display:
+#     cameras:
+#       - camera_id: security_cam_1
+#       - camera_id: security_cam_2  # ← Ajouter ici
+#
+# ========================================================================

@@ -1,6 +1,7 @@
 #include "network_camera.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esphome/components/wifi/wifi_component.h"
 
 #include <cstring>
 #include <algorithm>
@@ -53,7 +54,46 @@ void NetworkCamera::setup() {
 void NetworkCamera::loop() {
   // Start timer when enabled
   if (this->enabled_ && this->lvgl_timer_ == nullptr) {
+    uint32_t now = millis();
+
+    // CRITICAL: Check WiFi FIRST before any connection attempt
+    auto wifi_component = wifi::global_wifi_component;
+    if (wifi_component == nullptr || !wifi_component->is_connected()) {
+      // Log only on first attempt or every 30 seconds to avoid spam
+      static uint32_t last_wifi_log = 0;
+      if (this->connection_attempts_ == 0 || (now - last_wifi_log) > 30000) {
+        ESP_LOGW(TAG, "⏳ WiFi not ready yet, waiting for connection...");
+        last_wifi_log = now;
+      }
+      this->last_connection_attempt_ = now;
+      // Keep trying - don't disable camera
+      return;
+    }
+
+    // Additional check: Verify WiFi has valid IP address
+    if (!wifi_component->has_sta() || wifi_component->get_ip_address().is_set() == false) {
+      static uint32_t last_ip_log = 0;
+      if ((now - last_ip_log) > 30000) {
+        ESP_LOGW(TAG, "⏳ WiFi connected but no IP address yet, waiting...");
+        last_ip_log = now;
+      }
+      this->last_connection_attempt_ = now;
+      return;
+    }
+
+    // Check if we need to wait before attempting connection (retry delay)
+    if (this->last_connection_attempt_ > 0 &&
+        (now - this->last_connection_attempt_) < this->connection_retry_delay_) {
+      // Still within retry delay period, skip this attempt
+      return;
+    }
+
+    // WiFi is READY with valid IP - proceed with connection
+    ESP_LOGI(TAG, "✓ WiFi ready (IP: %s), starting camera...",
+             wifi_component->get_ip_address().str().c_str());
     ESP_LOGI(TAG, "Starting Network Camera display...");
+    this->connection_attempts_++;
+    this->last_connection_attempt_ = now;
 
     bool connected = false;
     if (this->protocol_ == Protocol::MJPEG) {
@@ -63,9 +103,15 @@ void NetworkCamera::loop() {
     }
 
     if (!connected) {
-      ESP_LOGE(TAG, "Failed to connect to stream");
+      ESP_LOGE(TAG, "Failed to connect to stream (attempt %u, will retry in %u seconds)",
+               this->connection_attempts_, this->connection_retry_delay_ / 1000);
+      // Don't disable - will retry automatically after delay
       return;
     }
+
+    // Connection successful! Reset retry counter
+    ESP_LOGI(TAG, "Connection established after %u attempt(s)", this->connection_attempts_);
+    this->connection_attempts_ = 0;
 
     this->lvgl_timer_ = lv_timer_create(lvgl_timer_callback_, this->update_interval_, this);
     if (this->lvgl_timer_ == nullptr) {
@@ -202,7 +248,7 @@ bool NetworkCamera::init_buffers_() {
 bool NetworkCamera::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t decode_eng_cfg = {
       .intr_priority = 0,
-      .timeout_ms = 40,
+      .timeout_ms = 100,  // 100ms timeout - same as simple_video_player (was 40ms - too short for network streams!)
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&decode_eng_cfg, &this->jpeg_decoder_);
@@ -211,7 +257,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "JPEG hardware decoder initialized");
+  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=100ms, optimized for network streams)");
   return true;
 }
 
@@ -374,27 +420,95 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   return false;
 }
 
+// Strip COM (comment) markers from JPEG that cause ESP32-P4 hardware decoder to fail
+// COM marker format: FF FE [2-byte length] [data]
+size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
+  if (len < 4) return len;
+
+  size_t write_pos = 0;
+  size_t read_pos = 0;
+
+  while (read_pos < len - 1) {
+    if (data[read_pos] == 0xFF && data[read_pos + 1] == 0xFE) {
+      // Found COM marker
+      if (read_pos + 3 >= len) break;  // Not enough data for length
+
+      uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+
+      // Skip the entire COM marker (FF FE + 2-byte length + data)
+      size_t skip_len = 2 + marker_len;  // marker_len includes the 2 length bytes
+
+      static uint32_t com_markers_stripped = 0;
+      if (com_markers_stripped++ < 3) {
+        ESP_LOGI(TAG, "Stripping COM marker at offset %u (length %u bytes)", read_pos, skip_len);
+      }
+
+      read_pos += skip_len;
+    } else {
+      // Copy byte
+      if (write_pos != read_pos) {
+        data[write_pos] = data[read_pos];
+      }
+      write_pos++;
+      read_pos++;
+    }
+  }
+
+  // Copy any remaining bytes
+  while (read_pos < len) {
+    if (write_pos != read_pos) {
+      data[write_pos] = data[read_pos];
+    }
+    write_pos++;
+    read_pos++;
+  }
+
+  if (write_pos < len) {
+    ESP_LOGD(TAG, "Stripped COM markers: %u → %u bytes (saved %u bytes)",
+             len, write_pos, len - write_pos);
+  }
+
+  return write_pos;
+}
+
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
   if (this->jpeg_data_len_ == 0 || this->jpeg_decoder_ == nullptr) {
     return false;
   }
 
-  // Log JPEG header info for debugging
+  // CRITICAL: Validate JPEG markers BEFORE decoding (like simple_video_player)
+  // This prevents crashes from corrupted/incomplete JPEG data
+  if (this->jpeg_data_len_ < 4 ||
+      this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8) {
+    static uint32_t validation_errors = 0;
+    if (validation_errors++ < 5) {
+      ESP_LOGW(TAG, "Invalid JPEG header: size=%u, markers=0x%02X%02X (expected FF D8)",
+               this->jpeg_data_len_,
+               this->jpeg_data_len_ > 0 ? this->jpeg_buffer_[0] : 0,
+               this->jpeg_data_len_ > 1 ? this->jpeg_buffer_[1] : 0);
+    }
+    return false;
+  }
+
+  // CRITICAL FIX: Strip COM markers that cause ESP32-P4 decoder to fail
+  // ffmpeg adds COM markers with metadata that the hardware decoder can't parse
+  this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+
+  // Log JPEG header info for debugging (first frame only)
   static bool logged_jpeg_info = false;
   if (!logged_jpeg_info && this->jpeg_data_len_ >= 20) {
-    ESP_LOGI(TAG, "JPEG Header Analysis:");
+    ESP_LOGI(TAG, "First JPEG frame analysis:");
     ESP_LOGI(TAG, "  Size: %u bytes", this->jpeg_data_len_);
-    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (should be FFD8)",
-             this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
+    ESP_LOGI(TAG, "  SOI marker: 0x%02X%02X (valid FFD8)", this->jpeg_buffer_[0], this->jpeg_buffer_[1]);
 
     // Look for SOF (Start of Frame) markers to identify JPEG type
     for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
       if (this->jpeg_buffer_[i] == 0xFF) {
         uint8_t marker = this->jpeg_buffer_[i + 1];
-        if (marker == 0xC0) ESP_LOGI(TAG, "  Found SOF0 (Baseline DCT) at offset %u", i);
-        if (marker == 0xC1) ESP_LOGW(TAG, "  Found SOF1 (Extended Sequential) at offset %u", i);
-        if (marker == 0xC2) ESP_LOGW(TAG, "  Found SOF2 (Progressive DCT) at offset %u - NOT SUPPORTED BY HARDWARE!", i);
-        if (marker == 0xC3) ESP_LOGW(TAG, "  Found SOF3 (Lossless) at offset %u", i);
+        if (marker == 0xC0) ESP_LOGI(TAG, "  Format: Baseline DCT (SOF0) - fully supported ✓");
+        if (marker == 0xC1) ESP_LOGW(TAG, "  Format: Extended Sequential (SOF1)");
+        if (marker == 0xC2) ESP_LOGW(TAG, "  Format: Progressive DCT (SOF2) - NOT SUPPORTED BY HARDWARE!");
+        if (marker == 0xC3) ESP_LOGW(TAG, "  Format: Lossless (SOF3)");
       }
     }
     logged_jpeg_info = true;
@@ -412,13 +526,29 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
-    ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
-             this->jpeg_data_len_, this->rgb565_buffer_size_);
+    static uint32_t decode_errors = 0;
+    if (decode_errors++ < 5) {
+      ESP_LOGE(TAG, "JPEG decode failed: %s (error #%u)", esp_err_to_name(ret), decode_errors);
+      ESP_LOGE(TAG, "  JPEG size: %u bytes, Output buffer size: %u bytes",
+               this->jpeg_data_len_, this->rgb565_buffer_size_);
+
+      // Dump first 16 bytes for debugging (like simple_video_player)
+      ESP_LOGE(TAG, "  JPEG header dump (first 16 bytes):");
+      if (this->jpeg_data_len_ >= 16) {
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, this->jpeg_buffer_, 16, ESP_LOG_ERROR);
+      }
+    }
     return false;
   }
 
-  ESP_LOGD(TAG, "JPEG decoded successfully: %u bytes output", out_size);
+  // Log first successful decode
+  static bool first_success = false;
+  if (!first_success) {
+    ESP_LOGI(TAG, "✓ First JPEG decoded successfully: %u bytes output", out_size);
+    first_success = true;
+  }
+
+  ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
   return true;
 }
 
@@ -877,9 +1007,13 @@ bool NetworkCamera::fetch_rtp_frame_() {
       // Don't add PPS to main buffer - it will be prepended to I-frames
     } else if (nal_type >= 1 && nal_type <= 23) {
       // Picture NAL unit (I-frame, P-frame, etc.)
-      // If this is an I-frame (IDR), prepend cached SPS/PPS
-      if (nal_type == 5 && this->has_sps_ && this->has_pps_) {
-        // Prepend SPS and PPS to the buffer before the I-frame
+
+      // CRITICAL FIX: Send SPS/PPS with the FIRST frame received (not just I-frames)
+      // Without this, if stream starts with P-frames, decoder never gets param sets
+      static bool param_sets_sent = false;
+
+      if (!param_sets_sent && this->has_sps_ && this->has_pps_) {
+        // Send SPS/PPS with first frame (I-frame OR P-frame)
         if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
           // Add SPS
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
@@ -887,7 +1021,23 @@ bool NetworkCamera::fetch_rtp_frame_() {
           // Add PPS
           memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
           this->h264_data_len_ += this->pps_len_;
-          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame", this->sps_len_, this->pps_len_);
+
+          ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST frame (NAL type %u)",
+                   this->sps_len_, this->pps_len_, nal_type);
+          param_sets_sent = true;
+        }
+      }
+
+      // Also prepend SPS/PPS to each I-frame for recovery after packet loss
+      if (nal_type == 5 && this->has_sps_ && this->has_pps_ && param_sets_sent) {
+        if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 4 < this->h264_buffer_size_) {
+          // Add SPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
+          this->h264_data_len_ += this->sps_len_;
+          // Add PPS
+          memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
+          this->h264_data_len_ += this->pps_len_;
+          ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to I-frame for recovery", this->sps_len_, this->pps_len_);
         }
       }
 
@@ -900,6 +1050,18 @@ bool NetworkCamera::fetch_rtp_frame_() {
         this->h264_buffer_[this->h264_data_len_++] = 0x01;
         memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data, nal_len);
         this->h264_data_len_ += nal_len;
+
+        // Log first 10 frames for debugging
+        static uint32_t frame_count = 0;
+        if (frame_count++ < 10) {
+          const char *frame_type = nal_type == 5 ? "I-frame (IDR)" :
+                                   nal_type == 1 ? "P-frame" :
+                                   nal_type == 2 ? "P-frame (partition A)" :
+                                   nal_type == 3 ? "P-frame (partition B)" :
+                                   nal_type == 4 ? "P-frame (partition C)" : "Other";
+          ESP_LOGI(TAG, "Frame #%u: NAL type %u (%s), size %u bytes",
+                   frame_count, nal_type, frame_type, nal_len);
+        }
       }
     } else if (nal_type == 28) {
       // FU-A (Fragmentation Unit)
@@ -913,8 +1075,13 @@ bool NetworkCamera::fetch_rtp_frame_() {
         // Start of fragmented NAL
         uint8_t reconstructed = (nal_data[0] & 0xE0) | fu_type;
 
-        // If this is a fragmented I-frame, prepend SPS/PPS
-        if (fu_type == 5 && this->has_sps_ && this->has_pps_) {
+        // CRITICAL FIX: Send SPS/PPS with first fragmented frame (but not twice!)
+        static bool param_sets_sent_fua = false;
+
+        // Only prepend SPS/PPS if we haven't sent them yet
+        // This handles both first frame AND subsequent I-frames
+        if (!param_sets_sent_fua && this->has_sps_ && this->has_pps_ && (fu_type >= 1 && fu_type <= 23)) {
+          // Send SPS/PPS with first fragmented picture frame
           if (this->h264_data_len_ + this->sps_len_ + this->pps_len_ + nal_len + 3 < this->h264_buffer_size_) {
             // Add SPS
             memcpy(this->h264_buffer_ + this->h264_data_len_, this->sps_cache_, this->sps_len_);
@@ -922,9 +1089,17 @@ bool NetworkCamera::fetch_rtp_frame_() {
             // Add PPS
             memcpy(this->h264_buffer_ + this->h264_data_len_, this->pps_cache_, this->pps_len_);
             this->h264_data_len_ += this->pps_len_;
-            ESP_LOGI(TAG, "Prepended SPS+PPS (%u+%u bytes) to fragmented I-frame", this->sps_len_, this->pps_len_);
+            ESP_LOGI(TAG, "✓ Sent SPS+PPS (%u+%u bytes) with FIRST fragmented frame (FU type %u)",
+                     this->sps_len_, this->pps_len_, fu_type);
+            param_sets_sent_fua = true;
+          } else {
+            ESP_LOGW(TAG, "⚠ Buffer too small to add SPS+PPS (need %u bytes, buffer has %u free)",
+                     this->sps_len_ + this->pps_len_ + nal_len + 3,
+                     this->h264_buffer_size_ - this->h264_data_len_);
           }
         }
+        // Note: We removed the second SPS/PPS prepending block to avoid double prepending
+        // I-frames will get SPS/PPS from the first block when param_sets_sent_fua is false
 
         if (this->h264_data_len_ + nal_len + 3 < this->h264_buffer_size_) {
           this->h264_buffer_[this->h264_data_len_++] = 0x00;
@@ -934,6 +1109,15 @@ bool NetworkCamera::fetch_rtp_frame_() {
           this->h264_buffer_[this->h264_data_len_++] = reconstructed;
           memcpy(this->h264_buffer_ + this->h264_data_len_, nal_data + 2, nal_len - 2);
           this->h264_data_len_ += nal_len - 2;
+
+          // Log first 10 fragmented frames for debugging
+          static uint32_t frag_count = 0;
+          if (frag_count++ < 10) {
+            const char *frame_type = fu_type == 5 ? "I-frame (IDR)" :
+                                     fu_type == 1 ? "P-frame" : "Other";
+            ESP_LOGI(TAG, "Fragmented frame #%u: FU type %u (%s), fragment size %u bytes",
+                     frag_count, fu_type, frame_type, nal_len - 2);
+          }
         }
       } else {
         // Continuation
@@ -975,9 +1159,31 @@ bool NetworkCamera::decode_h264_to_yuv_() {
 
   // Process all NAL units in the buffer
   bool frame_decoded = false;
+  static bool first_decode_success = false;
+
   while (in_frame.raw_data.len > 0) {
     esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
     if (ret != ESP_H264_ERR_OK) {
+      // Log decode error for debugging
+      static uint32_t error_count = 0;
+      error_count++;
+      if (error_count <= 10 || error_count % 100 == 0) {
+        ESP_LOGE(TAG, "H264 decode error: %d (NAL size: %u bytes, error #%u)",
+                 ret, in_frame.raw_data.len, error_count);
+
+        // Explain error code
+        if (ret == -1) ESP_LOGE(TAG, "  → ESP_H264_ERR_FAIL (general decode failure)");
+        if (ret == -2) ESP_LOGE(TAG, "  → ESP_H264_ERR_ARG (invalid arguments)");
+        if (ret == -3) ESP_LOGE(TAG, "  → ESP_H264_ERR_MEM (out of memory)");
+        if (ret == -5) ESP_LOGE(TAG, "  → ESP_H264_ERR_UNSUPPORTED (profile incompatible or feature not supported)");
+        if (ret == -6) ESP_LOGE(TAG, "  → ESP_H264_ERR_TIMEOUT");
+        if (ret == -7) ESP_LOGE(TAG, "  → ESP_H264_ERR_OVERFLOW");
+
+        if (!first_decode_success) {
+          ESP_LOGE(TAG, "  ⚠ No frames decoded yet - check if SPS/PPS were sent with first frame");
+          ESP_LOGE(TAG, "  ⚠ If error = -5, H264 profile may be incompatible (High Profile not fully supported)");
+        }
+      }
       break;
     }
 
@@ -990,6 +1196,14 @@ bool NetworkCamera::decode_h264_to_yuv_() {
       }
       memcpy(this->yuv_buffer_, out_frame.outbuf, copy_size);
       frame_decoded = true;
+
+      // Log first successful decode
+      if (!first_decode_success) {
+        ESP_LOGI(TAG, "✓ First frame decoded successfully! Decoder initialized and working.");
+        ESP_LOGI(TAG, "  Decoded YUV size: %u bytes (expected: %u bytes)",
+                 out_frame.out_size, this->yuv_buffer_size_);
+        first_decode_success = true;
+      }
     }
 
     // Move to next NAL unit
