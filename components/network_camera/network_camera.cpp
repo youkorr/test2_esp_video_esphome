@@ -662,7 +662,16 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
-        if (read_pos + total_len > len) break;
+
+        // CRITICAL: Validate SOF0 marker is not truncated
+        if (read_pos + total_len > len) {
+          if (debug_markers) {
+            ESP_LOGW(TAG, "  ⚠️ TRUNCATED SOF0 marker at offset %u (needs %u bytes, only %u available)",
+                     read_pos, total_len, len - read_pos);
+          }
+          // JPEG is corrupted - reject entire frame
+          return 0;
+        }
 
         // Extract resolution from SOF (offset +5 for height, +7 for width)
         if (read_pos + 9 < len) {
@@ -718,12 +727,21 @@ size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
         continue;
       }
 
-      // DQT, DHT - KEEP
+      // DQT, DHT - KEEP (with strict validation)
       if (marker == 0xDB || marker == 0xC4) {
         if (read_pos + 3 >= len) break;
         uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
         size_t total_len = 2 + marker_len;
-        if (read_pos + total_len > len) break;
+
+        // CRITICAL: Validate marker is not truncated
+        if (read_pos + total_len > len) {
+          if (debug_markers) {
+            ESP_LOGW(TAG, "  ⚠️ TRUNCATED %s marker at offset %u (needs %u bytes, only %u available)",
+                     marker == 0xDB ? "DQT" : "DHT", read_pos, total_len, len - read_pos);
+          }
+          // JPEG is corrupted - reject entire frame
+          return 0;  // Return 0 to indicate invalid JPEG
+        }
 
         const char *marker_name = (marker == 0xDB) ? "DQT" : "DHT";
         if (debug_markers) ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %u bytes", marker_name, marker, total_len);
@@ -823,6 +841,15 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
   // Strip ALL unsupported markers (APP, COM, DRI, RST, etc.)
   // This is the CRITICAL FIX for ESP32-P4 hardware decoder
   size_t cleaned_len = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+
+  // Check if marker stripping detected corrupted JPEG (returns 0)
+  if (cleaned_len == 0) {
+    static uint32_t truncation_errors = 0;
+    if (truncation_errors++ < 3) {
+      ESP_LOGW(TAG, "JPEG rejected: truncated marker detected (error #%u)", truncation_errors);
+    }
+    return false;  // Skip corrupted JPEG
+  }
 
   this->jpeg_data_len_ = cleaned_len;
 
