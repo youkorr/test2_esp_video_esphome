@@ -97,6 +97,27 @@ void NetworkCamera::loop() {
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
 
+    // CRITICAL: Check if buffers need to be reallocated (after being freed when camera was disabled)
+    if (this->rgb565_buffer_a_ == nullptr || this->rgb565_buffer_b_ == nullptr) {
+      ESP_LOGI(TAG, "Buffers were freed, reallocating...");
+      if (!this->init_buffers_()) {
+        ESP_LOGE(TAG, "Failed to reallocate buffers");
+        return;
+      }
+      // Also reinit decoder
+      if (this->protocol_ == Protocol::MJPEG) {
+        if (!this->init_jpeg_decoder_()) {
+          ESP_LOGE(TAG, "Failed to reinitialize JPEG decoder");
+          return;
+        }
+      } else {
+        if (!this->init_h264_decoder_()) {
+          ESP_LOGE(TAG, "Failed to reinitialize H264 decoder");
+          return;
+        }
+      }
+    }
+
     bool connected = false;
     if (this->protocol_ == Protocol::MJPEG) {
       connected = this->connect_mjpeg_stream_();
@@ -135,7 +156,12 @@ void NetworkCamera::loop() {
       this->disconnect_rtsp_stream_();
     }
 
-    ESP_LOGI(TAG, "Network Camera display stopped");
+    // CRITICAL: Free PSRAM buffers when camera is disabled to prevent memory overflow
+    // This releases ~1.5MB of PSRAM (RGB565 buffers + JPEG buffer + parse buffer)
+    ESP_LOGI(TAG, "Freeing PSRAM buffers...");
+    this->free_buffers_();
+
+    ESP_LOGI(TAG, "Network Camera display stopped and buffers freed");
   }
 }
 
@@ -345,6 +371,45 @@ bool NetworkCamera::init_buffers_() {
 
   ESP_LOGI(TAG, "Buffers allocated successfully");
   return true;
+}
+
+void NetworkCamera::free_buffers_() {
+  // Free RGB565 buffers
+  if (this->rgb565_buffer_a_ != nullptr) {
+    free(this->rgb565_buffer_a_);
+    this->rgb565_buffer_a_ = nullptr;
+  }
+  if (this->rgb565_buffer_b_ != nullptr) {
+    free(this->rgb565_buffer_b_);
+    this->rgb565_buffer_b_ = nullptr;
+  }
+
+  // Free JPEG buffer
+  if (this->jpeg_buffer_ != nullptr) {
+    free(this->jpeg_buffer_);
+    this->jpeg_buffer_ = nullptr;
+  }
+
+  // Free H264 buffers
+  if (this->h264_buffer_ != nullptr) {
+    free(this->h264_buffer_);
+    this->h264_buffer_ = nullptr;
+  }
+  if (this->yuv_buffer_ != nullptr) {
+    free(this->yuv_buffer_);
+    this->yuv_buffer_ = nullptr;
+  }
+
+  // Reset buffer sizes
+  this->rgb565_buffer_size_ = 0;
+  this->jpeg_buffer_size_ = 0;
+  this->h264_buffer_size_ = 0;
+  this->yuv_buffer_size_ = 0;
+
+  // Log freed memory
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  ESP_LOGI(TAG, "Buffers freed - Free PSRAM now: %u bytes (%.2f MB)",
+           free_psram, free_psram / 1024.0 / 1024.0);
 }
 
 bool NetworkCamera::init_jpeg_decoder_() {

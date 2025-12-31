@@ -138,6 +138,7 @@ class NetworkCamera : public Component {
 
   // Common methods
   bool init_buffers_();
+  void free_buffers_();  // Free PSRAM buffers when camera is disabled
   bool init_jpeg_decoder_();
   void update_canvas_();
   void swap_buffers_();
