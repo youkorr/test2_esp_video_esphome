@@ -354,6 +354,19 @@ bool NetworkCamera::init_buffers_() {
 
     ESP_LOGI(TAG, "Allocated 64-byte aligned JPEG buffer in %s: %u bytes (free PSRAM: %u bytes)",
              using_psram ? "PSRAM" : "internal RAM", this->jpeg_buffer_size_, free_psram);
+
+    // CRITICAL: Allocate parse buffer in PSRAM to save SRAM (was 128KB static in SRAM!)
+    // This buffer is used in fetch_jpeg_frame_() for MJPEG parsing
+    this->parse_buffer_size_ = 128 * 1024;  // 128KB parse buffer
+    this->parse_buffer_ = (uint8_t *)heap_caps_malloc(this->parse_buffer_size_,
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (this->parse_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate parse buffer (%u bytes) in PSRAM", this->parse_buffer_size_);
+      return false;
+    }
+    this->parse_buffer_len_ = 0;  // Reset parse buffer length
+    ESP_LOGI(TAG, "Allocated parse buffer in PSRAM: %u bytes (saves 128KB SRAM!)",
+             this->parse_buffer_size_);
   } else {
     // Allocate H264 and YUV buffers
     this->h264_buffer_size_ = MAX_H264_SIZE;
@@ -390,6 +403,12 @@ void NetworkCamera::free_buffers_() {
     this->jpeg_buffer_ = nullptr;
   }
 
+  // Free parse buffer (CRITICAL: saves 128KB SRAM!)
+  if (this->parse_buffer_ != nullptr) {
+    free(this->parse_buffer_);
+    this->parse_buffer_ = nullptr;
+  }
+
   // Free H264 buffers
   if (this->h264_buffer_ != nullptr) {
     free(this->h264_buffer_);
@@ -403,13 +422,17 @@ void NetworkCamera::free_buffers_() {
   // Reset buffer sizes
   this->rgb565_buffer_size_ = 0;
   this->jpeg_buffer_size_ = 0;
+  this->parse_buffer_size_ = 0;
+  this->parse_buffer_len_ = 0;
   this->h264_buffer_size_ = 0;
   this->yuv_buffer_size_ = 0;
 
   // Log freed memory
   size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  ESP_LOGI(TAG, "Buffers freed - Free PSRAM now: %u bytes (%.2f MB)",
-           free_psram, free_psram / 1024.0 / 1024.0);
+  size_t free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  ESP_LOGI(TAG, "Buffers freed - Free PSRAM: %u bytes (%.2f MB), Free SRAM: %u bytes (%.2f KB)",
+           free_psram, free_psram / 1024.0 / 1024.0,
+           free_sram, free_sram / 1024.0);
 }
 
 bool NetworkCamera::init_jpeg_decoder_() {
@@ -548,15 +571,18 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   // CRITICAL: parse_buffer must be large enough to hold complete JPEG + MJPEG overhead
   // When camera moves/rotates: JPEGs can be 80-150KB (high complexity)
   // When camera static: JPEGs are 20-40KB (low complexity)
-  static const size_t CHUNK_SIZE = 16 * 1024;         // 16KB chunks for reading
-  static const size_t PARSE_BUFFER_SIZE = 128 * 1024; // 128KB parse buffer (was 64KB)
+  static const size_t CHUNK_SIZE = 16 * 1024;  // 16KB chunks for reading
 
-  // CRITICAL: Use static buffers to avoid stack overflow on loopTask
-  // Stack-allocated buffers cause "Stack protection fault" crashes
-  static uint8_t temp_buffer[CHUNK_SIZE];              // 16KB chunk buffer
-  static uint8_t parse_buffer[PARSE_BUFFER_SIZE];      // 128KB parse buffer (increased from 64KB)
-  static size_t parse_buffer_len = 0;
-  static uint32_t total_bytes_read = 0;                // Track total for periodic yielding
+  // CRITICAL: Use static temp_buffer to avoid stack overflow on loopTask
+  // parse_buffer is now a class member allocated in PSRAM (saves 128KB SRAM!)
+  static uint8_t temp_buffer[CHUNK_SIZE];      // 16KB temp buffer (static, OK in SRAM)
+  static uint32_t total_bytes_read = 0;        // Track total for periodic yielding
+
+  // Safety check: ensure parse buffer is allocated
+  if (this->parse_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Parse buffer not allocated!");
+    return false;
+  }
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
@@ -577,27 +603,27 @@ bool NetworkCamera::fetch_jpeg_frame_() {
   }
 
   // Append to parse buffer
-  if (parse_buffer_len + read_len > PARSE_BUFFER_SIZE) {
+  if (this->parse_buffer_len_ + read_len > this->parse_buffer_size_) {
     // CRITICAL: Buffer overflow protection - keep last half of buffer
     // This prevents losing JPEG data in progress
     static uint32_t overflow_count = 0;
     if (overflow_count++ < 5) {
       ESP_LOGW(TAG, "Parse buffer overflow (%u + %d > %u), keeping last %u bytes",
-               parse_buffer_len, read_len, PARSE_BUFFER_SIZE, PARSE_BUFFER_SIZE / 2);
+               this->parse_buffer_len_, read_len, this->parse_buffer_size_, this->parse_buffer_size_ / 2);
     }
     // Keep second half of buffer, discard first half
-    memmove(parse_buffer, parse_buffer + PARSE_BUFFER_SIZE / 2, PARSE_BUFFER_SIZE / 2);
-    parse_buffer_len = PARSE_BUFFER_SIZE / 2;
+    memmove(this->parse_buffer_, this->parse_buffer_ + this->parse_buffer_size_ / 2, this->parse_buffer_size_ / 2);
+    this->parse_buffer_len_ = this->parse_buffer_size_ / 2;
   }
-  memcpy(parse_buffer + parse_buffer_len, temp_buffer, read_len);
-  parse_buffer_len += read_len;
+  memcpy(this->parse_buffer_ + this->parse_buffer_len_, temp_buffer, read_len);
+  this->parse_buffer_len_ += read_len;
 
   // Parse MJPEG stream - look for JPEG markers
   size_t i = 0;
-  while (i < parse_buffer_len - 1) {
+  while (i < this->parse_buffer_len_ - 1) {
     if (this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
       // Look for JPEG start marker (FFD8)
-      if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD8) {
+      if (this->parse_buffer_[i] == 0xFF && this->parse_buffer_[i + 1] == 0xD8) {
         this->jpeg_data_len_ = 0;
         this->mjpeg_state_ = MjpegState::READING_CONTENT;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
@@ -608,15 +634,15 @@ bool NetworkCamera::fetch_jpeg_frame_() {
       i++;
     } else if (this->mjpeg_state_ == MjpegState::READING_CONTENT) {
       // Copy data and look for end marker (FFD9)
-      if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD9) {
+      if (this->parse_buffer_[i] == 0xFF && this->parse_buffer_[i + 1] == 0xD9) {
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xD9;
 
-        size_t remaining = parse_buffer_len - i - 2;
+        size_t remaining = this->parse_buffer_len_ - i - 2;
         if (remaining > 0) {
-          memmove(parse_buffer, parse_buffer + i + 2, remaining);
+          memmove(this->parse_buffer_, this->parse_buffer_ + i + 2, remaining);
         }
-        parse_buffer_len = remaining;
+        this->parse_buffer_len_ = remaining;
 
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
 
@@ -629,7 +655,7 @@ bool NetworkCamera::fetch_jpeg_frame_() {
       }
 
       if (this->jpeg_data_len_ < this->jpeg_buffer_size_) {
-        this->jpeg_buffer_[this->jpeg_data_len_++] = parse_buffer[i];
+        this->jpeg_buffer_[this->jpeg_data_len_++] = this->parse_buffer_[i];
       } else {
         ESP_LOGW(TAG, "JPEG buffer overflow");
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
@@ -639,10 +665,10 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     }
   }
 
-  if (i < parse_buffer_len && this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
-    size_t remaining = parse_buffer_len - i;
-    memmove(parse_buffer, parse_buffer + i, remaining);
-    parse_buffer_len = remaining;
+  if (i < this->parse_buffer_len_ && this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
+    size_t remaining = this->parse_buffer_len_ - i;
+    memmove(this->parse_buffer_, this->parse_buffer_ + i, remaining);
+    this->parse_buffer_len_ = remaining;
   }
 
   return false;

@@ -91,6 +91,11 @@ class NetworkCamera : public Component {
   size_t jpeg_buffer_size_{0};
   size_t jpeg_data_len_{0};
 
+  // MJPEG parse buffer (dynamically allocated in PSRAM to save SRAM)
+  uint8_t *parse_buffer_{nullptr};
+  size_t parse_buffer_size_{0};
+  size_t parse_buffer_len_{0};
+
   // HTTP client (MJPEG)
   esp_http_client_handle_t http_client_{nullptr};
   bool stream_connected_{false};
