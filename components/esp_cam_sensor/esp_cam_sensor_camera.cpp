@@ -806,29 +806,12 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ 800x600)
+  // Custom Format Support (SC202CS @ 800x600) - DISABLED
   // ============================================================================
-  if (this->sensor_name_ == "sc202cs") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
-    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
-    if (width == 800 && height == 600) {
-      custom_format = &sc202cs_custom_format_800x600;
-      ESP_LOGI(TAG, "Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
-    }
-
-    // Apply custom format via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
-        ESP_LOGE(TAG, "   Falling back to driver default (likely 720P)");
-      } else {
-        ESP_LOGI(TAG, "SC202CS 800x600 format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for 800x600 centered crop");
-      }
-    }
-  }
+  // NOTE: SC202CS 800x600 is already a NATIVE format in the driver (sc202cs.c, index 0)
+  // Applying it via VIDIOC_S_SENSOR_FMT causes conflicts and stuttering.
+  // Use 720P (1280x720) instead - it's the tested default format (index 1).
+  // ============================================================================
 
     // ============================================================================
   // Custom Format Support (OV02C10 @ 640x480, 800x600, 640x368, 480x640, or 1920x1080)
