@@ -168,9 +168,13 @@ lvgl:
 #   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: sc202cs
 #   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
-#   resolution: "800x600"      # ✅ RECOMMANDÉ (SVGA - meilleur FPS, moins de bande passante)
+#   resolution: "800x600"      # ✅ Capture en 800x600 (SVGA - économe en bande passante)
 #   pixel_format: RGB565
 #   framerate: 30
+#
+#   # PPA Hardware Resize (CRITIQUE pour SC202CS avec écran 800x480)
+#   output_width: 800          # ← AJOUTER : Resize hardware 800x600 → 800x480
+#   output_height: 480         # ← AJOUTER : Évite le crop software lent de LVGL
 
 # lvgl_camera_display:
 #   id: camera_display
@@ -180,15 +184,22 @@ lvgl:
 
 # NOTES IMPORTANTES SC202CS:
 # ✅ Résolution RECOMMANDÉE: 800x600 (SVGA) - meilleur FPS et performance
+# ✅ CRITIQUE: Utilisez output_width/output_height pour resize hardware PPA
+# ⚠️  SANS PPA: LVGL fait le crop en software → très lent (9 FPS au lieu de 30)
+# ✅ AVEC PPA: Resize hardware → fluide 30 FPS stable
 # ✅ Alternative: 720P (1280x720) - plus haute résolution mais FPS réduit
 # ❌ VGA 640x480 N'EST PAS SUPPORTÉ par ce capteur !
 #
 # Résolutions disponibles:
-#   - 800x600 (SVGA) @ 30fps - ✅ RECOMMANDÉ (format index 0, économe)
+#   - 800x600 (SVGA) @ 30fps - ✅ RECOMMANDÉ avec PPA resize → 800x480
 #   - 720P (1280x720) @ 30fps - ✅ OK (format index 1, défaut driver)
 #   - 1600x1200 @ 30fps - Résolution native complète (haute mémoire)
 #
-# Mémoire: 800x600 ≈ 960 KB, 720P ≈ 1.8 MB
-# Bande passante: 800x600 ≈ 46 MB/s, 720P ≈ 88 MB/s
+# Performance avec PPA (800x600 → 800x480):
+#   - Mémoire capture: 800x600 ≈ 960 KB
+#   - Mémoire output: 800x480 ≈ 750 KB (après resize PPA)
+#   - Bande passante: 46 MB/s (bien inférieur à 720P @ 88 MB/s)
+#   - FPS LVGL: 30 fps stable (vs 9 fps sans PPA)
+#
 # SC202CS utilise 1-lane MIPI CSI @ 576 Mbps (vs 2-lane pour OV5647/OV02C10)
 # Résolution native capteur: 1600x1200 (crop centré pour toutes résolutions)
