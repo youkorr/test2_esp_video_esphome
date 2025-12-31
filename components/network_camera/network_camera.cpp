@@ -839,6 +839,10 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
 
+  // Error tracking (file-scope statics for persistence)
+  static uint32_t decode_errors = 0;
+  static uint32_t consecutive_errors = 0;
+
   uint32_t out_size = 0;
   esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
                                        this->jpeg_buffer_, this->jpeg_data_len_,
@@ -849,8 +853,6 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     // Silently handle decode errors - FFmpeg generates optimized Huffman tables
     // that ESP32-P4 hardware decoder doesn't support. Some frames will fail,
     // but successful frames will display normally.
-    static uint32_t decode_errors = 0;
-    static uint32_t consecutive_errors = 0;
     decode_errors++;
     consecutive_errors++;
 
@@ -860,19 +862,25 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                decode_errors, esp_err_to_name(ret));
     }
 
-    // CRITICAL: Prevent watchdog timeout on repeated errors
+    // CRITICAL: Prevent WiFi buffer exhaustion and watchdog timeout
+    // After 10 consecutive errors, pause to let WiFi drain buffers
+    if (consecutive_errors == 10) {
+      ESP_LOGD(TAG, "10 consecutive errors - pausing 200ms to let WiFi recover");
+      delay(200);  // Let WiFi drain buffers
+    }
+
+    // After 20 consecutive errors, longer pause for system recovery
     if (consecutive_errors >= 20) {
-      ESP_LOGD(TAG, "Multiple decode errors - yielding to prevent watchdog timeout");
-      delay(100);  // Let other tasks run, reset watchdog
-      consecutive_errors = 0;
+      ESP_LOGD(TAG, "20+ consecutive errors - pausing 500ms for full recovery");
+      delay(500);  // Longer pause for WiFi and watchdog
+      consecutive_errors = 0;  // Reset counter
     }
 
     return false;
   }
 
-  // Reset consecutive error counter on success
-  static uint32_t decode_errors_reset = 0;
-  decode_errors_reset = 0;
+  // Reset consecutive error counter on successful decode
+  consecutive_errors = 0;
 
   // Log first successful decode only
   static bool first_success = false;
