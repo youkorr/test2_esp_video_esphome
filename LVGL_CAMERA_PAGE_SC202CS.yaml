@@ -1,30 +1,30 @@
 # Page LVGL simplifiée pour caméra SC202CS
-# Résolution RECOMMANDÉE: 720P (1280x720) - testé et stable
-# IMPORTANT: 800x600 cause des saccades - évitez cette résolution !
+# Résolutions supportées: 800x600 (SVGA) ou 720P (1280x720)
+# 800x600 = Meilleure performance (moins de bande passante, meilleur FPS)
+# 720P = Plus haute résolution (consomme plus de ressources)
 # Contrôles: BACK, START, STOP, INFO
 
 # ============================================
-# VERSION 1: 720P (1280x720) - RECOMMANDÉ pour SC202CS
+# VERSION 1: SVGA 800x600 - RECOMMANDÉ pour meilleur FPS
 # ============================================
-# Note: 720P sera redimensionné pour s'adapter à l'écran 800x480
 lvgl:
   pages:
-    - id: camera_page_720p
+    - id: camera_page_svga
       bg_color: 0x000000
 
       on_load:
         - lambda: |-
-            ESP_LOGI("camera", "📸 Page caméra SC202CS 720P chargée");
-            ESP_LOGI("camera", "Canvas: 800x480 plein écran (redimensionné depuis 1280x720)");
+            ESP_LOGI("camera", "📸 Page caméra SC202CS SVGA chargée");
+            ESP_LOGI("camera", "Canvas: 800x480 (image 800x600 cropée en hauteur)");
 
             // Optionnel: démarrer automatiquement le streaming
             // Décommentez pour auto-start:
             // if (id(tab5_cam).start_streaming()) {
-            //   lv_label_set_text(id(status_label), "720P");
+            //   lv_label_set_text(id(status_label), "SVGA");
             // }
 
       widgets:
-        # Canvas 800x480 plein écran (image 720P redimensionnée)
+        # Canvas 800x480 plein écran (800x600 crop de 120px en hauteur)
         - canvas:
             id: camera_canvas
             width: 800
@@ -69,7 +69,7 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "▶️  START SC202CS");
                     if (id(tab5_cam).start_streaming()) {
-                      lv_label_set_text(id(status_label), "720P");
+                      lv_label_set_text(id(status_label), "SVGA");
                     }
             widgets:
               - label:
@@ -113,7 +113,7 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
                     ESP_LOGI("camera", "Sensor: SC202CS");
-                    ESP_LOGI("camera", "Résolution configurée: 1280x720 (720P)");
+                    ESP_LOGI("camera", "Résolution configurée: 800x600 (SVGA)");
 
                     // Résolution runtime
                     int w = id(tab5_cam).get_image_width();
@@ -126,10 +126,11 @@ lvgl:
                     }
 
                     ESP_LOGI("camera", "Format: RGB565 (converti depuis RAW8 BGGR)");
-                    ESP_LOGI("camera", "Canvas: 800x480 plein écran");
+                    ESP_LOGI("camera", "Canvas: 800x480 (crop 120px hauteur)");
                     ESP_LOGI("camera", "Bayer: BGGR (RAW8)");
-                    ESP_LOGI("camera", "Crop: Centré sur 1600x1200 (résolution native)");
-                    ESP_LOGI("camera", "MIPI: 1-lane CSI");
+                    ESP_LOGI("camera", "Capteur crop: 808x608 centré sur 1600x1200 → 800x600");
+                    ESP_LOGI("camera", "Timing: HTS=1920, VTS=1250, PCLK=72MHz → 30fps");
+                    ESP_LOGI("camera", "MIPI: 1-lane CSI @ 576 Mbps");
                     ESP_LOGI("camera", "Adresse I2C: 0x36");
             widgets:
               - label:
@@ -148,18 +149,13 @@ lvgl:
             text_font: nunito_20
 
 # ============================================
-# VERSION 2: 800x600 SVGA (NON RECOMMANDÉ - cause des saccades)
+# VERSION 2: 720P (1280x720) - Plus haute résolution
 # ============================================
-# AVERTISSEMENT: La résolution 800x600 cause des déformations et saccades
-# avec le SC202CS. Utilisez 720P à la place.
-#
-# Raison: Le format 800x600 est défini deux fois (driver natif + custom),
-# ce qui crée des conflits de timing.
-#
-# Si vous voulez absolument tester 800x600:
-# 1. Changez resolution: "720P" → resolution: "800x600" ci-dessous
-# 2. Ajustez le canvas à 800x600
-# 3. Attendez-vous à des problèmes de performance
+# Utilisez 720P si vous avez besoin de plus de détails
+# Note: Consomme plus de bande passante et réduit le FPS
+# Pour activer 720P:
+# 1. Changez resolution: "800x600" → resolution: "720P" ci-dessous
+# 2. Canvas reste 800x480 (redimensionnement automatique)
 
 # ============================================
 # CONFIGURATION CAMÉRA SC202CS
@@ -172,7 +168,7 @@ lvgl:
 #   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: sc202cs
 #   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
-#   resolution: "720P"         # ✅ RECOMMANDÉ (1280x720 - stable et testé)
+#   resolution: "800x600"      # ✅ RECOMMANDÉ (SVGA - meilleur FPS, moins de bande passante)
 #   pixel_format: RGB565
 #   framerate: 30
 
@@ -183,15 +179,16 @@ lvgl:
 #   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
 
 # NOTES IMPORTANTES SC202CS:
-# ✅ Résolution RECOMMANDÉE: 720P (1280x720) - format par défaut testé
-# ⚠️  ÉVITEZ 800x600 - cause des saccades et déformations (conflit de format)
+# ✅ Résolution RECOMMANDÉE: 800x600 (SVGA) - meilleur FPS et performance
+# ✅ Alternative: 720P (1280x720) - plus haute résolution mais FPS réduit
 # ❌ VGA 640x480 N'EST PAS SUPPORTÉ par ce capteur !
 #
 # Résolutions disponibles:
-#   - 720P (1280x720) @ 30fps - ✅ RECOMMANDÉ (format index 1, défaut driver)
-#   - 800x600 @ 30fps - ⚠️  Instable (format index 0, conflits)
+#   - 800x600 (SVGA) @ 30fps - ✅ RECOMMANDÉ (format index 0, économe)
+#   - 720P (1280x720) @ 30fps - ✅ OK (format index 1, défaut driver)
 #   - 1600x1200 @ 30fps - Résolution native complète (haute mémoire)
 #
-# Mémoire: 720P ≈ 1.8 MB, 800x600 ≈ 960 KB
-# SC202CS utilise 1-lane MIPI CSI (vs 2-lane pour OV5647/OV02C10)
-# Résolution native capteur: 1600x1200 (crop centré pour 720P et 800x600)
+# Mémoire: 800x600 ≈ 960 KB, 720P ≈ 1.8 MB
+# Bande passante: 800x600 ≈ 46 MB/s, 720P ≈ 88 MB/s
+# SC202CS utilise 1-lane MIPI CSI @ 576 Mbps (vs 2-lane pour OV5647/OV02C10)
+# Résolution native capteur: 1600x1200 (crop centré pour toutes résolutions)

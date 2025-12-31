@@ -806,12 +806,31 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // Custom Format Support (SC202CS @ 800x600) - DISABLED
+  // Custom Format Support (SC202CS @ 800x600)
   // ============================================================================
-  // NOTE: SC202CS 800x600 is already a NATIVE format in the driver (sc202cs.c, index 0)
-  // Applying it via VIDIOC_S_SENSOR_FMT causes conflicts and stuttering.
-  // Use 720P (1280x720) instead - it's the tested default format (index 1).
-  // ============================================================================
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    // SC202CS has native 800x600 format at index 0, but driver defaults to 720P (index 1)
+    // We MUST apply 800x600 via VIDIOC_S_SENSOR_FMT first, otherwise CSI validation fails
+    // with "format width or height is invalid" because sensor is still in 720P mode
+    if (width == 800 && height == 600) {
+      custom_format = &sc202cs_custom_format_800x600;
+      ESP_LOGI(TAG, "Applying SC202CS 800x600 format to sensor (required for CSI validation)");
+    }
+
+    // Apply sensor format BEFORE V4L2 format to pass CSI validation
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
+        ESP_LOGE(TAG, "   Falling back to driver default (720P may fail)");
+      } else {
+        ESP_LOGI(TAG, "SC202CS 800x600 sensor format applied successfully");
+        ESP_LOGI(TAG, "   Registers configured for 800x600 centered crop from 1600x1200");
+        custom_format_applied = true;
+      }
+    }
+  }
 
     // ============================================================================
   // Custom Format Support (OV02C10 @ 640x480, 800x600, 640x368, 480x640, or 1920x1080)
