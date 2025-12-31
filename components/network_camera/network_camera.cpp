@@ -1149,7 +1149,8 @@ bool NetworkCamera::connect_rtsp_stream_() {
     tv.tv_sec = 0;
     tv.tv_usec = 500000;  // 500ms
 
-    int sel_ret = select(this->rtsp_socket_ + 1, nullptr, &write_fds, nullptr, &tv);
+    // Use :: prefix to avoid macro conflicts with ESP-IDF's lwip select macro
+    int sel_ret = ::select(this->rtsp_socket_ + 1, nullptr, &write_fds, nullptr, &tv);
 
     if (sel_ret > 0) {
       // Check if connection succeeded
