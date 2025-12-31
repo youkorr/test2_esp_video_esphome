@@ -1103,7 +1103,8 @@ bool NetworkCamera::connect_rtsp_stream_() {
   ESP_LOGI(TAG, "Connecting to RTSP: %s:%u%s", host.c_str(), port, path.c_str());
 
   // Create TCP socket for RTSP
-  this->rtsp_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+  // Use lwip_socket() instead of socket() to avoid macro conflicts on ESP32-P4
+  this->rtsp_socket_ = lwip_socket(AF_INET, SOCK_STREAM, 0);
   if (this->rtsp_socket_ < 0) {
     ESP_LOGE(TAG, "Failed to create socket");
     return false;
@@ -1117,7 +1118,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
   struct hostent *he = gethostbyname(host.c_str());
   if (he == nullptr) {
     ESP_LOGE(TAG, "DNS resolution failed for %s", host.c_str());
-    close(this->rtsp_socket_);
+    lwip_close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
     return false;
   }
@@ -1130,10 +1131,11 @@ bool NetworkCamera::connect_rtsp_stream_() {
   fcntl(this->rtsp_socket_, F_SETFL, flags | O_NONBLOCK);
 
   // Start non-blocking connect
-  int ret = connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr));
+  // Use lwip_connect() instead of connect() to avoid macro conflicts on ESP32-P4
+  int ret = lwip_connect(this->rtsp_socket_, (struct sockaddr *)&server_addr, sizeof(server_addr));
   if (ret < 0 && errno != EINPROGRESS) {
     ESP_LOGE(TAG, "Failed to start connect: %s (errno %d)", strerror(errno), errno);
-    close(this->rtsp_socket_);
+    lwip_close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
     return false;
   }
@@ -1149,13 +1151,15 @@ bool NetworkCamera::connect_rtsp_stream_() {
     tv.tv_sec = 0;
     tv.tv_usec = 500000;  // 500ms
 
-    int sel_ret = select(this->rtsp_socket_ + 1, nullptr, &write_fds, nullptr, &tv);
+    // CRITICAL: Use lwip_select() instead of select() to avoid macro conflicts on ESP32-P4
+    // ESP32-P4 defines 'select' as a macro, which breaks the function call
+    int sel_ret = lwip_select(this->rtsp_socket_ + 1, nullptr, &write_fds, nullptr, &tv);
 
     if (sel_ret > 0) {
       // Check if connection succeeded
       int so_error;
       socklen_t len = sizeof(so_error);
-      getsockopt(this->rtsp_socket_, SOL_SOCKET, SO_ERROR, &so_error, &len);
+      lwip_getsockopt(this->rtsp_socket_, SOL_SOCKET, SO_ERROR, &so_error, &len);
 
       if (so_error == 0) {
         connected = true;
@@ -1176,7 +1180,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
 
   if (!connected) {
     ESP_LOGE(TAG, "Connection timeout");
-    close(this->rtsp_socket_);
+    lwip_close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
     return false;
   }
@@ -1188,8 +1192,8 @@ bool NetworkCamera::connect_rtsp_stream_() {
   struct timeval tv;
   tv.tv_sec = 5;
   tv.tv_usec = 0;
-  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  lwip_setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  lwip_setsockopt(this->rtsp_socket_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
   ESP_LOGI(TAG, "TCP connection established");
 
@@ -1296,7 +1300,7 @@ void NetworkCamera::disconnect_rtsp_stream_() {
       snprintf(session_header, sizeof(session_header), "Session: %s\r\n", this->rtsp_session_.c_str());
       this->send_rtsp_request_("TEARDOWN", this->url_, session_header);
     }
-    close(this->rtsp_socket_);
+    lwip_close(this->rtsp_socket_);
     this->rtsp_socket_ = -1;
   }
   this->stream_connected_ = false;
@@ -1328,14 +1332,14 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
            "\r\n",
            method.c_str(), url.c_str(), this->cseq_++, auth_header.c_str(), extra_headers.c_str());
 
-  if (send(this->rtsp_socket_, request, strlen(request), 0) < 0) {
+  if (lwip_send(this->rtsp_socket_, request, strlen(request), 0) < 0) {
     ESP_LOGE(TAG, "Failed to send RTSP %s", method.c_str());
     return false;
   }
 
   // Receive response
   char response[4096];  // Increased size for SDP content
-  int len = recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
+  int len = lwip_recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
   if (len <= 0) {
     ESP_LOGE(TAG, "Failed to receive RTSP response");
     return false;
@@ -1385,7 +1389,7 @@ bool NetworkCamera::fetch_rtp_frame_() {
 
   while (!frame_complete) {
     // Read interleaved header
-    ssize_t len = recv(this->rtsp_socket_, header, 4, MSG_PEEK);
+    ssize_t len = lwip_recv(this->rtsp_socket_, header, 4, MSG_PEEK);
     if (len <= 0) {
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
         break;  // No more data available
@@ -1401,7 +1405,7 @@ bool NetworkCamera::fetch_rtp_frame_() {
     if (header[0] != '$') {
       // Skip non-interleaved data (could be RTSP response)
       char skip[1];
-      recv(this->rtsp_socket_, skip, 1, 0);
+      lwip_recv(this->rtsp_socket_, skip, 1, 0);
       continue;
     }
 
@@ -1411,9 +1415,9 @@ bool NetworkCamera::fetch_rtp_frame_() {
     if (rtp_len > sizeof(rtp_packet)) {
       ESP_LOGW(TAG, "RTP packet too large: %u", rtp_len);
       // Consume the header and skip the packet
-      recv(this->rtsp_socket_, header, 4, 0);
+      lwip_recv(this->rtsp_socket_, header, 4, 0);
       while (rtp_len > 0) {
-        ssize_t skip = recv(this->rtsp_socket_, rtp_packet,
+        ssize_t skip = lwip_recv(this->rtsp_socket_, rtp_packet,
                            rtp_len > sizeof(rtp_packet) ? sizeof(rtp_packet) : rtp_len, 0);
         if (skip <= 0) break;
         rtp_len -= skip;
@@ -1422,12 +1426,12 @@ bool NetworkCamera::fetch_rtp_frame_() {
     }
 
     // Consume the header
-    recv(this->rtsp_socket_, header, 4, 0);
+    lwip_recv(this->rtsp_socket_, header, 4, 0);
 
     // Read RTP packet
     ssize_t received = 0;
     while (received < rtp_len) {
-      len = recv(this->rtsp_socket_, rtp_packet + received, rtp_len - received, 0);
+      len = lwip_recv(this->rtsp_socket_, rtp_packet + received, rtp_len - received, 0);
       if (len <= 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
           break;
