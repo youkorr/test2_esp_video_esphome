@@ -1,33 +1,34 @@
 # Page LVGL simplifiée pour caméra SC202CS
-# Résolutions disponibles: 640x480 (VGA) ou 720P
+# Résolutions supportées: 800x600 (natif SVGA) ou 720P (1280x720)
+# IMPORTANT: SC202CS ne supporte PAS 640x480 VGA !
 # Contrôles: BACK, START, STOP, INFO
 
 # ============================================
-# VERSION 1: VGA 640x480 (recommandé pour petits écrans)
+# VERSION 1: SVGA 800x600 (recommandé - résolution native SC202CS)
 # ============================================
 lvgl:
   pages:
-    - id: camera_page_vga
+    - id: camera_page_svga
       bg_color: 0x000000
 
       on_load:
         - lambda: |-
-            ESP_LOGI("camera", "📸 Page caméra SC202CS VGA chargée");
-            ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
+            ESP_LOGI("camera", "📸 Page caméra SC202CS SVGA chargée");
+            ESP_LOGI("camera", "Canvas: 800x600 plein écran");
 
             // Optionnel: démarrer automatiquement le streaming
             // Décommentez pour auto-start:
             // if (id(tab5_cam).start_streaming()) {
-            //   lv_label_set_text(id(status_label), "VGA");
+            //   lv_label_set_text(id(status_label), "SVGA");
             // }
 
       widgets:
-        # Canvas VGA centré sur écran 800x480
+        # Canvas SVGA 800x600 (dépasse de 120px en hauteur - scroll ou crop nécessaire)
         - canvas:
             id: camera_canvas
-            width: 640
-            height: 480
-            x: 80   # Centré: (800-640)/2 = 80
+            width: 800
+            height: 600
+            x: 0    # Plein écran largeur
             y: 0
             bg_color: 0x000000
 
@@ -67,7 +68,7 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "▶️  START SC202CS");
                     if (id(tab5_cam).start_streaming()) {
-                      lv_label_set_text(id(status_label), "VGA");
+                      lv_label_set_text(id(status_label), "SVGA");
                     }
             widgets:
               - label:
@@ -111,7 +112,7 @@ lvgl:
                 - lambda: |-
                     ESP_LOGI("camera", "📊 === INFORMATIONS CAMÉRA ===");
                     ESP_LOGI("camera", "Sensor: SC202CS");
-                    ESP_LOGI("camera", "Résolution configurée: 640x480 (VGA)");
+                    ESP_LOGI("camera", "Résolution configurée: 800x600 (SVGA)");
 
                     // Résolution runtime
                     int w = id(tab5_cam).get_image_width();
@@ -123,11 +124,11 @@ lvgl:
                       ESP_LOGI("camera", "Streaming: ARRÊTÉ");
                     }
 
-                    ESP_LOGI("camera", "Format: RGB565 RAW8");
-                    ESP_LOGI("camera", "Canvas: 640x480 centré (x=80)");
-                    ESP_LOGI("camera", "Bayer: BGGR");
-                    ESP_LOGI("camera", "Binning: 2x2 (de 1600x1200)");
-                    ESP_LOGI("camera", "MIPI: 1-lane");
+                    ESP_LOGI("camera", "Format: RGB565 (converti depuis RAW8 BGGR)");
+                    ESP_LOGI("camera", "Canvas: 800x600 plein écran");
+                    ESP_LOGI("camera", "Bayer: BGGR (RAW8)");
+                    ESP_LOGI("camera", "Crop: Centré sur 1600x1200 (résolution native)");
+                    ESP_LOGI("camera", "MIPI: 1-lane CSI");
                     ESP_LOGI("camera", "Adresse I2C: 0x36");
             widgets:
               - label:
@@ -200,7 +201,7 @@ lvgl:
 #   i2c_id: bsp_bus            # ← CHANGEZ selon votre configuration I2C
 #   sensor_type: sc202cs
 #   sensor_addr: 0x36          # OV02C10, OV5647, SC202CS = tous 0x36
-#   resolution: "VGA"          # Utilise custom format VGA
+#   resolution: "800x600"      # Résolution native SVGA (ou "720P" pour 1280x720)
 #   pixel_format: RGB565
 #   framerate: 30
 
@@ -210,7 +211,9 @@ lvgl:
 #   canvas_id: camera_canvas
 #   update_interval: 100ms     # 10 FPS (évite watchdog timeout)
 
-# NOTES:
-# - VGA (640x480) recommandé pour petits écrans (4-5")
-# - Mémoire VGA: ~600 KB vs 1.8 MB pour 720P
-# - SC202CS utilise 1-lane MIPI (vs 2-lane pour OV5647/OV02C10)
+# NOTES IMPORTANTES SC202CS:
+# - Résolutions supportées: 800x600 (SVGA natif) ou 1280x720 (720P)
+# - ATTENTION: VGA 640x480 N'EST PAS SUPPORTÉ par ce capteur !
+# - Mémoire SVGA: ~960 KB vs 1.8 MB pour 720P
+# - SC202CS utilise 1-lane MIPI CSI (vs 2-lane pour OV5647/OV02C10)
+# - Résolution native: 1600x1200 (crop centré pour 800x600 et 720P)
