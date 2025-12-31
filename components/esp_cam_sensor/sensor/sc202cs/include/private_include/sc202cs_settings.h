@@ -141,8 +141,9 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw10_1600x900_30fps[] = 
     {0x320F, 0xE2}, {SC202CS_REG_END, 0x00},
 };
 
-// Native 800x600 @ 30fps using centered crop (NO VTS/HTS - use sensor defaults like 1280x720)
+// Native 800x600 @ 30fps using centered crop with explicit HTS/VTS timing
 // SC202CS does NOT support hardware binning - this is a centered CROP
+// HTS=1920, VTS=1250 for stable 30fps (72MHz / (1920*1250) = 30.0fps)
 static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x0103, 0x01},          {SC202CS_REG_SLEEP_MODE, 0x00},
     {0x36e9, 0x80},          {0x36ea, 0x06},
@@ -167,6 +168,12 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x3211, 0x04},
     {0x3212, 0x00},          /* y offset = 4 */
     {0x3213, 0x04},
+    /* Frame timing - CRITICAL for 30fps stability */
+    /* FPS = pclk / (HTS * VTS) = 72MHz / (1920 * 1250) = 30fps */
+    {0x320c, 0x07},          /* HTS MSB = 1920 (0x0780) */
+    {0x320d, 0x80},          /* HTS LSB */
+    {0x320e, 0x04},          /* VTS MSB = 1250 (0x04E2) */
+    {0x320f, 0xe2},          /* VTS LSB */
     /* Analog settings identical to 1280x720 */
     {0x3301, 0xff},
     {0x3304, 0x68},          {0x3306, 0x40},
