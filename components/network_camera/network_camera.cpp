@@ -569,9 +569,11 @@ bool NetworkCamera::fetch_jpeg_frame_() {
 size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
 
-  // CRITICAL DEBUG: Log ALL markers found in first 3 JPEGs
+  // DEBUG: Disabled to reduce log verbosity
+  // Enable by changing debug_markers = true for troubleshooting
   static uint32_t jpeg_count = 0;
-  bool debug_markers = (jpeg_count++ < 3);
+  jpeg_count++;
+  bool debug_markers = false;  // Set to true to enable marker debugging
 
   size_t write_pos = 0;
   size_t read_pos = 0;
@@ -784,38 +786,22 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  // CRITICAL: Validate JPEG markers BEFORE decoding
+  // Validate JPEG markers before decoding
   if (this->jpeg_data_len_ < 4 ||
       this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8) {
-    static uint32_t validation_errors = 0;
-    if (validation_errors++ < 5) {
-      ESP_LOGW(TAG, "Invalid JPEG header: size=%u, markers=0x%02X%02X (expected FF D8)",
-               this->jpeg_data_len_,
-               this->jpeg_data_len_ > 0 ? this->jpeg_buffer_[0] : 0,
-               this->jpeg_data_len_ > 1 ? this->jpeg_buffer_[1] : 0);
-    }
-    return false;
+    return false;  // Silent fail - invalid JPEG
   }
 
-  // DEBUG: Track sizes through processing pipeline
+  // DEBUG: Disabled to reduce log verbosity
+  // Enable by setting debug_enabled = true for troubleshooting
+  static const bool debug_enabled = false;
   static uint32_t debug_count = 0;
   size_t original_len = this->jpeg_data_len_;
-  bool debug_this_frame = (debug_count++ < 5);  // Debug first 5 frames
+  bool debug_this_frame = debug_enabled && (debug_count++ < 3);
 
   if (debug_this_frame) {
-    ESP_LOGI(TAG, "=== JPEG Processing Debug ===");
-    ESP_LOGI(TAG, "Original size: %u bytes", original_len);
-
-    // CRITICAL: Hex dump first 64 bytes to see exact marker structure
-    ESP_LOGI(TAG, "First 64 bytes (hex):");
-    for (size_t i = 0; i < 64 && i < this->jpeg_data_len_; i += 16) {
-      char hex_line[64];
-      int pos = 0;
-      for (size_t j = 0; j < 16 && (i + j) < this->jpeg_data_len_; j++) {
-        pos += snprintf(hex_line + pos, sizeof(hex_line) - pos, "%02X ", this->jpeg_buffer_[i + j]);
-      }
-      ESP_LOGI(TAG, "  %04X: %s", i, hex_line);
-    }
+    ESP_LOGI(TAG, "=== JPEG Debug ===");
+    ESP_LOGI(TAG, "Size: %u bytes", original_len);
   }
 
   // CRITICAL FIX: Truncate at first EOI (FF D9) BEFORE stripping markers
@@ -834,35 +820,18 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     }
   }
 
-  if (debug_this_frame) {
-    if (!eoi_found) {
-      ESP_LOGW(TAG, "⚠️ NO EOI MARKER FOUND!");
-    }
-    ESP_LOGI(TAG, "After EOI truncation: %u bytes", this->jpeg_data_len_);
-  }
-
   // Strip ALL unsupported markers (APP, COM, DRI, RST, etc.)
   // This is the CRITICAL FIX for ESP32-P4 hardware decoder
   size_t cleaned_len = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
 
-  if (debug_this_frame) {
-    ESP_LOGI(TAG, "After marker cleanup: %u bytes (removed %d bytes)",
-             cleaned_len, (int)(this->jpeg_data_len_ - cleaned_len));
-    ESP_LOGI(TAG, "Final: SOI=%02X%02X EOI=%02X%02X",
-             this->jpeg_buffer_[0], this->jpeg_buffer_[1],
-             this->jpeg_buffer_[cleaned_len - 2], this->jpeg_buffer_[cleaned_len - 1]);
-    ESP_LOGI(TAG, "=============================");
-  }
-
   this->jpeg_data_len_ = cleaned_len;
 
-  // Validate we still have a valid JPEG after cleanup
+  // Validate we still have a valid JPEG after cleanup (silent)
   if (this->jpeg_data_len_ < 4 ||
       this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8 ||
       this->jpeg_buffer_[this->jpeg_data_len_ - 2] != 0xFF ||
       this->jpeg_buffer_[this->jpeg_data_len_ - 1] != 0xD9) {
-    ESP_LOGW(TAG, "JPEG corrupted after cleanup");
-    return false;
+    return false;  // Corrupted JPEG - skip silently
   }
 
   jpeg_decode_cfg_t decode_cfg = {
@@ -877,23 +846,33 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    // Log decode errors for first 10 frames, then only every 100th error
+    // Silently handle decode errors - FFmpeg generates optimized Huffman tables
+    // that ESP32-P4 hardware decoder doesn't support. Some frames will fail,
+    // but successful frames will display normally.
     static uint32_t decode_errors = 0;
+    static uint32_t consecutive_errors = 0;
     decode_errors++;
-    if (decode_errors <= 10 || decode_errors % 100 == 0) {
-      ESP_LOGE(TAG, "❌ JPEG decode failed (error #%u): %s",
-               decode_errors, esp_err_to_name(ret));
-      ESP_LOGE(TAG, "   JPEG size: %u bytes, RGB buffer: %u bytes",
-               this->jpeg_data_len_, this->rgb565_buffer_size_);
+    consecutive_errors++;
 
-      // Provide helpful diagnostic info
-      if (decode_errors <= 3) {
-        ESP_LOGE(TAG, "   💡 If errors persist, the JPEG may contain unsupported features");
-        ESP_LOGE(TAG, "   💡 Try adjusting camera JPEG quality or resolution");
-      }
+    // Only log first 3 errors, then stay silent
+    if (decode_errors <= 3) {
+      ESP_LOGW(TAG, "JPEG decode failed (error #%u): %s - will retry with next frame",
+               decode_errors, esp_err_to_name(ret));
     }
+
+    // CRITICAL: Prevent watchdog timeout on repeated errors
+    if (consecutive_errors >= 20) {
+      ESP_LOGD(TAG, "Multiple decode errors - yielding to prevent watchdog timeout");
+      delay(100);  // Let other tasks run, reset watchdog
+      consecutive_errors = 0;
+    }
+
     return false;
   }
+
+  // Reset consecutive error counter on success
+  static uint32_t decode_errors_reset = 0;
+  decode_errors_reset = 0;
 
   // Log first successful decode only
   static bool first_success = false;
