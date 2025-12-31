@@ -234,7 +234,7 @@ bool MipiDSICamComponent::init_ppa_() {
 
   ppa_client_config_t ppa_config = {};
   ppa_config.oper_type = PPA_OPERATION_SRM;
-  ppa_config.max_pending_trans_num = 16;
+  ppa_config.max_pending_trans_num = 1;  // Match M5Stack (was 16)
 
   esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
   if (ret != ESP_OK) {
@@ -349,7 +349,7 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   srm_config.mirror_y = this->mirror_y_;
   srm_config.rgb_swap = false;
   srm_config.byte_swap = false;
-  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+  srm_config.mode = PPA_TRANS_MODE_BLOCKING;  // Blocking mode (same as M5Stack)
 
   // LOG PPA configuration only once (first frame)
   static bool ppa_config_logged = false;
