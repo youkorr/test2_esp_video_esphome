@@ -806,12 +806,31 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
 
   // ============================================================================
-  // SC202CS @ 800x600 - Now uses NATIVE driver format (no custom format needed)
+  // Custom Format Support (SC202CS @ 800x600)
   // ============================================================================
-  // The 800x600 format is now complete in sc202cs_settings.h with HTS/VTS timing.
-  // Driver will automatically select index 0 (800x600) when this resolution is requested.
-  // No need for VIDIOC_S_SENSOR_FMT custom format application.
-  // ============================================================================
+  // Even with HTS/VTS registers added to native format, we still need to force
+  // the driver to switch from default 720P (index 1) to 800x600 (index 0).
+  // The driver won't enumerate 800x600 unless it's already in that mode.
+  if (this->sensor_name_ == "sc202cs") {
+    const esp_cam_sensor_format_t *custom_format = nullptr;
+
+    if (width == 800 && height == 600) {
+      custom_format = &sc202cs_custom_format_800x600;
+      ESP_LOGI(TAG, "Forcing SC202CS to 800x600 format (index 0) with VIDIOC_S_SENSOR_FMT");
+    }
+
+    // Apply sensor format to switch from default 720P to 800x600
+    if (custom_format != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed for SC202CS: %s", strerror(errno));
+        ESP_LOGE(TAG, "   Cannot switch to 800x600, staying in 720P");
+      } else {
+        ESP_LOGI(TAG, "SC202CS switched to 800x600 format successfully");
+        ESP_LOGI(TAG, "   Native format with HTS=1920, VTS=1250 for stable 30fps");
+        custom_format_applied = true;
+      }
+    }
+  }
 
     // ============================================================================
   // Custom Format Support (OV02C10 @ 640x480, 800x600, 640x368, 480x640, or 1920x1080)
