@@ -440,7 +440,11 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   ESP_LOGI(TAG, "MJPEG stream connected (HTTP buffer: 128KB, JPEG buffer: %u bytes)", this->jpeg_buffer_size_);
 
   this->stream_connected_ = true;
+  this->stream_connect_time_ = millis();  // Record connection time
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
+
+  ESP_LOGI(TAG, "Stream connected at %u ms (will reconnect every %u seconds)",
+           this->stream_connect_time_, this->stream_reconnect_interval_ / 1000);
 
   return true;
 }
@@ -457,6 +461,22 @@ void NetworkCamera::disconnect_mjpeg_stream_() {
 bool NetworkCamera::fetch_jpeg_frame_() {
   if (!this->stream_connected_ || this->http_client_ == nullptr) {
     return false;
+  }
+
+  // CRITICAL: Periodic stream reconnection to prevent WiFi buffer exhaustion
+  // After 3 minutes of continuous streaming, reconnect to reset WiFi state
+  uint32_t now = millis();
+  if (now - this->stream_connect_time_ > this->stream_reconnect_interval_) {
+    ESP_LOGI(TAG, "Periodic reconnect after %u seconds - resetting WiFi and decoder state",
+             (now - this->stream_connect_time_) / 1000);
+    this->disconnect_mjpeg_stream_();
+    delay(500);  // Let WiFi fully reset
+    if (this->connect_mjpeg_stream_()) {
+      ESP_LOGI(TAG, "Stream reconnected successfully");
+    } else {
+      ESP_LOGW(TAG, "Stream reconnection failed - will retry");
+      return false;
+    }
   }
 
   // OPTIMIZATION: Use larger buffers for better throughput and prevent JPEG truncation

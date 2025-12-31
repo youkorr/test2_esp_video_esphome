@@ -94,6 +94,8 @@ class NetworkCamera : public Component {
   // HTTP client (MJPEG)
   esp_http_client_handle_t http_client_{nullptr};
   bool stream_connected_{false};
+  uint32_t stream_connect_time_{0};  // Time when stream was connected
+  uint32_t stream_reconnect_interval_{180000};  // Reconnect every 3 minutes (180 seconds)
 
   // MJPEG parsing state
   enum class MjpegState {
