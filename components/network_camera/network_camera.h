@@ -71,6 +71,11 @@ class NetworkCamera : public Component {
   uint32_t connection_retry_delay_{15000};  // 15 seconds initial delay
   uint8_t connection_attempts_{0};
 
+  // Network quality adaptation
+  uint32_t last_quality_check_{0};
+  uint32_t quality_check_interval_{5000};  // Check every 5 seconds
+  uint8_t current_quality_level_{1};  // 0=low, 1=medium, 2=high
+
   // JPEG decoder
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
@@ -86,9 +91,16 @@ class NetworkCamera : public Component {
   size_t jpeg_buffer_size_{0};
   size_t jpeg_data_len_{0};
 
+  // MJPEG parse buffer (dynamically allocated in PSRAM to save SRAM)
+  uint8_t *parse_buffer_{nullptr};
+  size_t parse_buffer_size_{0};
+  size_t parse_buffer_len_{0};
+
   // HTTP client (MJPEG)
   esp_http_client_handle_t http_client_{nullptr};
   bool stream_connected_{false};
+  uint32_t stream_connect_time_{0};  // Time when stream was connected
+  uint32_t stream_reconnect_interval_{180000};  // Reconnect every 3 minutes (180 seconds)
 
   // MJPEG parsing state
   enum class MjpegState {
@@ -131,9 +143,12 @@ class NetworkCamera : public Component {
 
   // Common methods
   bool init_buffers_();
+  void free_buffers_();  // Free PSRAM buffers when camera is disabled
   bool init_jpeg_decoder_();
   void update_canvas_();
   void swap_buffers_();
+  void check_network_quality_();  // Monitor network conditions
+  void adapt_to_network_();
 
   // MJPEG methods
   bool connect_mjpeg_stream_();

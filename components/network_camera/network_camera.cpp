@@ -17,8 +17,11 @@ namespace network_camera {
 
 static const char *const TAG = "network_camera";
 
-// Maximum buffer sizes
-static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG
+// Maximum buffer sizes - adaptive based on resolution
+// Small resolution (640x480): 128KB JPEG buffer
+// Medium resolution (1280x720): 256KB JPEG buffer
+// Large resolution (1920x1080): 512KB JPEG buffer
+static const size_t MAX_JPEG_SIZE = 512 * 1024;  // 512KB for JPEG (max)
 static const size_t MAX_H264_SIZE = 256 * 1024;  // 256KB for H264 NAL units
 
 void NetworkCamera::setup() {
@@ -94,6 +97,27 @@ void NetworkCamera::loop() {
     this->connection_attempts_++;
     this->last_connection_attempt_ = now;
 
+    // CRITICAL: Check if buffers need to be reallocated (after being freed when camera was disabled)
+    if (this->rgb565_buffer_a_ == nullptr || this->rgb565_buffer_b_ == nullptr) {
+      ESP_LOGI(TAG, "Buffers were freed, reallocating...");
+      if (!this->init_buffers_()) {
+        ESP_LOGE(TAG, "Failed to reallocate buffers");
+        return;
+      }
+      // Also reinit decoder
+      if (this->protocol_ == Protocol::MJPEG) {
+        if (!this->init_jpeg_decoder_()) {
+          ESP_LOGE(TAG, "Failed to reinitialize JPEG decoder");
+          return;
+        }
+      } else {
+        if (!this->init_h264_decoder_()) {
+          ESP_LOGE(TAG, "Failed to reinitialize H264 decoder");
+          return;
+        }
+      }
+    }
+
     bool connected = false;
     if (this->protocol_ == Protocol::MJPEG) {
       connected = this->connect_mjpeg_stream_();
@@ -132,7 +156,75 @@ void NetworkCamera::loop() {
       this->disconnect_rtsp_stream_();
     }
 
-    ESP_LOGI(TAG, "Network Camera display stopped");
+    // CRITICAL: Free PSRAM buffers when camera is disabled to prevent memory overflow
+    // This releases ~1.5MB of PSRAM (RGB565 buffers + JPEG buffer + parse buffer)
+    ESP_LOGI(TAG, "Freeing PSRAM buffers...");
+    this->free_buffers_();
+
+    ESP_LOGI(TAG, "Network Camera display stopped and buffers freed");
+  }
+}
+
+void NetworkCamera::check_network_quality_() {
+  // Check network quality periodically
+  uint32_t now = millis();
+  if (now - this->last_quality_check_ < this->quality_check_interval_) {
+    return;
+  }
+  this->last_quality_check_ = now;
+
+  // Get WiFi RSSI as network quality indicator
+  auto wifi_component = wifi::global_wifi_component;
+  if (wifi_component == nullptr || !wifi_component->is_connected()) {
+    return;
+  }
+
+  int32_t rssi = wifi_component->wifi_rssi();
+  uint8_t old_level = this->current_quality_level_;
+
+  // Classify network quality based on RSSI
+  // Excellent (>= -50 dBm), Good (-50 to -70 dBm), Poor (< -70 dBm)
+  if (rssi >= -50) {
+    this->current_quality_level_ = 2;  // High quality
+  } else if (rssi >= -70) {
+    this->current_quality_level_ = 1;  // Medium quality
+  } else {
+    this->current_quality_level_ = 0;  // Low quality
+  }
+
+  // Log quality changes
+  if (old_level != this->current_quality_level_) {
+    const char *quality_names[] = {"LOW", "MEDIUM", "HIGH"};
+    ESP_LOGI(TAG, "Network quality changed: %s → %s (RSSI: %d dBm)",
+             quality_names[old_level], quality_names[this->current_quality_level_], rssi);
+    this->adapt_to_network_();
+  }
+}
+
+void NetworkCamera::adapt_to_network_() {
+  // Adapt update interval based on network quality
+  // This reduces CPU load and network bandwidth on poor connections
+  uint32_t old_interval = this->update_interval_;
+
+  switch (this->current_quality_level_) {
+    case 0:  // Low quality - reduce frame rate
+      this->update_interval_ = 200;  // ~5 FPS
+      ESP_LOGI(TAG, "Adapting to LOW network: 5 FPS");
+      break;
+    case 1:  // Medium quality - normal frame rate
+      this->update_interval_ = 100;  // ~10 FPS
+      ESP_LOGI(TAG, "Adapting to MEDIUM network: 10 FPS");
+      break;
+    case 2:  // High quality - maximum frame rate
+      this->update_interval_ = 66;   // ~15 FPS
+      ESP_LOGI(TAG, "Adapting to HIGH network: 15 FPS");
+      break;
+  }
+
+  // Update LVGL timer period if active
+  if (this->lvgl_timer_ != nullptr && old_interval != this->update_interval_) {
+    lv_timer_set_period(this->lvgl_timer_, this->update_interval_);
+    ESP_LOGI(TAG, "Timer period updated: %u ms → %u ms", old_interval, this->update_interval_);
   }
 }
 
@@ -141,6 +233,9 @@ void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
   if (cam == nullptr || !cam->stream_connected_) {
     return;
   }
+
+  // Check and adapt to network quality
+  cam->check_network_quality_();
 
   bool frame_ready = false;
 
@@ -217,14 +312,65 @@ bool NetworkCamera::init_buffers_() {
   this->current_decode_buffer_ = this->rgb565_buffer_b_;
 
   if (this->protocol_ == Protocol::MJPEG) {
-    // Allocate JPEG receive buffer
-    this->jpeg_buffer_size_ = MAX_JPEG_SIZE;
-    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(this->jpeg_buffer_size_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    // OPTIMIZATION: Adaptive buffer sizing based on resolution (from webdavbox3 pattern)
+    // 640x480 (307K pixels): 128KB buffer
+    // 1280x720 (922K pixels): 256KB buffer
+    // 1920x1080+ (2M+ pixels): 512KB buffer
+    uint32_t pixel_count = this->width_ * this->height_;
+    if (pixel_count <= 640 * 480) {
+      this->jpeg_buffer_size_ = 128 * 1024;  // 128KB for small resolution
+    } else if (pixel_count <= 1280 * 720) {
+      this->jpeg_buffer_size_ = 256 * 1024;  // 256KB for medium resolution
+    } else {
+      this->jpeg_buffer_size_ = 512 * 1024;  // 512KB for large resolution
+    }
+
+    ESP_LOGI(TAG, "Adaptive JPEG buffer size for %ux%u: %u bytes",
+             this->width_, this->height_, this->jpeg_buffer_size_);
+
+    // OPTIMIZATION: PSRAM-first allocation strategy with fallback (from webdavbox3)
+    bool using_psram = false;
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+    if (free_psram > this->jpeg_buffer_size_) {
+      this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
+                                                               MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      using_psram = true;
+    }
+
+    // Fallback to internal RAM if PSRAM allocation failed
+    if (this->jpeg_buffer_ == nullptr) {
+      ESP_LOGW(TAG, "PSRAM allocation failed (free: %u bytes), trying internal RAM fallback", free_psram);
+      this->jpeg_buffer_ = (uint8_t *)heap_caps_aligned_alloc(64, this->jpeg_buffer_size_,
+                                                               MALLOC_CAP_8BIT);
+      using_psram = false;
+    }
 
     if (this->jpeg_buffer_ == nullptr) {
-      ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes)", this->jpeg_buffer_size_);
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer (%u bytes) in both PSRAM and internal RAM",
+               this->jpeg_buffer_size_);
       return false;
     }
+
+    ESP_LOGI(TAG, "Allocated 64-byte aligned JPEG buffer in %s: %u bytes (free PSRAM: %u bytes)",
+             using_psram ? "PSRAM" : "internal RAM", this->jpeg_buffer_size_, free_psram);
+
+    // CRITICAL: Allocate parse buffer in PSRAM to save SRAM (was 128KB static in SRAM!)
+    // Parse buffer must be LARGER than JPEG buffer to handle:
+    // - Incomplete JPEG from previous chunk
+    // - MJPEG HTTP headers/boundaries
+    // - New chunk data (16KB)
+    // Camera motion generates 80-150KB JPEGs, so parse buffer needs to be 2x JPEG buffer!
+    this->parse_buffer_size_ = this->jpeg_buffer_size_ * 2;  // 2x JPEG buffer (256KB for 640x480)
+    this->parse_buffer_ = (uint8_t *)heap_caps_malloc(this->parse_buffer_size_,
+                                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (this->parse_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate parse buffer (%u bytes) in PSRAM", this->parse_buffer_size_);
+      return false;
+    }
+    this->parse_buffer_len_ = 0;  // Reset parse buffer length
+    ESP_LOGI(TAG, "Allocated parse buffer in PSRAM: %u bytes (2x JPEG buffer, saves SRAM!)",
+             this->parse_buffer_size_);
   } else {
     // Allocate H264 and YUV buffers
     this->h264_buffer_size_ = MAX_H264_SIZE;
@@ -244,10 +390,59 @@ bool NetworkCamera::init_buffers_() {
   return true;
 }
 
+void NetworkCamera::free_buffers_() {
+  // Free RGB565 buffers
+  if (this->rgb565_buffer_a_ != nullptr) {
+    free(this->rgb565_buffer_a_);
+    this->rgb565_buffer_a_ = nullptr;
+  }
+  if (this->rgb565_buffer_b_ != nullptr) {
+    free(this->rgb565_buffer_b_);
+    this->rgb565_buffer_b_ = nullptr;
+  }
+
+  // Free JPEG buffer
+  if (this->jpeg_buffer_ != nullptr) {
+    free(this->jpeg_buffer_);
+    this->jpeg_buffer_ = nullptr;
+  }
+
+  // Free parse buffer (CRITICAL: saves 128KB SRAM!)
+  if (this->parse_buffer_ != nullptr) {
+    free(this->parse_buffer_);
+    this->parse_buffer_ = nullptr;
+  }
+
+  // Free H264 buffers
+  if (this->h264_buffer_ != nullptr) {
+    free(this->h264_buffer_);
+    this->h264_buffer_ = nullptr;
+  }
+  if (this->yuv_buffer_ != nullptr) {
+    free(this->yuv_buffer_);
+    this->yuv_buffer_ = nullptr;
+  }
+
+  // Reset buffer sizes
+  this->rgb565_buffer_size_ = 0;
+  this->jpeg_buffer_size_ = 0;
+  this->parse_buffer_size_ = 0;
+  this->parse_buffer_len_ = 0;
+  this->h264_buffer_size_ = 0;
+  this->yuv_buffer_size_ = 0;
+
+  // Log freed memory
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t free_sram = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  ESP_LOGI(TAG, "Buffers freed - Free PSRAM: %u bytes (%.2f MB), Free SRAM: %u bytes (%.2f KB)",
+           free_psram, free_psram / 1024.0 / 1024.0,
+           free_sram, free_sram / 1024.0);
+}
+
 bool NetworkCamera::init_jpeg_decoder_() {
   jpeg_decode_engine_cfg_t decode_eng_cfg = {
       .intr_priority = 0,
-      .timeout_ms = 100,  // 100ms timeout - same as simple_video_player (was 40ms - too short for network streams!)
+      .timeout_ms = 200,  // 200ms timeout - increased for network streams with variable latency
   };
 
   esp_err_t ret = jpeg_new_decoder_engine(&decode_eng_cfg, &this->jpeg_decoder_);
@@ -256,7 +451,7 @@ bool NetworkCamera::init_jpeg_decoder_() {
     return false;
   }
 
-  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=100ms, optimized for network streams)");
+  ESP_LOGI(TAG, "JPEG hardware decoder initialized (timeout=200ms, optimized for network streams)");
   return true;
 }
 
@@ -293,7 +488,10 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   esp_http_client_config_t config = {};
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
-  config.buffer_size = 4096;
+  // OPTIMIZATION: Larger receive buffer for better throughput (from webdavbox3 pattern)
+  // Increased to 128KB to handle large JPEGs when camera moves/rotates
+  // Static camera: ~20-40KB JPEGs, Moving camera: ~80-150KB JPEGs
+  config.buffer_size = 131072;  // 128KB - handles complex scenes and camera motion
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -322,8 +520,23 @@ bool NetworkCamera::connect_mjpeg_stream_() {
     return false;
   }
 
+  // NOTE: Socket-level optimizations (TCP_NODELAY, SO_RCVBUF) are not available
+  // because esp_http_client doesn't expose the underlying socket descriptor.
+  // The esp_http_client_config_t provides timeout_ms and buffer_size options,
+  // which are already configured above (timeout=5s, buffer=128KB).
+  //
+  // OPTIMIZATIONS APPLIED:
+  // - HTTP client buffer: 128KB (handles moving camera JPEGs 80-150KB)
+  // - Parse buffer: 128KB in fetch_jpeg_frame_()
+  // - Read chunks: 16KB
+  ESP_LOGI(TAG, "MJPEG stream connected (HTTP buffer: 128KB, JPEG buffer: %u bytes)", this->jpeg_buffer_size_);
+
   this->stream_connected_ = true;
+  this->stream_connect_time_ = millis();  // Record connection time
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
+
+  ESP_LOGI(TAG, "Stream connected at %u ms (will reconnect every %u seconds)",
+           this->stream_connect_time_, this->stream_reconnect_interval_ / 1000);
 
   return true;
 }
@@ -342,9 +555,38 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  uint8_t temp_buffer[4096];
-  static uint8_t parse_buffer[8192];
-  static size_t parse_buffer_len = 0;
+  // CRITICAL: Periodic stream reconnection to prevent WiFi buffer exhaustion
+  // After 3 minutes of continuous streaming, reconnect to reset WiFi state
+  uint32_t now = millis();
+  if (now - this->stream_connect_time_ > this->stream_reconnect_interval_) {
+    ESP_LOGI(TAG, "Periodic reconnect after %u seconds - resetting WiFi and decoder state",
+             (now - this->stream_connect_time_) / 1000);
+    this->disconnect_mjpeg_stream_();
+    delay(500);  // Let WiFi fully reset
+    if (this->connect_mjpeg_stream_()) {
+      ESP_LOGI(TAG, "Stream reconnected successfully");
+    } else {
+      ESP_LOGW(TAG, "Stream reconnection failed - will retry");
+      return false;
+    }
+  }
+
+  // OPTIMIZATION: Use larger buffers for better throughput and prevent JPEG truncation
+  // CRITICAL: parse_buffer must be large enough to hold complete JPEG + MJPEG overhead
+  // When camera moves/rotates: JPEGs can be 80-150KB (high complexity)
+  // When camera static: JPEGs are 20-40KB (low complexity)
+  static const size_t CHUNK_SIZE = 16 * 1024;  // 16KB chunks for reading
+
+  // CRITICAL: Use static temp_buffer to avoid stack overflow on loopTask
+  // parse_buffer is now a class member allocated in PSRAM (saves 128KB SRAM!)
+  static uint8_t temp_buffer[CHUNK_SIZE];      // 16KB temp buffer (static, OK in SRAM)
+  static uint32_t total_bytes_read = 0;        // Track total for periodic yielding
+
+  // Safety check: ensure parse buffer is allocated
+  if (this->parse_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Parse buffer not allocated!");
+    return false;
+  }
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
@@ -356,19 +598,39 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     return false;
   }
 
-  // Append to parse buffer
-  if (parse_buffer_len + read_len > sizeof(parse_buffer)) {
-    parse_buffer_len = 0;
+  // OPTIMIZATION: Periodic CPU yielding during large transfers (from webdavbox3)
+  // Yield every 64KB to prevent watchdog timeout and allow other tasks to run
+  total_bytes_read += read_len;
+  if (total_bytes_read >= 64 * 1024) {
+    taskYIELD();
+    total_bytes_read = 0;
   }
-  memcpy(parse_buffer + parse_buffer_len, temp_buffer, read_len);
-  parse_buffer_len += read_len;
+
+  // Append to parse buffer
+  if (this->parse_buffer_len_ + read_len > this->parse_buffer_size_) {
+    // CRITICAL: Buffer overflow - discard corrupted data and reset state machine
+    // Keeping partial buffer would create truncated JPEG → DMA2D crash!
+    // Instead, clear everything and search for next complete JPEG frame
+    static uint32_t overflow_count = 0;
+    if (overflow_count++ < 5) {
+      ESP_LOGW(TAG, "Parse buffer overflow (%u + %d > %u) - discarding corrupted frame, resetting to search for next JPEG",
+               this->parse_buffer_len_, read_len, this->parse_buffer_size_);
+    }
+
+    // CRITICAL: Reset MJPEG state machine to search for new frame
+    this->parse_buffer_len_ = 0;         // Clear buffer
+    this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;  // Search for FFD8
+    this->jpeg_data_len_ = 0;            // Reset JPEG length
+  }
+  memcpy(this->parse_buffer_ + this->parse_buffer_len_, temp_buffer, read_len);
+  this->parse_buffer_len_ += read_len;
 
   // Parse MJPEG stream - look for JPEG markers
   size_t i = 0;
-  while (i < parse_buffer_len - 1) {
+  while (i < this->parse_buffer_len_ - 1) {
     if (this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
       // Look for JPEG start marker (FFD8)
-      if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD8) {
+      if (this->parse_buffer_[i] == 0xFF && this->parse_buffer_[i + 1] == 0xD8) {
         this->jpeg_data_len_ = 0;
         this->mjpeg_state_ = MjpegState::READING_CONTENT;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
@@ -379,15 +641,15 @@ bool NetworkCamera::fetch_jpeg_frame_() {
       i++;
     } else if (this->mjpeg_state_ == MjpegState::READING_CONTENT) {
       // Copy data and look for end marker (FFD9)
-      if (parse_buffer[i] == 0xFF && parse_buffer[i + 1] == 0xD9) {
+      if (this->parse_buffer_[i] == 0xFF && this->parse_buffer_[i + 1] == 0xD9) {
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xFF;
         this->jpeg_buffer_[this->jpeg_data_len_++] = 0xD9;
 
-        size_t remaining = parse_buffer_len - i - 2;
+        size_t remaining = this->parse_buffer_len_ - i - 2;
         if (remaining > 0) {
-          memmove(parse_buffer, parse_buffer + i + 2, remaining);
+          memmove(this->parse_buffer_, this->parse_buffer_ + i + 2, remaining);
         }
-        parse_buffer_len = remaining;
+        this->parse_buffer_len_ = remaining;
 
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
 
@@ -400,7 +662,7 @@ bool NetworkCamera::fetch_jpeg_frame_() {
       }
 
       if (this->jpeg_data_len_ < this->jpeg_buffer_size_) {
-        this->jpeg_buffer_[this->jpeg_data_len_++] = parse_buffer[i];
+        this->jpeg_buffer_[this->jpeg_data_len_++] = this->parse_buffer_[i];
       } else {
         ESP_LOGW(TAG, "JPEG buffer overflow");
         this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
@@ -410,75 +672,251 @@ bool NetworkCamera::fetch_jpeg_frame_() {
     }
   }
 
-  if (i < parse_buffer_len && this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
-    size_t remaining = parse_buffer_len - i;
-    memmove(parse_buffer, parse_buffer + i, remaining);
-    parse_buffer_len = remaining;
+  if (i < this->parse_buffer_len_ && this->mjpeg_state_ == MjpegState::SEARCHING_BOUNDARY) {
+    size_t remaining = this->parse_buffer_len_ - i;
+    memmove(this->parse_buffer_, this->parse_buffer_ + i, remaining);
+    this->parse_buffer_len_ = remaining;
   }
 
   return false;
 }
 
-// Strip COM (comment) markers from JPEG that cause ESP32-P4 hardware decoder to fail
-// COM marker format: FF FE [2-byte length] [data]
+// Strip ALL unsupported markers from JPEG for ESP32-P4 hardware decoder
+// ESP32-P4 JPEG hardware decoder only supports these markers:
+// - SOI (FF D8), DQT (FF DB), DHT (FF C4), SOF0 (FF C0), SOS (FF DA), EOI (FF D9)
+// - Scan data (between SOS and EOI)
+// ALL other markers must be removed: APP0-15, COM, DRI, RST, etc.
 size_t NetworkCamera::strip_jpeg_com_markers_(uint8_t *data, size_t len) {
   if (len < 4) return len;
+
+  // DEBUG: Disabled to reduce log verbosity
+  // Enable by changing debug_markers = true for troubleshooting
+  static uint32_t jpeg_count = 0;
+  jpeg_count++;
+  bool debug_markers = false;  // Set to true to enable marker debugging
 
   size_t write_pos = 0;
   size_t read_pos = 0;
 
+  // Keep SOI
+  if (data[0] == 0xFF && data[1] == 0xD8) {
+    data[write_pos++] = 0xFF;
+    data[write_pos++] = 0xD8;
+    read_pos = 2;
+    if (debug_markers) ESP_LOGI(TAG, "  [KEEP] SOI (FF D8)");
+  }
+
+  bool in_scan_data = false;
+  bool found_sos = false;
+  uint16_t sof_width = 0, sof_height = 0;
+
   while (read_pos < len - 1) {
-    if (data[read_pos] == 0xFF && data[read_pos + 1] == 0xFE) {
-      if (read_pos + 3 >= len) break;
-      uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
-      read_pos += 2 + marker_len;
-    } else {
-      if (write_pos != read_pos) {
-        data[write_pos] = data[read_pos];
+    if (data[read_pos] == 0xFF) {
+      uint8_t marker = data[read_pos + 1];
+
+      // Check for byte stuffing (FF 00) - always handle this first
+      if (marker == 0x00) {
+        if (in_scan_data) {
+          data[write_pos++] = 0xFF;
+          data[write_pos++] = 0x00;
+        }
+        read_pos += 2;
+        continue;
       }
-      write_pos++;
-      read_pos++;
+
+      // EOI marker - end of scan data and JPEG
+      if (marker == 0xD9) {
+        in_scan_data = false;  // Exit scan data mode
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] EOI (FF D9)");
+        data[write_pos++] = 0xFF;
+        data[write_pos++] = 0xD9;
+        break;  // End of JPEG
+      }
+
+      // CRITICAL: When in scan data, ONLY handle EOI and byte stuffing
+      // All other bytes (including FF D8) are compressed image data, not markers
+      if (in_scan_data) {
+        data[write_pos++] = data[read_pos++];
+        continue;
+      }
+
+      // CRITICAL: Detect second SOI - means concatenated JPEGs from FFmpeg
+      // Only check this OUTSIDE scan data (before SOS or after EOI)
+      if (marker == 0xD8 && read_pos > 2) {
+        if (debug_markers) {
+          ESP_LOGW(TAG, "  ⚠️ CONCATENATED JPEG detected at offset %u - truncating here", read_pos);
+          ESP_LOGW(TAG, "  FFmpeg is sending multiple JPEGs glued together!");
+        }
+        // Add EOI marker to close first JPEG properly
+        data[write_pos++] = 0xFF;
+        data[write_pos++] = 0xD9;
+        if (debug_markers) ESP_LOGI(TAG, "  [ADDED] EOI (FF D9) to close first JPEG");
+        break;  // Stop processing - only use first JPEG
+      }
+
+      // SOS marker - start of scan data
+      if (marker == 0xDA) {
+        in_scan_data = true;
+        found_sos = true;
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t total_len = 2 + marker_len;
+        if (read_pos + total_len > len) break;
+
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] SOS (FF DA) - %u bytes", total_len);
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
+        continue;
+      }
+
+      // RST markers - REMOVE
+      if (marker >= 0xD0 && marker <= 0xD7) {
+        if (debug_markers) ESP_LOGI(TAG, "  [REMOVE] RST%d (FF %02X)", marker - 0xD0, marker);
+        read_pos += 2;
+        continue;
+      }
+
+      // SOF0 ONLY - ESP32-P4 hardware decoder only supports baseline JPEG, NOT progressive!
+      if (marker == 0xC0) {
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t total_len = 2 + marker_len;
+
+        // CRITICAL: Validate SOF0 marker is not truncated
+        if (read_pos + total_len > len) {
+          if (debug_markers) {
+            ESP_LOGW(TAG, "  ⚠️ TRUNCATED SOF0 marker at offset %u (needs %u bytes, only %u available)",
+                     read_pos, total_len, len - read_pos);
+          }
+          // JPEG is corrupted - reject entire frame
+          return 0;
+        }
+
+        // Extract resolution from SOF (offset +5 for height, +7 for width)
+        if (read_pos + 9 < len) {
+          sof_height = (data[read_pos + 5] << 8) | data[read_pos + 6];
+          sof_width = (data[read_pos + 7] << 8) | data[read_pos + 8];
+        }
+
+        if (debug_markers) {
+          const char *sof_name = (marker == 0xC0) ? "SOF0 (Baseline)" : "SOF2 (Progressive)";
+
+          // CRITICAL: Log sampling factors to diagnose decoder rejection
+          // SOF format: FF C0/C2 [length] [precision] [height] [width] [num_components] [component_data...]
+          uint8_t num_components = (read_pos + 9 < len) ? data[read_pos + 9] : 0;
+
+          ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %ux%u - %u components - %u bytes",
+                   sof_name, marker, sof_width, sof_height, num_components, total_len);
+
+          // Log sampling factors for each component
+          size_t component_offset = 10;
+          for (uint8_t i = 0; i < num_components && read_pos + component_offset + 2 < len; i++) {
+            uint8_t component_id = data[read_pos + component_offset];
+            uint8_t sampling = data[read_pos + component_offset + 1];
+            uint8_t h_factor = (sampling >> 4) & 0x0F;
+            uint8_t v_factor = sampling & 0x0F;
+            uint8_t quant_table = data[read_pos + component_offset + 2];
+
+            ESP_LOGI(TAG, "    Component %u: H=%u V=%u (sampling %ux%u) QT=%u",
+                     component_id, h_factor, v_factor, h_factor, v_factor, quant_table);
+            component_offset += 3;
+          }
+
+          // Determine chroma subsampling format
+          if (num_components == 3 && read_pos + 11 + 1 < len) {
+            uint8_t y_sampling = data[read_pos + 11];
+            uint8_t y_h = (y_sampling >> 4) & 0x0F;
+            uint8_t y_v = y_sampling & 0x0F;
+
+            if (y_h == 2 && y_v == 2) {
+              ESP_LOGI(TAG, "    📊 Chroma subsampling: 4:2:0 (YUV420) ✅ Standard");
+            } else if (y_h == 2 && y_v == 1) {
+              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:2:2 (YUV422) ⚠️ May not be supported");
+            } else if (y_h == 1 && y_v == 1) {
+              ESP_LOGW(TAG, "    📊 Chroma subsampling: 4:4:4 (YUV444) ⚠️ May not be supported");
+            } else {
+              ESP_LOGW(TAG, "    📊 Non-standard chroma subsampling: %ux%u ⚠️", y_h, y_v);
+            }
+          }
+        }
+
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
+        continue;
+      }
+
+      // DQT, DHT - KEEP (with strict validation)
+      if (marker == 0xDB || marker == 0xC4) {
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t total_len = 2 + marker_len;
+
+        // CRITICAL: Validate marker is not truncated
+        if (read_pos + total_len > len) {
+          if (debug_markers) {
+            ESP_LOGW(TAG, "  ⚠️ TRUNCATED %s marker at offset %u (needs %u bytes, only %u available)",
+                     marker == 0xDB ? "DQT" : "DHT", read_pos, total_len, len - read_pos);
+          }
+          // JPEG is corrupted - reject entire frame
+          return 0;  // Return 0 to indicate invalid JPEG
+        }
+
+        const char *marker_name = (marker == 0xDB) ? "DQT" : "DHT";
+        if (debug_markers) ESP_LOGI(TAG, "  [KEEP] %s (FF %02X) - %u bytes", marker_name, marker, total_len);
+
+        memcpy(data + write_pos, data + read_pos, total_len);
+        write_pos += total_len;
+        read_pos += total_len;
+        continue;
+      }
+
+      // ALL other markers - REMOVE (including SOF2 progressive JPEG)
+      if ((marker >= 0xE0 && marker <= 0xEF) ||  // APP
+          marker == 0xFE ||                        // COM
+          marker == 0xDD ||                        // DRI
+          marker == 0xDC ||                        // DNL
+          (marker >= 0xC0 && marker <= 0xCF && marker != 0xC0 && marker != 0xC4)) {  // Remove SOF1-15 except SOF0 and DHT
+        if (read_pos + 3 >= len) break;
+        uint16_t marker_len = (data[read_pos + 2] << 8) | data[read_pos + 3];
+
+        if (debug_markers) {
+          const char *marker_name =
+            (marker >= 0xE0 && marker <= 0xEF) ? "APP" :
+            (marker == 0xFE) ? "COM" :
+            (marker == 0xDD) ? "DRI" :
+            (marker == 0xDC) ? "DNL" : "OTHER_SOF";
+          ESP_LOGI(TAG, "  [REMOVE] %s (FF %02X) - %u bytes", marker_name, marker, marker_len);
+        }
+
+        read_pos += 2 + marker_len;
+        continue;
+      }
+
+      // Unknown marker
+      if (debug_markers) ESP_LOGW(TAG, "  [SKIP] Unknown (FF %02X)", marker);
+      read_pos += 2;
+    } else {
+      data[write_pos++] = data[read_pos++];
     }
   }
 
-  while (read_pos < len) {
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
+  // Log resolution mismatch warning
+  if (debug_markers && (sof_width != 0 || sof_height != 0)) {
+    ESP_LOGI(TAG, "  JPEG resolution: %ux%u (configured: 640x480)", sof_width, sof_height);
+    if (sof_width != 640 || sof_height != 480) {
+      ESP_LOGW(TAG, "  ⚠️ RESOLUTION MISMATCH! Decoder expects 640x480");
     }
-    write_pos++;
-    read_pos++;
   }
 
   return write_pos;
 }
 
 size_t NetworkCamera::strip_jpeg_restart_markers_(uint8_t *data, size_t len) {
-  if (len < 4) return len;
-
-  size_t write_pos = 0;
-  size_t read_pos = 0;
-
-  while (read_pos < len - 1) {
-    if (data[read_pos] == 0xFF &&
-        (data[read_pos + 1] >= 0xD0 && data[read_pos + 1] <= 0xD7)) {
-      read_pos += 2;  // Skip RST marker
-      continue;
-    }
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
-    }
-    write_pos++;
-    read_pos++;
-  }
-
-  if (read_pos < len) {
-    if (write_pos != read_pos) {
-      data[write_pos] = data[read_pos];
-    }
-    write_pos++;
-  }
-
-  return write_pos;
+  // This function is now integrated into strip_jpeg_com_markers_
+  // Keep for compatibility but it does nothing
+  return len;
 }
 
 bool NetworkCamera::decode_jpeg_to_rgb565_() {
@@ -486,56 +924,32 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     return false;
   }
 
-  // CRITICAL: Validate JPEG markers BEFORE decoding (like simple_video_player)
-  // This prevents crashes from corrupted/incomplete JPEG data
+  // Validate JPEG markers before decoding
   if (this->jpeg_data_len_ < 4 ||
       this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8) {
-    static uint32_t validation_errors = 0;
-    if (validation_errors++ < 5) {
-      ESP_LOGW(TAG, "Invalid JPEG header: size=%u, markers=0x%02X%02X (expected FF D8)",
-               this->jpeg_data_len_,
-               this->jpeg_data_len_ > 0 ? this->jpeg_buffer_[0] : 0,
-               this->jpeg_data_len_ > 1 ? this->jpeg_buffer_[1] : 0);
-    }
-    return false;
+    return false;  // Silent fail - invalid JPEG
   }
 
-  // DEBUG: Track sizes through processing pipeline
+  // DEBUG: Disabled to reduce log verbosity
+  // Enable by setting debug_enabled = true for troubleshooting
+  static const bool debug_enabled = false;
   static uint32_t debug_count = 0;
   size_t original_len = this->jpeg_data_len_;
-  bool debug_this_frame = (debug_count++ < 3);  // Debug first 3 frames only
+  bool debug_this_frame = debug_enabled && (debug_count++ < 3);
 
   if (debug_this_frame) {
-    ESP_LOGI(TAG, "=== JPEG Processing Debug ===");
-    ESP_LOGI(TAG, "Original size: %u bytes", original_len);
-    ESP_LOGI(TAG, "Last 4 bytes (original): %02X %02X %02X %02X",
-             this->jpeg_buffer_[original_len - 4],
-             this->jpeg_buffer_[original_len - 3],
-             this->jpeg_buffer_[original_len - 2],
-             this->jpeg_buffer_[original_len - 1]);
+    ESP_LOGI(TAG, "=== JPEG Debug ===");
+    ESP_LOGI(TAG, "Size: %u bytes", original_len);
   }
 
-  // Strip COM markers
-  this->jpeg_data_len_ = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
-  if (debug_this_frame) {
-    ESP_LOGI(TAG, "After COM stripping: %u bytes", this->jpeg_data_len_);
-  }
-
-  // Strip Restart Markers
-  this->jpeg_data_len_ = this->strip_jpeg_restart_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
-  if (debug_this_frame) {
-    ESP_LOGI(TAG, "After RST stripping: %u bytes", this->jpeg_data_len_);
-  }
-
-  // CRITICAL FIX: Truncate at first EOI (FF D9) - go2rtc concatenates multiple JPEGs
+  // CRITICAL FIX: Truncate at first EOI (FF D9) BEFORE stripping markers
+  // go2rtc concatenates multiple JPEGs - we need only the first one
   bool eoi_found = false;
-  size_t eoi_position = 0;
   for (size_t i = 0; i < this->jpeg_data_len_ - 1; i++) {
     if (this->jpeg_buffer_[i] == 0xFF) {
       uint8_t next = this->jpeg_buffer_[i + 1];
       if (next == 0xD9) {  // EOI marker found
         eoi_found = true;
-        eoi_position = i;
         this->jpeg_data_len_ = i + 2;  // Truncate here
         break;
       } else if (next == 0x00) {
@@ -544,25 +958,37 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
     }
   }
 
-  if (debug_this_frame) {
-    if (eoi_found) {
-      ESP_LOGI(TAG, "EOI found at offset: %u", eoi_position);
-      ESP_LOGI(TAG, "After EOI truncation: %u bytes", this->jpeg_data_len_);
-    } else {
-      ESP_LOGW(TAG, "⚠️ NO EOI MARKER FOUND!");
+  // Strip ALL unsupported markers (APP, COM, DRI, RST, etc.)
+  // This is the CRITICAL FIX for ESP32-P4 hardware decoder
+  size_t cleaned_len = this->strip_jpeg_com_markers_(this->jpeg_buffer_, this->jpeg_data_len_);
+
+  // Check if marker stripping detected corrupted JPEG (returns 0)
+  if (cleaned_len == 0) {
+    static uint32_t truncation_errors = 0;
+    if (truncation_errors++ < 3) {
+      ESP_LOGW(TAG, "JPEG rejected: truncated marker detected (error #%u)", truncation_errors);
     }
-    ESP_LOGI(TAG, "Last 4 bytes (final): %02X %02X %02X %02X",
-             this->jpeg_buffer_[this->jpeg_data_len_ - 4],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 3],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 2],
-             this->jpeg_buffer_[this->jpeg_data_len_ - 1]);
-    ESP_LOGI(TAG, "=============================");
+    return false;  // Skip corrupted JPEG
+  }
+
+  this->jpeg_data_len_ = cleaned_len;
+
+  // Validate we still have a valid JPEG after cleanup (silent)
+  if (this->jpeg_data_len_ < 4 ||
+      this->jpeg_buffer_[0] != 0xFF || this->jpeg_buffer_[1] != 0xD8 ||
+      this->jpeg_buffer_[this->jpeg_data_len_ - 2] != 0xFF ||
+      this->jpeg_buffer_[this->jpeg_data_len_ - 1] != 0xD9) {
+    return false;  // Corrupted JPEG - skip silently
   }
 
   jpeg_decode_cfg_t decode_cfg = {
       .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
       .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
   };
+
+  // Error tracking (file-scope statics for persistence)
+  static uint32_t decode_errors = 0;
+  static uint32_t consecutive_errors = 0;
 
   uint32_t out_size = 0;
   esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_, &decode_cfg,
@@ -571,20 +997,46 @@ bool NetworkCamera::decode_jpeg_to_rgb565_() {
                                        &out_size);
 
   if (ret != ESP_OK) {
-    // Silently fail - most frames will work
+    // Silently handle decode errors - FFmpeg generates optimized Huffman tables
+    // that ESP32-P4 hardware decoder doesn't support. Some frames will fail,
+    // but successful frames will display normally.
+    decode_errors++;
+    consecutive_errors++;
+
+    // Only log first 3 errors, then stay silent
+    if (decode_errors <= 3) {
+      ESP_LOGW(TAG, "JPEG decode failed (error #%u): %s - will retry with next frame",
+               decode_errors, esp_err_to_name(ret));
+    }
+
+    // CRITICAL: Prevent WiFi buffer exhaustion and watchdog timeout
+    // After 10 consecutive errors, pause to let WiFi drain buffers
+    if (consecutive_errors == 10) {
+      ESP_LOGD(TAG, "10 consecutive errors - pausing 200ms to let WiFi recover");
+      delay(200);  // Let WiFi drain buffers
+    }
+
+    // After 20 consecutive errors, longer pause for system recovery
+    if (consecutive_errors >= 20) {
+      ESP_LOGD(TAG, "20+ consecutive errors - pausing 500ms for full recovery");
+      delay(500);  // Longer pause for WiFi and watchdog
+      consecutive_errors = 0;  // Reset counter
+    }
+
     return false;
   }
+
+  // Reset consecutive error counter on successful decode
+  consecutive_errors = 0;
 
   // Log first successful decode only
   static bool first_success = false;
   if (!first_success) {
-    ESP_LOGI(TAG, "✓ JPEG decoding: %ux%u @ %d FPS", this->width_, this->height_, 15);
-    ESP_LOGI(TAG, "✓ First frame: %u bytes → %u bytes RGB565", this->jpeg_data_len_, out_size);
+    ESP_LOGI(TAG, "✅ JPEG decoder working! %ux%u resolution", this->width_, this->height_);
+    ESP_LOGI(TAG, "✅ First frame: %u bytes JPEG → %u bytes RGB565", this->jpeg_data_len_, out_size);
     first_success = true;
   }
 
-  // Removed: ESP_LOGD spam - uncomment if debugging needed
-  // ESP_LOGD(TAG, "JPEG decoded: %u bytes output", out_size);
   return true;
 }
 
