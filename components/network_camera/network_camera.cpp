@@ -356,8 +356,12 @@ bool NetworkCamera::init_buffers_() {
              using_psram ? "PSRAM" : "internal RAM", this->jpeg_buffer_size_, free_psram);
 
     // CRITICAL: Allocate parse buffer in PSRAM to save SRAM (was 128KB static in SRAM!)
-    // This buffer is used in fetch_jpeg_frame_() for MJPEG parsing
-    this->parse_buffer_size_ = 128 * 1024;  // 128KB parse buffer
+    // Parse buffer must be LARGER than JPEG buffer to handle:
+    // - Incomplete JPEG from previous chunk
+    // - MJPEG HTTP headers/boundaries
+    // - New chunk data (16KB)
+    // Camera motion generates 80-150KB JPEGs, so parse buffer needs to be 2x JPEG buffer!
+    this->parse_buffer_size_ = this->jpeg_buffer_size_ * 2;  // 2x JPEG buffer (256KB for 640x480)
     this->parse_buffer_ = (uint8_t *)heap_caps_malloc(this->parse_buffer_size_,
                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (this->parse_buffer_ == nullptr) {
@@ -365,7 +369,7 @@ bool NetworkCamera::init_buffers_() {
       return false;
     }
     this->parse_buffer_len_ = 0;  // Reset parse buffer length
-    ESP_LOGI(TAG, "Allocated parse buffer in PSRAM: %u bytes (saves 128KB SRAM!)",
+    ESP_LOGI(TAG, "Allocated parse buffer in PSRAM: %u bytes (2x JPEG buffer, saves SRAM!)",
              this->parse_buffer_size_);
   } else {
     // Allocate H264 and YUV buffers
@@ -604,16 +608,19 @@ bool NetworkCamera::fetch_jpeg_frame_() {
 
   // Append to parse buffer
   if (this->parse_buffer_len_ + read_len > this->parse_buffer_size_) {
-    // CRITICAL: Buffer overflow protection - keep last half of buffer
-    // This prevents losing JPEG data in progress
+    // CRITICAL: Buffer overflow - discard corrupted data and reset state machine
+    // Keeping partial buffer would create truncated JPEG → DMA2D crash!
+    // Instead, clear everything and search for next complete JPEG frame
     static uint32_t overflow_count = 0;
     if (overflow_count++ < 5) {
-      ESP_LOGW(TAG, "Parse buffer overflow (%u + %d > %u), keeping last %u bytes",
-               this->parse_buffer_len_, read_len, this->parse_buffer_size_, this->parse_buffer_size_ / 2);
+      ESP_LOGW(TAG, "Parse buffer overflow (%u + %d > %u) - discarding corrupted frame, resetting to search for next JPEG",
+               this->parse_buffer_len_, read_len, this->parse_buffer_size_);
     }
-    // Keep second half of buffer, discard first half
-    memmove(this->parse_buffer_, this->parse_buffer_ + this->parse_buffer_size_ / 2, this->parse_buffer_size_ / 2);
-    this->parse_buffer_len_ = this->parse_buffer_size_ / 2;
+
+    // CRITICAL: Reset MJPEG state machine to search for new frame
+    this->parse_buffer_len_ = 0;         // Clear buffer
+    this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;  // Search for FFD8
+    this->jpeg_data_len_ = 0;            // Reset JPEG length
   }
   memcpy(this->parse_buffer_ + this->parse_buffer_len_, temp_buffer, read_len);
   this->parse_buffer_len_ += read_len;
