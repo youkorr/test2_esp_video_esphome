@@ -160,40 +160,57 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   uint8_t* img_data = this->camera_->get_buffer_data(buffer);
-  uint16_t width = this->camera_->get_image_width();
-  uint16_t height = this->camera_->get_image_height();
+  uint16_t img_width = this->camera_->get_image_width();
+  uint16_t img_height = this->camera_->get_image_height();
 
   if (img_data == nullptr) {
     return;
   }
 
+  // Get canvas dimensions from LVGL widget (NOT from camera!)
+  lv_coord_t canvas_width = lv_obj_get_width(this->canvas_obj_);
+  lv_coord_t canvas_height = lv_obj_get_height(this->canvas_obj_);
+
   // Optional: draw detection results if configured
 #ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
-    this->face_detection_->draw_on_frame(img_data, width, height);
+    this->face_detection_->draw_on_frame(img_data, img_width, img_height);
   }
 #endif
 #ifdef USE_YOLO11_DETECTION
   if (this->yolo11_detection_ != nullptr) {
-    this->yolo11_detection_->draw_on_frame(img_data, width, height);
+    this->yolo11_detection_->draw_on_frame(img_data, img_width, img_height);
   }
 #endif
 #ifdef USE_PEDESTRIAN_DETECTION
   if (this->pedestrian_detection_ != nullptr) {
-    this->pedestrian_detection_->draw_on_frame(img_data, width, height);
+    this->pedestrian_detection_->draw_on_frame(img_data, img_width, img_height);
   }
 #endif
 
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
-    ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
+    ESP_LOGI(TAG, "   Image: %ux%u", img_width, img_height);
+    ESP_LOGI(TAG, "   Canvas: %dx%d", canvas_width, canvas_height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
+
+    // CRITICAL WARNING if sizes don't match
+    if (img_width != canvas_width || img_height != canvas_height) {
+      ESP_LOGW(TAG, "⚠️  SIZE MISMATCH! Image=%ux%u but Canvas=%dx%d",
+               img_width, img_height, canvas_width, canvas_height);
+      ESP_LOGW(TAG, "⚠️  This will cause slow LVGL software resize!");
+      ESP_LOGW(TAG, "⚠️  Solution: Enable PPA with output_width=%d output_height=%d",
+               canvas_width, canvas_height);
+    }
+
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  // IMPORTANT: Use CANVAS size, not image size!
+  // This ensures buffer dimensions match canvas widget dimensions
+  lv_canvas_set_buffer(this->canvas_obj_, img_data, canvas_width, canvas_height, LV_IMG_CF_TRUE_COLOR);
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update
