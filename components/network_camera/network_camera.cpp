@@ -397,8 +397,9 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   config.url = this->url_.c_str();
   config.timeout_ms = 5000;
   // OPTIMIZATION: Larger receive buffer for better throughput (from webdavbox3 pattern)
-  // Increased to 64KB to handle MJPEG stream overhead and prevent truncation
-  config.buffer_size = 65536;  // 64KB - large enough for complete JPEG frames
+  // Increased to 128KB to handle large JPEGs when camera moves/rotates
+  // Static camera: ~20-40KB JPEGs, Moving camera: ~80-150KB JPEGs
+  config.buffer_size = 131072;  // 128KB - handles complex scenes and camera motion
   config.buffer_size_tx = 1024;
 
   this->http_client_ = esp_http_client_init(&config);
@@ -430,13 +431,13 @@ bool NetworkCamera::connect_mjpeg_stream_() {
   // NOTE: Socket-level optimizations (TCP_NODELAY, SO_RCVBUF) are not available
   // because esp_http_client doesn't expose the underlying socket descriptor.
   // The esp_http_client_config_t provides timeout_ms and buffer_size options,
-  // which are already configured above (timeout=5s, buffer=64KB).
+  // which are already configured above (timeout=5s, buffer=128KB).
   //
   // OPTIMIZATIONS APPLIED:
-  // - HTTP client buffer: 64KB (increased from 4KB)
-  // - Parse buffer: 64KB in fetch_jpeg_frame_()
+  // - HTTP client buffer: 128KB (handles moving camera JPEGs 80-150KB)
+  // - Parse buffer: 128KB in fetch_jpeg_frame_()
   // - Read chunks: 16KB
-  ESP_LOGI(TAG, "MJPEG stream connected (HTTP buffer: 64KB, JPEG buffer: %u bytes)", this->jpeg_buffer_size_);
+  ESP_LOGI(TAG, "MJPEG stream connected (HTTP buffer: 128KB, JPEG buffer: %u bytes)", this->jpeg_buffer_size_);
 
   this->stream_connected_ = true;
   this->mjpeg_state_ = MjpegState::SEARCHING_BOUNDARY;
@@ -460,16 +461,17 @@ bool NetworkCamera::fetch_jpeg_frame_() {
 
   // OPTIMIZATION: Use larger buffers for better throughput and prevent JPEG truncation
   // CRITICAL: parse_buffer must be large enough to hold complete JPEG + MJPEG overhead
-  // Typical 640x480 JPEG: 10-30KB, but we need margin for HTTP headers and boundaries
-  static const size_t CHUNK_SIZE = 16 * 1024;     // 16KB chunks for reading
-  static const size_t PARSE_BUFFER_SIZE = 64 * 1024;  // 64KB parse buffer (was 16KB)
+  // When camera moves/rotates: JPEGs can be 80-150KB (high complexity)
+  // When camera static: JPEGs are 20-40KB (low complexity)
+  static const size_t CHUNK_SIZE = 16 * 1024;         // 16KB chunks for reading
+  static const size_t PARSE_BUFFER_SIZE = 128 * 1024; // 128KB parse buffer (was 64KB)
 
   // CRITICAL: Use static buffers to avoid stack overflow on loopTask
   // Stack-allocated buffers cause "Stack protection fault" crashes
-  static uint8_t temp_buffer[CHUNK_SIZE];           // 16KB chunk buffer
-  static uint8_t parse_buffer[PARSE_BUFFER_SIZE];   // 64KB parse buffer (increased from 16KB)
+  static uint8_t temp_buffer[CHUNK_SIZE];              // 16KB chunk buffer
+  static uint8_t parse_buffer[PARSE_BUFFER_SIZE];      // 128KB parse buffer (increased from 64KB)
   static size_t parse_buffer_len = 0;
-  static uint32_t total_bytes_read = 0;             // Track total for periodic yielding
+  static uint32_t total_bytes_read = 0;                // Track total for periodic yielding
 
   int read_len = esp_http_client_read(this->http_client_, (char *)temp_buffer, sizeof(temp_buffer));
   if (read_len < 0) {
