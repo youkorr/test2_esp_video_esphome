@@ -1,0 +1,128 @@
+# ============================================================================
+# Exemple Simple: FPS Overlay avec imlib (Zero-Copy)
+# ============================================================================
+# imlib est maintenant ACTIVÉ PAR DÉFAUT dans le code C++
+# Pas besoin de build_flags - ça marche directement!
+# ============================================================================
+
+# Votre configuration normale...
+mipi_dsi_cam:
+  id: tab5_cam
+  i2c_id: bsp_bus
+  sensor_type: sc202cs
+  sensor_addr: 0x36
+  resolution: "720P"      # 1280x720
+  pixel_format: RGB565
+  framerate: 30
+
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  update_interval: 33ms
+
+# ============================================================================
+# OVERLAY FPS - Dessine FPS directement sur les frames vidéo
+# ============================================================================
+interval:
+  - interval: 100ms  # Mise à jour 10 fois par seconde
+    then:
+      - lambda: |-
+          // ============================================
+          // FPS Counter avec imlib (zero-copy)
+          // ============================================
+          static uint32_t frame_count = 0;
+          static uint32_t last_time = millis();
+          static float fps = 0.0;
+
+          frame_count++;
+
+          uint32_t now = millis();
+          if (now - last_time >= 1000) {
+            // Calculer FPS
+            fps = frame_count * 1000.0 / (now - last_time);
+            frame_count = 0;
+            last_time = now;
+          }
+
+          // Dessiner FPS en haut à gauche
+          char fps_text[32];
+          snprintf(fps_text, sizeof(fps_text), "FPS: %.1f", fps);
+
+          // Fond noir
+          id(tab5_cam).draw_rectangle(5, 5, 180, 35, 0x0000, 1, true);
+
+          // Texte blanc, taille 1.5x (24x24 pixels)
+          id(tab5_cam).draw_string(10, 10, fps_text, 0xFFFF, 1.5);
+
+          // BONUS: Dessiner un petit indicateur vert si FPS > 25
+          if (fps > 25.0) {
+            id(tab5_cam).draw_circle(190, 22, 8, 0x07E0, 2, true);  // Cercle vert
+          } else {
+            id(tab5_cam).draw_circle(190, 22, 8, 0xF800, 2, true);  // Cercle rouge
+          }
+
+# ============================================================================
+# COULEURS RGB565
+# ============================================================================
+# 0xFFFF - Blanc
+# 0x0000 - Noir
+# 0xF800 - Rouge
+# 0x07E0 - Vert
+# 0x001F - Bleu
+# 0xFFE0 - Jaune
+# 0xF81F - Magenta
+# 0x07FF - Cyan
+# 0x4208 - Gris
+
+# ============================================================================
+# FONCTIONS DISPONIBLES
+# ============================================================================
+# id(tab5_cam).draw_string(x, y, text, color, scale);
+# id(tab5_cam).draw_line(x0, y0, x1, y1, color, thickness);
+# id(tab5_cam).draw_rectangle(x, y, w, h, color, thickness, fill);
+# id(tab5_cam).draw_circle(cx, cy, radius, color, thickness, fill);
+# id(tab5_cam).get_pixel(x, y);
+# id(tab5_cam).set_pixel(x, y, color);
+
+# ============================================================================
+# EXEMPLES SUPPLÉMENTAIRES
+# ============================================================================
+
+# Réticule de visée au centre:
+# interval:
+#   - interval: 50ms
+#     then:
+#       - lambda: |-
+#           int cx = 640, cy = 360;  // Centre 1280x720
+#           id(tab5_cam).draw_circle(cx, cy, 50, 0xF800, 2, false);
+#           id(tab5_cam).draw_line(cx-60, cy, cx-10, cy, 0xF800, 1);
+#           id(tab5_cam).draw_line(cx+10, cy, cx+60, cy, 0xF800, 1);
+
+# Grid 3x3 (règle des tiers):
+# interval:
+#   - interval: 100ms
+#     then:
+#       - lambda: |-
+#           uint16_t gray = 0x4208;
+#           id(tab5_cam).draw_line(427, 0, 427, 720, gray, 1);  // 1280/3
+#           id(tab5_cam).draw_line(853, 0, 853, 720, gray, 1);  // 2*1280/3
+#           id(tab5_cam).draw_line(0, 240, 1280, 240, gray, 1); // 720/3
+#           id(tab5_cam).draw_line(0, 480, 1280, 480, gray, 1); // 2*720/3
+
+# Timestamp (nécessite time component):
+# time:
+#   - platform: sntp
+#     id: sntp_time
+#
+# interval:
+#   - interval: 500ms
+#     then:
+#       - lambda: |-
+#           auto time = id(sntp_time).now();
+#           if (time.is_valid()) {
+#             char ts[32];
+#             snprintf(ts, sizeof(ts), "%02d:%02d:%02d",
+#                      time.hour, time.minute, time.second);
+#             id(tab5_cam).draw_string(1050, 10, ts, 0x07E0, 1.2);
+#           }

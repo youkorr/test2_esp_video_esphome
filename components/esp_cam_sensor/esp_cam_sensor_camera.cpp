@@ -37,8 +37,14 @@ extern "C" {
 #include "sc202cs_custom_formats.h"  // SC202CS: 800x600
 #include "ov02c10_custom_formats.h"  // OV02C10: 1280x800, 800x600
 
-// imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
-// Pour activer : ajouter -DENABLE_IMLIB_DRAWING dans build_flags
+// ============================================================================
+// IMLIB ACTIVATION - Dessin zero-copy sur frames vidéo
+// ============================================================================
+// ACTIVÉ PAR DÉFAUT - Permet draw_string(), draw_line(), draw_rectangle(), etc.
+#ifndef ENABLE_IMLIB_DRAWING
+  #define ENABLE_IMLIB_DRAWING 1  // ← ACTIVÉ par défaut maintenant!
+#endif
+
 #ifdef ENABLE_IMLIB_DRAWING
   extern "C" {
     #include "imlib.h"
