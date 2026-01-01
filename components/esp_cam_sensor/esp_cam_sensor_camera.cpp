@@ -41,16 +41,22 @@ extern "C" {
 // IMLIB ACTIVATION - Dessin zero-copy sur frames vidéo
 // ============================================================================
 // ACTIVÉ PAR DÉFAUT - Permet draw_string(), draw_line(), draw_rectangle(), etc.
+// IMPORTANT: imlib est compilé par ESP-IDF, donc disponible seulement après
+// la phase PlatformIO. On détecte automatiquement si imlib.h est accessible.
 #ifndef ENABLE_IMLIB_DRAWING
   #define ENABLE_IMLIB_DRAWING 1  // ← ACTIVÉ par défaut maintenant!
 #endif
 
-#ifdef ENABLE_IMLIB_DRAWING
+// Détection automatique: tester si imlib.h existe
+#if ENABLE_IMLIB_DRAWING && __has_include("imlib.h")
+  // imlib disponible (compilation ESP-IDF finale)
   extern "C" {
     #include "imlib.h"
   }
   #define IMLIB_AVAILABLE 1
 #else
+  // imlib pas encore disponible (compilation PlatformIO initiale)
+  // Les stubs seront utilisés temporairement
   #define IMLIB_AVAILABLE 0
 #endif
 
