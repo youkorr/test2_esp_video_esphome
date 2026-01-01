@@ -12,6 +12,12 @@
 #include "mbedtls/base64.h"
 #include "esp_task_wdt.h"
 
+// LVGL defines 'select' as a macro, which conflicts with POSIX select()
+// Undefine it so we can use the real select() function
+#ifdef select
+#undef select
+#endif
+
 namespace esphome {
 namespace network_camera {
 
