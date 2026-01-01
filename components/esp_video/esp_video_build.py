@@ -313,6 +313,10 @@ json_files_to_embed = [
         "path": os.path.join(esp_cam_sensor_dir, "sensor/ov02c10/cfg/ov02c10_default.json"),
         "symbol": "ov02c10_ipa_config_json",
     },
+    {
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/sc202cs/cfg/sc202cs_default.json"),
+        "symbol": "sc202cs_ipa_config_json",
+    },
 ]
 
 # Embarquer chaque fichier JSON comme binary data
