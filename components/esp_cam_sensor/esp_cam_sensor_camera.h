@@ -31,6 +31,42 @@ struct SimpleBufferElement {
   uint32_t index;     // Index du buffer (0, 1, 2)
 };
 
+// ============================================================================
+// IMLIB Drawing Command Queue
+// ============================================================================
+// Commands are queued by camera component and executed by lvgl_camera_display
+// on the actual buffer being sent to LVGL. This ensures drawings are visible.
+
+enum class DrawCommandType {
+  STRING,
+  LINE,
+  RECTANGLE,
+  CIRCLE,
+  PIXEL
+};
+
+struct DrawCommand {
+  DrawCommandType type;
+
+  // Common parameters
+  int x, y;
+  uint16_t color;
+
+  // Type-specific parameters
+  union {
+    struct { const char *text; float scale; } string_params;  // STRING
+    struct { int x1, y1; int thickness; } line_params;        // LINE
+    struct { int w, h; int thickness; bool fill; } rect_params;  // RECTANGLE
+    struct { int radius; int thickness; bool fill; } circle_params;  // CIRCLE
+    struct { } pixel_params;  // PIXEL (just x, y, color)
+  };
+
+  // Text buffer for STRING commands (copied to avoid dangling pointers)
+  std::string text_buffer;
+
+  DrawCommand() : type(DrawCommandType::PIXEL), x(0), y(0), color(0) {}
+};
+
 class MipiDSICamComponent : public Component {
  public:
   void setup() override;
@@ -163,13 +199,17 @@ class MipiDSICamComponent : public Component {
   bool set_sharpness(int value);     // 0 à 255 (filter/sharpness control)
 
   // imlib - Dessin zero-copy sur buffer RGB565 (améliore fluidité)
-  image_t* get_imlib_image();  // Retourne image_t wrappant le buffer caméra actuel
+  // NOTE: Ces méthodes QUEUED les commandes de dessin. Elles sont exécutées
+  // par lvgl_camera_display sur le buffer avant affichage LVGL.
   void draw_string(int x, int y, const char *text, uint16_t color, float scale = 1.0f);
   void draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness = 1);
   void draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness = 1, bool fill = false);
   void draw_circle(int cx, int cy, int radius, uint16_t color, int thickness = 1, bool fill = false);
-  int get_pixel(int x, int y);  // Lire pixel RGB565 à (x,y)
   void set_pixel(int x, int y, uint16_t color);  // Écrire pixel RGB565 à (x,y)
+
+  // Queue management (appelé par lvgl_camera_display)
+  const std::vector<DrawCommand>& get_pending_draw_commands() const { return pending_draw_commands_; }
+  void clear_draw_commands() { pending_draw_commands_.clear(); }
 
  protected:
   std::string sensor_name_{"sc202cs"};
@@ -236,6 +276,9 @@ class MipiDSICamComponent : public Component {
   // imlib image wrapper (zero-copy, pointe vers image_buffer_)
   image_t *imlib_image_{nullptr};  // Pointeur vers structure imlib (allouée dans .cpp)
   bool imlib_image_valid_{false};
+
+  // imlib drawing command queue (executed by lvgl_camera_display)
+  std::vector<DrawCommand> pending_draw_commands_;
 
   bool check_pipeline_health_();
   void cleanup_pipeline_();

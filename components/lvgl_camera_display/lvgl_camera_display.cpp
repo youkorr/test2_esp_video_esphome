@@ -12,10 +12,81 @@
 #include "esphome/components/pedestrian_detection/pedestrian_detection.h"
 #endif
 
+// ============================================================================
+// IMLIB Integration - Drawing on camera frames
+// ============================================================================
+#if ENABLE_IMLIB_DRAWING && __has_include("imlib.h")
+  extern "C" {
+    #include "imlib.h"
+  }
+  #define IMLIB_DRAWING_ENABLED 1
+#else
+  #define IMLIB_DRAWING_ENABLED 0
+#endif
+
 namespace esphome {
 namespace lvgl_camera_display {
 
 static const char *const TAG = "lvgl_camera_display";
+
+// ============================================================================
+// Execute Imlib Drawing Commands
+// ============================================================================
+#if IMLIB_DRAWING_ENABLED
+static void execute_draw_commands(const std::vector<esp_cam_sensor::DrawCommand>& commands,
+                                   uint8_t* buffer, uint16_t width, uint16_t height) {
+  if (commands.empty()) {
+    return;
+  }
+
+  // Wrap buffer as imlib image_t (RGB565)
+  image_t img;
+  img.w = width;
+  img.h = height;
+  img.pixfmt = PIXFORMAT_RGB565;
+  img.data = buffer;
+
+  // Execute each command
+  for (const auto& cmd : commands) {
+    switch (cmd.type) {
+      case esp_cam_sensor::DrawCommandType::STRING:
+        imlib_draw_string(&img, cmd.x, cmd.y, cmd.string_params.text, cmd.color,
+                          cmd.string_params.scale, 1, 1, 0, false, false, PIXFORMAT_RGB565, nullptr);
+        break;
+
+      case esp_cam_sensor::DrawCommandType::LINE:
+        imlib_draw_line(&img, cmd.x, cmd.y, cmd.line_params.x1, cmd.line_params.y1,
+                        cmd.color, cmd.line_params.thickness);
+        break;
+
+      case esp_cam_sensor::DrawCommandType::RECTANGLE:
+        imlib_draw_rectangle(&img, cmd.x, cmd.y, cmd.rect_params.w, cmd.rect_params.h,
+                             cmd.color, cmd.rect_params.thickness, cmd.rect_params.fill);
+        break;
+
+      case esp_cam_sensor::DrawCommandType::CIRCLE:
+        imlib_draw_circle(&img, cmd.x, cmd.y, cmd.circle_params.radius,
+                          cmd.color, cmd.circle_params.thickness, cmd.circle_params.fill);
+        break;
+
+      case esp_cam_sensor::DrawCommandType::PIXEL:
+        imlib_set_pixel(&img, cmd.x, cmd.y, cmd.color);
+        break;
+    }
+  }
+}
+#else
+// Stub when imlib not available
+static void execute_draw_commands(const std::vector<esp_cam_sensor::DrawCommand>& commands,
+                                   uint8_t* buffer, uint16_t width, uint16_t height) {
+  static bool warning_shown = false;
+  if (!commands.empty() && !warning_shown) {
+    ESP_LOGW(TAG, "imlib drawing commands queued but imlib is not available");
+    ESP_LOGW(TAG, "Compile with -DENABLE_IMLIB_DRAWING and ensure imlib component is loaded");
+    warning_shown = true;
+  }
+}
+#endif
 
 void LVGLCameraDisplay::setup() {
   ESP_LOGCONFIG(TAG, "Configuration LVGL Camera Display...");
@@ -40,6 +111,11 @@ void LVGLCameraDisplay::setup() {
   ESP_LOGI(TAG, "   Camera: Operationnelle");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
+#if IMLIB_DRAWING_ENABLED
+  ESP_LOGI(TAG, "   imlib drawing: ENABLED (zero-copy overlay on video frames)");
+#else
+  ESP_LOGI(TAG, "   imlib drawing: DISABLED (compile with -DENABLE_IMLIB_DRAWING to enable)");
+#endif
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
 }
 
@@ -187,6 +263,16 @@ void LVGLCameraDisplay::update_canvas_() {
     this->pedestrian_detection_->draw_on_frame(img_data, img_width, img_height);
   }
 #endif
+
+  // ============================================================================
+  // Execute Imlib Drawing Commands (from camera component queue)
+  // ============================================================================
+  // Get and execute all queued drawing commands from the camera component
+  const auto& draw_commands = this->camera_->get_pending_draw_commands();
+  if (!draw_commands.empty()) {
+    execute_draw_commands(draw_commands, img_data, img_width, img_height);
+    this->camera_->clear_draw_commands();  // Clear queue after execution
+  }
 
   if (this->first_update_) {
     ESP_LOGI(TAG, "Premier update canvas (buffer pool):");

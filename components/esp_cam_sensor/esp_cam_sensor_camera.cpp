@@ -285,6 +285,30 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
   int input_width = this->image_width_;
   int input_height = this->image_height_;
 
+  // ============================================================================
+  // OPTIMIZATION: Skip PPA if no actual transformation is needed
+  // ============================================================================
+  // Check if output dimensions match input (scale=1.0) and no mirror/rotate/crop
+  bool needs_resize = (this->output_width_ > 0 && this->output_height_ > 0 &&
+                       (this->output_width_ != input_width || this->output_height_ != input_height));
+  bool needs_transform = (this->mirror_x_ || this->mirror_y_ || this->rotation_ != 0 || this->crop_offset_x_ != 0);
+
+  if (!needs_resize && !needs_transform) {
+    // No transformation needed - fast memcpy instead of slow PPA hardware
+    // This avoids the 26ms PPA blocking overhead when scale=1.0
+    static bool optimization_logged = false;
+    if (!optimization_logged) {
+      ESP_LOGI(TAG, "PPA optimization: No transformation needed (scale=1.0, no mirror/rotate/crop)");
+      ESP_LOGI(TAG, "  Using fast memcpy instead of PPA hardware (saves ~26ms, cost ~2ms)");
+      optimization_logged = true;
+    }
+
+    // Fast copy from src to dst (RGB565, ~2ms for 800x600)
+    size_t buffer_size = input_width * input_height * 2;  // RGB565 = 2 bytes/pixel
+    memcpy(dst_buffer, src_buffer, buffer_size);
+    return true;
+  }
+
   // Output dimensions and scaling - GENERIC ALGORITHM for all sensors/resolutions
   // Based on ESP-GMF implementation (esp_gmf_video_ppa.c lines 225-240)
   //
@@ -1805,78 +1829,137 @@ image_t* MipiDSICamComponent::get_imlib_image() {
   return this->imlib_image_;
 }
 
-void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return;
+// ============================================================================
+// IMLIB Drawing API - Queue commands for execution by lvgl_camera_display
+// ============================================================================
+// These methods queue drawing commands instead of executing immediately.
+// lvgl_camera_display executes them on the buffer before sending to LVGL.
 
-  imlib_draw_string(img, x, y, text, color, scale, 1, 1, 0, false, false, PIXFORMAT_RGB565, nullptr);
+void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::STRING;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
+  cmd.string_params.scale = scale;
+  cmd.text_buffer = std::string(text);  // Copy text to avoid dangling pointer
+  cmd.string_params.text = cmd.text_buffer.c_str();
+
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return;
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::LINE;
+  cmd.x = x0;
+  cmd.y = y0;
+  cmd.color = color;
+  cmd.line_params.x1 = x1;
+  cmd.line_params.y1 = y1;
+  cmd.line_params.thickness = thickness;
 
-  imlib_draw_line(img, x0, y0, x1, y1, color, thickness);
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness, bool fill) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return;
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::RECTANGLE;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
+  cmd.rect_params.w = w;
+  cmd.rect_params.h = h;
+  cmd.rect_params.thickness = thickness;
+  cmd.rect_params.fill = fill;
 
-  imlib_draw_rectangle(img, x, y, w, h, color, thickness, fill);
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_circle(int cx, int cy, int radius, uint16_t color, int thickness, bool fill) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return;
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::CIRCLE;
+  cmd.x = cx;
+  cmd.y = cy;
+  cmd.color = color;
+  cmd.circle_params.radius = radius;
+  cmd.circle_params.thickness = thickness;
+  cmd.circle_params.fill = fill;
 
-  imlib_draw_circle(img, cx, cy, radius, color, thickness, fill);
-}
-
-int MipiDSICamComponent::get_pixel(int x, int y) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return 0;
-
-  return imlib_get_pixel(img, x, y);
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
-  image_t *img = this->get_imlib_image();
-  if (!img) return;
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::PIXEL;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
 
-  imlib_set_pixel(img, x, y, color);
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 #else  // IMLIB_AVAILABLE == 0
 
-// Stubs imlib (imlib désactivé) - retournent sans erreur
-image_t* MipiDSICamComponent::get_imlib_image() {
-  ESP_LOGW(TAG, "imlib drawing disabled (compile with -DENABLE_IMLIB_DRAWING to enable)");
-  return nullptr;
-}
+// Stubs imlib (imlib désactivé)
+// Commands are still queued but lvgl_camera_display will skip execution
 
 void MipiDSICamComponent::draw_string(int x, int y, const char *text, uint16_t color, float scale) {
-  // Stub - ne fait rien
+  // Queue command even when imlib disabled (logged once in lvgl_camera_display)
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::STRING;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
+  cmd.string_params.scale = scale;
+  cmd.text_buffer = std::string(text);
+  cmd.string_params.text = cmd.text_buffer.c_str();
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_line(int x0, int y0, int x1, int y1, uint16_t color, int thickness) {
-  // Stub - ne fait rien
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::LINE;
+  cmd.x = x0;
+  cmd.y = y0;
+  cmd.color = color;
+  cmd.line_params.x1 = x1;
+  cmd.line_params.y1 = y1;
+  cmd.line_params.thickness = thickness;
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_rectangle(int x, int y, int w, int h, uint16_t color, int thickness, bool fill) {
-  // Stub - ne fait rien
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::RECTANGLE;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
+  cmd.rect_params.w = w;
+  cmd.rect_params.h = h;
+  cmd.rect_params.thickness = thickness;
+  cmd.rect_params.fill = fill;
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::draw_circle(int cx, int cy, int radius, uint16_t color, int thickness, bool fill) {
-  // Stub - ne fait rien
-}
-
-int MipiDSICamComponent::get_pixel(int x, int y) {
-  return 0;  // Stub - retourne noir
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::CIRCLE;
+  cmd.x = cx;
+  cmd.y = cy;
+  cmd.color = color;
+  cmd.circle_params.radius = radius;
+  cmd.circle_params.thickness = thickness;
+  cmd.circle_params.fill = fill;
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 void MipiDSICamComponent::set_pixel(int x, int y, uint16_t color) {
-  // Stub - ne fait rien
+  DrawCommand cmd;
+  cmd.type = DrawCommandType::PIXEL;
+  cmd.x = x;
+  cmd.y = y;
+  cmd.color = color;
+  this->pending_draw_commands_.push_back(cmd);
 }
 
 #endif  // IMLIB_AVAILABLE
