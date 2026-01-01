@@ -234,7 +234,7 @@ bool MipiDSICamComponent::init_ppa_() {
 
   ppa_client_config_t ppa_config = {};
   ppa_config.oper_type = PPA_OPERATION_SRM;
-  ppa_config.max_pending_trans_num = 16;
+  ppa_config.max_pending_trans_num = 1;  // M5Stack uses 1, not 16!
 
   esp_err_t ret = ppa_register_client(&ppa_config, (ppa_client_handle_t*)&this->ppa_client_handle_);
   if (ret != ESP_OK) {
