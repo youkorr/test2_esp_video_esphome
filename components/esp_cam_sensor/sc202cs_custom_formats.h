@@ -70,12 +70,8 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x320a, 0x02},          /* output height MSB = 600 (0x0258) */
     {0x320b, 0x58},          /* output height LSB */
 
-    /* Frame timing - MUST set for 30fps (addresses 0x320C-0x320F) */
-    /* FPS = pclk / (HTS * VTS) = 72MHz / (1920 * 1250) = 30fps */
-    {0x320c, 0x07},          /* HTS MSB = 1920 (0x0780) */
-    {0x320d, 0x80},          /* HTS LSB */
-    {0x320e, 0x04},          /* VTS MSB = 1250 (0x04E2) */
-    {0x320f, 0xe2},          /* VTS LSB */
+    /* NO HTS/VTS - Use sensor defaults (like 1280x720 mode) */
+    /* This prevents frame timing issues that cause stuttering */
 
     {0x3210, 0x00},          /* x offset = 4 (comme mode 1280x720) */
     {0x3211, 0x04},
@@ -143,8 +139,8 @@ static const esp_cam_sensor_isp_info_t sc202cs_800x600_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
         .pclk = 72000000,     /* Pixel clock */
-        .hts = 1920,          /* Horizontal Total Size */
-        .vts = 1250,          /* Vertical Total Size */
+        .hts = 0,             /* Auto-detect from sensor defaults (no forced HTS) */
+        .vts = 0,             /* Auto-detect from sensor defaults (no forced VTS) */
         .exp_def = 0x4dc,     /* M5Stack value (1244) - proper exposure */
         .gain_def = 0,        /* M5Stack value - no extra gain */
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,

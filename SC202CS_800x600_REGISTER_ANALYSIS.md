@@ -288,3 +288,56 @@ Si DQBUF varie beaucoup (50us à 500us), c'est un signe de timing sensor instabl
 3. **Rapportez les résultats**
 
 Si besoin d'aide pour modifier, je peux faire les changements directement.
+
+---
+
+## ✅ FIX APPLIQUÉ
+
+**Date:** 2026-01-01
+
+### Changements effectués dans `sc202cs_custom_formats.h`
+
+#### 1. Suppression des registres HTS/VTS (lignes 73-78)
+
+**AVANT:**
+```c
+/* Frame timing - MUST set for 30fps (addresses 0x320C-0x320F) */
+/* FPS = pclk / (HTS * VTS) = 72MHz / (1920 * 1250) = 30fps */
+{0x320c, 0x07},          /* HTS MSB = 1920 (0x0780) */
+{0x320d, 0x80},          /* HTS LSB */
+{0x320e, 0x04},          /* VTS MSB = 1250 (0x04E2) */
+{0x320f, 0xe2},          /* VTS LSB */
+```
+
+**APRÈS:**
+```c
+/* NO HTS/VTS - Use sensor defaults (like 1280x720 mode) */
+/* This prevents frame timing issues that cause stuttering */
+```
+
+#### 2. Mise à jour ISP info pour auto-detect (lignes 142-143)
+
+**AVANT:**
+```c
+.hts = 1920,          /* Horizontal Total Size */
+.vts = 1250,          /* Vertical Total Size */
+```
+
+**APRÈS:**
+```c
+.hts = 0,             /* Auto-detect from sensor defaults (no forced HTS) */
+.vts = 0,             /* Auto-detect from sensor defaults (no forced VTS) */
+```
+
+### Résultat attendu
+
+✅ **800x600 ne saccade plus sans PPA** - Le sensor utilise maintenant son timing par défaut comme le mode 1280x720 fonctionnel
+
+✅ **Cohérence avec M5Stack** - Le pattern correspond maintenant à `sc202cs_settings.h` et au mode 1280x720
+
+### À tester
+
+Compiler, flasher et vérifier:
+1. 800x600 sans PPA → pas de saccadement
+2. 800x600 avec PPA → fonctionne toujours
+3. FPS stable à ~30 FPS
