@@ -663,7 +663,13 @@ static esp_err_t csi_video_set_parm(struct esp_video *video, struct v4l2_streamp
         }
 
         param->skip_frames = sensor_format.fps / cp->timeperframe.denominator;
-        ESP_LOGD(TAG, "skip_frames=%d", param->skip_frames);
+        ESP_LOGI(TAG, "★ V4L2 VIDIOC_S_PARM: Requested FPS=%u, Sensor FPS=%u → skip_frames=%d",
+                 cp->timeperframe.denominator, sensor_format.fps, param->skip_frames);
+        if (param->skip_frames > 1) {
+            ESP_LOGW(TAG, "⚠ Frame skipping active! Only 1 out of every %d frames will be used", param->skip_frames);
+            ESP_LOGW(TAG, "⚠ Effective FPS will be: %u / %d = %u fps",
+                     sensor_format.fps, param->skip_frames, sensor_format.fps / param->skip_frames);
+        }
         ret = ESP_OK;
     }
 
