@@ -123,6 +123,7 @@ class SimpleVideoPlayer : public Component {
 
   bool init_jpeg_decoder_();
   bool read_next_mjpeg_frame_();
+  void strip_jpeg_com_markers_();  // Strip COM markers that cause ESP32 JPEG decoder to fail
   bool decode_mjpeg_frame_();
 
   // PSRAM File Cache - Load entire file to memory to eliminate SD overhead
