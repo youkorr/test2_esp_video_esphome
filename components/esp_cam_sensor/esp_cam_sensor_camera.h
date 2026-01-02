@@ -222,7 +222,7 @@ class MipiDSICamComponent : public Component {
   int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
 
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
-  SimpleBufferElement simple_buffers_[3];  // Triple buffering
+  SimpleBufferElement simple_buffers_[4];  // Quad buffering (matches CSI_QUEUE_ITEMS=4)
   int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
   portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)
 
