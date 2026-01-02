@@ -262,6 +262,25 @@ bool MipiDSICamComponent::apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst
     return true;  // Pas de transformation
   }
 
+  // Detect no-op transformation (avoid 27ms PPA overhead for identity operation)
+  bool is_no_op = (this->mirror_x_ == 0 && this->mirror_y_ == 0 && this->rotation_ == 0 &&
+                   this->crop_offset_x_ == 0 &&
+                   (this->output_width_ == 0 || this->output_width_ == this->image_width_) &&
+                   (this->output_height_ == 0 || this->output_height_ == this->image_height_));
+
+  if (is_no_op) {
+    // No transformation needed - just copy buffer (much faster than PPA hardware call)
+    static bool no_op_logged = false;
+    if (!no_op_logged) {
+      ESP_LOGW(TAG, "⚠️  PPA enabled but no transformation needed (mirror=0, rotation=0, scale=1.0)");
+      ESP_LOGW(TAG, "    Using fast memcpy instead of PPA hardware (saves ~27ms per frame)");
+      ESP_LOGW(TAG, "    TIP: Remove 'ppa_enabled: true' from YAML to avoid this overhead entirely");
+      no_op_logged = true;
+    }
+    memcpy(dst_buffer, src_buffer, this->image_buffer_size_);
+    return true;
+  }
+
   // SIMPLIFIED PPA configuration to match M5Stack's working implementation
   // M5Stack only sets: buffer, pic_w, pic_h, scale_x, scale_y, mirror_x
   // They do NOT set block_w, block_h, block_offset_x (let PPA handle defaults)
