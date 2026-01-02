@@ -1275,6 +1275,13 @@ bool MipiDSICamComponent::capture_frame() {
 
   // 1. Dequeue un buffer rempli (USERPTR mode)
   uint32_t t1 = esp_timer_get_time();
+
+  // DEBUG: Track how often we're called vs how often frames are available
+  static uint32_t call_count = 0;
+  static uint32_t eagain_count = 0;
+  static uint32_t last_log_time = 0;
+  call_count++;
+
   struct v4l2_buffer buf;
   memset(&buf, 0, sizeof(buf));
   buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -1283,6 +1290,21 @@ bool MipiDSICamComponent::capture_frame() {
   if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
     if (errno == EAGAIN) {
       // Pas de frame disponible (mode non-blocking)
+      eagain_count++;
+
+      // Log every 5 seconds to check if we're being throttled
+      uint32_t now = millis();
+      if (now - last_log_time > 5000) {
+        ESP_LOGW(TAG, "capture_frame() stats: called=%u, EAGAIN=%u (%.1f%% no frame ready)",
+                 call_count, eagain_count, (eagain_count * 100.0f / call_count));
+        if (eagain_count > call_count * 0.9) {
+          ESP_LOGE(TAG, "⚠️  Sensor is producing frames SLOWER than we're requesting them!");
+          ESP_LOGE(TAG, "    This confirms sensor is running at ~9 FPS, not 30 FPS");
+        }
+        last_log_time = now;
+        call_count = 0;
+        eagain_count = 0;
+      }
       return false;
     }
     ESP_LOGE(TAG, "VIDIOC_DQBUF failed: %s", strerror(errno));
