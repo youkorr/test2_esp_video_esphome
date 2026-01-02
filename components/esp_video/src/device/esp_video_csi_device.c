@@ -36,7 +36,7 @@
 
 #define CSI_CTRL_ID                 0
 #define CSI_CLK_SRC                 MIPI_CSI_PHY_CLK_SRC_DEFAULT
-#define CSI_QUEUE_ITEMS             1
+#define CSI_QUEUE_ITEMS             4  /* Increased from 1 to 4 for DMA pipelining */
 
 /* AEG-1488 */
 #define CSI_BYTE_SWAP_EN            false
