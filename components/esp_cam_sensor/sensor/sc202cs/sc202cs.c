@@ -908,15 +908,15 @@ static const sc202cs_gain_t sc202cs_gain_map[] = {
 #endif  // end CONFIG_ANA_GAIN_PRIORITY
 
 static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
-    // [0] 800x600 @ 15fps (increased VTS for auto-exposure headroom → smooth delivery)
+    // [0] 800x600 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
-             .vts      = 2500,    // Doubled from 1250 → 15fps base, prevents VTS fluctuations
+             .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,       // M5Stack value
-             .exp_def  = 0x4dc,   // M5Stack value (1244) - now only 50% of VTS (was 99.8%)
+             .gain_def = 0,      // M5Stack value
+             .exp_def  = 0x4dc,  // M5Stack value (1244)
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     // [1] 1280x720 @ 30fps
