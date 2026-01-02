@@ -1193,6 +1193,25 @@ bool MipiDSICamComponent::start_streaming() {
   vTaskDelay(pdMS_TO_TICKS(300));
   ESP_LOGI(TAG, "Sensor should be ready for capture");
 
+  // ★ DEBUG: Read back VTS/HTS registers to verify timing configuration
+  // This will tell us if V4L2/ISP modified the sensor registers after initialization
+  esp_cam_sensor_device_t *sensor_dev = esp_video_get_csi_video_device_sensor();
+  if (sensor_dev) {
+    esp_cam_sensor_format_t current_fmt;
+    if (esp_cam_sensor_get_format(sensor_dev, &current_fmt) == ESP_OK) {
+      ESP_LOGI(TAG, "Verifying sensor timing registers for %s (%ux%u @ %ufps):",
+               this->sensor_name_.c_str(), current_fmt.width, current_fmt.height, current_fmt.fps);
+      ESP_LOGI(TAG, "  Expected from ISP info: HTS=%u, VTS=%u, PCLK=%u Hz",
+               current_fmt.isp_info->isp_v1_info.hts,
+               current_fmt.isp_info->isp_v1_info.vts,
+               current_fmt.isp_info->isp_v1_info.pclk);
+      uint32_t expected_fps = current_fmt.isp_info->isp_v1_info.pclk /
+                              (current_fmt.isp_info->isp_v1_info.hts *
+                               current_fmt.isp_info->isp_v1_info.vts);
+      ESP_LOGI(TAG, "  Calculated theoretical FPS: %u fps", expected_fps);
+    }
+  }
+
   this->isp_fd_ = open(ESP_VIDEO_ISP1_DEVICE_NAME, O_RDWR | O_NONBLOCK);
   if (this->isp_fd_ < 0) {
     ESP_LOGW(TAG, "Failed to open ISP device %s for V4L2 controls: %s",
