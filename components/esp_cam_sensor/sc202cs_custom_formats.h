@@ -70,12 +70,12 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x320a, 0x02},          /* output height MSB = 600 (0x0258) */
     {0x320b, 0x58},          /* output height LSB */
 
-    /* Frame timing optimized for 800x600 @ 30fps */
-    /* FPS = 72MHz / (1600 * 1500) = 30fps (tighter timing than 1280x720) */
-    {0x320c, 0x06},          /* HTS MSB = 1600 (0x0640) */
-    {0x320d, 0x40},          /* HTS LSB */
-    {0x320e, 0x05},          /* VTS MSB = 1500 (0x05DC) */
-    {0x320f, 0xdc},          /* VTS LSB */
+    /* Frame timing - Use M5Stack values (same as 1280x720) */
+    /* FPS = 72MHz / (1920 * 1250) = 30fps */
+    {0x320c, 0x07},          /* HTS MSB = 1920 (0x0780) - M5Stack value */
+    {0x320d, 0x80},          /* HTS LSB */
+    {0x320e, 0x04},          /* VTS MSB = 1250 (0x04E2) - M5Stack value */
+    {0x320f, 0xe2},          /* VTS LSB */
 
     {0x3210, 0x00},          /* x offset = 4 (comme mode 1280x720) */
     {0x3211, 0x04},
@@ -138,13 +138,13 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {SC202CS_REG_END, 0x00},
 };
 
-/* ISP info for 800x600 mode - Optimized timing for 800x600 @ 30fps */
+/* ISP info for 800x600 mode - M5Stack timing values */
 static const esp_cam_sensor_isp_info_t sc202cs_800x600_isp_info = {
     .isp_v1_info = {
         .version = SENSOR_ISP_INFO_VERSION_DEFAULT,
         .pclk = 72000000,     /* Pixel clock */
-        .hts = 1600,          /* Horizontal timing optimized for 800x600 */
-        .vts = 1500,          /* Vertical timing: 72MHz/(1600*1500) = 30fps */
+        .hts = 1920,          /* M5Stack value (same as 1280x720) */
+        .vts = 1250,          /* M5Stack value: 72MHz/(1920*1250) = 30fps */
         .exp_def = 0x4dc,     /* M5Stack value (1244) - proper exposure */
         .gain_def = 0,        /* M5Stack value - no extra gain */
         .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
