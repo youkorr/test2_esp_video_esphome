@@ -194,7 +194,11 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
-  lv_obj_invalidate(this->canvas_obj_);
+
+  // ★ PERFORMANCE FIX: Use lv_refr_now() instead of lv_obj_invalidate()
+  // Waveshare ESP32-P4 Camera.cpp (LVGL v8) uses lv_refr_now(NULL) for better performance
+  // This refreshes only dirty areas instead of entire page hierarchy
+  lv_refr_now(NULL);
 
   // Tracker ce buffer pour le liberer au prochain update
   this->displayed_buffer_ = buffer;
