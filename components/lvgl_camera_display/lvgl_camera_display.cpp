@@ -193,7 +193,9 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_IMG_CF_TRUE_COLOR);
+  // ★ FIX: Use LVGL v9 RGB565 format explicitly (matches M5Stack implementation)
+  // LV_IMG_CF_TRUE_COLOR is deprecated and causes color mapping issues
+  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_COLOR_FORMAT_RGB565);
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update
