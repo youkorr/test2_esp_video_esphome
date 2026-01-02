@@ -70,6 +70,10 @@ static const sc202cs_reginfo_t init_reglist_MIPI_1lane_raw8_800x600_30fps[] = {
     {0x320a, 0x02},          /* output height MSB = 600 (0x0258) */
     {0x320b, 0x58},          /* output height LSB */
 
+    /* Frame timing - CRITICAL for crop mode! Match 1600x900 approach */
+    {0x320c, 0x07},          {0x320d, 0x80},  /* HTS = 1920 */
+    {0x320e, 0x04},          {0x320f, 0xe2},  /* VTS = 1250 */
+
     {0x3210, 0x00},          /* x offset = 4 (comme mode 1280x720) */
     {0x3211, 0x04},
     {0x3212, 0x00},          /* y offset = 4 */
