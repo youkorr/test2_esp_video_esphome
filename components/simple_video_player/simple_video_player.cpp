@@ -1688,6 +1688,102 @@ bool SimpleVideoPlayer::init_jpeg_decoder_() {
   return true;
 }
 
+void SimpleVideoPlayer::strip_jpeg_com_markers_() {
+  // Strip COM (Comment) markers that cause ESP32 JPEG decoder to fail
+  // FFmpeg/Libavcodec adds COM markers like "Lavc60.39." which trigger:
+  // "jpeg_parse_com_marker: COM marker data underflow"
+  //
+  // JPEG marker format: 0xFF + marker_type + size(2 bytes big-endian) + data
+  // COM marker is 0xFFFE
+
+  if (this->input_size_ < 4) {
+    return;  // Too small to have any markers
+  }
+
+  size_t read_pos = 2;  // Skip SOI (0xFFD8)
+  size_t write_pos = 2;
+  bool markers_stripped = false;
+
+  while (read_pos + 1 < this->input_size_) {
+    // Look for marker (0xFF followed by non-0x00)
+    if (this->input_buffer_[read_pos] != 0xFF) {
+      this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+      continue;
+    }
+
+    uint8_t marker = this->input_buffer_[read_pos + 1];
+
+    // Handle padding bytes (0xFF 0x00 is not a marker)
+    if (marker == 0x00) {
+      this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+      this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+      continue;
+    }
+
+    // Check if this is a COM marker (0xFFFE)
+    if (marker == 0xFE) {
+      // Read marker size (2 bytes, big-endian, includes these 2 bytes)
+      if (read_pos + 3 >= this->input_size_) {
+        break;  // Incomplete marker
+      }
+
+      uint16_t marker_size = (this->input_buffer_[read_pos + 2] << 8) | this->input_buffer_[read_pos + 3];
+
+      if (marker_size < 2) {
+        ESP_LOGW(TAG, "Invalid COM marker size: %u", marker_size);
+        break;  // Invalid marker
+      }
+
+      // Skip the entire COM marker (0xFF + 0xFE + size_bytes + data)
+      size_t skip_size = 2 + marker_size;  // marker (2) + size+data (marker_size)
+
+      if (read_pos + skip_size > this->input_size_) {
+        ESP_LOGW(TAG, "COM marker extends beyond buffer: read_pos=%zu, skip=%zu, total=%zu",
+                 read_pos, skip_size, this->input_size_);
+        break;  // Marker extends beyond buffer
+      }
+
+      ESP_LOGD(TAG, "Stripping COM marker at offset %zu (size=%u bytes)", read_pos, marker_size);
+      read_pos += skip_size;
+      markers_stripped = true;
+      continue;
+    }
+
+    // For all other markers, copy them as-is
+    // SOS (0xFFDA) contains entropy-coded data until next marker or EOI
+    if (marker == 0xDA) {
+      // Start of Scan - copy rest of data (includes entropy-coded segment)
+      while (read_pos < this->input_size_) {
+        this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+      }
+      break;
+    }
+
+    // For other markers with length field
+    if (marker != 0xD8 && marker != 0xD9 && marker != 0x01) {  // Not SOI, EOI, or TEM
+      if (read_pos + 3 < this->input_size_) {
+        uint16_t marker_size = (this->input_buffer_[read_pos + 2] << 8) | this->input_buffer_[read_pos + 3];
+        size_t copy_size = 2 + marker_size;  // marker + size + data
+
+        if (read_pos + copy_size <= this->input_size_) {
+          for (size_t i = 0; i < copy_size; i++) {
+            this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+          }
+          continue;
+        }
+      }
+    }
+
+    // Default: copy marker byte
+    this->input_buffer_[write_pos++] = this->input_buffer_[read_pos++];
+  }
+
+  if (markers_stripped && write_pos < this->input_size_) {
+    ESP_LOGI(TAG, "Stripped COM markers: %zu bytes -> %zu bytes", this->input_size_, write_pos);
+    this->input_size_ = write_pos;
+  }
+}
+
 bool SimpleVideoPlayer::decode_mjpeg_frame_() {
   if (this->input_size_ == 0 || this->jpeg_decoder_ == nullptr) {
     ESP_LOGW(TAG, "Cannot decode: input_size=%zu, decoder=%p", this->input_size_, this->jpeg_decoder_);
@@ -1701,6 +1797,9 @@ bool SimpleVideoPlayer::decode_mjpeg_frame_() {
              this->input_size_, this->input_buffer_[0], this->input_buffer_[1]);
     return false;
   }
+
+  // Strip COM markers that cause ESP32 JPEG decoder to fail (FFmpeg/Libavcodec "Lavc60.39.")
+  this->strip_jpeg_com_markers_();
 
   jpeg_decode_cfg_t decode_cfg = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
