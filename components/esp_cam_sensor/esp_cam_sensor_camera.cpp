@@ -1295,6 +1295,20 @@ bool MipiDSICamComponent::capture_frame() {
   int buffer_idx = buf.index;
   uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
 
+  // DEBUG: Check for frame drops (sequence should increment by 1 each time)
+  static uint32_t last_sequence = 0;
+  static bool sequence_logged = false;
+  if (!sequence_logged && this->frame_sequence_ > 10) {
+    uint32_t skip = (buf.sequence > last_sequence) ? (buf.sequence - last_sequence - 1) : 0;
+    ESP_LOGW(TAG, "V4L2 frame sequence: %u (skip=%u) - checking for frame drops", buf.sequence, skip);
+    if (skip > 0) {
+      ESP_LOGE(TAG, "⚠️  V4L2 IS DROPPING FRAMES! %u frames skipped between captures!", skip);
+      ESP_LOGE(TAG, "    This explains why FPS is low (~9 instead of 30)");
+    }
+    sequence_logged = true;
+  }
+  last_sequence = buf.sequence;
+
   // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
   uint8_t *display_buffer = frame_data;  // By default, use captured frame directly
