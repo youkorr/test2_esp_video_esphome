@@ -1333,7 +1333,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
                 ESP_LOGW(TAG, "  Failed to apply JSON IPA configuration to ISP");
             }
         } else {
-            ESP_LOGD(TAG, "  No JSON IPA config for '%s' (normal for non-OV02C10/OV5647 sensors)", config->sensor_name);
+            ESP_LOGD(TAG, "  No JSON IPA config for '%s' (normal for sensors without IPA config)", config->sensor_name);
         }
     }
 
