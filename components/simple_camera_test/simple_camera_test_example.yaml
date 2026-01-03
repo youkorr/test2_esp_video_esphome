@@ -1,0 +1,17 @@
+# Example YAML for simple_camera_test component
+# This component bypasses all ESPHome layers and uses direct V4L2 API
+# It's designed to test if FPS issues come from sensor or ESPHome stack
+
+simple_camera_test:
+  width: 800
+  height: 600
+
+# How to use:
+# 1. Comment out your existing lvgl_camera_display or esp_cam_sensor components
+# 2. Add simple_camera_test configuration above
+# 3. Flash and observe FPS in logs
+# 4. Compare FPS with full ESPHome stack
+
+# Expected results:
+# - If FPS is 25-30: Problem is in ESPHome layers (V4L2/CSI/buffers)
+# - If FPS is still 8-10: Problem is in sensor hardware or ISP configuration

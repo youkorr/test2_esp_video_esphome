@@ -1,0 +1,11 @@
+{
+  "name": "simple_camera_test",
+  "version": "1.0.0",
+  "description": "Simple direct V4L2 camera test for debugging FPS issues",
+  "authors": [
+    {
+      "name": "ESPHome Community"
+    }
+  ],
+  "dependencies": []
+}
