@@ -1230,13 +1230,34 @@ bool MipiDSICamComponent::start_streaming() {
     if (esp_ipa_load_json_config(this->sensor_name_.c_str(), &ipa_json_config) == ESP_OK) {
       ESP_LOGI(TAG, "  ✓ JSON IPA config loaded successfully");
 
+      // DIAGNOSTIC: Show what was loaded
+      ESP_LOGI(TAG, "  📊 IPA JSON Config Details:");
+      ESP_LOGI(TAG, "     CCM available: %s", ipa_json_config.has_ccm ? "YES" : "NO");
+      if (ipa_json_config.has_ccm) {
+        ESP_LOGI(TAG, "        Matrix: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+                 ipa_json_config.ccm.matrix[0][0], ipa_json_config.ccm.matrix[0][1], ipa_json_config.ccm.matrix[0][2],
+                 ipa_json_config.ccm.matrix[1][0], ipa_json_config.ccm.matrix[1][1], ipa_json_config.ccm.matrix[1][2],
+                 ipa_json_config.ccm.matrix[2][0], ipa_json_config.ccm.matrix[2][1], ipa_json_config.ccm.matrix[2][2]);
+      }
+      ESP_LOGI(TAG, "     AWB available: %s", ipa_json_config.has_awb ? "YES" : "NO");
+      ESP_LOGI(TAG, "     Sharpen available: %s", ipa_json_config.has_sharpen ? "YES" : "NO");
+      ESP_LOGI(TAG, "     Gamma available: %s", ipa_json_config.has_gamma ? "YES" : "NO");
+      ESP_LOGI(TAG, "     Contrast available: %s", ipa_json_config.has_contrast ? "YES" : "NO");
+      if (ipa_json_config.has_contrast) {
+        ESP_LOGI(TAG, "        Value: %u", ipa_json_config.contrast.value);
+      }
+
       // Apply JSON config to ISP
-      if (esp_ipa_apply_json_to_isp(this->isp_fd_, &ipa_json_config) == ESP_OK) {
+      ESP_LOGI(TAG, "  🔧 Applying IPA JSON to ISP (fd=%d)...", this->isp_fd_);
+      esp_err_t apply_result = esp_ipa_apply_json_to_isp(this->isp_fd_, &ipa_json_config);
+
+      if (apply_result == ESP_OK) {
         ESP_LOGI(TAG, "  ✓ IPA JSON configuration applied to ISP!");
         ESP_LOGI(TAG, "     → Color Correction Matrix (CCM) active");
         ESP_LOGI(TAG, "     → Saturation, Contrast, Gamma tuned for %s", this->sensor_name_.c_str());
       } else {
-        ESP_LOGW(TAG, "  ✗ Failed to apply IPA JSON to ISP");
+        ESP_LOGE(TAG, "  ✗ Failed to apply IPA JSON to ISP (error=%d)", apply_result);
+        ESP_LOGE(TAG, "     Image may remain washed out without IPA tuning");
       }
     } else {
       ESP_LOGD(TAG, "  No JSON IPA config for '%s' (using hardcoded IPA)", this->sensor_name_.c_str());
