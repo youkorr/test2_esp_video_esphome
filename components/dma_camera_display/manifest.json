@@ -1,0 +1,11 @@
+{
+  "name": "dma_camera_display",
+  "version": "1.0.0",
+  "description": "DMA Camera Display - Zero LVGL Redraw (esp_brookesia architecture)",
+  "authors": [
+    {
+      "name": "ESPHome Community"
+    }
+  ],
+  "dependencies": []
+}
