@@ -1291,6 +1291,17 @@ bool MipiDSICamComponent::capture_frame() {
   static uint32_t total_copy_us = 0;
   static uint32_t total_qbuf_us = 0;
 
+  // ============================================================================
+  // DIAGNOSTIC MODE - Logs détaillés pour debugging déformation/frames manquées
+  // ============================================================================
+  static bool diagnostic_mode = true;  // Set to false to disable verbose logs
+  static uint32_t missed_frames = 0;
+  static uint32_t corrupt_frames = 0;
+  static uint32_t last_v4l2_sequence = 0;
+  static uint64_t last_frame_timestamp_us = 0;
+  static uint64_t diagnostic_start_time = 0;
+  static uint32_t diagnostic_frame_count = 0;
+
   // 1. Dequeue un buffer rempli (USERPTR mode)
   uint32_t t1 = esp_timer_get_time();
   struct v4l2_buffer buf;
@@ -1301,12 +1312,85 @@ bool MipiDSICamComponent::capture_frame() {
   if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
     if (errno == EAGAIN) {
       // Pas de frame disponible (mode non-blocking)
+      if (diagnostic_mode && (missed_frames % 10 == 0)) {
+        ESP_LOGW(TAG, "⚠️  No frame ready (EAGAIN) - buffer underrun? (count=%u)", missed_frames);
+      }
+      missed_frames++;
       return false;
     }
-    ESP_LOGE(TAG, "VIDIOC_DQBUF failed: %s", strerror(errno));
+    ESP_LOGE(TAG, "❌ VIDIOC_DQBUF failed: %s", strerror(errno));
     return false;
   }
   uint32_t t2 = esp_timer_get_time();
+
+  // ============================================================================
+  // DIAGNOSTIC: Analyze V4L2 buffer metadata
+  // ============================================================================
+  if (diagnostic_mode) {
+    // Calculate frame timing
+    uint64_t current_timestamp_us = esp_timer_get_time();
+    uint64_t frame_delta_us = 0;
+    if (last_frame_timestamp_us > 0) {
+      frame_delta_us = current_timestamp_us - last_frame_timestamp_us;
+    }
+    last_frame_timestamp_us = current_timestamp_us;
+
+    // Check for dropped frames via V4L2 sequence number
+    uint32_t sequence_gap = 0;
+    if (last_v4l2_sequence > 0 && buf.sequence > last_v4l2_sequence) {
+      sequence_gap = buf.sequence - last_v4l2_sequence - 1;
+      if (sequence_gap > 0) {
+        ESP_LOGW(TAG, "⚠️  DROPPED %u FRAME(S)! V4L2 sequence jump: %u → %u",
+                 sequence_gap, last_v4l2_sequence, buf.sequence);
+      }
+    }
+    last_v4l2_sequence = buf.sequence;
+
+    // Check buffer size
+    uint32_t expected_size = this->image_buffer_size_;
+    uint32_t received_size = buf.bytesused;
+    bool size_mismatch = (received_size != expected_size);
+
+    if (size_mismatch) {
+      ESP_LOGE(TAG, "❌ BUFFER SIZE MISMATCH! Expected %u bytes, got %u bytes",
+               expected_size, received_size);
+      corrupt_frames++;
+    }
+
+    // Calculate real-time FPS
+    if (diagnostic_start_time == 0) {
+      diagnostic_start_time = current_timestamp_us;
+    }
+    diagnostic_frame_count++;
+
+    uint64_t elapsed_sec = (current_timestamp_us - diagnostic_start_time) / 1000000;
+    float current_fps = (elapsed_sec > 0) ? (float)diagnostic_frame_count / elapsed_sec : 0.0f;
+
+    // Log every 30 frames OR if there's an issue
+    bool should_log = (diagnostic_frame_count % 30 == 0) || sequence_gap > 0 || size_mismatch;
+
+    if (should_log) {
+      ESP_LOGI(TAG, "📸 Frame #%u (V4L2 seq=%u, buf_idx=%d)",
+               diagnostic_frame_count, buf.sequence, buf.index);
+      ESP_LOGI(TAG, "   ⏱️  Delta: %.1f ms (%.1f FPS expected @ 30fps)",
+               frame_delta_us / 1000.0f, 1000000.0f / frame_delta_us);
+      ESP_LOGI(TAG, "   📊 Average FPS: %.1f (over %llu sec)",
+               current_fps, elapsed_sec);
+      ESP_LOGI(TAG, "   📦 Size: %u bytes (%ux%u RGB565 = %u expected)",
+               received_size, this->image_width_, this->image_height_, expected_size);
+      ESP_LOGI(TAG, "   🔢 V4L2 timestamp: %lu.%06lu",
+               buf.timestamp.tv_sec, buf.timestamp.tv_usec);
+      ESP_LOGI(TAG, "   ⚠️  Stats: missed=%u, dropped=%u, corrupt=%u",
+               missed_frames, sequence_gap, corrupt_frames);
+
+      // Check frame data integrity (first few pixels)
+      uint8_t *data = (uint8_t *)buf.m.userptr;
+      if (data) {
+        ESP_LOGI(TAG, "   🖼️  First pixels (RGB565): %02X%02X %02X%02X %02X%02X",
+                 data[0], data[1], data[2], data[3], data[4], data[5]);
+      }
+    }
+  }
 
   // 2. V4L2 a déjà écrit directement dans notre buffer SPIRAM!
   // Pas de memcpy nécessaire - le buffer est prêt à être utilisé
