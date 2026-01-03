@@ -97,9 +97,10 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
             return &ipa_config_ov5647;
         } else if (strcmp(cam_name, "SC202CS") == 0 || strcmp(cam_name, "sc202cs") == 0) {
-            // SC202CS: Désactiver CCM pour éviter le fond vert (même config que OV5647)
-            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - fixes green tint)", cam_name);
-            return &ipa_config_ov5647;
+            // SC202CS: ENABLE CCM for better color accuracy
+            // The JSON IPA has a calibrated CCM matrix that improves colors
+            ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
+            return &ipa_config_full;  // ← Now using FULL config with CCM!
         } else {
             ESP_LOGI(TAG, "📸 IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
             return &ipa_config_full;
