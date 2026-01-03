@@ -35,7 +35,7 @@ extern "C" {
 
 // Custom format configurations for all sensors
 #include "ov5647_custom_formats.h"   // OV5647: VGA 640x480, 800x600, 800x640, 1024x600
-#include "sc202cs_custom_formats.h"  // SC202CS: 800x600
+#include "sc202cs_custom_formats.h"  // SC202CS: 800x600, 1280x720
 #include "ov02c10_custom_formats.h"  // OV02C10: 1280x800, 800x600
 
 // imlib est optionnel - désactivé pour l'instant car compilé par ESP-IDF après PlatformIO
@@ -813,10 +813,13 @@ bool MipiDSICamComponent::start_streaming() {
     const esp_cam_sensor_format_t *custom_format = nullptr;
 
     // SC202CS has native 800x600 format, but driver defaults to 720P (index 1)
-    // We need to explicitly apply 800x600 format (index 0) via VIDIOC_S_SENSOR_FMT
+    // We need to explicitly apply formats via VIDIOC_S_SENSOR_FMT
     if (width == 800 && height == 600) {
       custom_format = &sc202cs_custom_format_800x600;
       ESP_LOGI(TAG, "Using SC202CS NATIVE format: 800x600 RAW8 @ 30fps");
+    } else if (width == 1280 && height == 720) {
+      custom_format = &sc202cs_custom_format_1280x720;
+      ESP_LOGI(TAG, "Using SC202CS CUSTOM format: 1280x720 RAW8 @ 30fps");
     }
 
     // Apply custom format via VIDIOC_S_SENSOR_FMT
