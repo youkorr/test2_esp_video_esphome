@@ -1,0 +1,239 @@
+# ============================================================================
+# camera_display - Waveshare Architecture Example
+# ============================================================================
+#
+# This component implements the Waveshare ESP32-P4 camera architecture:
+# Camera DMA → Triple Buffer → LVGL Canvas (25-30 FPS expected)
+#
+# REMOVE these old components:
+#   ❌ esp_cam_sensor
+#   ❌ lvgl_camera_display
+#
+# KEEP these:
+#   ✅ esp_video (infrastructure)
+#   ✅ lvgl (LVGL system)
+#
+# ============================================================================
+
+esphome:
+  name: esp32-p4-camera-demo
+  friendly_name: ESP32-P4 Camera
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+# ============================================================================
+# ESP Video Infrastructure (KEEP THIS)
+# ============================================================================
+esp_video:
+  i2c_id: bsp_bus
+  xclk_pin: GPIO36
+  xclk_freq: 24000000
+  enable_h264: false
+  enable_jpeg: true
+  enable_isp: true
+  use_heap_allocator: false
+
+# ============================================================================
+# NEW: Waveshare Camera Display
+# Replaces: esp_cam_sensor + lvgl_camera_display
+# ============================================================================
+camera_display:
+  id: my_camera
+  sensor_name: sc202cs       # sc202cs, ov5647, ov02c10
+  width: 800
+  height: 600
+  buffer_count: 2            # 2-6 buffers (2 recommended for lowest latency)
+  cpu_core: 0                # Pin streaming task to core 0
+  pixel_format: RGB565       # RGB565, RGB888, RAW8, GRAY
+  mirror_x: false
+  mirror_y: false
+
+# ============================================================================
+# LVGL Display with Camera
+# ============================================================================
+lvgl:
+  log_level: INFO
+
+  pages:
+    # ========================================================================
+    # Camera Page
+    # ========================================================================
+    - id: camera_page
+      bg_color: 0x000000     # Black background
+
+      widgets:
+        # Canvas for camera preview (REQUIRED!)
+        - canvas:
+            id: camera_canvas
+            width: 800
+            height: 600
+            x: 0
+            y: 0
+
+        # Start button (top-left)
+        - button:
+            id: btn_start
+            width: 100
+            height: 50
+            x: 10
+            y: 10
+            bg_color: 0x00AA00  # Green
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶️ Starting camera...");
+                    id(my_camera).start_streaming();
+            widgets:
+              - label:
+                  text: "START"
+                  text_color: 0xFFFFFF
+                  text_align: CENTER
+
+        # Stop button
+        - button:
+            id: btn_stop
+            width: 100
+            height: 50
+            x: 120
+            y: 10
+            bg_color: 0xCC0000  # Red
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "⏹️ Stopping camera...");
+                    id(my_camera).stop_streaming();
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_align: CENTER
+
+        # FPS indicator (top-right)
+        - label:
+            id: lbl_fps
+            x: 700
+            y: 20
+            text: "FPS: --"
+            text_color: 0xFFFFFF
+            text_font: montserrat_16
+
+      # CRITICAL: Connect canvas to camera on page load
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Camera page loaded");
+            ESP_LOGI("camera", "Connecting canvas to camera...");
+            id(my_camera).set_canvas(id(camera_canvas));
+            ESP_LOGI("camera", "Auto-starting camera...");
+            id(my_camera).start_streaming();
+
+# ============================================================================
+# Update FPS label every 2 seconds
+# ============================================================================
+interval:
+  - interval: 2s
+    then:
+      - lambda: |-
+          if (id(my_camera).is_streaming()) {
+            float fps = id(my_camera).get_fps();
+            char buf[32];
+            snprintf(buf, sizeof(buf), "FPS: %.1f", fps);
+            lv_label_set_text(id(lbl_fps), buf);
+          } else {
+            lv_label_set_text(id(lbl_fps), "FPS: --");
+          }
+
+# ============================================================================
+# Example with Multiple Pages
+# ============================================================================
+
+# Uncomment this for multi-page demo:
+#
+# lvgl:
+#   pages:
+#     # Menu page
+#     - id: menu_page
+#       widgets:
+#         - button:
+#             text: "Open Camera"
+#             on_click:
+#               - lvgl.page.show: camera_page
+#
+#     # Camera page (from above)
+#     - id: camera_page
+#       widgets:
+#         - canvas:
+#             id: camera_canvas
+#             width: 800
+#             height: 600
+#         - button:
+#             text: "Back to Menu"
+#             on_click:
+#               - lambda: id(my_camera).stop_streaming();
+#               - lvgl.page.show: menu_page
+#       on_load:
+#         - lambda: |-
+#             id(my_camera).set_canvas(id(camera_canvas));
+#             id(my_camera).start_streaming();
+
+# ============================================================================
+# Example with Different Resolutions
+# ============================================================================
+
+# For 1280x720:
+#
+# camera_display:
+#   id: my_camera
+#   sensor_name: sc202cs
+#   width: 1280
+#   height: 720
+#   buffer_count: 2
+#
+# lvgl:
+#   pages:
+#     - widgets:
+#         - canvas:
+#             id: camera_canvas
+#             width: 1280  # ← MUST match camera
+#             height: 720  # ← MUST match camera
+
+# ============================================================================
+# Example with Position Offset (for smaller screens)
+# ============================================================================
+
+# For displaying 800x600 on 1024x600 screen (centered):
+#
+# lvgl:
+#   pages:
+#     - widgets:
+#         - canvas:
+#             id: camera_canvas
+#             width: 800
+#             height: 600
+#             x: 112  # (1024-800)/2 = center horizontally
+#             y: 0
+
+# ============================================================================
+# Performance Notes
+# ============================================================================
+#
+# Expected FPS:
+#   - SC202CS 800x600:   25-30 FPS ✅
+#   - SC202CS 1280x720:  25-30 FPS ✅
+#   - OV5647 800x600:    25-30 FPS ✅
+#
+# If you get <15 FPS, check:
+#   1. Canvas size matches camera resolution
+#   2. Logs show "Streaming: X frames (25.3 FPS)"
+#   3. No "Failed to dequeue buffer" errors
+#
+# Buffer count recommendations:
+#   - 2 buffers: Lowest latency (recommended)
+#   - 3 buffers: More stable under CPU load
+#   - 4+ buffers: Usually unnecessary
+#
+# ============================================================================
