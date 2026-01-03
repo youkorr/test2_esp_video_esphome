@@ -1,0 +1,332 @@
+# ============================================
+# SMART CAMERA DISPLAY - EXEMPLE COMPLET
+# Utilisation identique à simple_video_player
+# ============================================
+
+# ============================================
+# OPTION 1: Contrôles Automatiques (Simple)
+# ============================================
+smart_camera_display:
+  id: my_camera
+  camera_model: sc202cs  # ou ov5647, ov02c10
+  width: 800
+  height: 600
+  show_controls: true  # Crée automatiquement Play/Stop/Info
+  auto_start: false
+  enable_dma_optimization: true  # Triple buffering interne
+  target_fps: 30.0
+
+lvgl:
+  pages:
+    - id: camera_page_auto
+      bg_color: 0x000000
+      widgets:
+        - canvas:
+            id: camera_canvas
+            width: 800
+            height: 600
+            x: 0
+            y: 0
+
+      on_load:
+        - lambda: |-
+            // Lier canvas à la caméra
+            id(my_camera).set_canvas(id(camera_canvas));
+
+# ============================================
+# OPTION 2: Contrôles Personnalisés (Comme simple_video_player)
+# ============================================
+smart_camera_display:
+  id: my_custom_camera
+  camera_model: sc202cs
+  width: 800
+  height: 600
+  show_controls: false  # On crée nos propres boutons
+  auto_start: false
+  enable_dma_optimization: true
+
+lvgl:
+  pages:
+    - id: camera_page_custom
+      bg_color: 0x000000
+
+      widgets:
+        # Canvas caméra (plein écran)
+        - canvas:
+            id: camera_canvas_custom
+            width: 800
+            height: 600
+            x: 0
+            y: 0
+
+        # Bouton BACK (retour accueil)
+        - button:
+            id: btn_camera_back
+            width: 100
+            height: 45
+            x: 10
+            y: 10
+            bg_color: 0x333333
+            radius: 8
+            on_click:
+              then:
+                - lambda: id(my_custom_camera).stop_streaming();
+                - lvgl.page.show: page_home
+            widgets:
+              - label:
+                  text: "BACK"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton PLAY
+        - button:
+            id: btn_play
+            width: 100
+            height: 45
+            x: 10
+            y: 65
+            bg_color: 0x00AA00  # Vert
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "▶️  START");
+                    id(my_custom_camera).start_streaming();
+            widgets:
+              - label:
+                  text: "PLAY"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton STOP
+        - button:
+            id: btn_stop
+            width: 100
+            height: 45
+            x: 10
+            y: 120
+            bg_color: 0xCC0000  # Rouge
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "⏹️  STOP");
+                    id(my_custom_camera).stop_streaming();
+            widgets:
+              - label:
+                  text: "STOP"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Bouton INFO
+        - button:
+            id: btn_info
+            width: 100
+            height: 45
+            x: 10
+            y: 175
+            bg_color: 0x4682B4  # Bleu
+            radius: 8
+            on_click:
+              then:
+                - lambda: |-
+                    ESP_LOGI("camera", "📊 === INFO ===");
+                    ESP_LOGI("camera", "Model: %s", id(my_custom_camera).get_camera_model().c_str());
+                    ESP_LOGI("camera", "Resolution: %dx%d",
+                             id(my_custom_camera).get_width(),
+                             id(my_custom_camera).get_height());
+                    ESP_LOGI("camera", "FPS: %.2f", id(my_custom_camera).get_current_fps());
+                    ESP_LOGI("camera", "Streaming: %s",
+                             id(my_custom_camera).is_streaming() ? "Yes" : "No");
+            widgets:
+              - label:
+                  text: "INFO"
+                  text_color: 0xFFFFFF
+                  text_font: nunito_20
+                  text_align: CENTER
+
+        # Label status (optionnel)
+        - label:
+            id: status_label
+            text: "READY"
+            x: 120
+            y: 70
+            text_color: 0xFFFF00
+            text_font: nunito_20
+
+      on_load:
+        - lambda: |-
+            ESP_LOGI("camera", "📸 Page caméra chargée");
+            // Lier canvas
+            id(my_custom_camera).set_canvas(id(camera_canvas_custom));
+
+# ============================================
+# OPTION 3: Différentes Résolutions d'Écran
+# ============================================
+
+# Écran 800x480 (plein écran)
+smart_camera_display:
+  id: camera_800x480
+  width: 800
+  height: 480
+  x_offset: 0
+  y_offset: 0
+
+# Écran 1024x600 (centré)
+smart_camera_display:
+  id: camera_1024x600
+  width: 800
+  height: 600
+  x_offset: 112  # (1024-800)/2 pour centrer
+  y_offset: 0
+
+# Écran 1280x720 (petit coin)
+smart_camera_display:
+  id: camera_small
+  width: 640
+  height: 480
+  x_offset: 640  # À droite
+  y_offset: 240  # En bas
+
+# ============================================
+# OPTION 4: Page d'Accueil avec Bouton Caméra
+# (Comme simple_video_player)
+# ============================================
+lvgl:
+  pages:
+    - id: page_home
+      bg_color: 0x1E1E1E
+      widgets:
+        # Titre
+        - label:
+            text: "MENU PRINCIPAL"
+            x: 300
+            y: 20
+            text_color: 0xFFFFFF
+            text_font: roboto_32
+
+        # Bouton CAMERA (ouvre page caméra)
+        - button:
+            id: btn_open_camera
+            width: 200
+            height: 60
+            x: 10
+            y: 100
+            bg_color: 0x4682B4  # Bleu acier
+            radius: 15
+            on_press:
+              then:
+                - lvgl.page.show: camera_page_custom
+            widgets:
+              - label:
+                  text: "CAMERA"
+                  x: 55
+                  y: 10
+                  text_color: 0xFFFFFF
+                  text_font: roboto_24
+
+              - label:
+                  text: "\U000F0571"  # Icon caméra MDI
+                  text_color: 0xFFFF00
+                  text_font: mdi46
+
+        # Bouton VIDEO
+        - button:
+            id: btn_open_video
+            width: 200
+            height: 60
+            x: 10
+            y: 170
+            bg_color: 0x8B4513  # Marron
+            radius: 15
+            on_press:
+              then:
+                - lvgl.page.show: video_page
+            widgets:
+              - label:
+                  text: "MEDIA"
+                  x: 55
+                  y: 10
+                  text_color: 0xFFFFFF
+                  text_font: roboto_24
+
+# ============================================
+# OPTION 5: Automation Actions
+# ============================================
+on_boot:
+  then:
+    # Auto-démarrer caméra au boot
+    - delay: 2s
+    - smart_camera_display.start_streaming:
+        id: my_camera
+
+on_shutdown:
+  then:
+    # Arrêter caméra proprement
+    - smart_camera_display.stop_streaming:
+        id: my_camera
+
+# Avec conditions
+button:
+  - platform: template
+    name: "Toggle Camera"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: return id(my_camera).is_streaming();
+            then:
+              - smart_camera_display.stop_streaming:
+                  id: my_camera
+            else:
+              - smart_camera_display.start_streaming:
+                  id: my_camera
+
+# ============================================
+# OPTION 6: Reconnaissance Faciale (Plus Tard)
+# ============================================
+# TODO: À implémenter dans version future
+# smart_camera_display:
+#   id: my_camera_detection
+#   camera_model: sc202cs
+#   width: 800
+#   height: 600
+#   enable_detection: true
+#   detection_type: face
+#   detection_interval: 1000  # ms
+#
+#   on_face_detected:
+#     then:
+#       - logger.log: "Visage détecté!"
+#       - lambda: |-
+#           auto faces = id(my_camera_detection).get_detected_faces();
+#           for (auto &face : faces) {
+#             ESP_LOGI("face", "Position: (%d, %d), Taille: %dx%d",
+#                      face.x, face.y, face.width, face.height);
+#           }
+
+# ============================================
+# NOTES IMPORTANTES
+# ============================================
+# 1. Toujours lier le canvas dans on_load:
+#    id(my_camera).set_canvas(id(camera_canvas));
+#
+# 2. enable_dma_optimization: true pour meilleure performance
+#    (triple buffering + optimisations DMA)
+#
+# 3. show_controls: false si vous voulez vos propres boutons
+#    (comme simple_video_player)
+#
+# 4. Compatible avec toutes résolutions:
+#    - Ajustez width/height
+#    - Utilisez x_offset/y_offset pour positionner
+#
+# 5. Actions disponibles:
+#    - start_streaming()
+#    - stop_streaming()
+#    - is_streaming()
+#    - get_current_fps()
+#    - get_width(), get_height()
