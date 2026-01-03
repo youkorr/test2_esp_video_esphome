@@ -412,7 +412,13 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
     esp_err_t ret = ESP_OK;
     int applied_count = 0;
 
-    ESP_LOGI(TAG, "Applying JSON IPA parameters to ISP...");
+    ESP_LOGI(TAG, "🔧 Applying JSON IPA parameters to ISP (fd=%d)...", isp_fd);
+    ESP_LOGI(TAG, "   Available: CCM=%s, AWB=%s, Sharpen=%s, Gamma=%s, Contrast=%s",
+             ipa_json_config->has_ccm ? "YES" : "NO",
+             ipa_json_config->has_awb ? "YES" : "NO",
+             ipa_json_config->has_sharpen ? "YES" : "NO",
+             ipa_json_config->has_gamma ? "YES" : "NO",
+             ipa_json_config->has_contrast ? "YES" : "NO");
 
     // 1. Apply CCM (Color Correction Matrix) - CRITICAL for fixing fade colors
     if (ipa_json_config->has_ccm) {
@@ -429,11 +435,18 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
         control[0].id = V4L2_CID_USER_ESP_ISP_CCM;
         control[0].p_u8 = (uint8_t *)&ccm;
 
+        ESP_LOGI(TAG, "   → Attempting to apply CCM matrix...");
+        ESP_LOGI(TAG, "      Matrix: [%.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f, %.2f]",
+                 ccm.matrix[0], ccm.matrix[1], ccm.matrix[2],
+                 ccm.matrix[3], ccm.matrix[4], ccm.matrix[5],
+                 ccm.matrix[6], ccm.matrix[7], ccm.matrix[8]);
+
         if (ioctl(isp_fd, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
-            ESP_LOGI(TAG, "  CCM matrix applied successfully");
+            ESP_LOGI(TAG, "      ✓ CCM matrix applied successfully!");
             applied_count++;
         } else {
-            ESP_LOGE(TAG, "  Failed to apply CCM matrix: errno=%d", errno);
+            ESP_LOGE(TAG, "      ✗ Failed to apply CCM matrix: errno=%d (%s)", errno, strerror(errno));
+            ESP_LOGE(TAG, "         Control ID: 0x%08X, isp_fd=%d", control[0].id, isp_fd);
             ret = ESP_FAIL;
         }
     }
@@ -508,6 +521,8 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
 
     // 5. Apply Contrast if available
     if (ipa_json_config->has_contrast) {
+        ESP_LOGI(TAG, "   → Attempting to apply Contrast (value=%d)...", ipa_json_config->contrast.value);
+
         controls.ctrl_class = V4L2_CID_USER_CLASS;
         controls.count = 1;
         controls.controls = control;
@@ -515,10 +530,11 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
         control[0].value = ipa_json_config->contrast.value;
 
         if (ioctl(isp_fd, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
-            ESP_LOGI(TAG, "  Contrast applied: %d", ipa_json_config->contrast.value);
+            ESP_LOGI(TAG, "      ✓ Contrast applied successfully: %d", ipa_json_config->contrast.value);
             applied_count++;
         } else {
-            ESP_LOGE(TAG, "  Failed to apply contrast: errno=%d", errno);
+            ESP_LOGE(TAG, "      ✗ Failed to apply contrast: errno=%d (%s)", errno, strerror(errno));
+            ESP_LOGE(TAG, "         Control ID: 0x%08X, value=%d", control[0].id, control[0].value);
         }
     }
 
