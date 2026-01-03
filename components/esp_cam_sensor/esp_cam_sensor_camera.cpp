@@ -26,6 +26,7 @@ extern "C" {
 #include "esp_video_isp_ioctl.h"
 #include "esp_ipa.h"
 #include "esp_ipa_types.h"
+#include "esp_ipa_json_loader.h"  // IPA JSON configuration loader
 #include "driver/ppa.h"  // Pixel-Processing Accelerator for hardware mirror/rotate
 #include "linux/videodev2.h"
 #include "esp_task_wdt.h"
@@ -1218,6 +1219,29 @@ bool MipiDSICamComponent::start_streaming() {
   // Les buffers SPIRAM ont déjà été alloués et passés à V4L2 en mode USERPTR
   // V4L2 écrit maintenant directement dans nos buffers SPIRAM - pas de memcpy nécessaire!
   ESP_LOGI(TAG, "V4L2 USERPTR mode active - zero-copy to SPIRAM");
+
+  // ============================================================================
+  // Load and apply IPA JSON configuration (CCM, saturation, contrast, gamma)
+  // ============================================================================
+  if (this->isp_fd_ >= 0) {
+    ESP_LOGI(TAG, "Loading IPA JSON configuration for sensor '%s'...", this->sensor_name_.c_str());
+
+    esp_ipa_json_config_t ipa_json_config = {0};
+    if (esp_ipa_load_json_config(this->sensor_name_.c_str(), &ipa_json_config) == ESP_OK) {
+      ESP_LOGI(TAG, "  ✓ JSON IPA config loaded successfully");
+
+      // Apply JSON config to ISP
+      if (esp_ipa_apply_json_to_isp(this->isp_fd_, &ipa_json_config) == ESP_OK) {
+        ESP_LOGI(TAG, "  ✓ IPA JSON configuration applied to ISP!");
+        ESP_LOGI(TAG, "     → Color Correction Matrix (CCM) active");
+        ESP_LOGI(TAG, "     → Saturation, Contrast, Gamma tuned for %s", this->sensor_name_.c_str());
+      } else {
+        ESP_LOGW(TAG, "  ✗ Failed to apply IPA JSON to ISP");
+      }
+    } else {
+      ESP_LOGD(TAG, "  No JSON IPA config for '%s' (using hardcoded IPA)", this->sensor_name_.c_str());
+    }
+  }
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
   if (this->rgb_gains_enabled_) {
