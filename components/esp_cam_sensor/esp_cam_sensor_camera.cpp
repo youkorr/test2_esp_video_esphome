@@ -1281,6 +1281,24 @@ bool MipiDSICamComponent::start_streaming() {
     } else {
       ESP_LOGE(TAG, "     ✗ Failed to get hardcoded IPA config!");
     }
+
+    // DIAGNOSTIC: Verify V4L2 ISP device is operational
+    ESP_LOGI(TAG, "  🔬 Testing V4L2 ISP device communication...");
+    struct v4l2_ext_control ctrl[1];
+    struct v4l2_ext_controls controls;
+    memset(&ctrl, 0, sizeof(ctrl));
+    memset(&controls, 0, sizeof(controls));
+
+    ctrl[0].id = V4L2_CID_BRIGHTNESS;
+    controls.count = 1;
+    controls.controls = ctrl;
+
+    if (ioctl(this->isp_fd_, VIDIOC_G_EXT_CTRLS, &controls) == 0) {
+      ESP_LOGI(TAG, "     ✓ ISP V4L2 responding (test read successful)");
+    } else {
+      ESP_LOGW(TAG, "     ⚠️  ISP V4L2 not responding: %s", strerror(errno));
+      ESP_LOGW(TAG, "     This suggests ISP pipeline may not be active!");
+    }
   }
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
