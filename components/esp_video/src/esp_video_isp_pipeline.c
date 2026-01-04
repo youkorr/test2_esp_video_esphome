@@ -977,7 +977,20 @@ static void isp_task(void *p)
             continue;
         }
 
+        // DIAGNOSTIC: Confirm DQBUF succeeded
+        if (frame_count == 1) {
+            printf("✅ ISP Task: First DQBUF succeeded! buf.index=%d\n", buf.index);
+            printf("   → Continuing to process metadata...\n");
+        }
+        if (frame_count % 10 == 0) {
+            printf("📊 ISP Task: Frame #%lu - DQBUF succeeded, processing metadata\n", frame_count);
+        }
+
         get_sensor_state(isp, buf.index);
+
+        if (frame_count % 10 == 0) {
+            printf("   → get_sensor_state() completed\n");
+        }
 
         isp_stats_to_ipa_stats(isp->isp_stats[buf.index], &isp->ipa_stats);
         if (ioctl(isp->isp_fd, VIDIOC_QBUF, &buf) != 0) {
@@ -985,25 +998,45 @@ static void isp_task(void *p)
         }
         print_stats_info(&isp->ipa_stats);
 
+        if (frame_count % 10 == 0) {
+            printf("   → About to call esp_ipa_pipeline_process()...\n");
+        }
+
         isp->metadata.flags = 0;
         ret = esp_ipa_pipeline_process(isp->ipa_pipeline, &isp->ipa_stats, &isp->sensor, &isp->metadata);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "failed to process image algorithm");
+            printf("❌ ISP Task: esp_ipa_pipeline_process() FAILED! ret=%d\n", ret);
             continue;
+        }
+
+        if (frame_count % 10 == 0) {
+            printf("   → esp_ipa_pipeline_process() completed, metadata.flags=0x%08X\n", isp->metadata.flags);
         }
 
         // DIAGNOSTIC: Log every 30 frames to see if CCM is being applied
         if (frame_count % 30 == 0) {
+            printf("📊 ISP Task frame #%lu: metadata flags=0x%08X\n", frame_count, isp->metadata.flags);
             ESP_LOGI(TAG, "📊 ISP Task frame #%lu: metadata flags=0x%08X", frame_count, isp->metadata.flags);
             if (isp->metadata.flags & IPA_METADATA_FLAGS_CCM) {
+                printf("   ✓ CCM flag SET - will apply CCM matrix\n");
                 ESP_LOGI(TAG, "   ✓ CCM flag SET - will apply CCM matrix");
             } else {
+                printf("   ✗ CCM flag NOT set - CCM will NOT be applied!\n");
                 ESP_LOGW(TAG, "   ✗ CCM flag NOT set - CCM will NOT be applied!");
                 ESP_LOGW(TAG, "   This is why colors are washed out!");
             }
         }
 
+        if (frame_count % 10 == 0) {
+            printf("   → About to call config_isp_and_camera()...\n");
+        }
+
         config_isp_and_camera(isp, &isp->metadata);
+
+        if (frame_count % 10 == 0) {
+            printf("   → Frame #%lu processing complete!\n\n", frame_count);
+        }
     }
 
     vTaskDelete(NULL);
