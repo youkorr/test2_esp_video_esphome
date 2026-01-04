@@ -889,9 +889,13 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
     int ret;
     struct v4l2_format format;
 
-    if (isp->sensor_attr.awb) {
-        isp->isp_stats[index]->flags &= ~ESP_VIDEO_ISP_STATS_FLAG_AWB;
-    }
+    // WORKAROUND: DO NOT remove AWB flag when sensor has built-in AWB!
+    // The CCM algorithm REQUIRES AWB statistics to function.
+    // Instead, we'll provide synthetic AWB data below.
+    // Old broken code:
+    // if (isp->sensor_attr.awb) {
+    //     isp->isp_stats[index]->flags &= ~ESP_VIDEO_ISP_STATS_FLAG_AWB;
+    // }
 
     memset(&format, 0, sizeof(struct v4l2_format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -900,6 +904,8 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
         isp->sensor.width = format.fmt.pix.width;
         isp->sensor.height = format.fmt.pix.height;
     }
+
+    bool awb_stats_received = false;
 
     if (isp->sensor_attr.stats) {
         struct v4l2_ext_controls controls;
@@ -931,10 +937,32 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
                     awb->sum_r = sensor_stats.wb_avg.red_avg;
                     awb->sum_g = sensor_stats.wb_avg.green_avg;
                     awb->sum_b = sensor_stats.wb_avg.blue_avg;
+                    awb_stats_received = true;
                 }
 
                 isp->sensor_stats_seq = sensor_stats.seq;
             }
+        }
+    }
+
+    // WORKAROUND: Provide synthetic AWB statistics for sensors with built-in AWB
+    // CCM algorithm requires AWB data to function, but SC202CS doesn't report it
+    if (isp->sensor_attr.awb && !awb_stats_received) {
+        isp_awb_stat_result_t *awb = &isp->isp_stats[index]->awb.awb_result;
+
+        // Provide neutral daylight white balance (5500K approximate)
+        // Slightly higher R and B to account for typical indoor/daylight mix
+        isp->isp_stats[index]->flags |= ESP_VIDEO_ISP_STATS_FLAG_AWB;
+        awb->white_patch_num = 100;  // Reasonable patch count
+        awb->sum_r = 12000;          // Red sum (slightly warm)
+        awb->sum_g = 12000;          // Green sum (reference)
+        awb->sum_b = 11500;          // Blue sum (slightly less than neutral)
+
+        // Log once every 100 frames to avoid spam
+        static uint32_t awb_log_counter = 0;
+        if (awb_log_counter++ % 100 == 0) {
+            ESP_LOGD(TAG, "Synthetic AWB stats provided (R=%lu, G=%lu, B=%lu)",
+                     awb->sum_r, awb->sum_g, awb->sum_b);
         }
     }
 
