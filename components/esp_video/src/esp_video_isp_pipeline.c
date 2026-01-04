@@ -1000,6 +1000,16 @@ static void isp_task(void *p)
 
         if (frame_count % 10 == 0) {
             printf("   → About to call esp_ipa_pipeline_process()...\n");
+            printf("      📊 Input stats.flags=0x%08X (AWB=%d, AE=%d, HIST=%d, SHARP=%d)\n",
+                   isp->ipa_stats.flags,
+                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_AWB),
+                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_AE),
+                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_HIST),
+                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_SHARPEN));
+            printf("      📷 Sensor: %dx%d, exp=%u/%u/%u, gain=%.2f/%.2f/%.2f\n",
+                   isp->sensor.width, isp->sensor.height,
+                   isp->sensor.min_exposure, isp->sensor.cur_exposure, isp->sensor.max_exposure,
+                   isp->sensor.min_gain, isp->sensor.cur_gain, isp->sensor.max_gain);
         }
 
         isp->metadata.flags = 0;
@@ -1376,6 +1386,25 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     ESP_LOGI(TAG, "IPA Pipeline created - verifying loaded algorithms:");
     esp_ipa_pipeline_print(isp->ipa_pipeline);
 
+    // DIAGNOSTIC: Force print loaded algorithms with printf()
+    printf("\n🔧 IPA Pipeline Created:\n");
+    printf("   Requested %d algorithms: ", config->ipa_config->ipa_nums);
+    for (int i = 0; i < config->ipa_config->ipa_nums; i++) {
+        printf("%s%s", config->ipa_config->ipa_names[i], (i < config->ipa_config->ipa_nums - 1) ? ", " : "\n");
+    }
+    if (isp->ipa_pipeline && isp->ipa_pipeline->ipa_array) {
+        printf("   Actually loaded %d algorithms: ", isp->ipa_pipeline->ipa_nums);
+        for (int i = 0; i < isp->ipa_pipeline->ipa_nums; i++) {
+            if (isp->ipa_pipeline->ipa_array[i]) {
+                printf("%s%s", isp->ipa_pipeline->ipa_array[i]->name,
+                       (i < isp->ipa_pipeline->ipa_nums - 1) ? ", " : "\n");
+            }
+        }
+    } else {
+        printf("   ⚠️  WARNING: ipa_pipeline or ipa_array is NULL!\n");
+    }
+    printf("\n");
+
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
     ESP_GOTO_ON_ERROR(init_isp_dev(config, isp), fail_2, TAG, "failed to initialize ISP device");
 
@@ -1383,6 +1412,20 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
     ESP_GOTO_ON_ERROR(esp_ipa_pipeline_init(isp->ipa_pipeline, &isp->sensor, &metadata),
                       fail_3, TAG, "failed to initialize IPA pipeline");
     ESP_LOGI(TAG, "IPA Pipeline initialized successfully");
+
+    // DIAGNOSTIC: Show what metadata flags were set during init
+    printf("🔬 IPA Pipeline Init Results:\n");
+    printf("   metadata.flags = 0x%08X\n", metadata.flags);
+    printf("   Flags set: ");
+    if (metadata.flags & IPA_METADATA_FLAGS_CCM) printf("CCM ");
+    if (metadata.flags & IPA_METADATA_FLAGS_GAMMA) printf("GAMMA ");
+    if (metadata.flags & IPA_METADATA_FLAGS_SH) printf("SHARPEN ");
+    if (metadata.flags & IPA_METADATA_FLAGS_BF) printf("DENOISING ");
+    if (metadata.flags & IPA_METADATA_FLAGS_RG) printf("RED_GAIN ");
+    if (metadata.flags & IPA_METADATA_FLAGS_BG) printf("BLUE_GAIN ");
+    if (metadata.flags == 0) printf("(NONE!)");
+    printf("\n\n");
+
     config_isp_and_camera(isp, &metadata);
 
     // Load and apply JSON IPA configuration if sensor name is provided
