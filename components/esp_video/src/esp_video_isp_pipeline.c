@@ -945,7 +945,12 @@ static void isp_task(void *p)
     struct v4l2_buffer buf;
     esp_video_isp_t *isp = (esp_video_isp_t *)p;
 
+    ESP_LOGI(TAG, "🚀 ISP Pipeline Task started! Running on core %d", xPortGetCoreID());
+    ESP_LOGI(TAG, "   Task will process sensor stats and apply IPA corrections (CCM, AWB, etc)");
+
+    static uint32_t frame_count = 0;
     while (1) {
+        frame_count++;
         memset(&buf, 0, sizeof(buf));
         buf.type   = V4L2_BUF_TYPE_META_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
@@ -967,6 +972,17 @@ static void isp_task(void *p)
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "failed to process image algorithm");
             continue;
+        }
+
+        // DIAGNOSTIC: Log every 30 frames to see if CCM is being applied
+        if (frame_count % 30 == 0) {
+            ESP_LOGI(TAG, "📊 ISP Task frame #%lu: metadata flags=0x%08X", frame_count, isp->metadata.flags);
+            if (isp->metadata.flags & IPA_METADATA_FLAGS_CCM) {
+                ESP_LOGI(TAG, "   ✓ CCM flag SET - will apply CCM matrix");
+            } else {
+                ESP_LOGW(TAG, "   ✗ CCM flag NOT set - CCM will NOT be applied!");
+                ESP_LOGW(TAG, "   This is why colors are washed out!");
+            }
         }
 
         config_isp_and_camera(isp, &isp->metadata);
