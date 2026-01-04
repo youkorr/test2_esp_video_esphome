@@ -1262,6 +1262,25 @@ bool MipiDSICamComponent::start_streaming() {
     } else {
       ESP_LOGD(TAG, "  No JSON IPA config for '%s' (using hardcoded IPA)", this->sensor_name_.c_str());
     }
+
+    // DIAGNOSTIC: Check what hardcoded IPA config is being used
+    ESP_LOGI(TAG, "  🔍 Checking hardcoded IPA pipeline config for '%s'...", this->sensor_name_.c_str());
+    const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(this->sensor_name_.c_str());
+    if (ipa_config) {
+      ESP_LOGI(TAG, "     → Hardcoded IPA has %d algorithms:", ipa_config->ipa_nums);
+      for (int i = 0; i < ipa_config->ipa_nums; i++) {
+        ESP_LOGI(TAG, "        [%d] %s", i + 1, ipa_config->ipa_names[i]);
+        if (strcmp(ipa_config->ipa_names[i], "cc.linear") == 0) {
+          ESP_LOGI(TAG, "           ✓ CCM (Color Correction Matrix) is ENABLED");
+        }
+      }
+      if (ipa_config->ipa_nums == 4) {
+        ESP_LOGW(TAG, "     ⚠️  WARNING: Only 4 algorithms - CCM is DISABLED!");
+        ESP_LOGW(TAG, "     ⚠️  This causes washed out colors. Expected 5 algorithms with cc.linear");
+      }
+    } else {
+      ESP_LOGE(TAG, "     ✗ Failed to get hardcoded IPA config!");
+    }
   }
 
   // Auto-appliquer les gains RGB CCM si configurés dans YAML
