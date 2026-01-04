@@ -888,14 +888,18 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
 {
     int ret;
     struct v4l2_format format;
+    static uint32_t debug_counter = 0;
 
-    // WORKAROUND: DO NOT remove AWB flag when sensor has built-in AWB!
-    // The CCM algorithm REQUIRES AWB statistics to function.
-    // Instead, we'll provide synthetic AWB data below.
-    // Old broken code:
-    // if (isp->sensor_attr.awb) {
-    //     isp->isp_stats[index]->flags &= ~ESP_VIDEO_ISP_STATS_FLAG_AWB;
-    // }
+    // DIAGNOSTIC: Force log every 50 frames to debug AWB issue
+    bool do_log = (debug_counter++ % 50 == 0);
+
+    if (do_log) {
+        printf("\n🔍 get_sensor_state() frame %lu:\n", debug_counter);
+        printf("   sensor_attr: awb=%d, stats=%d, gain=%d, exposure=%d\n",
+               isp->sensor_attr.awb, isp->sensor_attr.stats,
+               isp->sensor_attr.gain, isp->sensor_attr.exposure);
+        printf("   isp_stats[%d]->flags BEFORE=0x%08X\n", index, isp->isp_stats[index]->flags);
+    }
 
     memset(&format, 0, sizeof(struct v4l2_format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -938,6 +942,11 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
                     awb->sum_g = sensor_stats.wb_avg.green_avg;
                     awb->sum_b = sensor_stats.wb_avg.blue_avg;
                     awb_stats_received = true;
+
+                    if (do_log) {
+                        printf("   ✓ Real AWB from sensor: R=%u G=%u B=%u\n",
+                               awb->sum_r, awb->sum_g, awb->sum_b);
+                    }
                 }
 
                 isp->sensor_stats_seq = sensor_stats.seq;
@@ -948,29 +957,35 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
     // WORKAROUND: Provide synthetic AWB statistics for sensors with built-in AWB
     // CCM algorithm requires AWB data to function, but SC202CS doesn't report it
     if (isp->sensor_attr.awb && !awb_stats_received) {
+        if (do_log) {
+            printf("   → Providing SYNTHETIC AWB (sensor has built-in AWB)\n");
+        }
+
         isp_awb_stat_result_t *awb = &isp->isp_stats[index]->awb.awb_result;
 
         // Provide neutral daylight white balance (5500K approximate)
-        // Slightly higher R and B to account for typical indoor/daylight mix
         isp->isp_stats[index]->flags |= ESP_VIDEO_ISP_STATS_FLAG_AWB;
-        awb->white_patch_num = 100;  // Reasonable patch count
-        awb->sum_r = 12000;          // Red sum (slightly warm)
-        awb->sum_g = 12000;          // Green sum (reference)
-        awb->sum_b = 11500;          // Blue sum (slightly less than neutral)
+        awb->white_patch_num = 100;
+        awb->sum_r = 12000;
+        awb->sum_g = 12000;
+        awb->sum_b = 11500;
 
-        // Log once every 100 frames to avoid spam
-        static uint32_t awb_log_counter = 0;
-        if (awb_log_counter++ % 100 == 0) {
-            ESP_LOGD(TAG, "Synthetic AWB stats provided (R=%lu, G=%lu, B=%lu)",
-                     awb->sum_r, awb->sum_g, awb->sum_b);
+        if (do_log) {
+            printf("   ✓ Synthetic AWB set: flags=0x%08X, R=%lu G=%lu B=%lu\n",
+                   isp->isp_stats[index]->flags, awb->sum_r, awb->sum_g, awb->sum_b);
         }
+    } else if (!isp->sensor_attr.awb && do_log) {
+        printf("   ⚠️  sensor_attr.awb=0 - NOT providing synthetic AWB!\n");
+        printf("   → This is the problem - CCM needs AWB stats!\n");
     }
 
     // WORKAROUND: Ensure cur_exposure always has a valid value
-    // SC202CS may not report exposure via V4L2_CID_CAMERA_STATS
     if (isp->sensor.cur_exposure == 0 && isp->sensor.max_exposure > 0) {
-        // Use middle of exposure range as default
         isp->sensor.cur_exposure = (isp->sensor.min_exposure + isp->sensor.max_exposure) / 2;
+    }
+
+    if (do_log) {
+        printf("   isp_stats[%d]->flags AFTER=0x%08X\n\n", index, isp->isp_stats[index]->flags);
     }
 }
 
