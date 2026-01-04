@@ -1266,6 +1266,17 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         isp->sensor_attr.stats = 1;
     } else {
         ESP_LOGD(TAG, "V4L2_CID_CAMERA_STATS is not supported");
+
+        // WORKAROUND: SC202CS has built-in AWB but doesn't support V4L2_CID_CAMERA_STATS
+        // Force sensor_attr.awb=1 so get_sensor_state() will provide synthetic AWB stats
+        // This is required for CCM algorithm to function
+        if (config->sensor_name &&
+            (strcmp(config->sensor_name, "sc202cs") == 0 ||
+             strcmp(config->sensor_name, "SC202CS") == 0)) {
+            isp->sensor_attr.awb = 1;
+            printf("⚙️  SC202CS: Forcing sensor_attr.awb=1 (built-in AWB, needs synthetic stats for CCM)\n");
+            ESP_LOGI(TAG, "SC202CS: sensor_attr.awb forced to 1 for CCM algorithm");
+        }
     }
 
     qctrl.id = V4L2_CID_CAMERA_GROUP;
