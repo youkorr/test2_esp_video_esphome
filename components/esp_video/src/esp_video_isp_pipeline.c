@@ -937,6 +937,13 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
             }
         }
     }
+
+    // WORKAROUND: Ensure cur_exposure always has a valid value
+    // SC202CS may not report exposure via V4L2_CID_CAMERA_STATS
+    if (isp->sensor.cur_exposure == 0 && isp->sensor.max_exposure > 0) {
+        // Use middle of exposure range as default
+        isp->sensor.cur_exposure = (isp->sensor.min_exposure + isp->sensor.max_exposure) / 2;
+    }
 }
 
 static void isp_task(void *p)
@@ -1161,8 +1168,38 @@ static esp_err_t init_cam_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_LOGD(TAG, "  max:     %"PRIi64, qctrl.maximum);
         ESP_LOGD(TAG, "  step:    %"PRIu64, qctrl.step);
         ESP_LOGD(TAG, "  current: %"PRIi32, control[0].value);
+
+        // DIAGNOSTIC: Verify exposure values are valid
+        printf("📷 Exposure V4L2 control results:\n");
+        printf("   tline_ns=%u, min=%u us, max=%u us, cur=%u us\n",
+               isp->sensor_tline_ns,
+               isp->sensor.min_exposure,
+               isp->sensor.max_exposure,
+               isp->sensor.cur_exposure);
+
+        // WORKAROUND: If exposure values are invalid (zero), provide reasonable defaults
+        if (isp->sensor.min_exposure == 0 && isp->sensor.max_exposure == 0) {
+            printf("   ⚠️  Exposure values are ZERO - using SC202CS defaults\n");
+            isp->sensor.min_exposure = 100;      // 100 microseconds minimum
+            isp->sensor.max_exposure = 100000;   // 100 milliseconds maximum
+            isp->sensor.cur_exposure = 10000;    // 10ms default (100 FPS equivalent)
+            isp->sensor.step_exposure = 100;
+            printf("   → Fallback: min=%u, max=%u, cur=%u us\n",
+                   isp->sensor.min_exposure, isp->sensor.max_exposure, isp->sensor.cur_exposure);
+        }
     } else {
         ESP_LOGD(TAG, "V4L2_CID_EXPOSURE is not supported");
+        printf("⚠️  V4L2_CID_EXPOSURE not supported - providing SC202CS exposure defaults\n");
+
+        // SC202CS doesn't support V4L2 exposure control - use reasonable defaults
+        isp->sensor.min_exposure = 100;      // 100 microseconds
+        isp->sensor.max_exposure = 100000;   // 100 milliseconds
+        isp->sensor.cur_exposure = 10000;    // 10ms default
+        isp->sensor.step_exposure = 100;
+        isp->sensor_attr.exposure = 1;       // Mark as available (using defaults)
+
+        printf("   Exposure defaults: min=%u, max=%u, cur=%u us\n",
+               isp->sensor.min_exposure, isp->sensor.max_exposure, isp->sensor.cur_exposure);
     }
 
     qctrl.id = V4L2_CID_CAMERA_STATS;
