@@ -334,6 +334,24 @@ void ESPVideoComponent::setup() {
     close(fd);
   }
 
+  // Test: Try to open /dev/video0 a second time to check for ownership conflicts
+  ESP_LOGI(TAG, "🔬 Testing /dev/video0 multiple open support...");
+  int fd1 = open("/dev/video0", O_RDWR);
+  if (fd1 >= 0) {
+    ESP_LOGI(TAG, "   First open of /dev/video0: fd=%d ✓", fd1);
+
+    int fd2 = open("/dev/video0", O_RDWR);
+    if (fd2 >= 0) {
+      ESP_LOGI(TAG, "   Second open of /dev/video0: fd=%d ✓", fd2);
+      ESP_LOGI(TAG, "   → Multiple opens ALLOWED (no VIDIOC_SET_OWNER conflict)");
+      close(fd2);
+    } else {
+      ESP_LOGW(TAG, "   Second open FAILED: errno=%d (%s)", errno, strerror(errno));
+      ESP_LOGW(TAG, "   → Device owned exclusively (VIDIOC_SET_OWNER active?)");
+    }
+    close(fd1);
+  }
+
   // NOTE: Sensor detection is already done by esp_video_init() above.
   // The automatic detection loop correctly identifies SC202CS, OV5647, OV02C10, etc.
   // Manual I2C chip ID verification is not needed and was causing confusing log messages

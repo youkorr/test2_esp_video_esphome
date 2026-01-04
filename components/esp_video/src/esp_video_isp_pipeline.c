@@ -945,6 +945,15 @@ static void isp_task(void *p)
     struct v4l2_buffer buf;
     esp_video_isp_t *isp = (esp_video_isp_t *)p;
 
+    // CRITICAL: Use printf() to force display even if ESP_LOG filtering is active
+    printf("\n========================================\n");
+    printf("🚀 ISP PIPELINE TASK STARTED!\n");
+    printf("   Running on core: %d\n", xPortGetCoreID());
+    printf("   ISP fd: %d\n", isp->isp_fd);
+    printf("   CAM fd: %d\n", isp->cam_fd);
+    printf("   About to wait for metadata from /dev/video20...\n");
+    printf("========================================\n\n");
+
     ESP_LOGI(TAG, "🚀 ISP Pipeline Task started! Running on core %d", xPortGetCoreID());
     ESP_LOGI(TAG, "   Task will process sensor stats and apply IPA corrections (CCM, AWB, etc)");
 
@@ -954,7 +963,16 @@ static void isp_task(void *p)
         memset(&buf, 0, sizeof(buf));
         buf.type   = V4L2_BUF_TYPE_META_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
+
+        // DIAGNOSTIC: First iteration log
+        if (frame_count == 1) {
+            printf("📊 ISP Task: First VIDIOC_DQBUF call (may block until streaming starts)...\n");
+        }
+
         if (ioctl(isp->isp_fd, VIDIOC_DQBUF, &buf) != 0) {
+            if (frame_count == 1) {
+                printf("❌ ISP Task: First DQBUF failed! errno=%d (%s)\n", errno, strerror(errno));
+            }
             ESP_LOGE(TAG, "failed to receive video frame");
             continue;
         }
