@@ -1321,11 +1321,12 @@ static esp_err_t init_isp_dev(const esp_video_isp_config_t *config, esp_video_is
         ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to queue buffer");
     }
 
-    // NOTE: Pour ESPHome/PlatformIO, le streaming est contrôlé manuellement par l'utilisateur
-    // Ne pas démarrer automatiquement le streaming ici - l'utilisateur appellera VIDIOC_STREAMON quand nécessaire
-    // ret = ioctl(fd, VIDIOC_STREAMON, &type);
-    // ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to start stream");
-    ESP_LOGI(TAG, "ISP metadata buffers initialized - streaming controlled by user");
+    // CRITICAL FIX: ISP metadata streaming MUST be started for ISP task to receive frames
+    // Without this, the ISP task blocks forever on VIDIOC_DQBUF waiting for metadata
+    ret = ioctl(fd, VIDIOC_STREAMON, &type);
+    ESP_GOTO_ON_FALSE(ret == 0, ESP_FAIL, fail_0, TAG, "failed to start ISP metadata stream");
+    printf("✅ ISP metadata streaming STARTED on /dev/video20 (type=%d)\n", type);
+    ESP_LOGI(TAG, "ISP metadata streaming started - ISP task can now process frames");
 
     isp->isp_fd = fd;
 
