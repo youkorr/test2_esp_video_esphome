@@ -3,7 +3,7 @@
     "SC202CS": {
         "awb": {
             "min_counted": 2000,
-            "min_red_gain_step": 0.050,
+            "min_red_gain_step": 0.048,
             "min_blue_gain_step": 0.034
         },
 
@@ -17,7 +17,7 @@
                 "min_step": 0.03,
                 "frame_delay": 3
             },
-            "speed": 0.08,  // plus lent pour réduire tearing
+            "speed": 0.08,
 
             "luma_adjust": {
                 "target_low": 115,
@@ -73,9 +73,9 @@
                 {
                     "color_temp": 0,
                     "matrix": [
-                        1.60,  -0.04,  -0.18,
-                       -0.12,   1.30,  -0.18,
-                       -0.04,  -0.14,   1.22
+                        1.55, -0.04, -0.18,
+                        -0.12, 1.25, -0.18,
+                        -0.04, -0.14, 1.22
                     ]
                 }
             ]
@@ -83,55 +83,13 @@
 
         "adn": {
             "bf": [
-                {
-                    "gain": 1,
-                    "param": {
-                        "level": 4,
-                        "matrix": [2, 4, 2, 4, 9, 4, 2, 4, 2]
-                    }
-                },
-                {
-                    "gain": 4,
-                    "param": {
-                        "level": 5,
-                        "matrix": [1, 3, 1, 3, 6, 3, 1, 3, 1]
-                    }
-                },
-                {
-                    "gain": 8,
-                    "param": {
-                        "level": 6,
-                        "matrix": [1, 4, 1, 4, 8, 4, 1, 8, 1]
-                    }
-                },
-                {
-                    "gain": 16,
-                    "param": {
-                        "level": 8,
-                        "matrix": [1, 3, 1, 3, 6, 3, 1, 3, 1]
-                    }
-                },
-                {
-                    "gain": 24,
-                    "param": {
-                        "level": 10,
-                        "matrix": [1, 2, 1, 2, 5, 2, 1, 2, 1]
-                    }
-                },
-                {
-                    "gain": 32,
-                    "param": {
-                        "level": 14,
-                        "matrix": [1, 2, 1, 2, 4, 2, 1, 2, 1]
-                    }
-                },
-                {
-                    "gain": 64,
-                    "param": {
-                        "level": 19,
-                        "matrix": [1, 2, 1, 2, 4, 2, 1, 2, 1]
-                    }
-                }
+                { "gain": 1, "param": { "level": 4, "matrix": [2, 4, 2, 4, 9, 4, 2, 4, 2] } },
+                { "gain": 4, "param": { "level": 5, "matrix": [1, 3, 1, 3, 6, 3, 1, 3, 1] } },
+                { "gain": 8, "param": { "level": 6, "matrix": [1, 4, 1, 4, 8, 4, 1, 8, 1] } },
+                { "gain": 16, "param": { "level": 8, "matrix": [1, 3, 1, 3, 6, 3, 1, 3, 1] } },
+                { "gain": 24, "param": { "level": 10, "matrix": [1, 2, 1, 2, 5, 2, 1, 2, 1] } },
+                { "gain": 32, "param": { "level": 14, "matrix": [1, 2, 1, 2, 4, 2, 1, 2, 1] } },
+                { "gain": 64, "param": { "level": 19, "matrix": [1, 2, 1, 2, 4, 2, 1, 2, 1] } }
             ],
 
             "demosaic": [
@@ -144,56 +102,15 @@
 
         "aen": {
             "gamma": {
-                "table": [
-                    0, 40, 64, 84,
-                    103, 120, 136, 151,
-                    165, 179, 193, 206,
-                    219, 231, 243, 255
-                ],
+                "table": [0,40,64,84,103,120,136,151,165,179,193,206,219,231,243,255],
                 "param": 0.62
             },
 
             "sharpen": [
-                {
-                    "gain": 1,
-                    "param": {
-                        "h_thresh": 65,
-                        "l_thresh": 10,
-                        "h_coeff": 1.025,
-                        "m_coeff": 1.825,
-                        "matrix": [3, 2, 3, 2, 1, 2, 3, 2, 3]
-                    }
-                },
-                {
-                    "gain": 8,
-                    "param": {
-                        "h_thresh": 60,
-                        "l_thresh": 12,
-                        "h_coeff": 0.825,
-                        "m_coeff": 1.425,
-                        "matrix": [2, 2, 2, 2, 1, 2, 2, 2, 2]
-                    }
-                },
-                {
-                    "gain": 12,
-                    "param": {
-                        "h_thresh": 60,
-                        "l_thresh": 18,
-                        "h_coeff": 0.525,
-                        "m_coeff": 1.225,
-                        "matrix": [1, 1, 1, 1, 1, 2, 1, 1, 1]
-                    }
-                },
-                {
-                    "gain": 65,
-                    "param": {
-                        "h_thresh": 50,
-                        "l_thresh": 20,
-                        "h_coeff": 0.525,
-                        "m_coeff": 1.225,
-                        "matrix": [1, 1, 1, 1, 1, 1, 1, 1, 1]
-                    }
-                }
+                { "gain": 1, "param": { "h_thresh": 65, "l_thresh": 10, "h_coeff": 1.025, "m_coeff": 1.825, "matrix": [3,2,3,2,1,2,3,2,3] } },
+                { "gain": 8, "param": { "h_thresh": 60, "l_thresh": 12, "h_coeff": 0.825, "m_coeff": 1.425, "matrix": [2,2,2,2,1,2,2,2,2] } },
+                { "gain": 12, "param": { "h_thresh": 60, "l_thresh": 18, "h_coeff": 0.525, "m_coeff": 1.225, "matrix": [1,1,1,1,1,2,1,1,1] } },
+                { "gain": 65, "param": { "h_thresh": 50, "l_thresh": 20, "h_coeff": 0.525, "m_coeff": 1.225, "matrix": [1,1,1,1,1,1,1,1,1] } }
             ],
 
             "contrast": [
@@ -207,6 +124,7 @@
         }
     }
 }
+
 
 
 
