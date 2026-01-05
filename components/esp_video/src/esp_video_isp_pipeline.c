@@ -888,18 +888,6 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
 {
     int ret;
     struct v4l2_format format;
-    static uint32_t debug_counter = 0;
-
-    // DIAGNOSTIC: Force log every 50 frames to debug AWB issue
-    bool do_log = (debug_counter++ % 50 == 0);
-
-    if (do_log) {
-        printf("\n🔍 get_sensor_state() frame %lu:\n", debug_counter);
-        printf("   sensor_attr: awb=%d, stats=%d, gain=%d, exposure=%d\n",
-               isp->sensor_attr.awb, isp->sensor_attr.stats,
-               isp->sensor_attr.gain, isp->sensor_attr.exposure);
-        printf("   isp_stats[%d]->flags BEFORE=0x%08X\n", index, isp->isp_stats[index]->flags);
-    }
 
     memset(&format, 0, sizeof(struct v4l2_format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -942,11 +930,6 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
                     awb->sum_g = sensor_stats.wb_avg.green_avg;
                     awb->sum_b = sensor_stats.wb_avg.blue_avg;
                     awb_stats_received = true;
-
-                    if (do_log) {
-                        printf("   ✓ Real AWB from sensor: R=%u G=%u B=%u\n",
-                               awb->sum_r, awb->sum_g, awb->sum_b);
-                    }
                 }
 
                 isp->sensor_stats_seq = sensor_stats.seq;
@@ -957,10 +940,6 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
     // WORKAROUND: Provide synthetic AWB statistics for sensors with built-in AWB
     // CCM algorithm requires AWB data to function, but SC202CS doesn't report it
     if (isp->sensor_attr.awb && !awb_stats_received) {
-        if (do_log) {
-            printf("   → Providing SYNTHETIC AWB (sensor has built-in AWB)\n");
-        }
-
         isp_awb_stat_result_t *awb = &isp->isp_stats[index]->awb.awb_result;
 
         // Provide neutral daylight white balance (5500K approximate)
@@ -970,22 +949,17 @@ static void get_sensor_state(esp_video_isp_t *isp, int index)
         awb->sum_g = 12000;
         awb->sum_b = 11500;
 
-        if (do_log) {
-            printf("   ✓ Synthetic AWB set: flags=0x%08X, R=%lu G=%lu B=%lu\n",
-                   isp->isp_stats[index]->flags, awb->sum_r, awb->sum_g, awb->sum_b);
+        // Log once on first call to confirm synthetic AWB is active
+        static bool logged_once = false;
+        if (!logged_once) {
+            ESP_LOGI(TAG, "Providing synthetic AWB stats for CCM (R=12000, G=12000, B=11500)");
+            logged_once = true;
         }
-    } else if (!isp->sensor_attr.awb && do_log) {
-        printf("   ⚠️  sensor_attr.awb=0 - NOT providing synthetic AWB!\n");
-        printf("   → This is the problem - CCM needs AWB stats!\n");
     }
 
     // WORKAROUND: Ensure cur_exposure always has a valid value
     if (isp->sensor.cur_exposure == 0 && isp->sensor.max_exposure > 0) {
         isp->sensor.cur_exposure = (isp->sensor.min_exposure + isp->sensor.max_exposure) / 2;
-    }
-
-    if (do_log) {
-        printf("   isp_stats[%d]->flags AFTER=0x%08X\n\n", index, isp->isp_stats[index]->flags);
     }
 }
 
@@ -995,17 +969,7 @@ static void isp_task(void *p)
     struct v4l2_buffer buf;
     esp_video_isp_t *isp = (esp_video_isp_t *)p;
 
-    // CRITICAL: Use printf() to force display even if ESP_LOG filtering is active
-    printf("\n========================================\n");
-    printf("🚀 ISP PIPELINE TASK STARTED!\n");
-    printf("   Running on core: %d\n", xPortGetCoreID());
-    printf("   ISP fd: %d\n", isp->isp_fd);
-    printf("   CAM fd: %d\n", isp->cam_fd);
-    printf("   About to wait for metadata from /dev/video20...\n");
-    printf("========================================\n\n");
-
-    ESP_LOGI(TAG, "🚀 ISP Pipeline Task started! Running on core %d", xPortGetCoreID());
-    ESP_LOGI(TAG, "   Task will process sensor stats and apply IPA corrections (CCM, AWB, etc)");
+    ESP_LOGI(TAG, "ISP Pipeline Task started on core %d", xPortGetCoreID());
 
     static uint32_t frame_count = 0;
     while (1) {
@@ -1014,33 +978,12 @@ static void isp_task(void *p)
         buf.type   = V4L2_BUF_TYPE_META_CAPTURE;
         buf.memory = V4L2_MEMORY_MMAP;
 
-        // DIAGNOSTIC: First iteration log
-        if (frame_count == 1) {
-            printf("📊 ISP Task: First VIDIOC_DQBUF call (may block until streaming starts)...\n");
-        }
-
         if (ioctl(isp->isp_fd, VIDIOC_DQBUF, &buf) != 0) {
-            if (frame_count == 1) {
-                printf("❌ ISP Task: First DQBUF failed! errno=%d (%s)\n", errno, strerror(errno));
-            }
             ESP_LOGE(TAG, "failed to receive video frame");
             continue;
         }
 
-        // DIAGNOSTIC: Confirm DQBUF succeeded
-        if (frame_count == 1) {
-            printf("✅ ISP Task: First DQBUF succeeded! buf.index=%d\n", buf.index);
-            printf("   → Continuing to process metadata...\n");
-        }
-        if (frame_count % 10 == 0) {
-            printf("📊 ISP Task: Frame #%lu - DQBUF succeeded, processing metadata\n", frame_count);
-        }
-
         get_sensor_state(isp, buf.index);
-
-        if (frame_count % 10 == 0) {
-            printf("   → get_sensor_state() completed\n");
-        }
 
         isp_stats_to_ipa_stats(isp->isp_stats[buf.index], &isp->ipa_stats);
         if (ioctl(isp->isp_fd, VIDIOC_QBUF, &buf) != 0) {
@@ -1048,55 +991,23 @@ static void isp_task(void *p)
         }
         print_stats_info(&isp->ipa_stats);
 
-        if (frame_count % 10 == 0) {
-            printf("   → About to call esp_ipa_pipeline_process()...\n");
-            printf("      📊 Input stats.flags=0x%08X (AWB=%d, AE=%d, HIST=%d, SHARP=%d)\n",
-                   isp->ipa_stats.flags,
-                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_AWB),
-                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_AE),
-                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_HIST),
-                   !!(isp->ipa_stats.flags & IPA_STATS_FLAGS_SHARPEN));
-            printf("      📷 Sensor: %dx%d, exp=%u/%u/%u, gain=%.2f/%.2f/%.2f\n",
-                   isp->sensor.width, isp->sensor.height,
-                   isp->sensor.min_exposure, isp->sensor.cur_exposure, isp->sensor.max_exposure,
-                   isp->sensor.min_gain, isp->sensor.cur_gain, isp->sensor.max_gain);
-        }
-
         isp->metadata.flags = 0;
         ret = esp_ipa_pipeline_process(isp->ipa_pipeline, &isp->ipa_stats, &isp->sensor, &isp->metadata);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "failed to process image algorithm");
-            printf("❌ ISP Task: esp_ipa_pipeline_process() FAILED! ret=%d\n", ret);
             continue;
         }
 
-        if (frame_count % 10 == 0) {
-            printf("   → esp_ipa_pipeline_process() completed, metadata.flags=0x%08X\n", isp->metadata.flags);
-        }
-
-        // DIAGNOSTIC: Log every 30 frames to see if CCM is being applied
+        // Log every 30 frames to monitor CCM status
         if (frame_count % 30 == 0) {
-            printf("📊 ISP Task frame #%lu: metadata flags=0x%08X\n", frame_count, isp->metadata.flags);
-            ESP_LOGI(TAG, "📊 ISP Task frame #%lu: metadata flags=0x%08X", frame_count, isp->metadata.flags);
             if (isp->metadata.flags & IPA_METADATA_FLAGS_CCM) {
-                printf("   ✓ CCM flag SET - will apply CCM matrix\n");
-                ESP_LOGI(TAG, "   ✓ CCM flag SET - will apply CCM matrix");
+                ESP_LOGI(TAG, "Frame %lu: CCM active (flags=0x%04X)", frame_count, isp->metadata.flags);
             } else {
-                printf("   ✗ CCM flag NOT set - CCM will NOT be applied!\n");
-                ESP_LOGW(TAG, "   ✗ CCM flag NOT set - CCM will NOT be applied!");
-                ESP_LOGW(TAG, "   This is why colors are washed out!");
+                ESP_LOGW(TAG, "Frame %lu: CCM NOT active (flags=0x%04X)", frame_count, isp->metadata.flags);
             }
         }
 
-        if (frame_count % 10 == 0) {
-            printf("   → About to call config_isp_and_camera()...\n");
-        }
-
         config_isp_and_camera(isp, &isp->metadata);
-
-        if (frame_count % 10 == 0) {
-            printf("   → Frame #%lu processing complete!\n\n", frame_count);
-        }
     }
 
     vTaskDelete(NULL);
