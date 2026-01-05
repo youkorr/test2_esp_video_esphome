@@ -376,6 +376,15 @@ static void config_ccm(esp_video_isp_t *isp, esp_ipa_metadata_t *metadata)
             }
         }
 
+        // Log CCM matrix being applied (once every 100 frames)
+        static uint32_t log_count = 0;
+        if (log_count++ % 100 == 0) {
+            ESP_LOGI(TAG, "📐 CCM: [%.2f %.2f %.2f, %.2f %.2f %.2f, %.2f %.2f %.2f]",
+                     ccm.matrix[0], ccm.matrix[1], ccm.matrix[2],
+                     ccm.matrix[3], ccm.matrix[4], ccm.matrix[5],
+                     ccm.matrix[6], ccm.matrix[7], ccm.matrix[8]);
+        }
+
         controls.ctrl_class = V4L2_CID_USER_CLASS;
         controls.count      = 1;
         controls.controls   = control;
