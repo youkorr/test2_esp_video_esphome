@@ -17,7 +17,7 @@
                 "min_step": 0.03,
                 "frame_delay": 3
             },
-            "speed": 0.18,
+            "speed": 0.08,  // plus lent pour réduire tearing
 
             "luma_adjust": {
                 "target_low": 115,
@@ -73,7 +73,7 @@
                 {
                     "color_temp": 0,
                     "matrix": [
-                        1.58,  -0.04,  -0.18,
+                        1.60,  -0.04,  -0.18,
                        -0.12,   1.30,  -0.18,
                        -0.04,  -0.14,   1.22
                     ]
@@ -207,5 +207,6 @@
         }
     }
 }
+
 
 
