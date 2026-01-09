@@ -26,7 +26,8 @@ namespace esp_cam_sensor {
 
 // Simple buffer element pour triple buffering (remplace esp_video_buffer)
 struct SimpleBufferElement {
-  uint8_t *data;      // Pointeur vers données RGB565
+  uint8_t *data;      // Pointeur vers données RGB565 (peut être override par PPA)
+  uint8_t *v4l2_data; // Pointeur V4L2 original (pour VIDIOC_QBUF, même si PPA actif)
   bool allocated;     // true = en cours d'utilisation
   uint32_t index;     // Index du buffer (0, 1, 2)
 };
@@ -224,6 +225,8 @@ class MipiDSICamComponent : public Component {
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
   SimpleBufferElement simple_buffers_[3];  // Triple buffering
   int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
+  int pending_release_buffers_[3];  // Queue of buffers to requeue to V4L2 (indices, -1 = empty)
+  int pending_release_count_{0};   // Number of buffers in pending_release_buffers_
   portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)
 
   // Legacy pointer (deprecated, pointe vers current_buffer_ si disponible)

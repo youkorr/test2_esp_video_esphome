@@ -1075,12 +1075,12 @@ bool MipiDSICamComponent::start_streaming() {
   ESP_LOGI(TAG, "  Cache line size: %u bytes", cache_line_size);
 
   for (int i = 0; i < 3; i++) {
-    this->simple_buffers_[i].data = (uint8_t*)heap_caps_aligned_alloc(
+    uint8_t *buffer_ptr = (uint8_t*)heap_caps_aligned_alloc(
         cache_line_size,
         this->image_buffer_size_,
         MALLOC_CAP_SPIRAM);
 
-    if (this->simple_buffers_[i].data == nullptr) {
+    if (buffer_ptr == nullptr) {
       ESP_LOGE(TAG, "❌ Failed to allocate aligned buffer %d (size: %u bytes, align: %u)",
                i, this->image_buffer_size_, cache_line_size);
       ESP_LOGE(TAG, "   Free SPIRAM: %u bytes, Free internal: %u bytes",
@@ -1088,20 +1088,29 @@ bool MipiDSICamComponent::start_streaming() {
                heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
       // Libérer les buffers déjà alloués
       for (int j = 0; j < i; j++) {
-        heap_caps_free(this->simple_buffers_[j].data);
+        heap_caps_free(this->simple_buffers_[j].v4l2_data);
         this->simple_buffers_[j].data = nullptr;
+        this->simple_buffers_[j].v4l2_data = nullptr;
       }
       close(this->video_fd_);
       this->video_fd_ = -1;
       return false;
     }
+    this->simple_buffers_[i].data = buffer_ptr;      // Display pointer (may be overridden by PPA)
+    this->simple_buffers_[i].v4l2_data = buffer_ptr; // V4L2 original pointer (never changes)
     this->simple_buffers_[i].allocated = false;
     this->simple_buffers_[i].index = i;
     ESP_LOGI(TAG, "  Buffer[%d]: %p (aligned to %u bytes)",
-             i, this->simple_buffers_[i].data, cache_line_size);
+             i, buffer_ptr, cache_line_size);
   }
   this->current_buffer_index_ = -1;
   this->image_buffer_ = nullptr;
+
+  // Initialize pending release queue (no buffers to release initially)
+  for (int i = 0; i < 3; i++) {
+    this->pending_release_buffers_[i] = -1;
+  }
+  this->pending_release_count_ = 0;
 
   // 4. Demander 3 buffers V4L2 en mode USERPTR (au lieu de MMAP)
   struct v4l2_requestbuffers req;
@@ -1131,15 +1140,16 @@ bool MipiDSICamComponent::start_streaming() {
     buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     buf.memory = V4L2_MEMORY_USERPTR;
     buf.index = i;
-    buf.m.userptr = (unsigned long)this->simple_buffers_[i].data;  // ★ Notre buffer SPIRAM
+    buf.m.userptr = (unsigned long)this->simple_buffers_[i].v4l2_data;  // ★ V4L2 buffer SPIRAM
     buf.length = this->image_buffer_size_;
 
     if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
       ESP_LOGE(TAG, "VIDIOC_QBUF[%u] (USERPTR) failed: %s", i, strerror(errno));
       // Libérer les buffers SPIRAM
       for (int j = 0; j < 3; j++) {
-        heap_caps_free(this->simple_buffers_[j].data);
+        heap_caps_free(this->simple_buffers_[j].v4l2_data);
         this->simple_buffers_[j].data = nullptr;
+        this->simple_buffers_[j].v4l2_data = nullptr;
       }
       close(this->video_fd_);
       this->video_fd_ = -1;
@@ -1254,6 +1264,44 @@ bool MipiDSICamComponent::capture_frame() {
   static uint32_t total_copy_us = 0;
   static uint32_t total_qbuf_us = 0;
 
+  // 0. FIRST: Requeue all pending buffers (released by LVGL via release_buffer())
+  //    This ensures V4L2 doesn't write into buffers still being displayed
+  uint32_t t0 = esp_timer_get_time();
+  portENTER_CRITICAL(&this->buffer_mutex_);
+  int buffers_to_requeue[3];
+  int requeue_count = 0;
+  for (int i = 0; i < this->pending_release_count_; i++) {
+    if (this->pending_release_buffers_[i] >= 0) {
+      buffers_to_requeue[requeue_count++] = this->pending_release_buffers_[i];
+    }
+  }
+  this->pending_release_count_ = 0;  // Clear pending queue
+  for (int i = 0; i < 3; i++) {
+    this->pending_release_buffers_[i] = -1;
+  }
+  portEXIT_CRITICAL(&this->buffer_mutex_);
+
+  // Requeue outside critical section (ioctl can block)
+  for (int i = 0; i < requeue_count; i++) {
+    int buf_idx = buffers_to_requeue[i];
+    struct v4l2_buffer qbuf;
+    memset(&qbuf, 0, sizeof(qbuf));
+    qbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    qbuf.memory = V4L2_MEMORY_USERPTR;
+    qbuf.index = buf_idx;
+    qbuf.m.userptr = (unsigned long)this->simple_buffers_[buf_idx].v4l2_data;  // Always use V4L2 original pointer
+    qbuf.length = this->image_buffer_size_;
+
+    if (ioctl(this->video_fd_, VIDIOC_QBUF, &qbuf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QBUF (pending buffer %d) failed: %s", buf_idx, strerror(errno));
+      // Continue anyway - don't fail the whole capture
+    }
+  }
+  uint32_t t0_end = esp_timer_get_time();
+  if (requeue_count > 0) {
+    total_qbuf_us += (t0_end - t0);
+  }
+
   // 1. Dequeue un buffer rempli (USERPTR mode)
   uint32_t t1 = esp_timer_get_time();
   struct v4l2_buffer buf;
@@ -1343,30 +1391,12 @@ bool MipiDSICamComponent::capture_frame() {
   total_dqbuf_us += (t2 - t1);
   total_copy_us += (t4 - t3);  // PPA transformation time (no memcpy!)
 
-  // 5. Re-queue le buffer pour V4L2 (V4L2 réutilisera notre buffer SPIRAM)
-  uint32_t t5 = esp_timer_get_time();
-
-  // IMPORTANT: Restore original V4L2 buffer pointer before queuing back
-  // We may have overridden it with PPA buffer for display purposes
-  if (this->ppa_enabled_ && this->simple_buffers_[buffer_idx].data != frame_data) {
-    portENTER_CRITICAL(&this->buffer_mutex_);
-    this->simple_buffers_[buffer_idx].data = frame_data;  // Restore V4L2 pointer
-    portEXIT_CRITICAL(&this->buffer_mutex_);
-  }
-
-  buf.m.userptr = (unsigned long)frame_data;  // Repasser le pointeur SPIRAM
-  buf.length = this->image_buffer_size_;
-  if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
-    ESP_LOGE(TAG, "VIDIOC_QBUF failed: %s", strerror(errno));
-    return false;
-  }
-  uint32_t t6 = esp_timer_get_time();
-
-  total_qbuf_us += (t6 - t5);
+  // 5. DO NOT re-queue the buffer immediately!
+  //    The buffer will be re-queued later when LVGL is done displaying it
+  //    via release_buffer() → pending_release_buffers_ → next capture_frame()
+  //    This prevents tearing (V4L2 writing while LVGL is reading)
 
   if (profile_count == 100) {
-
-
     profile_count = 0;
     total_dqbuf_us = 0;
     total_copy_us = 0;
@@ -1397,12 +1427,19 @@ void MipiDSICamComponent::stop_streaming() {
   portEXIT_CRITICAL(&this->buffer_mutex_);
 
   for (int i = 0; i < 3; i++) {
-    if (this->simple_buffers_[i].data != nullptr) {
-      heap_caps_free(this->simple_buffers_[i].data);
+    if (this->simple_buffers_[i].v4l2_data != nullptr) {
+      heap_caps_free(this->simple_buffers_[i].v4l2_data);  // Free V4L2 buffer (the real allocation)
       this->simple_buffers_[i].data = nullptr;
+      this->simple_buffers_[i].v4l2_data = nullptr;
       this->simple_buffers_[i].allocated = false;
     }
   }
+
+  // Clear pending release queue
+  for (int i = 0; i < 3; i++) {
+    this->pending_release_buffers_[i] = -1;
+  }
+  this->pending_release_count_ = 0;
 
   // Reset legacy pointer
   this->image_buffer_ = nullptr;
@@ -1889,11 +1926,28 @@ void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
     return;
   }
 
-  // Ne PAS libérer current_buffer_index_ (il est encore utilisé pour capture)
+  // Add buffer to pending release queue (will be re-queued to V4L2 in next capture_frame())
+  // This ensures V4L2 doesn't write into buffers still being displayed by LVGL
   portENTER_CRITICAL(&this->buffer_mutex_);
+
+  // Don't release current_buffer_index_ (still being captured/used)
   if (element->index != this->current_buffer_index_) {
     element->allocated = false;
+
+    // Add to pending release queue if not already present
+    bool already_pending = false;
+    for (int i = 0; i < this->pending_release_count_; i++) {
+      if (this->pending_release_buffers_[i] == element->index) {
+        already_pending = true;
+        break;
+      }
+    }
+
+    if (!already_pending && this->pending_release_count_ < 3) {
+      this->pending_release_buffers_[this->pending_release_count_++] = element->index;
+    }
   }
+
   portEXIT_CRITICAL(&this->buffer_mutex_);
 }
 
