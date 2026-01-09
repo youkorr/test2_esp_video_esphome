@@ -1322,7 +1322,8 @@ bool MipiDSICamComponent::capture_frame() {
   // 2. V4L2 a déjà écrit directement dans notre buffer SPIRAM!
   // Pas de memcpy nécessaire - le buffer est prêt à être utilisé
   int buffer_idx = buf.index;
-  uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
+  // IMPORTANT: Use v4l2_data (not data), because data may have been overridden by PPA in previous frame
+  uint8_t *frame_data = this->simple_buffers_[buffer_idx].v4l2_data;
 
   // 3. Apply PPA transformations if enabled (crop, mirror, rotate)
   uint32_t t3 = esp_timer_get_time();
@@ -1357,10 +1358,12 @@ bool MipiDSICamComponent::capture_frame() {
   this->simple_buffers_[buffer_idx].allocated = true;
   this->current_buffer_index_ = buffer_idx;
 
-  // CRITICAL: When PPA is enabled, update the buffer element to point to PPA output!
+  // CRITICAL: Always restore data to v4l2_data first (in case it was overridden in previous frame)
+  this->simple_buffers_[buffer_idx].data = this->simple_buffers_[buffer_idx].v4l2_data;
+
+  // Then, if PPA is enabled, override data to point to PPA output buffer
   // This ensures acquire_buffer() returns the transformed image, not the raw sensor data
   if (this->ppa_enabled_ && this->image_buffer_) {
-    // Temporarily override the V4L2 buffer pointer with PPA output
     this->simple_buffers_[buffer_idx].data = this->image_buffer_;
   }
 
@@ -1923,6 +1926,12 @@ SimpleBufferElement* MipiDSICamComponent::acquire_buffer() {
 
 void MipiDSICamComponent::release_buffer(SimpleBufferElement *element) {
   if (element == nullptr) {
+    return;
+  }
+
+  // Validate buffer index (safety check)
+  if (element->index < 0 || element->index >= 3) {
+    ESP_LOGE(TAG, "release_buffer: invalid buffer index %d", element->index);
     return;
   }
 
