@@ -98,8 +98,10 @@ void SdMmc::setup() {
   // Étape 2 : Configuration optimale pour le montage de la carte SD
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = false,
-    .max_files = 16,
-    .allocation_unit_size = 256 * 1024  // 256KB optimise l'écriture des fichiers
+    .max_files = 32,  // Augmenté pour améliorer les performances (was 16)
+    .allocation_unit_size = 64 * 1024  // 64KB optimisé pour la vidéo (was 256KB)
+                                       // Réduit le gaspillage d'espace et améliore les performances
+                                       // pour les écritures séquentielles de frames vidéo
   };
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
@@ -197,9 +199,62 @@ void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t l
       break;
     }
     written += to_write;
+
+    // CRITIQUE: Forcer l'écriture immédiate sur la carte SD après chaque chunk
+    // Sans cela, les données restent dans le buffer RAM et peuvent être perdues
+    // lors de l'enregistrement vidéo à haute fréquence
+    fflush(file);
   }
   fclose(file);
   this->update_sensors();
+}
+
+// Fonction optimisée pour l'écriture de frames vidéo
+// Paramètres:
+//   - path: chemin du fichier
+//   - buffer: buffer contenant la frame vidéo
+//   - len: taille de la frame
+//   - force_sync: si true, force l'écriture sur disque avec fsync() (par défaut true)
+//
+// Cette fonction est optimisée pour le streaming vidéo:
+// - Utilise fflush() pour vider le buffer stdio
+// - Utilise fsync() pour garantir l'écriture sur le disque physique
+// - Évite les pertes de frames lors de l'enregistrement vidéo
+void SdMmc::write_file_video(const char *path, const uint8_t *buffer, size_t len, bool force_sync) {
+  std::string absolut_path = build_path(path);
+  FILE *file = fopen(absolut_path.c_str(), "ab");  // Mode append binaire
+  if (file == NULL) {
+    ESP_LOGE(TAG, "Failed to open video file for writing: %s (errno=%d)", path, errno);
+    return;
+  }
+
+  // Écriture de la frame complète
+  size_t written = fwrite(buffer, 1, len, file);
+  if (written != len) {
+    ESP_LOGE(TAG, "Video write incomplete: wrote %zu/%zu bytes", written, len);
+    fclose(file);
+    return;
+  }
+
+  // Forcer l'écriture du buffer stdio vers le kernel
+  if (fflush(file) != 0) {
+    ESP_LOGE(TAG, "Video fflush failed: errno=%d", errno);
+  }
+
+  // Si force_sync est activé, forcer l'écriture sur le disque physique
+  // ATTENTION: fsync() peut ralentir les écritures mais garantit la persistance des données
+  // Pour vidéo haute résolution/framerate, vous pouvez désactiver force_sync
+  if (force_sync) {
+    int fd = fileno(file);
+    if (fd >= 0) {
+      if (fsync(fd) != 0) {
+        ESP_LOGW(TAG, "Video fsync failed: errno=%d (data may be cached)", errno);
+      }
+    }
+  }
+
+  fclose(file);
+  // Ne pas appeler update_sensors() à chaque frame pour éviter la surcharge
 }
 #else
 void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size) {

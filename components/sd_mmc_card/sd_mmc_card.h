@@ -59,6 +59,8 @@ class SdMmc : public Component {
   void write_file(const char *path, const uint8_t *buffer, size_t len);
   void append_file(const char *path, const uint8_t *buffer, size_t len);
   void write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size);
+  // Fonction optimisée pour l'écriture de frames vidéo avec fsync() pour garantir l'écriture sur disque
+  void write_file_video(const char *path, const uint8_t *buffer, size_t len, bool force_sync = true);
   bool delete_file(const char *path);
   bool delete_file(std::string const &path);
   bool create_directory(const char *path);
