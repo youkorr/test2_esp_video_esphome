@@ -56,7 +56,7 @@ class NetworkCamera : public Component {
 
   lv_obj_t *canvas_obj_{nullptr};
 
-  uint32_t update_interval_{33};  // 30 FPS by default (changed from 100ms/10FPS for H.264 High Profile)
+  uint32_t update_interval_{100};  // 10 FPS by default - prevents watchdog timeout with H.264 software decode
   uint32_t last_update_{0};
 
   uint32_t frame_count_{0};
@@ -74,7 +74,7 @@ class NetworkCamera : public Component {
   // Network quality adaptation
   uint32_t last_quality_check_{0};
   uint32_t quality_check_interval_{5000};  // Check every 5 seconds
-  uint8_t current_quality_level_{2};  // Start at HIGH (30 FPS) - changed from medium for H.264 High Profile support
+  uint8_t current_quality_level_{1};  // Start at MEDIUM (10 FPS) - prevents watchdog timeout
 
   // JPEG decoder
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};

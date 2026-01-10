@@ -207,17 +207,17 @@ void NetworkCamera::adapt_to_network_() {
   uint32_t old_interval = this->update_interval_;
 
   switch (this->current_quality_level_) {
-    case 0:  // Low quality - reduce frame rate
-      this->update_interval_ = 100;  // ~10 FPS (increased from 5 FPS)
-      ESP_LOGI(TAG, "Adapting to LOW network: 10 FPS");
+    case 0:  // Low quality - reduce frame rate to prevent watchdog timeout
+      this->update_interval_ = 200;  // ~5 FPS - safe for poor WiFi and slow H.264 decode
+      ESP_LOGI(TAG, "Adapting to LOW network: 5 FPS");
       break;
     case 1:  // Medium quality - normal frame rate
-      this->update_interval_ = 50;   // ~20 FPS (increased from 10 FPS)
-      ESP_LOGI(TAG, "Adapting to MEDIUM network: 20 FPS");
+      this->update_interval_ = 100;  // ~10 FPS - balanced performance without watchdog risk
+      ESP_LOGI(TAG, "Adapting to MEDIUM network: 10 FPS");
       break;
-    case 2:  // High quality - maximum frame rate
-      this->update_interval_ = 33;   // ~30 FPS (increased from 15 FPS for H.264 High Profile support)
-      ESP_LOGI(TAG, "Adapting to HIGH network: 30 FPS");
+    case 2:  // High quality - maximum safe frame rate
+      this->update_interval_ = 66;   // ~15 FPS - max safe FPS for H.264 software decode without callback stacking
+      ESP_LOGI(TAG, "Adapting to HIGH network: 15 FPS");
       break;
   }
 
