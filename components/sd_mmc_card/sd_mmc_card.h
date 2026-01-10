@@ -78,6 +78,8 @@ class SdMmc : public Component {
   size_t file_size(const char *path);
   size_t file_size(std::string const &path);
   void read_file_stream(const char *path, size_t offset, size_t chunk_size, std::function<void(const uint8_t*, size_t)> callback);
+  // Fonction optimisée pour la lecture de fichiers vidéo (wrapper simplifié de read_file_stream)
+  std::vector<uint8_t> read_file_video(const char *path, size_t max_size = 0);
 #ifdef USE_SENSOR
   void add_file_size_sensor(sensor::Sensor *, std::string const &path);
 #endif

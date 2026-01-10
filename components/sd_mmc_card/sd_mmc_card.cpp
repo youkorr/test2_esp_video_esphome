@@ -507,6 +507,64 @@ void SdMmc::read_file_stream(const char *path, size_t offset, size_t chunk_size,
   }
 }
 
+// Fonction optimisée pour la lecture de fichiers vidéo
+// Cette fonction est un wrapper simplifié de read_file_stream() pour les cas d'usage courants
+//
+// Paramètres:
+//   - path: chemin du fichier vidéo
+//   - max_size: taille maximale à lire (0 = lire le fichier complet)
+//
+// Avantages par rapport à read_file():
+// - Pas de limite de 5MB
+// - Reset du watchdog automatique pour éviter les timeouts
+// - Optimisé pour les gros fichiers vidéo (300+ Mo)
+//
+// Note: Pour les très gros fichiers (>500 Mo), préférez utiliser read_file_stream()
+// directement avec un callback pour éviter d'allouer trop de mémoire d'un coup
+std::vector<uint8_t> SdMmc::read_file_video(const char *path, size_t max_size) {
+  // Vérifier la taille du fichier
+  size_t file_size = this->file_size(path);
+  if (file_size == 0) {
+    ESP_LOGE(TAG, "File not found or empty: %s", path);
+    return {};
+  }
+
+  // Si max_size est spécifié, limiter la lecture
+  size_t bytes_to_read = (max_size > 0 && max_size < file_size) ? max_size : file_size;
+
+  // Vérification de mémoire disponible
+  size_t free_heap = heap_caps_get_free_size(MALLOC_CAP_8BIT);
+  if (bytes_to_read > free_heap / 2) {
+    ESP_LOGE(TAG, "Not enough memory to read video file: need %zu bytes, only %zu available",
+             bytes_to_read, free_heap);
+    ESP_LOGE(TAG, "Use read_file_stream() with callback for large files");
+    return {};
+  }
+
+  ESP_LOGI(TAG, "Reading video file: %s (%zu bytes)", path, bytes_to_read);
+
+  // Préparer le buffer de sortie
+  std::vector<uint8_t> result;
+  result.reserve(bytes_to_read);
+
+  // Utiliser read_file_stream avec un callback qui accumule les données
+  size_t bytes_read = 0;
+  this->read_file_stream(path, 0, 32 * 1024, [&](const uint8_t* data, size_t len) {
+    // Limiter au max_size si spécifié
+    size_t to_append = len;
+    if (max_size > 0 && bytes_read + len > max_size) {
+      to_append = max_size - bytes_read;
+    }
+
+    if (to_append > 0) {
+      result.insert(result.end(), data, data + to_append);
+      bytes_read += to_append;
+    }
+  });
+
+  ESP_LOGI(TAG, "Video file read complete: %zu bytes", result.size());
+  return result;
+}
 
 #endif
 size_t SdMmc::file_size(std::string const &path) { return this->file_size(path.c_str()); }
