@@ -1,4 +1,12 @@
-# Fix: ESPHome FPS Limit pour H.264 High Profile
+# ⚠️ DOCUMENT INCORRECT - NE PAS UTILISER
+
+**AVERTISSEMENT**: Ce document contient des recommandations DANGEREUSES qui peuvent causer des crashes watchdog. Il a été conservé pour référence historique seulement.
+
+**Lisez plutôt**: `ANALYSE_CRASH_FPS.md` pour comprendre pourquoi augmenter les FPS cause des crashes.
+
+---
+
+# ~~Fix: ESPHome FPS Limit pour H.264 High Profile~~ (INCORRECT)
 
 ## 🔴 Problème Identifié
 
