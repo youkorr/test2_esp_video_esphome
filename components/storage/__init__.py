@@ -19,7 +19,7 @@ from esphome.core import CORE
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "storage"
-DEPENDENCIES = ["display"]
+DEPENDENCIES = ["display", "lvgl"]  # lvgl requis pour les décodeurs d'images avancés
 
 # Namespaces
 storage_ns = cg.esphome_ns.namespace("storage")
@@ -39,6 +39,28 @@ CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
 CONF_AUTO_LOAD = "auto_load"  # Uniquement pour sd_images, pas pour storage
+
+# LVGL Advanced Decoders Configuration (fusionné de lvgl_advanced_features)
+CONF_DECODERS = "decoders"
+CONF_THORVG = "thorvg"
+CONF_THORVG_INTERNAL = "internal"
+CONF_THORVG_EXTERNAL = "external"
+CONF_SVG = "svg"
+CONF_LOTTIE = "lottie"
+CONF_FREETYPE = "freetype"
+CONF_RLOTTIE = "rlottie"
+CONF_FFMPEG = "ffmpeg"
+CONF_LIBPNG = "libpng"
+CONF_LIBJPEG_TURBO = "libjpeg_turbo"
+CONF_GIF = "gif"
+CONF_BMP = "bmp"
+CONF_QRCODE = "qrcode"
+CONF_BARCODE = "barcode"
+CONF_IME_PINYIN = "ime_pinyin"
+CONF_DRAW_SW_COMPLEX = "draw_sw_complex"
+CONF_DRAW_SW_ASM = "draw_sw_asm"
+CONF_SHADOW_CACHE_SIZE = "shadow_cache_size"
+CONF_IMG_CACHE_SIZE = "img_cache_size"
 
 # FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
@@ -77,7 +99,39 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_SD_COMPONENT): cv.use_id(SdMmc),
         cv.Optional(CONF_ROOT_PATH, default="/"): cv.string,
         cv.Optional(CONF_SD_IMAGES, default=[]): cv.ensure_list(SD_IMAGE_SCHEMA),
-        # PAS d'auto_load dans le schema principal - uniquement dans sd_images
+
+        # LVGL Advanced Decoders (fusionné de lvgl_advanced_features)
+        cv.Optional(CONF_DECODERS): cv.Schema({
+            # Vector Graphics (LVGL v9 only)
+            cv.Optional(CONF_THORVG): cv.Schema({
+                cv.Optional(CONF_THORVG_INTERNAL, default=False): cv.boolean,
+                cv.Optional(CONF_THORVG_EXTERNAL, default=False): cv.boolean,
+            }),
+            cv.Optional(CONF_SVG, default=False): cv.boolean,
+            cv.Optional(CONF_LOTTIE, default=False): cv.boolean,
+
+            # Font rendering
+            cv.Optional(CONF_FREETYPE, default=False): cv.boolean,
+            cv.Optional(CONF_RLOTTIE, default=False): cv.boolean,
+
+            # Media support
+            cv.Optional(CONF_FFMPEG, default=False): cv.boolean,
+            cv.Optional(CONF_LIBPNG, default=False): cv.boolean,
+            cv.Optional(CONF_LIBJPEG_TURBO, default=False): cv.boolean,
+            cv.Optional(CONF_GIF, default=False): cv.boolean,
+            cv.Optional(CONF_BMP, default=False): cv.boolean,
+
+            # Widgets
+            cv.Optional(CONF_QRCODE, default=False): cv.boolean,
+            cv.Optional(CONF_BARCODE, default=False): cv.boolean,
+            cv.Optional(CONF_IME_PINYIN, default=False): cv.boolean,
+
+            # Performance
+            cv.Optional(CONF_DRAW_SW_COMPLEX, default=False): cv.boolean,
+            cv.Optional(CONF_DRAW_SW_ASM, default="none"): cv.one_of("none", "neon", "helium"),
+            cv.Optional(CONF_SHADOW_CACHE_SIZE, default=0): cv.int_range(min=0, max=1024),
+            cv.Optional(CONF_IMG_CACHE_SIZE, default=0): cv.int_range(min=0, max=1024),
+        }),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -121,23 +175,120 @@ automation.register_action(
 
 async def to_code(config):
     """Génère le code C++ pour le composant storage"""
-    
+
     # Créer le composant principal - PAS d'auto_load ici
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
+
     # Configuration du composant principal
     cg.add(var.set_platform(config[CONF_PLATFORM]))
     cg.add(var.set_root_path(config[CONF_ROOT_PATH]))
-    
+
     if CONF_SD_COMPONENT in config:
         sd_comp = await cg.get_variable(config[CONF_SD_COMPONENT])
         cg.add(var.set_sd_component(sd_comp))
-    
+
     # Configuration des images SD - auto_load configuré ici
     if CONF_SD_IMAGES in config:
         for img_config in config[CONF_SD_IMAGES]:
             await setup_sd_image_component(img_config, var)
+
+    # ========================================
+    # LVGL ADVANCED DECODERS (fusionné de lvgl_advanced_features)
+    # ========================================
+    if CONF_DECODERS in config:
+        decoders_cfg = config[CONF_DECODERS]
+        _LOGGER.info("Storage: Configuring LVGL decoders for SD card images")
+
+        # ThorVG configuration (v9 only)
+        if CONF_THORVG in decoders_cfg:
+            thorvg_cfg = decoders_cfg[CONF_THORVG]
+            if thorvg_cfg.get(CONF_THORVG_INTERNAL, False):
+                cg.add_build_flag("-DLV_USE_THORVG_INTERNAL=1")
+                _LOGGER.info("  ThorVG Internal: ENABLED (requires LVGL v9)")
+            if thorvg_cfg.get(CONF_THORVG_EXTERNAL, False):
+                cg.add_build_flag("-DLV_USE_THORVG_EXTERNAL=1")
+                _LOGGER.info("  ThorVG External: ENABLED (requires LVGL v9)")
+
+        # SVG support (v9 only - requires ThorVG)
+        if decoders_cfg.get(CONF_SVG, False):
+            cg.add_build_flag("-DLV_USE_SVG=1")
+            _LOGGER.info("  SVG: ENABLED (requires LVGL v9 + ThorVG)")
+
+        # Lottie support (v9 only - requires ThorVG)
+        if decoders_cfg.get(CONF_LOTTIE, False):
+            cg.add_build_flag("-DLV_USE_LOTTIE=1")
+            _LOGGER.info("  Lottie: ENABLED (requires LVGL v9 + ThorVG)")
+
+        # FreeType font rendering (v8+v9 compatible)
+        if decoders_cfg.get(CONF_FREETYPE, False):
+            cg.add_build_flag("-DLV_USE_FREETYPE=1")
+            _LOGGER.info("  FreeType: ENABLED (compatible v8+v9)")
+
+        # RLottie (alternative to ThorVG for Lottie) - experimental
+        if decoders_cfg.get(CONF_RLOTTIE, False):
+            cg.add_build_flag("-DLV_USE_RLOTTIE=1")
+            _LOGGER.info("  RLottie: ENABLED (experimental)")
+
+        # FFmpeg support (v9 only)
+        if decoders_cfg.get(CONF_FFMPEG, False):
+            cg.add_build_flag("-DLV_USE_FFMPEG=1")
+            _LOGGER.info("  FFmpeg: ENABLED (requires LVGL v9)")
+
+        # Image format support (v8+v9 compatible)
+        if decoders_cfg.get(CONF_LIBPNG, False):
+            cg.add_build_flag("-DLV_USE_LIBPNG=1")
+            _LOGGER.info("  LibPNG: ENABLED (compatible v8+v9)")
+
+        if decoders_cfg.get(CONF_LIBJPEG_TURBO, False):
+            cg.add_build_flag("-DLV_USE_LIBJPEG_TURBO=1")
+            _LOGGER.info("  LibJPEG Turbo: ENABLED (compatible v8+v9)")
+
+        if decoders_cfg.get(CONF_GIF, False):
+            cg.add_build_flag("-DLV_USE_GIF=1")
+            _LOGGER.info("  GIF: ENABLED (compatible v8+v9)")
+
+        if decoders_cfg.get(CONF_BMP, False):
+            cg.add_build_flag("-DLV_USE_BMP=1")
+            _LOGGER.info("  BMP: ENABLED (compatible v8+v9)")
+
+        # Widgets
+        if decoders_cfg.get(CONF_QRCODE, False):
+            cg.add_build_flag("-DLV_USE_QRCODE=1")
+            _LOGGER.info("  QRCode: ENABLED (compatible v8+v9)")
+
+        if decoders_cfg.get(CONF_BARCODE, False):
+            cg.add_build_flag("-DLV_USE_BARCODE=1")
+            _LOGGER.info("  Barcode: ENABLED (requires LVGL v9)")
+
+        if decoders_cfg.get(CONF_IME_PINYIN, False):
+            cg.add_build_flag("-DLV_USE_IME_PINYIN=1")
+            _LOGGER.info("  IME Pinyin: ENABLED (v9 feature)")
+
+        # Performance optimizations (v8+v9 compatible)
+        if decoders_cfg.get(CONF_DRAW_SW_COMPLEX, False):
+            cg.add_build_flag("-DLV_DRAW_SW_COMPLEX=1")
+            _LOGGER.info("  Draw SW Complex: ENABLED (compatible v8+v9)")
+
+        asm_type = decoders_cfg.get(CONF_DRAW_SW_ASM, "none")
+        if asm_type == "neon":
+            cg.add_build_flag("-DLV_DRAW_SW_ASM=LV_DRAW_SW_ASM_NEON")
+            _LOGGER.info("  ASM Optimization: NEON (ARM)")
+        elif asm_type == "helium":
+            cg.add_build_flag("-DLV_DRAW_SW_ASM=LV_DRAW_SW_ASM_HELIUM")
+            _LOGGER.info("  ASM Optimization: HELIUM (ARM v8.1-M)")
+
+        if decoders_cfg.get(CONF_SHADOW_CACHE_SIZE, 0) > 0:
+            size = decoders_cfg[CONF_SHADOW_CACHE_SIZE]
+            cg.add_build_flag(f"-DLV_SHADOW_CACHE_SIZE={size}")
+            _LOGGER.info(f"  Shadow Cache: {size} bytes")
+
+        if decoders_cfg.get(CONF_IMG_CACHE_SIZE, 0) > 0:
+            size = decoders_cfg[CONF_IMG_CACHE_SIZE]
+            cg.add_build_flag(f"-DLV_IMG_CACHE_SIZE={size}")
+            _LOGGER.info(f"  Image Cache: {size} bytes")
+
+        _LOGGER.info("Storage: LVGL decoders configuration complete!")
 
 async def setup_sd_image_component(config, parent_storage):
     """Configure un SdImageComponent"""
