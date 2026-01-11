@@ -549,17 +549,57 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 void SdImageComponent::unload_image() {
+  // Log avant libération pour débuggage
+  size_t image_buffer_size = this->image_buffer_.size();
+  size_t gif_frames_count = this->gif_frames_.size();
+  size_t total_gif_memory = 0;
+
+  for (const auto &frame : this->gif_frames_) {
+    total_gif_memory += frame.pixels.size() + frame.transparency.size();
+  }
+
+  if (image_buffer_size > 0 || total_gif_memory > 0) {
+    ESP_LOGI(TAG_IMAGE, "Unloading image - Freeing memory:");
+    ESP_LOGI(TAG_IMAGE, "  image_buffer_: %zu bytes", image_buffer_size);
+    ESP_LOGI(TAG_IMAGE, "  gif_frames_: %zu frames, %zu bytes total", gif_frames_count, total_gif_memory);
+    ESP_LOGI(TAG_IMAGE, "  TOTAL PSRAM to free: %zu bytes (~%.2f MB)",
+             image_buffer_size + total_gif_memory,
+             (image_buffer_size + total_gif_memory) / (1024.0 * 1024.0));
+  }
+
+  // CRITIQUE: Libérer image_buffer_ (buffer principal)
   this->image_buffer_.clear();
   this->image_buffer_.shrink_to_fit();
+
+  // CRITIQUE: Libérer gif_frames_ (frames d'animation GIF - PEUT ÊTRE TRÈS GROS!)
+  // Chaque frame contient pixels (RGB565) + transparency mask
+  // Pour un GIF 320x240 avec 60 frames = ~9 MB de PSRAM!
+  for (auto &frame : this->gif_frames_) {
+    frame.pixels.clear();
+    frame.pixels.shrink_to_fit();
+    frame.transparency.clear();
+    frame.transparency.shrink_to_fit();
+  }
+  this->gif_frames_.clear();
+  this->gif_frames_.shrink_to_fit();
+
+  // Réinitialiser les états d'animation GIF
+  this->is_gif_animated_ = false;
+  this->current_gif_frame_ = 0;
+  this->last_frame_time_ = 0;
+
+  // Réinitialiser les flags et dimensions
   this->image_loaded_ = false;
   this->image_width_ = 0;
   this->image_height_ = 0;
-  
-  // Réinitialiser aussi les propriétés de la classe de base
+
+  // Réinitialiser les propriétés de la classe de base ESPHome Image
   this->width_ = 0;
   this->height_ = 0;
   this->data_start_ = nullptr;
   this->bpp_ = 0;
+
+  ESP_LOGD(TAG_IMAGE, "Image unloaded - PSRAM freed successfully");
 }
 
 bool SdImageComponent::reload_image() {

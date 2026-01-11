@@ -83,9 +83,14 @@ class StorageComponent : public Component {
 class SdImageComponent : public Component, public image::Image {
  public:
   // Constructeur CRITIQUE - doit initialiser la classe de base avec des données valides
-  SdImageComponent() : Component(), 
+  SdImageComponent() : Component(),
                        image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {
     // Initialisation de base
+  }
+
+  // Destructeur CRITIQUE - Libère toute la mémoire PSRAM (image_buffer_ + gif_frames_)
+  ~SdImageComponent() {
+    unload_image();  // Garantit la libération de TOUTE la mémoire
   }
 
   // Component lifecycle
