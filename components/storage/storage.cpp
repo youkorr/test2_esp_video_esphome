@@ -1099,7 +1099,7 @@ std::string SdImageComponent::format_to_string() const {
 
 std::string SdImageComponent::get_debug_info() const {
   char buffer[256];
-  snprintf(buffer, sizeof(buffer), 
+  snprintf(buffer, sizeof(buffer),
     "SdImage[%s]: %dx%d, %s, loaded=%s, size=%zu bytes",
     this->file_path_.c_str(),
     this->image_width_, this->image_height_,
@@ -1108,6 +1108,214 @@ std::string SdImageComponent::get_debug_info() const {
     this->image_buffer_.size()
   );
   return std::string(buffer);
+}
+
+// =====================================================
+// Auto-Adaptive PSRAM Optimization Implementation
+// =====================================================
+
+DisplayInfo SdImageComponent::detect_display_info() {
+  DisplayInfo info;
+
+  #ifdef USE_LVGL
+  // Get info from LVGL
+  info.width = LV_HOR_RES;
+  info.height = LV_VER_RES;
+  info.color_bitness = LV_COLOR_DEPTH;
+
+  // Calculate bytes per pixel
+  switch (info.color_bitness) {
+    case 16: info.bytes_per_pixel = 2; break;  // RGB565
+    case 24: info.bytes_per_pixel = 3; break;  // RGB888
+    case 32: info.bytes_per_pixel = 4; break;  // RGBA8888
+    default: info.bytes_per_pixel = 2; break;
+  }
+
+  info.framebuffer_size = info.width * info.height * info.bytes_per_pixel;
+
+  ESP_LOGI(TAG_IMAGE, "Display detected: %dx%d, %d-bit, %zu bytes/pixel",
+           info.width, info.height, info.color_bitness, info.bytes_per_pixel);
+  #else
+  ESP_LOGW(TAG_IMAGE, "LVGL not available, cannot detect display info");
+  #endif
+
+  return info;
+}
+
+ImageInfo SdImageComponent::detect_image_info(const std::string &path) {
+  ImageInfo info;
+
+  // Get full path
+  std::string full_path = path;
+  if (!path.empty() && path[0] != '/' && this->storage_component_) {
+    full_path = this->storage_component_->get_root_path() + path;
+  }
+
+  // Open file
+  FILE *file = fopen(full_path.c_str(), "rb");
+  if (!file) {
+    ESP_LOGE(TAG_IMAGE, "Cannot open file for detection: %s", full_path.c_str());
+    return info;
+  }
+
+  // Get file size
+  fseek(file, 0, SEEK_END);
+  info.file_size = ftell(file);
+  fseek(file, 0, SEEK_SET);
+
+  // Read header
+  uint8_t header[16];
+  size_t read_bytes = fread(header, 1, 16, file);
+  if (read_bytes < 16) {
+    fclose(file);
+    ESP_LOGE(TAG_IMAGE, "Cannot read file header: %s", full_path.c_str());
+    return info;
+  }
+
+  // Detect JPEG
+  if (header[0] == 0xFF && header[1] == 0xD8) {
+    info.format_name = "JPEG";
+
+    #ifdef USE_JPEGDEC
+    // Parse JPEG header for dimensions
+    fseek(file, 0, SEEK_SET);
+    JPEGDEC jpeg;
+    if (jpeg.open(file, nullptr) == 1) {
+      info.width = jpeg.getWidth();
+      info.height = jpeg.getHeight();
+      jpeg.close();
+    }
+    #endif
+
+    info.frame_count = 1;
+  }
+  // Detect GIF
+  else if (header[0] == 'G' && header[1] == 'I' && header[2] == 'F') {
+    info.format_name = "GIF";
+
+    // Parse GIF header for dimensions (bytes 6-9)
+    info.width = header[6] | (header[7] << 8);
+    info.height = header[8] | (header[9] << 8);
+
+    // Count frames (quick scan)
+    info.frame_count = 1;  // TODO: implement proper frame counting
+  }
+  // Detect PNG
+  else if (header[0] == 0x89 && header[1] == 0x50 &&
+           header[2] == 0x4E && header[3] == 0x47) {
+    info.format_name = "PNG";
+
+    // Parse PNG IHDR chunk (at offset 16)
+    uint8_t ihdr[8];
+    fseek(file, 16, SEEK_SET);
+    if (fread(ihdr, 1, 8, file) == 8) {
+      info.width = (ihdr[0] << 24) | (ihdr[1] << 16) | (ihdr[2] << 8) | ihdr[3];
+      info.height = (ihdr[4] << 24) | (ihdr[5] << 16) | (ihdr[6] << 8) | ihdr[7];
+    }
+
+    info.frame_count = 1;
+  }
+
+  fclose(file);
+
+  // Calculate decoded size (RGB565)
+  info.decoded_size = (size_t)info.width * info.height * 2 * info.frame_count;
+
+  ESP_LOGI(TAG_IMAGE, "Image detected: %s", full_path.c_str());
+  ESP_LOGI(TAG_IMAGE, "  - Dimensions: %dx%d", info.width, info.height);
+  ESP_LOGI(TAG_IMAGE, "  - Format: %s", info.format_name.c_str());
+  ESP_LOGI(TAG_IMAGE, "  - Frames: %d", info.frame_count);
+  ESP_LOGI(TAG_IMAGE, "  - File size: %zu KB (compressed)", info.file_size / 1024);
+  ESP_LOGI(TAG_IMAGE, "  - Decoded size: %zu KB (uncompressed)", info.decoded_size / 1024);
+
+  return info;
+}
+
+StrategyDecision SdImageComponent::determine_strategy(
+    const ImageInfo &img_info,
+    const DisplayInfo &disp_info,
+    ImageType img_type) {
+
+  StrategyDecision decision;
+
+  // 1. Check if scaling needed
+  if (img_info.width > disp_info.width || img_info.height > disp_info.height) {
+    decision.needs_scaling = true;
+    float scale_w = (float)disp_info.width / img_info.width;
+    float scale_h = (float)disp_info.height / img_info.height;
+    decision.scale_factor = std::min(scale_w, scale_h);
+  } else {
+    decision.needs_scaling = false;
+    decision.scale_factor = 1.0f;
+  }
+
+  // 2. BACKGROUNDS: Always streaming
+  if (img_type == ImageType::BACKGROUND) {
+    if (decision.needs_scaling) {
+      decision.strategy = RenderStrategy::SCALED_STREAMING;
+      decision.estimated_psram = disp_info.width * 2 * 2;  // 2 line buffers
+      decision.reason = "Background with scaling - streaming line-by-line";
+    } else {
+      decision.strategy = RenderStrategy::STREAMING;
+      decision.estimated_psram = img_info.width * 2;  // 1 line buffer
+      decision.reason = "Background - streaming line-by-line";
+    }
+
+    ESP_LOGI(TAG_IMAGE, "Strategy decision:");
+    ESP_LOGI(TAG_IMAGE, "  - Type: BACKGROUND");
+    ESP_LOGI(TAG_IMAGE, "  - Scaling: %s", decision.needs_scaling ? "YES" : "NO");
+    if (decision.needs_scaling) {
+      ESP_LOGI(TAG_IMAGE, "  - Scale factor: %.2fx", decision.scale_factor);
+    }
+    ESP_LOGI(TAG_IMAGE, "  - Strategy: %s",
+             decision.strategy == RenderStrategy::SCALED_STREAMING ? "SCALED_STREAMING" : "STREAMING");
+    ESP_LOGI(TAG_IMAGE, "  - PSRAM needed: %zu KB", decision.estimated_psram / 1024);
+    ESP_LOGI(TAG_IMAGE, "  - Reason: %s", decision.reason.c_str());
+
+    return decision;
+  }
+
+  // 3. ANIMATIONS: Decision based on size
+  if (img_type == ImageType::ANIMATION) {
+    size_t decoded_size = img_info.decoded_size;
+
+    // Small animation: Full cache
+    if (decoded_size < MAX_FULL_CACHE_SIZE) {
+      decision.strategy = RenderStrategy::CACHE_FULL;
+      decision.estimated_psram = decoded_size;
+      decision.reason = "Small animation - full cache for smooth loop";
+    }
+    // Large animation: On-demand
+    else {
+      decision.strategy = RenderStrategy::CACHE_ON_DEMAND;
+      size_t frame_size = img_info.width * img_info.height * 2;
+      decision.estimated_psram = frame_size * 3;  // 1 current + 2 preload
+      decision.reason = "Large animation - on-demand frame loading";
+    }
+
+    ESP_LOGI(TAG_IMAGE, "Strategy decision:");
+    ESP_LOGI(TAG_IMAGE, "  - Type: ANIMATION");
+    ESP_LOGI(TAG_IMAGE, "  - Decoded size: %zu KB", decoded_size / 1024);
+    ESP_LOGI(TAG_IMAGE, "  - Strategy: %s",
+             decision.strategy == RenderStrategy::CACHE_FULL ? "CACHE_FULL" : "CACHE_ON_DEMAND");
+    ESP_LOGI(TAG_IMAGE, "  - PSRAM needed: %zu KB", decision.estimated_psram / 1024);
+    ESP_LOGI(TAG_IMAGE, "  - Reason: %s", decision.reason.c_str());
+
+    return decision;
+  }
+
+  // 4. STANDARD: Cache full if not too large
+  if (img_info.decoded_size < 500 * 1024) {
+    decision.strategy = RenderStrategy::CACHE_FULL;
+    decision.estimated_psram = img_info.decoded_size;
+    decision.reason = "Standard image - full cache";
+  } else {
+    decision.strategy = RenderStrategy::STREAMING;
+    decision.estimated_psram = img_info.width * 2;
+    decision.reason = "Large image - streaming";
+  }
+
+  return decision;
 }
 
 void SdImageComponent::list_directory_contents(const std::string &dir_path) {

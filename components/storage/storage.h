@@ -44,6 +44,53 @@ enum class SdByteOrder {
 };
 
 // =====================================================
+// Auto-Adaptive PSRAM Optimization Structures
+// =====================================================
+
+// Image type for optimization strategy
+enum class ImageType {
+  STANDARD,      // Normal image (default behavior)
+  BACKGROUND,    // Background image (streaming, 0 PSRAM permanent)
+  ANIMATION      // Animation (intelligent cache: full vs on-demand)
+};
+
+// Display information auto-detected
+struct DisplayInfo {
+  uint16_t width{0};
+  uint16_t height{0};
+  size_t framebuffer_size{0};
+  uint8_t color_bitness{16};  // 16, 24, or 32
+  size_t bytes_per_pixel{2};  // 2 for RGB565, 3 for RGB888, 4 for RGBA
+};
+
+// Image information from file header
+struct ImageInfo {
+  uint16_t width{0};
+  uint16_t height{0};
+  size_t file_size{0};
+  size_t decoded_size{0};
+  uint16_t frame_count{1};
+  std::string format_name;
+};
+
+// Rendering strategy auto-selected
+enum class RenderStrategy {
+  STREAMING,        // Stream line-by-line (backgrounds)
+  SCALED_STREAMING, // Stream with scaling (image > display)
+  CACHE_FULL,       // Cache all frames in PSRAM (small animations)
+  CACHE_ON_DEMAND   // Cache 1 frame + preload (large animations)
+};
+
+// Strategy decision with details
+struct StrategyDecision {
+  RenderStrategy strategy{RenderStrategy::CACHE_FULL};
+  bool needs_scaling{false};
+  float scale_factor{1.0f};
+  size_t estimated_psram{0};
+  std::string reason;
+};
+
+// =====================================================
 // StorageComponent - Main Storage Class
 // =====================================================
 class StorageComponent : public Component {
@@ -102,12 +149,16 @@ class SdImageComponent : public Component, public image::Image {
   // Configuration setters
   void set_file_path(const std::string &path) { this->file_path_ = path; }
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
-  void set_resize(int width, int height) { 
-    this->resize_width_ = width; 
-    this->resize_height_ = height; 
+  void set_resize(int width, int height) {
+    this->resize_width_ = width;
+    this->resize_height_ = height;
   }
   void set_format(ImageFormat format) { this->format_ = format; }
   void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
+
+  // Auto-adaptive optimization configuration
+  void set_image_type(ImageType type) { this->image_type_ = type; }
+  ImageType get_image_type() const { return this->image_type_; }
   
   // Compatibility methods for YAML configuration
   void set_output_format_string(const std::string &format);
@@ -160,6 +211,27 @@ class SdImageComponent : public Component, public image::Image {
   void clear_canvas_area(lv_obj_t *canvas, int x = 0, int y = 0);
   #endif
 
+  // =====================================================
+  // Auto-Adaptive PSRAM Optimization Methods
+  // =====================================================
+
+  // Auto-detection methods
+  DisplayInfo detect_display_info();
+  ImageInfo detect_image_info(const std::string &path);
+  StrategyDecision determine_strategy(const ImageInfo &img_info,
+                                      const DisplayInfo &disp_info,
+                                      ImageType img_type);
+
+  // Rendering with auto-selected strategy
+  #ifdef USE_LVGL
+  bool render_with_strategy(lv_obj_t *parent);
+  bool render_background_streaming(lv_obj_t *parent);
+  bool render_background_streaming_scaled(lv_obj_t *parent, float scale_factor);
+  #endif
+
+  // Get strategy information
+  const StrategyDecision &get_current_strategy() const { return this->current_strategy_; }
+
   // Debug info
   std::string get_debug_info() const;
 
@@ -201,6 +273,14 @@ class SdImageComponent : public Component, public image::Image {
   bool retry_load_{false};
   uint32_t last_retry_attempt_{0};
   static const uint32_t RETRY_INTERVAL_MS = 2000; // Retry toutes les 2 secondes
+
+  // Auto-adaptive optimization state
+  ImageType image_type_{ImageType::STANDARD};
+  StrategyDecision current_strategy_;
+  std::vector<uint8_t> line_buffer_;  // Buffer for streaming (1-2 lines)
+
+  // Cache policy for animations
+  static const size_t MAX_FULL_CACHE_SIZE = 300 * 1024;  // 300 KB per animation
   
   // File type detection
   enum class FileType {
