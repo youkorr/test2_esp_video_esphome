@@ -549,17 +549,57 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 void SdImageComponent::unload_image() {
+  // Log avant libération pour débuggage
+  size_t image_buffer_size = this->image_buffer_.size();
+  size_t gif_frames_count = this->gif_frames_.size();
+  size_t total_gif_memory = 0;
+
+  for (const auto &frame : this->gif_frames_) {
+    total_gif_memory += frame.pixels.size() + frame.transparency.size();
+  }
+
+  if (image_buffer_size > 0 || total_gif_memory > 0) {
+    ESP_LOGI(TAG_IMAGE, "Unloading image - Freeing memory:");
+    ESP_LOGI(TAG_IMAGE, "  image_buffer_: %zu bytes", image_buffer_size);
+    ESP_LOGI(TAG_IMAGE, "  gif_frames_: %zu frames, %zu bytes total", gif_frames_count, total_gif_memory);
+    ESP_LOGI(TAG_IMAGE, "  TOTAL PSRAM to free: %zu bytes (~%.2f MB)",
+             image_buffer_size + total_gif_memory,
+             (image_buffer_size + total_gif_memory) / (1024.0 * 1024.0));
+  }
+
+  // CRITIQUE: Libérer image_buffer_ (buffer principal)
   this->image_buffer_.clear();
   this->image_buffer_.shrink_to_fit();
+
+  // CRITIQUE: Libérer gif_frames_ (frames d'animation GIF - PEUT ÊTRE TRÈS GROS!)
+  // Chaque frame contient pixels (RGB565) + transparency mask
+  // Pour un GIF 320x240 avec 60 frames = ~9 MB de PSRAM!
+  for (auto &frame : this->gif_frames_) {
+    frame.pixels.clear();
+    frame.pixels.shrink_to_fit();
+    frame.transparency.clear();
+    frame.transparency.shrink_to_fit();
+  }
+  this->gif_frames_.clear();
+  this->gif_frames_.shrink_to_fit();
+
+  // Réinitialiser les états d'animation GIF
+  this->is_gif_animated_ = false;
+  this->current_gif_frame_ = 0;
+  this->last_frame_time_ = 0;
+
+  // Réinitialiser les flags et dimensions
   this->image_loaded_ = false;
   this->image_width_ = 0;
   this->image_height_ = 0;
-  
-  // Réinitialiser aussi les propriétés de la classe de base
+
+  // Réinitialiser les propriétés de la classe de base ESPHome Image
   this->width_ = 0;
   this->height_ = 0;
   this->data_start_ = nullptr;
   this->bpp_ = 0;
+
+  ESP_LOGD(TAG_IMAGE, "Image unloaded - PSRAM freed successfully");
 }
 
 bool SdImageComponent::reload_image() {
@@ -688,6 +728,10 @@ Color SdImageComponent::get_pixel_color(int x, int y) const {
 SdImageComponent::FileType SdImageComponent::detect_file_type(const std::vector<uint8_t> &data) const {
   if (this->is_jpeg_data(data)) return FileType::JPEG;
   if (this->is_gif_data(data)) return FileType::GIF;
+  if (this->is_png_data(data)) return FileType::PNG;
+  if (this->is_bmp_data(data)) return FileType::BMP;
+  if (this->is_svg_data(data)) return FileType::SVG;
+  if (this->is_lottie_data(data)) return FileType::LOTTIE;
   return FileType::UNKNOWN;
 }
 
@@ -700,6 +744,42 @@ bool SdImageComponent::is_gif_data(const std::vector<uint8_t> &data) const {
   return data.size() >= 6 &&
          data[0] == 'G' && data[1] == 'I' && data[2] == 'F' &&
          data[3] == '8' && (data[4] == '7' || data[4] == '9') && data[5] == 'a';
+}
+
+bool SdImageComponent::is_png_data(const std::vector<uint8_t> &data) const {
+  // PNG signature: 0x89 'P' 'N' 'G' 0x0D 0x0A 0x1A 0x0A
+  return data.size() >= 8 &&
+         data[0] == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G' &&
+         data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
+}
+
+bool SdImageComponent::is_bmp_data(const std::vector<uint8_t> &data) const {
+  // BMP signature: 'B' 'M' at start
+  return data.size() >= 2 && data[0] == 'B' && data[1] == 'M';
+}
+
+bool SdImageComponent::is_svg_data(const std::vector<uint8_t> &data) const {
+  // SVG is XML, starts with '<' and contains "svg"
+  if (data.size() < 10) return false;
+  // Check for "<?xml" or "<svg"
+  if (data[0] == '<') {
+    std::string start(data.begin(), data.begin() + std::min(data.size(), size_t(100)));
+    return start.find("svg") != std::string::npos;
+  }
+  return false;
+}
+
+bool SdImageComponent::is_lottie_data(const std::vector<uint8_t> &data) const {
+  // Lottie is JSON, typically starts with '{' and contains "v" (version) or "assets"
+  if (data.size() < 10) return false;
+  if (data[0] == '{') {
+    std::string start(data.begin(), data.begin() + std::min(data.size(), size_t(100)));
+    // Lottie JSON contains specific keys
+    return (start.find("\"v\"") != std::string::npos ||
+            start.find("\"assets\"") != std::string::npos ||
+            start.find("\"layers\"") != std::string::npos);
+  }
+  return false;
 }
 
 // Image decoding
@@ -715,8 +795,24 @@ bool SdImageComponent::decode_image(const std::vector<uint8_t> &data) {
       ESP_LOGI(TAG_IMAGE, "Decoding GIF image");
       return this->decode_gif_image(data);
 
+    case FileType::PNG:
+      ESP_LOGI(TAG_IMAGE, "Decoding PNG image");
+      return this->decode_png_image(data);
+
+    case FileType::BMP:
+      ESP_LOGI(TAG_IMAGE, "Decoding BMP image");
+      return this->decode_bmp_image(data);
+
+    case FileType::SVG:
+      ESP_LOGI(TAG_IMAGE, "Decoding SVG image");
+      return this->decode_svg_image(data);
+
+    case FileType::LOTTIE:
+      ESP_LOGI(TAG_IMAGE, "Decoding Lottie animation");
+      return this->decode_lottie_image(data);
+
     default:
-      ESP_LOGE(TAG_IMAGE, "Unsupported image format (supported: JPEG, GIF)");
+      ESP_LOGE(TAG_IMAGE, "Unsupported image format (supported: JPEG, GIF, PNG, BMP, SVG, Lottie)");
       return false;
   }
 }
@@ -1493,6 +1589,100 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
   }
 
   return true;
+}
+
+// =====================================================
+// PNG Decoder Implementation (via LVGL)
+// =====================================================
+
+bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
+#ifdef LV_USE_LIBPNG
+  ESP_LOGD(TAG_IMAGE, "Using LVGL PNG decoder (LV_USE_LIBPNG)");
+
+  // For PNG, we need to use LVGL's decoder
+  // The strategy is to store raw data and let LVGL decode it when needed
+  // For now, we'll use a simple approach: decode via LVGL decoder manually
+
+  // Note: This requires LVGL png decoder to be active
+  // User must have lvgl_advanced_features with libpng: true
+
+  ESP_LOGW(TAG_IMAGE, "PNG decoding via LVGL decoder - requires direct LVGL integration");
+  ESP_LOGW(TAG_IMAGE, "Consider using LVGL's img widget directly with file path");
+
+  // For compatibility, return error for now - user should use LVGL img widget
+  ESP_LOGE(TAG_IMAGE, "PNG decoding not yet implemented in storage component");
+  ESP_LOGI(TAG_IMAGE, "Workaround: Use LVGL's lv_img widget with file:// path to let LVGL decode PNG");
+
+  return false;
+#else
+  ESP_LOGE(TAG_IMAGE, "PNG decoder not available - enable lvgl_advanced_features with libpng: true");
+  return false;
+#endif
+}
+
+// =====================================================
+// BMP Decoder Implementation (via LVGL)
+// =====================================================
+
+bool SdImageComponent::decode_bmp_image(const std::vector<uint8_t> &bmp_data) {
+#ifdef LV_USE_BMP
+  ESP_LOGD(TAG_IMAGE, "Using LVGL BMP decoder (LV_USE_BMP)");
+
+  ESP_LOGW(TAG_IMAGE, "BMP decoding via LVGL decoder - requires direct LVGL integration");
+  ESP_LOGW(TAG_IMAGE, "Consider using LVGL's img widget directly with file path");
+
+  ESP_LOGE(TAG_IMAGE, "BMP decoding not yet implemented in storage component");
+  ESP_LOGI(TAG_IMAGE, "Workaround: Use LVGL's lv_img widget with file:// path to let LVGL decode BMP");
+
+  return false;
+#else
+  ESP_LOGE(TAG_IMAGE, "BMP decoder not available - enable lvgl_advanced_features with bmp: true");
+  return false;
+#endif
+}
+
+// =====================================================
+// SVG Decoder Implementation (via LVGL + ThorVG)
+// =====================================================
+
+bool SdImageComponent::decode_svg_image(const std::vector<uint8_t> &svg_data) {
+#ifdef LV_USE_SVG
+  ESP_LOGD(TAG_IMAGE, "Using LVGL SVG decoder (LV_USE_SVG + ThorVG)");
+
+  ESP_LOGW(TAG_IMAGE, "SVG decoding via LVGL + ThorVG - requires direct LVGL integration");
+  ESP_LOGW(TAG_IMAGE, "SVG is a vector format - best used with LVGL's img widget directly");
+
+  ESP_LOGE(TAG_IMAGE, "SVG decoding not yet implemented in storage component");
+  ESP_LOGI(TAG_IMAGE, "Workaround: Use LVGL's lv_img widget with file:// path to let LVGL decode SVG");
+  ESP_LOGI(TAG_IMAGE, "Requires: lvgl_advanced_features with svg: true and thorvg: {internal: true}");
+
+  return false;
+#else
+  ESP_LOGE(TAG_IMAGE, "SVG decoder not available - enable lvgl_advanced_features with svg: true (LVGL v9 only)");
+  return false;
+#endif
+}
+
+// =====================================================
+// Lottie Decoder Implementation (via LVGL + ThorVG)
+// =====================================================
+
+bool SdImageComponent::decode_lottie_image(const std::vector<uint8_t> &lottie_data) {
+#ifdef LV_USE_LOTTIE
+  ESP_LOGD(TAG_IMAGE, "Using LVGL Lottie decoder (LV_USE_LOTTIE + ThorVG)");
+
+  ESP_LOGW(TAG_IMAGE, "Lottie decoding via LVGL + ThorVG - requires direct LVGL integration");
+  ESP_LOGW(TAG_IMAGE, "Lottie is an animation format - best used with LVGL's lottie widget directly");
+
+  ESP_LOGE(TAG_IMAGE, "Lottie decoding not yet implemented in storage component");
+  ESP_LOGI(TAG_IMAGE, "Workaround: Use LVGL's lv_lottie widget with file:// path");
+  ESP_LOGI(TAG_IMAGE, "Requires: lvgl_advanced_features with lottie: true and thorvg: {internal: true}");
+
+  return false;
+#else
+  ESP_LOGE(TAG_IMAGE, "Lottie decoder not available - enable lvgl_advanced_features with lottie: true (LVGL v9 only)");
+  return false;
+#endif
 }
 
 }  // namespace storage

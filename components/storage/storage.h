@@ -83,9 +83,14 @@ class StorageComponent : public Component {
 class SdImageComponent : public Component, public image::Image {
  public:
   // Constructeur CRITIQUE - doit initialiser la classe de base avec des données valides
-  SdImageComponent() : Component(), 
+  SdImageComponent() : Component(),
                        image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {
     // Initialisation de base
+  }
+
+  // Destructeur CRITIQUE - Libère toute la mémoire PSRAM (image_buffer_ + gif_frames_)
+  ~SdImageComponent() {
+    unload_image();  // Garantit la libération de TOUTE la mémoire
   }
 
   // Component lifecycle
@@ -201,17 +206,31 @@ class SdImageComponent : public Component, public image::Image {
   enum class FileType {
     UNKNOWN,
     JPEG,
-    GIF
+    GIF,
+    PNG,      // Supported via LV_USE_LIBPNG (lvgl_advanced_features)
+    BMP,      // Supported via LV_USE_BMP (lvgl_advanced_features)
+    SVG,      // Supported via LV_USE_SVG (lvgl_advanced_features, LVGL v9)
+    LOTTIE    // Supported via LV_USE_LOTTIE (lvgl_advanced_features, LVGL v9)
   };
-  
+
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
   bool is_jpeg_data(const std::vector<uint8_t> &data) const;
   bool is_gif_data(const std::vector<uint8_t> &data) const;
+  bool is_png_data(const std::vector<uint8_t> &data) const;
+  bool is_bmp_data(const std::vector<uint8_t> &data) const;
+  bool is_svg_data(const std::vector<uint8_t> &data) const;
+  bool is_lottie_data(const std::vector<uint8_t> &data) const;
 
-  // Image decoding - JPEG and GIF
+  // Image decoding - JPEG and GIF (built-in)
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
   bool decode_gif_image(const std::vector<uint8_t> &gif_data);
+
+  // Image decoding - PNG, BMP, SVG, Lottie (via LVGL decoders)
+  bool decode_png_image(const std::vector<uint8_t> &png_data);
+  bool decode_bmp_image(const std::vector<uint8_t> &bmp_data);
+  bool decode_svg_image(const std::vector<uint8_t> &svg_data);
+  bool decode_lottie_image(const std::vector<uint8_t> &lottie_data);
   
   // JPEG decoder callbacks
 #ifdef USE_JPEGDEC

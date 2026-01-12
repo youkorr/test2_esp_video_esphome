@@ -59,6 +59,8 @@ class SdMmc : public Component {
   void write_file(const char *path, const uint8_t *buffer, size_t len);
   void append_file(const char *path, const uint8_t *buffer, size_t len);
   void write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size);
+  // Fonction optimisée pour l'écriture de frames vidéo avec fsync() pour garantir l'écriture sur disque
+  void write_file_video(const char *path, const uint8_t *buffer, size_t len, bool force_sync = true);
   bool delete_file(const char *path);
   bool delete_file(std::string const &path);
   bool create_directory(const char *path);
@@ -76,6 +78,8 @@ class SdMmc : public Component {
   size_t file_size(const char *path);
   size_t file_size(std::string const &path);
   void read_file_stream(const char *path, size_t offset, size_t chunk_size, std::function<void(const uint8_t*, size_t)> callback);
+  // Fonction optimisée pour la lecture de fichiers vidéo (wrapper simplifié de read_file_stream)
+  std::vector<uint8_t> read_file_video(const char *path, size_t max_size = 0);
 #ifdef USE_SENSOR
   void add_file_size_sensor(sensor::Sensor *, std::string const &path);
 #endif
