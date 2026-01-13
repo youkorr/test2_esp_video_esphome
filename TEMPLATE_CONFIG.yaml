@@ -1,0 +1,441 @@
+# ============================================
+# TEMPLATE DE CONFIGURATION ESP32-P4
+# LVGL v9.4 + ThorVG (SVG/Lottie)
+# ============================================
+#
+# Ce fichier est un template complet pour utiliser les composants
+# de ce dépôt. Copiez ce fichier et adaptez-le à votre besoin.
+#
+# USAGE:
+#   cp TEMPLATE_CONFIG.yaml mon_appareil.yaml
+#   # Modifier mon_appareil.yaml selon vos besoins
+#   esphome run mon_appareil.yaml
+#
+# ============================================
+
+# ============================================
+# CONFIGURATION DE BASE
+# ============================================
+esphome:
+  name: esp32-p4-template
+  friendly_name: "ESP32-P4 Display"
+
+  # Platform ESP32
+  platform: esp32
+  board: esp32-p4-function-ev-board
+
+  # Options PlatformIO (PSRAM nécessaire)
+  platformio_options:
+    board_build.psram_type: "opi_opi"  # PSRAM Octal
+    board_build.flash_mode: "qio"
+    board_build.flash_size: "16MB"
+
+# ============================================
+# WIFI
+# ============================================
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Point d'accès de secours
+  ap:
+    ssid: "ESP32-P4 Fallback"
+    password: "fallback123"
+
+# Page captive si WiFi échoue
+captive_portal:
+
+# ============================================
+# API HOME ASSISTANT
+# ============================================
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+# ============================================
+# OTA (Mise à jour sans fil)
+# ============================================
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# ============================================
+# LOGGER (pour débogage)
+# ============================================
+logger:
+  level: INFO  # DEBUG pour plus de détails
+  logs:
+    lvgl: INFO
+    storage: INFO
+    esp_cam_sensor: INFO
+
+# ============================================
+# COMPOSANTS EXTERNES
+# ============================================
+external_components:
+  # ──────────────────────────────────────────
+  # Tous les composants de ce dépôt
+  # ──────────────────────────────────────────
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+      # Pour développement local, utilisez :
+      # type: local
+      # path: components
+    components:
+      # Composant LVGL v9.4 (avec ThorVG/SVG/Lottie intégré)
+      - lvgl                 # OBLIGATOIRE - LVGL v9.4 complet
+      # Composants de base (décommenter selon besoins)
+      - storage              # SD + ThorVG/SVG/Lottie (recommandé)
+      # - esp_cam_sensor     # Caméra ESP32-P4 (si caméra)
+      # - lvgl_camera_display # Affichage caméra LVGL (si caméra)
+      # - ppa_accelerator    # Accélération PPA (recommandé)
+
+      # Composants vidéo (décommenter si besoin)
+      # - avi_player         # Lecteur vidéo AVI
+      # - simple_video_player # Lecteur vidéo simple
+      # - video_player       # Lecteur vidéo avancé
+
+      # Composants réseau (décommenter si besoin)
+      # - network_camera     # Caméras RTSP/Frigate
+      # - multi_camera_display # Multi-caméras
+
+      # Composants IA (décommenter si besoin)
+      # - yolo11_detection   # Détection objets YOLO11
+      # - face_detection     # Détection visage
+      # - human_face_recognition # Reconnaissance faciale
+
+# ============================================
+# CARTE SD (Optionnel, pour images/vidéos)
+# ============================================
+# Décommenter si vous utilisez une carte SD
+# sd_mmc_card:
+#   id: sd_card
+#   clk_pin: GPIO13
+#   cmd_pin: GPIO11
+#   data_pins:
+#     - GPIO12
+#   frequency: 40MHz
+
+# ============================================
+# STORAGE + THORVG (SVG/Lottie)
+# ============================================
+storage:
+  # Liaison carte SD (décommenter si carte SD présente)
+  # sd_card_id: sd_card
+
+  # ──────────────────────────────────────────
+  # DÉCODEURS D'IMAGES AVANCÉS
+  # ──────────────────────────────────────────
+  decoders:
+    # ThorVG (moteur vectoriel pour SVG/Lottie)
+    thorvg:
+      internal: true   # ThorVG intégré dans LVGL (recommandé)
+      external: false  # ThorVG externe (nécessite lib)
+
+    # Formats supportés
+    svg: true          # Support SVG (icônes vectorielles)
+    lottie: true       # Support Lottie (animations vectorielles)
+    gif: true          # Support GIF animés
+    png: true          # Support PNG (via libpng)
+    bmp: true          # Support BMP
+
+    # Options de performance
+    draw_sw_complex: true    # Rendu complexe optimisé
+    img_cache_size: 8        # Cache 8 images en RAM
+    shadow_cache_size: 16    # Cache 16 ombres
+
+  # ──────────────────────────────────────────
+  # IMAGES DEPUIS CARTE SD (Optionnel)
+  # ──────────────────────────────────────────
+  # Décommenter pour charger des images depuis SD
+  # sd_images:
+  #   - id: photo1
+  #     file_path: "/photos/family.jpg"
+  #
+  #   - id: logo
+  #     file_path: "/icons/logo.png"
+
+# ============================================
+# PPA ACCELERATOR (Accélération matérielle)
+# ============================================
+# Décommenter pour activer l'accélération PPA
+# ppa_accelerator:
+#   id: ppa
+#   enable_rotation: true
+#   enable_scale: true
+#   enable_color_conversion: true
+
+# ============================================
+# CAMÉRA ESP32-P4 (Optionnel)
+# ============================================
+# Décommenter si vous utilisez une caméra
+# esp_cam_sensor:
+#   id: my_camera
+#   model: OV5647  # Options: OV5647, OV02C10, SC202CS
+#
+#   # Pins data (ajuster selon votre board)
+#   data_pins: [4, 5, 6, 7, 15, 16, 17, 18]
+#   vsync_pin: 19
+#   href_pin: 20
+#   pclk_pin: 21
+#   reset_pin: 22
+#   pwdn_pin: -1  # -1 si non utilisé
+#
+#   # Configuration image
+#   resolution: 800x600  # Options: 640x480, 800x600, 1024x768, 1280x720
+#   jpeg_quality: 12     # 1-63 (plus bas = meilleure qualité)
+#   framerate: 30
+
+# ============================================
+# DISPLAY (Configuration écran)
+# ============================================
+# IMPORTANT: Adaptez cette section à VOTRE écran
+#
+# Exemples de configurations courantes :
+#
+# ──────────────────────────────────────────
+# ILI9xxx (SPI)
+# ──────────────────────────────────────────
+# display:
+#   - platform: ili9xxx
+#     id: my_display
+#     model: ILI9488
+#     cs_pin: GPIO10
+#     dc_pin: GPIO9
+#     reset_pin: GPIO8
+#     rotation: 0
+#     dimensions:
+#       width: 480
+#       height: 320
+#
+# ──────────────────────────────────────────
+# RGB Display (Parallel)
+# ──────────────────────────────────────────
+# display:
+#   - platform: rgb
+#     id: my_display
+#     dimensions:
+#       width: 800
+#       height: 480
+#     data_pins:
+#       red: [1, 2, 3, 4, 5]
+#       green: [6, 7, 8, 9, 10, 11]
+#       blue: [12, 13, 14, 15, 16]
+#     hsync_pin: 17
+#     vsync_pin: 18
+#     pclk_pin: 19
+#
+# ──────────────────────────────────────────
+# MIPI DSI (ESP32-P4 natif)
+# ──────────────────────────────────────────
+# display:
+#   - platform: mipi_dsi
+#     id: my_display
+#     dimensions:
+#       width: 1280
+#       height: 720
+#     # ... configuration MIPI ...
+
+# ============================================
+# LVGL (Interface Graphique)
+# ============================================
+lvgl:
+  # ──────────────────────────────────────────
+  # Configuration display
+  # ──────────────────────────────────────────
+  displays:
+    - my_display  # Référence au display défini ci-dessus
+
+  # ──────────────────────────────────────────
+  # Configuration globale
+  # ──────────────────────────────────────────
+  color_depth: 16  # RGB565 (standard pour ESP32)
+  buffer_size: 100%  # Utiliser 100% pour fluidité
+
+  # ──────────────────────────────────────────
+  # Pages LVGL
+  # ──────────────────────────────────────────
+  pages:
+    # ════════════════════════════════════════
+    # PAGE 1 : HOME (Accueil)
+    # ════════════════════════════════════════
+    - id: page_home
+      bg_color: 0x000000  # Fond noir
+
+      widgets:
+        # Label titre
+        - label:
+            id: label_title
+            text: "ESP32-P4 + LVGL v9 + ThorVG"
+            x: 50
+            y: 30
+            text_font: montserrat_24
+            text_color: 0xFFFFFF
+
+        # Label sous-titre
+        - label:
+            text: "SVG + Lottie Animations"
+            x: 50
+            y: 70
+            text_color: 0xCCCCCC
+
+        # ─────────────────────────────────────
+        # Exemple SVG (icône vectorielle)
+        # ─────────────────────────────────────
+        # Décommenter si carte SD avec fichier SVG
+        # - image:
+        #     id: icon_sun
+        #     src: "S:/icons/sun.svg"  # S: = carte SD
+        #     width: 100
+        #     height: 100
+        #     x: 50
+        #     y: 150
+
+        # ─────────────────────────────────────
+        # Exemple Lottie (animation vectorielle)
+        # ─────────────────────────────────────
+        # Décommenter si carte SD avec fichier Lottie
+        # - lottie:
+        #     id: anim_loading
+        #     src: "S:/animations/loading.json"
+        #     width: 200
+        #     height: 200
+        #     x: 200
+        #     y: 150
+        #     loop: true
+        #     autoplay: true
+
+        # ─────────────────────────────────────
+        # Bouton exemple
+        # ─────────────────────────────────────
+        - button:
+            id: btn_next_page
+            x: 50
+            y: 400
+            width: 150
+            height: 50
+            checkable: false
+            widgets:
+              - label:
+                  text: "Next Page"
+                  align: center
+            on_click:
+              - lvgl.page.show: page_2
+
+    # ════════════════════════════════════════
+    # PAGE 2 : Exemple (décommenter si besoin)
+    # ════════════════════════════════════════
+    # - id: page_2
+    #   widgets:
+    #     - label:
+    #         text: "Page 2"
+    #         x: 50
+    #         y: 50
+    #
+    #     - button:
+    #         x: 50
+    #         y: 400
+    #         width: 150
+    #         height: 50
+    #         widgets:
+    #           - label:
+    #               text: "Back"
+    #               align: center
+    #         on_click:
+    #           - lvgl.page.show: page_home
+
+# ============================================
+# AFFICHAGE CAMÉRA DANS LVGL (Optionnel)
+# ============================================
+# Décommenter si vous utilisez une caméra
+# lvgl_camera_display:
+#   camera_id: my_camera
+#   update_interval: 33ms  # 30 FPS (1000/30 = 33ms)
+#   lvgl_display: my_display
+#
+#   # Position dans LVGL
+#   x: 0
+#   y: 0
+#   width: 800
+#   height: 600
+#
+#   # Options
+#   auto_start: true
+
+# ============================================
+# SWITCH HOME ASSISTANT (Exemples)
+# ============================================
+switch:
+  # Switch pour redémarrer l'ESP32
+  - platform: restart
+    name: "ESP32 P4 Restart"
+
+# ============================================
+# SENSOR HOME ASSISTANT (Exemples)
+# ============================================
+sensor:
+  # WiFi Signal
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+  # Uptime
+  - platform: uptime
+    name: "Uptime"
+
+# ============================================
+# TEXT SENSOR HOME ASSISTANT (Exemples)
+# ============================================
+text_sensor:
+  # Version ESPHome
+  - platform: version
+    name: "ESPHome Version"
+
+# ============================================
+# BINARY SENSOR HOME ASSISTANT (Exemples)
+# ============================================
+binary_sensor:
+  # Status
+  - platform: status
+    name: "Status"
+
+# ============================================
+# NOTES D'UTILISATION
+# ============================================
+#
+# 1. SECRETS:
+#    Créez un fichier secrets.yaml avec :
+#      wifi_ssid: "VotreSSID"
+#      wifi_password: "VotreMotDePasse"
+#      api_encryption_key: "votre_cle_32_caracteres"
+#      ota_password: "votre_mot_de_passe"
+#
+# 2. CARTE SD (pour SVG/Lottie):
+#    Structure recommandée :
+#      /sdcard/
+#      ├── icons/
+#      │   ├── sun.svg
+#      │   ├── moon.svg
+#      │   └── cloud.svg
+#      ├── animations/
+#      │   ├── loading.json
+#      │   └── weather.json
+#      └── photos/
+#          └── family.jpg
+#
+# 3. RESSOURCES LOTTIE GRATUITES:
+#    - Weather Icons: https://github.com/basmilius/weather-icons
+#    - LottieFiles: https://lottiefiles.com/free
+#    - Remix Icon (SVG): https://remixicon.com/
+#
+# 4. COMPILATION:
+#    esphome compile TEMPLATE_CONFIG.yaml
+#
+# 5. FLASH:
+#    esphome run TEMPLATE_CONFIG.yaml
+#
+# 6. LOGS:
+#    esphome logs TEMPLATE_CONFIG.yaml
+#
+# ============================================
