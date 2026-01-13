@@ -56,38 +56,19 @@ esphome:
   platform: esp32
   board: esp32-p4-function-ev-board
 
-# Composants externes (LVGL v9.4 + composants de ce dépôt)
+# Composants externes (tout depuis ce dépôt)
 external_components:
-  # LVGL v9.4 (temporaire, en attendant ESPHome officiel)
-  - source:
-      type: git
-      url: https://github.com/clydebarrow/esphome
-      ref: lvgl-9.4
-    components:
-      - lvgl
-      - font
-      - image
-    refresh: 1d
-
-  # Composants de ce dépôt
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
     components:
-      - storage              # Support SD + ThorVG/SVG/Lottie
+      - lvgl                 # LVGL v9.4 avec ThorVG/SVG/Lottie intégré
+      - storage              # Support SD + images avancées
       - esp_cam_sensor       # Caméra optimisée ESP32-P4
       - lvgl_camera_display  # Affichage caméra dans LVGL
       # Ajoutez d'autres selon vos besoins
 
-# Configuration ThorVG pour SVG/Lottie
-storage:
-  decoders:
-    thorvg:
-      internal: true  # ThorVG intégré dans LVGL
-    svg: true         # Support SVG
-    lottie: true      # Support Lottie animations
-    gif: true         # Support GIF
-    png: true         # Support PNG via libpng
+# C'est tout ! ThorVG/SVG/Lottie sont activés automatiquement
 ```
 
 #### 2. Compilation et Flash

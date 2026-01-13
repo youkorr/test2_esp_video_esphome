@@ -39,20 +39,13 @@ ota:
 # COMPOSANTS EXTERNES (COPY-PASTE)
 # ============================================
 external_components:
-  # LVGL v9.4 (temporaire)
-  - source:
-      type: git
-      url: https://github.com/clydebarrow/esphome
-      ref: lvgl-9.4
-    components: [lvgl, font, image]
-    refresh: 1d
-
-  # Composants de ce dépôt
+  # Tous les composants depuis ce dépôt
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
     components:
-      - storage
+      - lvgl     # LVGL v9.4 avec ThorVG/SVG/Lottie intégré
+      - storage  # Support SD + images
       # Ajoutez d'autres composants si besoin
 
 # ============================================
@@ -214,9 +207,8 @@ lvgl_camera_display:
 ```yaml
 - source:
     type: git
-    url: https://github.com/clydebarrow/esphome
-    ref: lvgl-9.4
-  components: [lvgl, font, image]
+    url: https://github.com/youkorr/test2_esp_video_esphome
+  components: [lvgl]  # ← LVGL v9.4 avec ThorVG
 ```
 
 ### Erreur : "ThorVG not enabled"

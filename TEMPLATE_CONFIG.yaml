@@ -74,20 +74,7 @@ logger:
 # ============================================
 external_components:
   # ──────────────────────────────────────────
-  # LVGL v9.4 (temporaire, en attendant ESPHome officiel)
-  # ──────────────────────────────────────────
-  - source:
-      type: git
-      url: https://github.com/clydebarrow/esphome
-      ref: lvgl-9.4
-    components:
-      - lvgl
-      - font
-      - image
-    refresh: 1d
-
-  # ──────────────────────────────────────────
-  # Composants de ce dépôt
+  # Tous les composants de ce dépôt
   # ──────────────────────────────────────────
   - source:
       type: git
@@ -96,6 +83,8 @@ external_components:
       # type: local
       # path: components
     components:
+      # Composant LVGL v9.4 (avec ThorVG/SVG/Lottie intégré)
+      - lvgl                 # OBLIGATOIRE - LVGL v9.4 complet
       # Composants de base (décommenter selon besoins)
       - storage              # SD + ThorVG/SVG/Lottie (recommandé)
       # - esp_cam_sensor     # Caméra ESP32-P4 (si caméra)
