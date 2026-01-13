@@ -1,0 +1,98 @@
+# ============================================================================
+# TEST CONFIGURATION MINIMALE - Composant LVGL pour ESPHome
+# ============================================================================
+# Cette configuration teste le composant LVGL local avec une configuration minimale
+# ============================================================================
+
+esphome:
+  name: test-lvgl-component
+  friendly_name: "Test LVGL Component"
+
+  # Vérification version LVGL au démarrage
+  on_boot:
+    priority: -100
+    then:
+      - lambda: |-
+          ESP_LOGI("main", "=================================");
+          ESP_LOGI("main", "Testing LVGL Component");
+          ESP_LOGI("main", "LVGL Version: %d.%d.%d",
+                   LVGL_VERSION_MAJOR, LVGL_VERSION_MINOR, LVGL_VERSION_PATCH);
+          #ifdef LV_USE_THORVG_INTERNAL
+          ESP_LOGI("main", "ThorVG: ENABLED ✅");
+          #else
+          ESP_LOGI("main", "ThorVG: DISABLED ❌");
+          #endif
+          #ifdef LV_USE_SVG
+          ESP_LOGI("main", "SVG Support: ENABLED ✅");
+          #endif
+          #ifdef LV_USE_LOTTIE
+          ESP_LOGI("main", "Lottie Support: ENABLED ✅");
+          #endif
+          ESP_LOGI("main", "=================================");
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      CONFIG_ESP32_SPIRAM_SUPPORT: y
+
+# Composants locaux
+external_components:
+  - source:
+      type: local
+      path: components
+    components:
+      - lvgl
+
+logger:
+  level: INFO
+  logs:
+    lvgl: DEBUG
+    component: DEBUG
+
+# Configuration Display factice (minimal pour test de compilation)
+spi:
+  id: spi_bus
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: ili9341
+    cs_pin: GPIO5
+    dc_pin: GPIO16
+    reset_pin: GPIO17
+    dimensions:
+      width: 320
+      height: 240
+    update_interval: 50ms
+
+# ============================================================================
+# CONFIGURATION LVGL - Test avec hello_world.yaml intégré
+# ============================================================================
+lvgl:
+  log_level: INFO
+
+  displays:
+    - display_id: my_display
+
+  # Buffer de rendu
+  buffer_size: 25%
+
+  # Utilisation de la configuration hello_world par défaut
+  # Le composant LVGL charge automatiquement hello_world.yaml si aucun widget n'est défini
+
+  # Test simple avec un label
+  pages:
+    - id: test_page
+      bg_color: 0x000000
+      widgets:
+        - label:
+            id: test_label
+            text: "LVGL Component Test OK ✅"
+            x: 10
+            y: 10
+            text_color: 0x00FF00
