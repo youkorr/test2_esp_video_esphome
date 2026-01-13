@@ -98,22 +98,26 @@ async def to_code(config):
     if CONF_THORVG in config:
         thorvg_cfg = config[CONF_THORVG]
         if thorvg_cfg.get(CONF_THORVG_INTERNAL, False):
+            cg.add_build_flag("-DLV_USE_VECTOR_GRAPHIC=1")
             cg.add_build_flag("-DLV_USE_THORVG_INTERNAL=1")
             cg.add(var.set_thorvg_internal(True))
             _LOGGER.info("  ThorVG Internal: ENABLED (requires LVGL v9)")
         if thorvg_cfg.get(CONF_THORVG_EXTERNAL, False):
+            cg.add_build_flag("-DLV_USE_VECTOR_GRAPHIC=1")
             cg.add_build_flag("-DLV_USE_THORVG_EXTERNAL=1")
             cg.add(var.set_thorvg_external(True))
             _LOGGER.info("  ThorVG External: ENABLED (requires LVGL v9)")
 
     # SVG support (v9 only - requires ThorVG)
     if config.get(CONF_SVG, False):
+        cg.add_build_flag("-DLV_USE_VECTOR_GRAPHIC=1")
         cg.add_build_flag("-DLV_USE_SVG=1")
         cg.add(var.set_svg_enabled(True))
         _LOGGER.info("  SVG: ENABLED (requires LVGL v9 + ThorVG)")
 
     # Lottie support (v9 only - requires ThorVG)
     if config.get(CONF_LOTTIE, False):
+        cg.add_build_flag("-DLV_USE_VECTOR_GRAPHIC=1")
         cg.add_build_flag("-DLV_USE_LOTTIE=1")
         cg.add(var.set_lottie_enabled(True))
         _LOGGER.info("  Lottie: ENABLED (requires LVGL v9 + ThorVG)")

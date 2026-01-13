@@ -219,6 +219,8 @@ async def to_code(configs):
     # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
+    # Enable vector graphics engine (required for SVG/Lottie)
+    df.add_define("LV_USE_VECTOR_GRAPHIC", "1")
     # Enable ThorVG vector graphics engine (built-in to LVGL v9)
     df.add_define("LV_USE_THORVG_INTERNAL", "1")
     # Enable SVG support (requires ThorVG)
