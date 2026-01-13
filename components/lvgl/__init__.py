@@ -219,6 +219,8 @@ async def to_code(configs):
     # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
+    # Enable floating point support (required by matrix)
+    df.add_define("LV_USE_FLOAT", "1")
     # Enable matrix support (required by vector graphics)
     df.add_define("LV_USE_MATRIX", "1")
     # Enable vector graphics support (required for SVG/Lottie)
