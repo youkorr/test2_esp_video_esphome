@@ -1,0 +1,108 @@
+# ============================================================================
+# 🔧 PATCH RAPIDE: Convertir YOLO11 en mode SD Card
+# ============================================================================
+# Copiez ces sections dans votre fichier YAML principal pour passer au
+# chargement depuis SD card au lieu de l'embedding dans le firmware.
+# ============================================================================
+
+# ============================================================================
+# SECTION 1: Configuration SD Card (à ajouter AVANT yolo11_detection)
+# ============================================================================
+sd_mmc_card:
+  id: sd_card
+  # Pins pour ESP32-P4 Function EV Board (ajustez si nécessaire)
+  clk_pin: GPIO43
+  cmd_pin: GPIO44
+  data0_pin: GPIO39
+  data1_pin: GPIO40
+  data2_pin: GPIO41
+  data3_pin: GPIO42
+  mode_1bit: false    # Mode 4-bit pour vitesse maximale (≈20 MB/s)
+  slot: 0
+
+# ============================================================================
+# SECTION 2: Modifier votre yolo11_detection EXISTANT
+# ============================================================================
+# AJOUTEZ ces 2 lignes dans votre configuration yolo11_detection existante:
+
+yolo11_detection:
+  id: yolo11_detector
+  camera_id: tab5_cam
+
+  # ✨ NOUVELLES LIGNES À AJOUTER ✨
+  model_location: sdcard     # Charger depuis SD au lieu de flash
+  model_path: "/sdcard"      # Point de montage de la carte SD
+
+  # Vos paramètres existants restent identiques
+  detection_interval: 12
+  score_threshold: 0.45
+  nms_threshold: 0.5
+  draw_enabled: true
+
+# ============================================================================
+# SECTION 3: Vérifier CONFIG_SPIRAM_RODATA (dans esp32:)
+# ============================================================================
+# Assurez-vous que cette configuration est présente:
+
+esp32:
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_SPIRAM: y
+      CONFIG_SPIRAM_SPEED_200M: y
+      CONFIG_SPIRAM_RODATA: y              # ← CRITIQUE pour YOLO
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_USE_CAPS_ALLOC: y
+      CONFIG_CACHE_L2_CACHE_256KB: y
+
+# ============================================================================
+# SECTION 4: Logger (optionnel mais recommandé pour debug)
+# ============================================================================
+logger:
+  level: INFO
+  logs:
+    yolo11_detection: INFO
+    dl::Model: DEBUG        # Pour voir le chargement du modèle
+    sd_mmc_card: DEBUG      # Pour voir l'état de la SD card
+
+# ============================================================================
+# 📋 ÉTAPES AVANT DE COMPILER
+# ============================================================================
+# 1. Copier le modèle sur votre carte SD:
+#
+#    Linux/Mac:
+#      cp components/yolo11_detect/models/p4/yolo11_detect_s8_v1.espdl /media/sdcard/
+#
+#    Windows:
+#      copy components\yolo11_detect\models\p4\yolo11_detect_s8_v1.espdl E:\
+#
+# 2. Vérifier la structure sur la SD:
+#    /sdcard/
+#    └── yolo11_detect_s8_v1.espdl  (2.8 MB)
+#
+# 3. Insérer la carte SD dans l'ESP32-P4
+#
+# 4. Compiler et uploader:
+#    esphome compile votre_config.yaml
+#    esphome upload votre_config.yaml
+#
+# ============================================================================
+# ✅ RÉSULTAT ATTENDU
+# ============================================================================
+# Compilation:
+#   - Durée: 30-60 secondes (au lieu de 10+ minutes)
+#   - Flash: 5.6 MB / 7.75 MB (72% au lieu de 104%)
+#   - Firmware: -2.8 MB plus léger
+#
+# Boot:
+#   [I][sd_mmc_card] SD Card initialized successfully
+#   [I][yolo11_detection] Loading YOLO11 model from SD card: /sdcard
+#   [I][dl::Model] Model loaded from SDCARD (2.8 MB) in 2.1 seconds
+#   [I][yolo11_detection] ✅ YOLO11 Object Detection ready
+#
+# Runtime:
+#   - Performance identique (8-12 FPS)
+#   - RAM: 6-8 MB (40-50%)
+#   - PSRAM: 11-12 MB (69-75%)
+# ============================================================================
