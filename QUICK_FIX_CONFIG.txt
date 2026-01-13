@@ -1,0 +1,32 @@
+# QUICK FIX - Configuration Temporaire
+# ======================================
+#
+# Pour débloquer IMMÉDIATEMENT la compilation,
+# modifiez votre /config/esphome/waveshare.yaml
+#
+# AVANT (ligne qui cause l'erreur):
+# ------------------------------------
+# external_components:
+#   - source:
+#       type: git
+#       url: https://github.com/youkorr/test2_esp_video_esphome
+#       ref: main  ← PROBLÈME ICI
+#
+# APRÈS (correction temporaire):
+# ------------------------------------
+# external_components:
+#   - source:
+#       type: git
+#       url: https://github.com/youkorr/test2_esp_video_esphome
+#       ref: claude/test-lvgl-esphome-UoCXX  ← CORRECTION ICI
+#
+# Puis recompilez:
+# esphome compile /config/esphome/waveshare.yaml
+#
+# Cette branche contient TOUS les fixes nécessaires:
+# ✅ Fix VariableDeclarationExpression (32d408a)
+# ✅ Fix LV_USE_VECTOR_GRAPHIC (a36ca7c)
+# ✅ Documentation (07dc065)
+#
+# Une fois que vous aurez mergé la PR dans main,
+# vous pourrez remettre "ref: main" dans la config.
