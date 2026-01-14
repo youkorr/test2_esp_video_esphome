@@ -18,7 +18,7 @@ CONFIG_SCHEMA = cv.Schema({
 async def to_code(config):
     # Define the button count macro - required by ESPHome core
     # Must be set before any entity registration
-    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", "0")
+    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
 
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
@@ -28,6 +28,6 @@ async def to_code(config):
 # Also add the define at module level as a fallback
 # This ensures it's available even if no button entities are configured
 def _setup_button_count():
-    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", "0")
+    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
 
 _setup_button_count()

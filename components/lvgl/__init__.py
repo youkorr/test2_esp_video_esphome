@@ -213,7 +213,7 @@ async def to_code(configs):
     # CRITICAL FIX: Define ESPHOME_ENTITY_BUTTON_COUNT before any ESPHome core files are compiled
     # This prevents "ESPHOME_ENTITY_BUTTON_COUNT was not declared" errors in application.h
     # The button component is auto-loaded by LVGL, but the define must be set early
-    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", "0")
+    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
 
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
