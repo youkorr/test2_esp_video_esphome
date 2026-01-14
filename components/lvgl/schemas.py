@@ -156,7 +156,6 @@ STYLE_PROPS = {
     "bg_color": lvalid.lv_color,
     "bg_grad": lv_gradient,
     "bg_grad_color": lvalid.lv_color,
-    "bg_dither_mode": df.LvConstant("LV_DITHER_", "NONE", "ORDERED", "ERR_DIFF").one_of,
     "bg_grad_dir": LV_GRAD_DIR.one_of,
     "bg_grad_stop": lvalid.stop_value,
     "bg_image_opa": lvalid.opacity,
@@ -200,8 +199,6 @@ STYLE_PROPS = {
     "shadow_color": lvalid.lv_color,
     "shadow_offset_x": lvalid.lv_int,
     "shadow_offset_y": lvalid.lv_int,
-    "shadow_ofs_x": lvalid.lv_int,
-    "shadow_ofs_y": lvalid.lv_int,
     "shadow_opa": lvalid.opacity,
     "shadow_spread": lvalid.lv_int,
     "shadow_width": lvalid.lv_positive_int,
@@ -243,8 +240,6 @@ STYLE_REMAP = {
     "transform_angle": "transform_rotation",
     "zoom": "scale",
     "angle": "rotation",
-    "shadow_ofs_x": "shadow_offset_x",
-    "shadow_ofs_y": "shadow_offset_y",
     "r_mod": "length",
 }
 

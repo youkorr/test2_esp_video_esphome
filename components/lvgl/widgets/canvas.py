@@ -235,8 +235,6 @@ RECT_PROPS = {
         "shadow_width",
         "shadow_offset_x",
         "shadow_offset_y",
-        "shadow_ofs_x",
-        "shadow_ofs_y",
         "shadow_spread",
         "shadow_opa",
     )
