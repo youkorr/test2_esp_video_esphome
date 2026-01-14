@@ -156,7 +156,6 @@ STYLE_PROPS = {
     "bg_color": lvalid.lv_color,
     "bg_grad": lv_gradient,
     "bg_grad_color": lvalid.lv_color,
-    "bg_dither_mode": df.LvConstant("LV_DITHER_", "NONE", "ORDERED", "ERR_DIFF").one_of,
     "bg_grad_dir": LV_GRAD_DIR.one_of,
     "bg_grad_stop": lvalid.stop_value,
     "bg_image_opa": lvalid.opacity,
