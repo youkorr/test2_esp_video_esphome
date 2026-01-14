@@ -84,8 +84,8 @@ external_components:
       # path: components
     components:
       # Composant LVGL v9.4 (avec ThorVG/SVG/Lottie intégré)
-      - lvgl                 # OBLIGATOIRE - LVGL v9.4 complet
-      - font                 # OBLIGATOIRE - Font avec compatibilité LVGL 9.x
+      # Note: font, image, et button sont chargés automatiquement avec LVGL
+      - lvgl                 # OBLIGATOIRE - LVGL v9.4 complet (charge auto: font, image, button)
       # Composants de base (décommenter selon besoins)
       - storage              # SD + ThorVG/SVG/Lottie (recommandé)
       # - esp_cam_sensor     # Caméra ESP32-P4 (si caméra)
