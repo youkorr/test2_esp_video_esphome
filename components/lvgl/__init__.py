@@ -85,9 +85,13 @@ for module_info in pkgutil.iter_modules(widgets.__path__):
 
 DOMAIN = "lvgl"
 DEPENDENCIES = ["display"]
-AUTO_LOAD = ["key_provider", "font", "image", "button"]
+AUTO_LOAD = ["key_provider", "font", "image"]
 CODEOWNERS = ["@youkorr"]  # Forked from @clydebarrow lvgl-9.4 branch with ThorVG enabled by default
 HELLO_WORLD_FILE = "hello_world.yaml"
+
+# Define ESPHOME_ENTITY_BUTTON_COUNT to prevent compilation errors
+# This is required because ESPHome core expects this define to exist
+cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", "0")
 
 
 SIMPLE_TRIGGERS = (
