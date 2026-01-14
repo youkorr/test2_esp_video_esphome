@@ -1976,7 +1976,7 @@ void SimpleVideoPlayer::create_ui_() {
   // Create canvas for video display (use actual dimensions)
   this->canvas_ = lv_canvas_create(parent);
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+                       this->actual_width_, this->actual_height_, LV_COLOR_FORMAT_RGB565);
   lv_obj_center(this->canvas_);
 
   // Create loading indicator (shown during initial load, hidden after first frame)
@@ -2228,7 +2228,7 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
 }
 
 void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
-  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_timer_get_user_data(timer));
 
   if (player->state_ != PlayerState::PLAYING) {
     return;
@@ -2344,7 +2344,7 @@ void SimpleVideoPlayer::timer_cb_(lv_timer_t *timer) {
 }
 
 void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) {
-  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_timer_get_user_data(timer));
   player->hide_controls_();
   lv_timer_pause(timer);
 }
