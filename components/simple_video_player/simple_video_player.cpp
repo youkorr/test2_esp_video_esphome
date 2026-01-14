@@ -158,8 +158,8 @@ void SimpleVideoPlayer::setup() {
     // Create rotation handle with actual video dimensions
     esp_imgfx_rotate_cfg_t rotate_cfg = {
       .in_res = {
-        .width = (uint16_t)this->aligned_width_,
-        .height = (uint16_t)this->aligned_height_,
+        .width = static_cast<int16_t>(this->aligned_width_),
+        .height = static_cast<int16_t>(this->aligned_height_),
       },
       .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
       .degree = this->rotation_,
@@ -486,8 +486,8 @@ void SimpleVideoPlayer::complete_video_initialization_() {
     // Create rotation handle with actual video dimensions
     esp_imgfx_rotate_cfg_t rotate_cfg = {
       .in_res = {
-        .width = (uint16_t)this->aligned_width_,
-        .height = (uint16_t)this->aligned_height_,
+        .width = static_cast<int16_t>(this->aligned_width_),
+        .height = static_cast<int16_t>(this->aligned_height_),
       },
       .in_pixel_fmt = ESP_IMGFX_PIXEL_FMT_RGB565_LE,
       .degree = this->rotation_,
@@ -3885,7 +3885,7 @@ void SimpleVideoPlayer::update_display_() {
   }
 
   lv_canvas_set_buffer(this->canvas_, canvas_buffer,
-                       canvas_width, canvas_height, LV_IMG_CF_TRUE_COLOR);
+                       canvas_width, canvas_height, LV_COLOR_FORMAT_RGB565);
 
   // Swap buffers for next frame (rotate: 0120 for triple, 010 for double)
   if (this->use_triple_buffer_ && this->rgb_buffer_back_ != nullptr && this->rgb_buffer_third_ != nullptr) {
@@ -3926,7 +3926,7 @@ void SimpleVideoPlayer::create_ui_() {
   // Create canvas for video display (use actual dimensions)
   this->canvas_ = lv_canvas_create(parent);
   lv_canvas_set_buffer(this->canvas_, this->rgb_buffer_,
-                       this->actual_width_, this->actual_height_, LV_IMG_CF_TRUE_COLOR);
+                       this->actual_width_, this->actual_height_, LV_COLOR_FORMAT_RGB565);
   lv_obj_center(this->canvas_);
 
   // OPTIMIZATION: Disable unnecessary rendering features to maximize video FPS
@@ -4512,7 +4512,7 @@ void SimpleVideoPlayer::stop_btn_cb_(lv_event_t *e) {
 
 void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
   SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
-  lv_obj_t *slider = lv_event_get_target(e);
+  lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(e));
 
   int value = lv_slider_get_value(slider);
 
@@ -4804,7 +4804,7 @@ void SimpleVideoPlayer::esp_timer_cb_(void *arg) {
 }
 
 void SimpleVideoPlayer::hide_timer_cb_(lv_timer_t *timer) {
-  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(timer->user_data);
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_timer_get_user_data(timer));
   player->hide_controls_();
   lv_timer_pause(timer);
 }
