@@ -85,7 +85,7 @@ for module_info in pkgutil.iter_modules(widgets.__path__):
 
 DOMAIN = "lvgl"
 DEPENDENCIES = ["display"]
-AUTO_LOAD = ["key_provider", "font", "image", "button"]
+AUTO_LOAD = ["key_provider", "font", "image"]
 CODEOWNERS = ["@youkorr"]  # Forked from @clydebarrow lvgl-9.4 branch with ThorVG enabled by default
 HELLO_WORLD_FILE = "hello_world.yaml"
 
@@ -209,11 +209,6 @@ async def to_code(configs):
     # Global configuration
     cg.add_library("lvgl/lvgl", "9.4.0")
     cg.add_define("USE_LVGL")
-
-    # CRITICAL FIX: Define ESPHOME_ENTITY_BUTTON_COUNT before any ESPHome core files are compiled
-    # This prevents "ESPHOME_ENTITY_BUTTON_COUNT was not declared" errors in application.h
-    # The button component is auto-loaded by LVGL, but the define must be set early
-    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
 
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
