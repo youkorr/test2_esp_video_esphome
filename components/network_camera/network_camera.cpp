@@ -229,7 +229,7 @@ void NetworkCamera::adapt_to_network_() {
 }
 
 void NetworkCamera::lvgl_timer_callback_(lv_timer_t *timer) {
-  NetworkCamera *cam = static_cast<NetworkCamera *>(timer->user_data);
+  NetworkCamera *cam = static_cast<NetworkCamera *>(lv_timer_get_user_data(timer));
   if (cam == nullptr || !cam->stream_connected_) {
     return;
   }
@@ -1759,7 +1759,7 @@ void NetworkCamera::update_canvas_() {
   }
 
   lv_canvas_set_buffer(this->canvas_obj_, this->current_decode_buffer_,
-                       this->width_, this->height_, LV_IMG_CF_TRUE_COLOR);
+                       this->width_, this->height_, LV_COLOR_FORMAT_RGB565);
   lv_obj_invalidate(this->canvas_obj_);
 }
 
