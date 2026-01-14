@@ -2,6 +2,33 @@
 
 This is a local override of the ESPHome font component with LVGL 9.x compatibility fixes.
 
+## ⚠️ IMPORTANT: Required Configuration
+
+**You MUST explicitly include this font component in your `external_components` configuration**, otherwise ESPHome will use its built-in font component which does NOT have LVGL 9.x compatibility.
+
+### Correct Configuration
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+    components:
+      - lvgl    # LVGL v9.4
+      - font    # ← REQUIRED: Font with LVGL 9.x compatibility
+      # ... other components
+```
+
+### ❌ Common Mistake
+
+If you forget to include `font` in the components list, you will get compilation errors like:
+```
+error: 'struct lv_font_glyph_dsc_t' has no member named 'bpp'
+error: invalid conversion from 'const uint8_t* (*)(const lv_font_t*, uint32_t)' to 'const void* (*)(lv_font_glyph_dsc_t*, lv_draw_buf_t*)'
+```
+
+This happens because ESPHome is using its built-in (incompatible) font component instead of this one.
+
 ## Changes Made
 
 ### 1. Updated `get_glyph_bitmap` Callback Signature (font.h)
