@@ -116,7 +116,7 @@ void AviPlayerComponent::setup() {
   lvgl_img_dsc_.header.w = width_;
   lvgl_img_dsc_.header.h = height_;
   lvgl_img_dsc_.data_size = width_ * height_ * sizeof(lv_color_t);
-  lvgl_img_dsc_.header.cf = LV_IMG_CF_TRUE_COLOR;
+  lvgl_img_dsc_.header.cf = LV_COLOR_FORMAT_RGB565;
   lvgl_img_dsc_.data = (uint8_t *)video_buffer_;
 
   ESP_LOGI(TAG, "AVI Player initialized successfully");

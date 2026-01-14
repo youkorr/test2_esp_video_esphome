@@ -101,7 +101,7 @@ void MultiCameraDisplay::setup_grid_layout_() {
       for (int p = 0; p < canvas_w * canvas_h; p++) {
         buf[p] = lv_color_hex(0x4682B4);
       }
-      lv_canvas_set_buffer(canvas, buf, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+      lv_canvas_set_buffer(canvas, buf, canvas_w, canvas_h, LV_COLOR_FORMAT_RGB565);
       // Explicitly set canvas object size (required for LVGL to report correct dimensions)
       lv_obj_set_size(canvas, canvas_w, canvas_h);
       this->thumbnail_buffers_.push_back(buf);
@@ -153,7 +153,7 @@ void MultiCameraDisplay::setup_fullscreen_layout_() {
     for (int p = 0; p < canvas_w * canvas_h; p++) {
       this->fullscreen_buffer_[p] = lv_color_hex(0x000000);
     }
-    lv_canvas_set_buffer(this->fullscreen_canvas_, this->fullscreen_buffer_, canvas_w, canvas_h, LV_IMG_CF_TRUE_COLOR);
+    lv_canvas_set_buffer(this->fullscreen_canvas_, this->fullscreen_buffer_, canvas_w, canvas_h, LV_COLOR_FORMAT_RGB565);
     // Explicitly set canvas object size (required for LVGL to report correct dimensions)
     lv_obj_set_size(this->fullscreen_canvas_, canvas_w, canvas_h);
     ESP_LOGI(TAG, "  Allocated fullscreen canvas buffer: %dx%d (%d bytes)", canvas_w, canvas_h, buf_size);
