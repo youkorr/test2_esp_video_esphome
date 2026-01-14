@@ -59,6 +59,7 @@ private:
 
     // Use LVGL color packing (handles endianness automatically)
     lv_color_t color = lv_color_make(r, g, b);
-    return color.full;
+    // LVGL 9.x: Use lv_color_to_u16() instead of .full member
+    return lv_color_to_u16(color);
   }
 };
