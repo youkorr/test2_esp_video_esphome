@@ -254,7 +254,7 @@ class MockLv:
     """
 
     # Mapping for LVGL 9
-    ATTR_MAP = {"event_send": "obj_send_event", "dither": "bg_dither_mode"}
+    ATTR_MAP = {"event_send": "obj_send_event"}
 
     def __init__(self, base):
         self.base = base
