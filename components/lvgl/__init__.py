@@ -85,7 +85,7 @@ for module_info in pkgutil.iter_modules(widgets.__path__):
 
 DOMAIN = "lvgl"
 DEPENDENCIES = ["display"]
-AUTO_LOAD = ["key_provider", "font", "image", "button"]
+AUTO_LOAD = ["key_provider", "button"]
 CODEOWNERS = ["@youkorr"]  # Forked from @clydebarrow lvgl-9.4 branch with ThorVG enabled by default
 HELLO_WORLD_FILE = "hello_world.yaml"
 
