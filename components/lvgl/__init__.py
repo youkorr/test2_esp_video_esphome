@@ -237,10 +237,10 @@ async def to_code(configs):
     # Enable Lottie animation support (requires ThorVG)
     df.add_define("LV_USE_LOTTIE", "1")
     # Enable advanced image decoders
-    df.add_define("LV_USE_LIBPNG", "1")  # PNG support
+    df.add_define("LV_USE_LIBPNG", "0")  # PNG support via pngdec (not libpng)
     df.add_define("LV_USE_BMP", "1")      # BMP support
     df.add_define("LV_USE_GIF", "1")      # GIF support
-    # Add libpng library for PNG decoding
+    # Add pngdec library for PNG decoding (lightweight, no external deps)
     cg.add_library("pngdec", "1.0.1")
 
     df.add_define(
