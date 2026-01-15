@@ -1,0 +1,171 @@
+substitutions:
+  name: test_lvgl_v9
+
+esphome:
+  name: ${name}
+  friendly_name: "Test LVGL v9.4 Compilation"
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    version: 5.5.1
+    advanced:
+      enable_idf_experimental_features: true
+    sdkconfig_options:
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  encryption:
+    key: "dkQIr4kVvP+E4XffuF9vSL5qQopmfgW6voYVkciZ3V8="
+
+ota:
+  - platform: esphome
+    password: "test123456"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Test LVGL v9 Fallback"
+    password: "test123456"
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+external_components:
+  - source: github://pr#11886
+    components: [mipi_dsi]
+    refresh: always
+
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+      ref: claude/fix-button-template-error-VHHoC
+    components: [lvgl, font, image]
+    refresh: always
+
+i2c:
+  - id: bsp_bus
+    sda: GPIO07
+    scl: GPIO08
+    frequency: 400kHz
+
+esp_ldo:
+  - voltage: 2.5V
+    channel: 3
+  - voltage: 2.5V
+    channel: 4
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: bsp_bus
+    reset_pin: GPIO23
+    update_interval: 50ms
+    transform:
+      swap_xy: false
+      mirror_x: false
+      mirror_y: false
+
+output:
+  - platform: ledc
+    pin: GPIO32
+    id: backlight_pwm
+    frequency: 1000Hz
+    inverted: true
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    reset_pin:
+      number: 33
+    rotation: 180
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: 1024
+      height: 600
+
+font:
+  - file: "gfonts://Roboto"
+    id: roboto_24
+    size: 24
+  - file: "gfonts://Roboto"
+    id: roboto_32
+    size: 32
+
+color:
+  - id: color_blue
+    hex: '4A90E2'
+  - id: color_white
+    hex: 'FFFFFF'
+  - id: color_black
+    hex: '000000'
+
+lvgl:
+  byte_order: little_endian
+  displays:
+    - main_display
+  touchscreens:
+    - touch
+
+  pages:
+    - id: main_page
+      bg_color: color_black
+      widgets:
+        # Test label
+        - label:
+            text: "LVGL v9.4 Test"
+            x: 200
+            y: 50
+            text_color: color_white
+            text_font: roboto_32
+            text_align: CENTER
+
+        # Test button widget (LVGL widget, pas ESPHome button entity)
+        - button:
+            id: test_button
+            width: 200
+            height: 80
+            x: 412
+            y: 150
+            bg_color: color_blue
+            bg_opa: COVER
+            radius: 15
+            on_click:
+              - light.toggle: backlight
+            widgets:
+              - label:
+                  text: "Toggle Light"
+                  align: CENTER
+                  text_color: color_white
+                  text_font: roboto_24
+
+        # Test status label
+        - label:
+            id: status_label
+            text: "Compilation OK!"
+            x: 200
+            y: 300
+            text_color: color_blue
+            text_font: roboto_24
+            text_align: CENTER
