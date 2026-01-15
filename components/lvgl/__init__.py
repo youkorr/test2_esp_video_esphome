@@ -210,6 +210,10 @@ async def to_code(configs):
     cg.add_library("lvgl/lvgl", "9.4.0")
     cg.add_define("USE_LVGL")
 
+    # Define ESPHOME_ENTITY_BUTTON_COUNT for ESPHome core compatibility
+    # This is required by application.h even when not using button entities
+    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
+
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
     # Always enable - lots of things use it.
