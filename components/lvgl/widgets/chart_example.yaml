@@ -1,0 +1,155 @@
+# ESPHome LVGL Chart Widget Example
+# Demonstrates chart widget features in LVGL v9.4
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: charts_page
+          widgets:
+            # Example 1: Basic Line Chart (Temperature)
+            - chart:
+                id: temp_chart
+                x: 10
+                y: 10
+                width: 300
+                height: 150
+                type: LINE
+                point_count: 20
+                update_mode: SHIFT
+                bg_color: 0xFFFFFF
+                border_width: 2
+                border_color: 0x333333
+                axis_primary_y:
+                  min_value: 0
+                  max_value: 50
+                  div_line_count: 5
+                series:
+                  - id: temp_series
+                    color: 0xFF0000  # Red line
+
+            # Example 2: Multi-Series Chart
+            - chart:
+                id: multi_sensor_chart
+                x: 10
+                y: 170
+                width: 300
+                height: 150
+                type: LINE
+                point_count: 30
+                update_mode: CIRCULAR
+                axis_primary_y:
+                  min_value: 0
+                  max_value: 100
+                  div_line_count: 10
+                series:
+                  - id: temp_series_2
+                    color: 0xFF0000  # Red
+                  - id: humidity_series
+                    color: 0x0000FF  # Blue
+                  - id: pressure_series
+                    color: 0x00FF00  # Green
+
+            # Example 3: Bar Chart (Monthly Data)
+            - chart:
+                id: monthly_chart
+                x: 320
+                y: 10
+                width: 300
+                height: 200
+                type: BAR
+                point_count: 12
+                axis_primary_y:
+                  min_value: 0
+                  max_value: 1000
+                  div_line_count: 5
+                series:
+                  - id: sales_data
+                    color: 0x00AA00
+                    points: [120, 180, 240, 200, 280, 350, 380, 340, 300, 260, 220, 180]
+
+            # Example 4: Scatter Plot
+            - chart:
+                id: scatter_chart
+                x: 320
+                y: 220
+                width: 200
+                height: 200
+                type: SCATTER
+                point_count: 25
+                axis_primary_y:
+                  min_value: 0
+                  max_value: 100
+                axis_primary_x:
+                  min_value: 0
+                  max_value: 100
+                series:
+                  - id: scatter_data
+                    color: 0xFF00FF
+
+# Sensor integration example
+sensor:
+  - platform: template
+    name: "Temperature"
+    id: temperature_sensor
+    update_interval: 2s
+    lambda: |-
+      // Simulated temperature reading
+      return 20.0 + (rand() % 100) / 10.0;
+    on_value:
+      then:
+        # Add point to chart (will shift old data)
+        - lambda: |-
+            // Update chart with new temperature value
+            // Note: Actual chart update action would be implemented
+            // in the LVGL component's action handlers
+
+  - platform: template
+    name: "Humidity"
+    id: humidity_sensor
+    update_interval: 2s
+    lambda: |-
+      return 40.0 + (rand() % 400) / 10.0;
+    on_value:
+      then:
+        - lambda: |-
+            // Update humidity series
+
+  - platform: template
+    name: "Pressure"
+    id: pressure_sensor
+    update_interval: 2s
+    lambda: |-
+      return 980.0 + (rand() % 400) / 10.0;
+    on_value:
+      then:
+        - lambda: |-
+            // Update pressure series (scaled to 0-100)
+            // value = (pressure - 980) / 4
+
+# Chart update examples (conceptual - actual actions depend on implementation)
+# on_...:
+#   then:
+#     # Set specific point value
+#     - lvgl.chart.set_point:
+#         id: temp_chart
+#         series_id: temp_series
+#         point_index: 5
+#         value: 25
+#
+#     # Add new point (shifts data based on update_mode)
+#     - lvgl.chart.add_point:
+#         id: temp_chart
+#         series_id: temp_series
+#         value: !lambda 'return id(temperature_sensor).state;'
+#
+#     # Clear chart data
+#     - lvgl.chart.clear:
+#         id: temp_chart
+#
+#     # Update axis range dynamically
+#     - lvgl.chart.set_range:
+#         id: temp_chart
+#         axis: PRIMARY_Y
+#         min_value: -10
+#         max_value: 60

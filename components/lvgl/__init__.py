@@ -85,7 +85,7 @@ for module_info in pkgutil.iter_modules(widgets.__path__):
 
 DOMAIN = "lvgl"
 DEPENDENCIES = ["display"]
-AUTO_LOAD = ["key_provider", "font", "image"]
+AUTO_LOAD = ["key_provider", "button"]
 CODEOWNERS = ["@youkorr"]  # Forked from @clydebarrow lvgl-9.4 branch with ThorVG enabled by default
 HELLO_WORLD_FILE = "hello_world.yaml"
 
@@ -210,6 +210,10 @@ async def to_code(configs):
     cg.add_library("lvgl/lvgl", "9.4.0")
     cg.add_define("USE_LVGL")
 
+    # Define ESPHOME_ENTITY_BUTTON_COUNT for ESPHome core compatibility
+    # This is required by application.h even when not using button entities
+    cg.add_define("ESPHOME_ENTITY_BUTTON_COUNT", 0)
+
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
     # Always enable - lots of things use it.
@@ -233,10 +237,10 @@ async def to_code(configs):
     # Enable Lottie animation support (requires ThorVG)
     df.add_define("LV_USE_LOTTIE", "1")
     # Enable advanced image decoders
-    df.add_define("LV_USE_LIBPNG", "1")  # PNG support
+    df.add_define("LV_USE_LIBPNG", "0")  # PNG support via pngdec (not libpng)
     df.add_define("LV_USE_BMP", "1")      # BMP support
     df.add_define("LV_USE_GIF", "1")      # GIF support
-    # Add libpng library for PNG decoding
+    # Add pngdec library for PNG decoding (lightweight, no external deps)
     cg.add_library("pngdec", "1.0.1")
 
     df.add_define(

@@ -1,0 +1,246 @@
+# ESPHome LVGL Menu Widget Example
+# Demonstrates hierarchical navigation menu in LVGL v9.4
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: main_page
+          widgets:
+            # Example 1: Basic Settings Menu
+            - menu:
+                id: settings_menu
+                x: 0
+                y: 0
+                width: 100%
+                height: 100%
+                root_back_button: false
+                bg_color: 0xFFFFFF
+
+                # Style the header
+                header:
+                  bg_color: 0x0080FF
+                  text_color: 0xFFFFFF
+                  pad_all: 10
+
+                pages:
+                  # Root page
+                  - id: root_page
+                    title: "Settings"
+                    widgets:
+                      - label:
+                          text: "Device Configuration"
+                          x: 10
+                          y: 10
+
+                      - button:
+                          id: network_btn
+                          text: "Network Settings"
+                          x: 10
+                          y: 50
+                          width: 200
+                          # on_click: navigate to network page
+
+                      - button:
+                          text: "Display Settings"
+                          x: 10
+                          y: 100
+                          width: 200
+
+                      - button:
+                          text: "System Info"
+                          x: 10
+                          y: 150
+                          width: 200
+
+                  # Network settings page
+                  - id: network_page
+                    title: "Network"
+                    bg_color: 0xF0F0F0
+                    widgets:
+                      - label:
+                          text: "WiFi Configuration"
+                          x: 10
+                          y: 10
+
+                      - switch:
+                          id: wifi_enabled
+                          text: "WiFi Enabled"
+                          x: 10
+                          y: 50
+
+                      - label:
+                          text: "SSID:"
+                          x: 10
+                          y: 100
+
+                      - text_area:
+                          id: ssid_input
+                          placeholder: "Enter SSID"
+                          x: 10
+                          y: 130
+                          width: 250
+
+                  # Display settings page
+                  - id: display_page
+                    title: "Display"
+                    widgets:
+                      - label:
+                          text: "Screen Brightness"
+                          x: 10
+                          y: 10
+
+                      - slider:
+                          id: brightness_slider
+                          min_value: 0
+                          max_value: 100
+                          value: 75
+                          x: 10
+                          y: 50
+                          width: 250
+
+                      - label:
+                          text: "Rotation:"
+                          x: 10
+                          y: 100
+
+                      - dropdown:
+                          id: rotation_dropdown
+                          x: 10
+                          y: 130
+                          options:
+                            - "0°"
+                            - "90°"
+                            - "180°"
+                            - "270°"
+
+                  # System info page
+                  - id: system_page
+                    title: "System Information"
+                    widgets:
+                      - label:
+                          text: "Firmware Version: 1.0.0"
+                          x: 10
+                          y: 10
+
+                      - label:
+                          text: "Device: ESP32-P4"
+                          x: 10
+                          y: 40
+
+                      - label:
+                          id: uptime_label
+                          text: "Uptime: 0h 0m"
+                          x: 10
+                          y: 70
+
+                      - button:
+                          text: "Restart Device"
+                          x: 10
+                          y: 120
+                          bg_color: 0xFF0000
+                          text_color: 0xFFFFFF
+
+            # Example 2: Menu with Sidebar
+            - menu:
+                id: app_menu
+                x: 0
+                y: 0
+                width: 100%
+                height: 100%
+                sidebar_page: app_sidebar
+
+                pages:
+                  # Sidebar navigation
+                  - id: app_sidebar
+                    bg_color: 0x333333
+                    widgets:
+                      - list:
+                          id: nav_list
+                          items:
+                            - type: button
+                              text: "Dashboard"
+                            - type: button
+                              text: "Sensors"
+                            - type: button
+                              text: "Controls"
+                            - type: button
+                              text: "Logs"
+
+                  # Dashboard page
+                  - id: dashboard_page
+                    title: "Dashboard"
+                    widgets:
+                      - label:
+                          text: "System Overview"
+                          text_font: roboto_24
+
+                      - arc:
+                          id: cpu_gauge
+                          x: 20
+                          y: 50
+                          width: 120
+                          height: 120
+                          min_value: 0
+                          max_value: 100
+                          value: 45
+
+                  # Sensors page
+                  - id: sensors_page
+                    title: "Sensors"
+                    widgets:
+                      - table:
+                          id: sensor_table
+                          row_count: 5
+                          column_count: 2
+                          cells:
+                            - row: 0
+                              column: 0
+                              text: "Sensor"
+                            - row: 0
+                              column: 1
+                              text: "Value"
+                            - row: 1
+                              column: 0
+                              text: "Temperature"
+                            - row: 1
+                              column: 1
+                              text: "25°C"
+
+                  # Controls page
+                  - id: controls_page
+                    title: "Controls"
+                    widgets:
+                      - label:
+                          text: "Device Controls"
+
+                      - switch:
+                          text: "Light 1"
+
+                      - switch:
+                          text: "Light 2"
+
+                      - slider:
+                          text: "Fan Speed"
+                          min_value: 0
+                          max_value: 100
+
+# Menu navigation examples (actions)
+# Note: These would typically be triggered by button clicks or other events
+
+# on_button_click:
+#   - lvgl.menu.set_page:
+#       id: settings_menu
+#       page: network_page
+
+# on_back_button:
+#   - lvgl.menu.back:
+#       id: settings_menu
+
+# Update uptime label periodically
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // Update uptime display
+          // id(uptime_label).set_text(uptime_string);

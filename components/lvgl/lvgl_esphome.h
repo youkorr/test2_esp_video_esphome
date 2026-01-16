@@ -431,4 +431,25 @@ class LvKeyboardType : public key_provider::KeyProvider, public LvCompound {
   void set_obj(lv_obj_t *lv_obj) override;
 };
 #endif  // USE_LVGL_KEYBOARD
+
+#ifdef USE_LVGL_CALENDAR
+class LvCalendarType : public LvCompound {
+ public:
+  uint16_t get_selected_year() {
+    lv_calendar_date_t date;
+    lv_calendar_get_pressed_date(this->obj, &date);
+    return date.year;
+  }
+  uint8_t get_selected_month() {
+    lv_calendar_date_t date;
+    lv_calendar_get_pressed_date(this->obj, &date);
+    return date.month;
+  }
+  uint8_t get_selected_day() {
+    lv_calendar_date_t date;
+    lv_calendar_get_pressed_date(this->obj, &date);
+    return date.day;
+  }
+};
+#endif  // USE_LVGL_CALENDAR
 }  // namespace esphome::lvgl

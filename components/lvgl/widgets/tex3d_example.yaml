@@ -1,0 +1,56 @@
+# ESPHome LVGL 3D Texture Widget Example
+# ⚠️ Note: This widget requires OpenGL and is NOT recommended for ESP32
+
+# This example is for LVGL simulator/desktop environments only
+
+image:
+  - file: "textures/cube_texture.png"
+    id: cube_texture
+    resize: 256x256
+
+lvgl:
+  displays:
+    - display_id: simulator_display  # Desktop simulator only
+      pages:
+        - id: demo_3d_page
+          widgets:
+            # Warning label
+            - label:
+                text: "⚠️ 3D Texture - Simulator Only"
+                x: CENTER
+                y: 20
+                text_color: 0xFF9800
+                text_font: roboto_16_bold
+
+            # Example: Simple 3D Texture
+            - tex3d:
+                id: texture_3d_demo
+                x: CENTER
+                y: CENTER
+                width: 200
+                height: 200
+                src: cube_texture
+                rotation_x: 45.0
+                rotation_y: 30.0
+                rotation_z: 0.0
+                scale: 1.0
+
+            # Info label
+            - label:
+                text: "This widget requires OpenGL\nand is not supported on ESP32"
+                x: CENTER
+                y: 400
+                text_align: CENTER
+                text_color: 0x666666
+
+# Animation example (simulator only)
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          // Rotate texture continuously (simulator only)
+          // This code would NOT work on ESP32
+          static float angle = 0;
+          angle += 1.0;
+          if (angle >= 360.0) angle = 0;
+          // lv_3dtexture_set_rotation_y(id(texture_3d_demo), angle);
