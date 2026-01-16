@@ -1,0 +1,68 @@
+# Example configuration for LVGL List Widget
+# This demonstrates the basic usage of the lv_list widget
+
+lvgl:
+  displays:
+    - my_display
+
+  pages:
+    - id: main_page
+      widgets:
+        # Basic list with buttons and text items
+        - list:
+            id: my_list
+            x: 10
+            y: 10
+            width: 200
+            height: 300
+            items:
+              # Text header
+              - type: text
+                text: "Menu Options"
+
+              # Button without icon
+              - type: button
+                text: "Settings"
+
+              # Button with icon (if you have an image available)
+              # - type: button
+              #   text: "Wi-Fi Settings"
+              #   src: wifi_icon
+
+              # Another button
+              - type: button
+                text: "Display"
+
+              - type: button
+                text: "About"
+
+              # Section divider
+              - type: text
+                text: "Actions"
+
+              - type: button
+                text: "Restart"
+
+              - type: button
+                text: "Factory Reset"
+
+            # Style the main part
+            bg_color: 0xFFFFFF
+            border_width: 2
+            border_color: 0x333333
+            pad_all: 5
+
+            # Style the scrollbar
+            scrollbar:
+              bg_color: 0xCCCCCC
+              width: 8
+
+# Update action example - you can dynamically update the list
+# on_...:
+#   - lvgl.list.update:
+#       id: my_list
+#       items:
+#         - type: text
+#           text: "Updated Menu"
+#         - type: button
+#           text: "New Option"

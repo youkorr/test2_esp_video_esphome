@@ -1,0 +1,215 @@
+# ESPHome LVGL Scale Widget Example
+# Demonstrates all features of the LVGL v9.4 Scale widget
+
+# This example shows various scale configurations:
+# 1. Circular/Round scale (speedometer style)
+# 2. Horizontal scale (progress bar style)
+# 3. Vertical scale (thermometer style)
+# 4. Scale with colored sections (zones)
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: main_page
+          widgets:
+            # Example 1: Circular Scale (Speedometer)
+            - scale:
+                id: speed_scale
+                x: 10
+                y: 10
+                width: 200
+                height: 200
+                mode: ROUND_OUTER  # Circular scale with ticks on outside
+                min_value: 0
+                max_value: 200
+                rotation: 135  # Start angle
+                angle_range: 270  # Total angle coverage
+                ticks:
+                  count: 21  # 21 minor ticks
+                  width: 2
+                  length: 10
+                  color: 0x808080
+                  major:
+                    stride: 5  # Every 5th tick is major
+                    width: 4
+                    length: 20
+                    color: 0xFFFFFF
+                    label_show: true
+                    label_gap: 8
+                sections:
+                  # Green zone (0-120)
+                  - id: safe_zone
+                    range_from: 0
+                    range_to: 120
+                    color: 0x00FF00
+                    width: 6
+                  # Yellow zone (120-160)
+                  - id: caution_zone
+                    range_from: 120
+                    range_to: 160
+                    color: 0xFFFF00
+                    width: 6
+                  # Red zone (160-200)
+                  - id: danger_zone
+                    range_from: 160
+                    range_to: 200
+                    color: 0xFF0000
+                    width: 6
+
+            # Example 2: Horizontal Scale (Top)
+            - scale:
+                id: horizontal_scale
+                x: 10
+                y: 220
+                width: 300
+                height: 50
+                mode: HORIZONTAL_TOP  # Horizontal with ticks on top
+                min_value: 0
+                max_value: 100
+                ticks:
+                  count: 11  # 11 ticks (0, 10, 20, ..., 100)
+                  width: 2
+                  length: 8
+                  color: 0x808080
+                  major:
+                    stride: 5  # Every 5th tick is major
+                    width: 3
+                    length: 15
+                    color: 0x000000
+                    label_show: true
+                sections:
+                  - id: low_section
+                    range_from: 0
+                    range_to: 33
+                    color: 0x0000FF
+                    width: 4
+                  - id: mid_section
+                    range_from: 33
+                    range_to: 66
+                    color: 0x00FF00
+                    width: 4
+                  - id: high_section
+                    range_from: 66
+                    range_to: 100
+                    color: 0xFF0000
+                    width: 4
+
+            # Example 3: Vertical Scale (Left side)
+            - scale:
+                id: temp_scale
+                x: 320
+                y: 10
+                width: 50
+                height: 200
+                mode: VERTICAL_LEFT  # Vertical with ticks on left
+                min_value: -20
+                max_value: 50
+                ticks:
+                  count: 15  # 15 ticks
+                  width: 2
+                  length: 8
+                  color: 0x808080
+                  major:
+                    stride: 3  # Every 3rd tick
+                    width: 3
+                    length: 12
+                    color: 0x000000
+                    label_show: true
+                    label_gap: 4
+                sections:
+                  - id: freezing
+                    range_from: -20
+                    range_to: 0
+                    color: 0x0080FF
+                    width: 5
+                  - id: comfortable
+                    range_from: 0
+                    range_to: 25
+                    color: 0x00FF00
+                    width: 5
+                  - id: hot
+                    range_from: 25
+                    range_to: 50
+                    color: 0xFF0000
+                    width: 5
+
+            # Example 4: Round Inner Scale (Gauge style)
+            - scale:
+                id: pressure_gauge
+                x: 220
+                y: 10
+                width: 180
+                height: 180
+                mode: ROUND_INNER  # Circular scale with ticks on inside
+                min_value: 0
+                max_value: 10
+                rotation: 135
+                angle_range: 270
+                ticks:
+                  count: 21
+                  width: 2
+                  length: 10
+                  color: 0x808080
+                  major:
+                    stride: 5
+                    width: 4
+                    length: 20
+                    color: 0xFFFFFF
+                    label_show: true
+
+# Automation examples
+# Update scale sections dynamically
+on_...:
+  then:
+    # Update a scale section's range and color
+    - lvgl.scale.section.update:
+        id: safe_zone
+        range_from: 0
+        range_to: 100
+        color: 0x00AA00
+        width: 8
+
+    # Update scale mode and range
+    - lvgl.scale.update:
+        id: speed_scale
+        mode: ROUND_OUTER
+        min_value: 0
+        max_value: 300
+        rotation: 90
+        angle_range: 180
+
+# Integration with sensors
+sensor:
+  - platform: template
+    name: "Vehicle Speed"
+    id: vehicle_speed
+    update_interval: 500ms
+    lambda: |-
+      // Your speed calculation here
+      return 75.5;
+    on_value:
+      then:
+        # Note: Scale widget doesn't have direct value updates
+        # You would typically use this with indicators/needles
+        # that are positioned based on the sensor value
+        - lambda: |-
+            // Custom code to update needle/indicator position
+            // based on vehicle_speed->state
+
+  - platform: template
+    name: "Temperature"
+    id: temperature_sensor
+    update_interval: 1s
+    lambda: |-
+      return 22.5;
+    on_value:
+      then:
+        # Update sections based on temperature thresholds
+        - if:
+            condition:
+              lambda: 'return x > 30;'
+            then:
+              - lvgl.scale.section.update:
+                  id: hot
+                  color: 0xFF0000  # Bright red when too hot

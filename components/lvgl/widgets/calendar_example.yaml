@@ -1,0 +1,113 @@
+# LVGL Calendar Widget Example
+# This demonstrates the LVGL v9.4 Calendar widget implementation
+
+lvgl:
+  displays:
+    - my_display
+
+  pages:
+    - id: main_page
+      widgets:
+        # Basic Calendar
+        - calendar:
+            id: my_calendar
+            x: 10
+            y: 10
+            width: 300
+            height: 300
+            today_date:
+              year: 2024
+              month: 12
+              day: 15
+            showed_date:
+              year: 2024
+              month: 12
+              day: 1
+            # Highlight specific dates (e.g., holidays, events)
+            highlighted_dates:
+              - year: 2024
+                month: 12
+                day: 25  # Christmas
+              - year: 2024
+                month: 12
+                day: 31  # New Year's Eve
+              - year: 2024
+                month: 12
+                day: 1   # First of month
+            # Style the calendar
+            styles:
+              - my_calendar_style
+            # Style the main calendar part
+            main:
+              bg_color: 0xFFFFFF
+              border_width: 2
+              border_color: 0x0000FF
+              radius: 10
+            # Style the day items
+            items:
+              bg_color: 0xF0F0F0
+              text_color: 0x000000
+              # Today's date styling
+              checked:
+                bg_color: 0xFF0000
+                text_color: 0xFFFFFF
+              # Selected date styling
+              pressed:
+                bg_color: 0x0000FF
+                text_color: 0xFFFFFF
+              # Highlighted dates styling
+              focused:
+                bg_color: 0xFFFF00
+                text_color: 0x000000
+            # Event handlers
+            on_value:
+              - logger.log:
+                  format: "Date selected: %d-%02d-%02d"
+                  args: ['x.year', 'x.month', 'x.day']
+              - lambda: |-
+                  ESP_LOGI("calendar", "Selected: %d-%02d-%02d",
+                           x.year, x.month, x.day);
+
+# Automation example: Update calendar dynamically
+button:
+  - platform: gpio
+    pin: GPIO0
+    on_press:
+      - lvgl.calendar.update:
+          id: my_calendar
+          today_date:
+            year: 2025
+            month: 1
+            day: 1
+          showed_date:
+            year: 2025
+            month: 1
+            day: 1
+          highlighted_dates:
+            - year: 2025
+              month: 1
+              day: 1
+
+# Time-based calendar example
+time:
+  - platform: sntp
+    id: sntp_time
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          # Update calendar to show current date at midnight
+          - lvgl.calendar.update:
+              id: my_calendar
+              today_date:
+                year: !lambda 'return id(sntp_time).now().year;'
+                month: !lambda 'return id(sntp_time).now().month;'
+                day: !lambda 'return id(sntp_time).now().day_of_month;'
+
+# Style definitions
+style:
+  - id: my_calendar_style
+    bg_color: 0xFFFFFF
+    text_font: roboto_16
+    pad_all: 5

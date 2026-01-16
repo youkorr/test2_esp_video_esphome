@@ -1,0 +1,101 @@
+# Example usage of the LVGL Table widget for ESPHome
+# This file demonstrates how to configure a table widget with rows, columns, and cells
+
+lvgl:
+  displays:
+    - display_id: my_display
+
+  # Example 1: Simple table with 3 rows and 3 columns
+  - table:
+      id: my_table
+      row_count: 3
+      column_count: 3
+      columns:
+        - id: 0
+          width: 100
+        - id: 1
+          width: 150
+        - id: 2
+          width: 100
+      cells:
+        # Header row
+        - row: 0
+          column: 0
+          text: "Name"
+        - row: 0
+          column: 1
+          text: "Value"
+        - row: 0
+          column: 2
+          text: "Unit"
+
+        # Data rows
+        - row: 1
+          column: 0
+          text: "Temperature"
+        - row: 1
+          column: 1
+          text: "25.5"
+        - row: 1
+          column: 2
+          text: "°C"
+
+        - row: 2
+          column: 0
+          text: "Humidity"
+        - row: 2
+          column: 1
+          text: "60"
+        - row: 2
+          column: 2
+          text: "%"
+
+      # Styling for main part
+      styles:
+        - style:
+            bg_color: 0xFFFFFF
+            border_width: 1
+            border_color: 0x000000
+
+      # Styling for cells (items part)
+      items:
+        styles:
+          - style:
+              text_color: 0x000000
+              pad_all: 5
+
+  # Example 2: Larger table with dynamic content
+  - table:
+      id: sensor_table
+      row_count: 10
+      column_count: 4
+      columns:
+        - id: 0
+          width: 80
+        - id: 1
+          width: 120
+        - id: 2
+          width: 100
+        - id: 3
+          width: 80
+      cells:
+        - row: 0
+          column: 0
+          text: "ID"
+        - row: 0
+          column: 1
+          text: "Sensor"
+        - row: 0
+          column: 2
+          text: "Reading"
+        - row: 0
+          column: 3
+          text: "Status"
+
+# You can update table cells dynamically using actions:
+# - lvgl.table.update:
+#     id: my_table
+#     cells:
+#       - row: 1
+#         column: 1
+#         text: "30.2"
