@@ -6,13 +6,12 @@ This is an advanced widget for circular/curved text displays.
 """
 
 import esphome.config_validation as cv
-from esphome.const import CONF_TEXT
+from esphome.const import CONF_ROTATION, CONF_TEXT
 
 from ..defines import (
     CONF_END_ANGLE,
     CONF_MAIN,
     CONF_RADIUS,
-    CONF_ROTATION,
     CONF_START_ANGLE,
 )
 from ..helpers import lvgl_components_required
