@@ -1,0 +1,43 @@
+# ESPHome LVGL Arc Label Widget Example
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: circular_page
+          widgets:
+            # Example 1: Clock Face Numbers
+            - arclabel:
+                id: clock_numbers
+                text: "12  1  2  3  4  5  6  7  8  9  10  11"
+                x: CENTER
+                y: CENTER
+                radius: 120
+                start_angle: 0
+                end_angle: 360
+                text_color: 0x000000
+                text_font: roboto_16
+
+            # Example 2: Curved Title
+            - arclabel:
+                id: title_arc
+                text: "Smart Display"
+                x: CENTER
+                y: 50
+                radius: 100
+                start_angle: 45
+                end_angle: 135
+                text_color: 0x2196F3
+                text_font: roboto_20_bold
+
+            # Example 3: Bottom Arc Text
+            - arclabel:
+                id: bottom_text
+                text: "Device Status"
+                x: CENTER
+                y: 400
+                radius: 80
+                start_angle: 225
+                end_angle: 315
+                text_color: 0x666666
+                text_font: roboto_14

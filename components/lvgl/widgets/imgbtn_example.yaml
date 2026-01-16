@@ -1,0 +1,234 @@
+# ESPHome LVGL Image Button Widget Example
+# Demonstrates multi-state image buttons in LVGL v9.4
+
+# Define images for button states
+image:
+  # Play/Pause icons
+  - file: "icons/play.png"
+    id: play_icon
+    resize: 64x64
+  - file: "icons/play_pressed.png"
+    id: play_pressed_icon
+    resize: 64x64
+  - file: "icons/pause.png"
+    id: pause_icon
+    resize: 64x64
+  - file: "icons/pause_pressed.png"
+    id: pause_pressed_icon
+    resize: 64x64
+
+  # Power icons
+  - file: "icons/power_off.png"
+    id: power_off_icon
+    resize: 48x48
+  - file: "icons/power_on.png"
+    id: power_on_icon
+    resize: 48x48
+
+  # Toggle switch icons
+  - file: "icons/toggle_off.png"
+    id: toggle_off_icon
+    resize: 60x30
+  - file: "icons/toggle_on.png"
+    id: toggle_on_icon
+    resize: 60x30
+
+  # Navigation icons
+  - file: "icons/home.png"
+    id: home_icon
+    resize: 48x48
+  - file: "icons/home_pressed.png"
+    id: home_pressed_icon
+    resize: 48x48
+  - file: "icons/settings.png"
+    id: settings_icon
+    resize: 48x48
+  - file: "icons/settings_pressed.png"
+    id: settings_pressed_icon
+    resize: 48x48
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: media_player_page
+          widgets:
+            # Title
+            - label:
+                text: "Media Player Controls"
+                x: CENTER
+                y: 20
+                text_font: roboto_24
+                text_align: CENTER
+
+            # Example 1: Play/Pause Toggle Button
+            - imgbtn:
+                id: play_pause_btn
+                x: CENTER
+                y: 150
+                src_released: play_icon
+                src_pressed: play_pressed_icon
+                src_checked_released: pause_icon
+                src_checked_pressed: pause_pressed_icon
+                on_click:
+                  then:
+                    - lambda: |-
+                        bool is_playing = lv_obj_has_state(id(play_pause_btn), LV_STATE_CHECKED);
+                        if (is_playing) {
+                          ESP_LOGI("media", "Pausing playback");
+                          lv_obj_clear_state(id(play_pause_btn), LV_STATE_CHECKED);
+                        } else {
+                          ESP_LOGI("media", "Starting playback");
+                          lv_obj_add_state(id(play_pause_btn), LV_STATE_CHECKED);
+                        }
+
+            # Status label
+            - label:
+                id: media_status
+                x: CENTER
+                y: 230
+                text: "Stopped"
+                text_align: CENTER
+
+        - id: settings_page
+          widgets:
+            # Title
+            - label:
+                text: "Settings"
+                x: CENTER
+                y: 20
+                text_font: roboto_24
+
+            # Example 2: WiFi Toggle
+            - container:
+                x: 20
+                y: 80
+                width: 440
+                height: 60
+                bg_color: 0xF5F5F5
+                radius: 10
+                widgets:
+                  - label:
+                      text: "WiFi"
+                      x: 20
+                      y: CENTER
+                      text_font: roboto_16
+
+                  - imgbtn:
+                      id: wifi_toggle
+                      x: 380
+                      y: CENTER
+                      src_released: toggle_off_icon
+                      src_checked_released: toggle_on_icon
+                      on_click:
+                        then:
+                          - lambda: |-
+                              bool wifi_on = lv_obj_has_state(id(wifi_toggle), LV_STATE_CHECKED);
+                              if (wifi_on) {
+                                // Disable WiFi
+                                lv_obj_clear_state(id(wifi_toggle), LV_STATE_CHECKED);
+                                ESP_LOGI("wifi", "WiFi disabled");
+                              } else {
+                                // Enable WiFi
+                                lv_obj_add_state(id(wifi_toggle), LV_STATE_CHECKED);
+                                ESP_LOGI("wifi", "WiFi enabled");
+                              }
+
+            # Example 3: Bluetooth Toggle
+            - container:
+                x: 20
+                y: 160
+                width: 440
+                height: 60
+                bg_color: 0xF5F5F5
+                radius: 10
+                widgets:
+                  - label:
+                      text: "Bluetooth"
+                      x: 20
+                      y: CENTER
+                      text_font: roboto_16
+
+                  - imgbtn:
+                      id: bt_toggle
+                      x: 380
+                      y: CENTER
+                      src_released: toggle_off_icon
+                      src_checked_released: toggle_on_icon
+                      on_click:
+                        then:
+                          - lambda: |-
+                              bool bt_on = lv_obj_has_state(id(bt_toggle), LV_STATE_CHECKED);
+                              lv_obj_clear_state(id(bt_toggle), LV_STATE_CHECKED);
+                              if (!bt_on) {
+                                lv_obj_add_state(id(bt_toggle), LV_STATE_CHECKED);
+                              }
+
+            # Example 4: Power Button
+            - imgbtn:
+                id: power_btn
+                x: CENTER
+                y: 300
+                src_released: power_off_icon
+                src_checked_released: power_on_icon
+                on_click:
+                  then:
+                    - lambda: |-
+                        ESP_LOGI("power", "Power button clicked");
+
+        - id: navigation_page
+          widgets:
+            # Navigation bar
+            - container:
+                x: 0
+                y: 700
+                width: 100%
+                height: 80
+                bg_color: 0x2196F3
+                widgets:
+                  # Home button
+                  - imgbtn:
+                      id: nav_home
+                      x: 50
+                      y: CENTER
+                      src_released: home_icon
+                      src_pressed: home_pressed_icon
+                      on_click:
+                        - lvgl.page.show:
+                            id: media_player_page
+
+                  # Settings button
+                  - imgbtn:
+                      id: nav_settings
+                      x: 200
+                      y: CENTER
+                      src_released: settings_icon
+                      src_pressed: settings_pressed_icon
+                      on_click:
+                        - lvgl.page.show:
+                            id: settings_page
+
+# Integration with switch component
+switch:
+  - platform: template
+    name: "WiFi Switch"
+    id: wifi_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - lambda: |-
+          lv_obj_add_state(id(wifi_toggle), LV_STATE_CHECKED);
+    on_turn_off:
+      - lambda: |-
+          lv_obj_clear_state(id(wifi_toggle), LV_STATE_CHECKED);
+
+# Update button states based on system state
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          // Update media status label
+          if (lv_obj_has_state(id(play_pause_btn), LV_STATE_CHECKED)) {
+            id(media_status)->set_text("Playing");
+          } else {
+            id(media_status)->set_text("Paused");
+          }

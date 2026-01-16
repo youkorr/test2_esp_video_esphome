@@ -1,0 +1,178 @@
+# ESPHome LVGL Lottie Widget Example
+# Demonstrates Lottie animation widget in LVGL v9.4
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: animations_page
+          widgets:
+            # Example 1: Simple Loading Animation
+            - lottie:
+                id: loading_spinner
+                x: 50
+                y: 50
+                width: 100
+                height: 100
+                src: "/animations/loading.json"
+                autoplay: true
+                loop: true
+                bg_color: 0xFFFFFF
+
+            # Example 2: Success Animation (triggered)
+            - lottie:
+                id: success_animation
+                x: 200
+                y: 50
+                width: 120
+                height: 120
+                src: "/animations/success.json"
+                autoplay: false  # Don't start automatically
+                loop: false      # Play once
+                flag: HIDDEN     # Start hidden
+
+            # Example 3: Error Animation (triggered)
+            - lottie:
+                id: error_animation
+                x: 350
+                y: 50
+                width: 120
+                height: 120
+                src: "/animations/error.json"
+                autoplay: false
+                loop: false
+                flag: HIDDEN
+
+            # Example 4: Weather Animation
+            - lottie:
+                id: weather_icon
+                x: CENTER
+                y: 200
+                width: 150
+                height: 150
+                src: "/animations/weather/sunny.json"
+                autoplay: true
+                loop: true
+
+            # Example 5: Interactive Button with Animation
+            - container:
+                x: 50
+                y: 380
+                width: 250
+                height: 80
+                bg_color: 0xF0F0F0
+                border_width: 2
+                border_color: 0xCCCCCC
+                radius: 10
+                widgets:
+                  # Play icon animation
+                  - lottie:
+                      id: play_icon
+                      x: 10
+                      y: CENTER
+                      width: 60
+                      height: 60
+                      src: "/animations/play.json"
+                      autoplay: false
+                      loop: false
+
+                  # Button to trigger animation
+                  - button:
+                      id: play_button
+                      x: 80
+                      y: CENTER
+                      width: 160
+                      height: 60
+                      text: "Play Media"
+                      bg_color: 0x2196F3
+                      text_color: 0xFFFFFF
+
+            # Example 6: Download Progress Animation
+            - lottie:
+                id: download_anim
+                x: CENTER
+                y: 500
+                width: 200
+                height: 200
+                src: "/animations/download.json"
+                autoplay: true
+                loop: true
+                flag: HIDDEN
+
+            # Status label
+            - label:
+                id: status_label
+                x: CENTER
+                y: 720
+                text: "Ready"
+                text_font: roboto_24
+                text_align: CENTER
+
+# Buttons to trigger animations
+on_...:
+  then:
+    # Show success animation
+    - lvgl.obj.add_flag:
+        id: loading_spinner
+        flag: HIDDEN
+    - lvgl.obj.clear_flag:
+        id: success_animation
+        flag: HIDDEN
+
+on_...:
+  then:
+    # Show error animation
+    - lvgl.obj.add_flag:
+        id: loading_spinner
+        flag: HIDDEN
+    - lvgl.obj.clear_flag:
+        id: error_animation
+        flag: HIDDEN
+
+# Weather sensor integration
+sensor:
+  - platform: template
+    name: "Weather Condition"
+    id: weather_condition
+    update_interval: 60s
+    lambda: |-
+      // Your weather API call here
+      return 1; // 1=sunny, 2=rainy, 3=cloudy
+    on_value:
+      then:
+        - lambda: |-
+            if (x == 1) {
+              lv_lottie_set_src_file(id(weather_icon), "/animations/weather/sunny.json");
+            } else if (x == 2) {
+              lv_lottie_set_src_file(id(weather_icon), "/animations/weather/rainy.json");
+            } else if (x == 3) {
+              lv_lottie_set_src_file(id(weather_icon), "/animations/weather/cloudy.json");
+            }
+
+# Download progress simulation
+interval:
+  - interval: 100ms
+    then:
+      - lambda: |-
+          static int progress = 0;
+          if (download_active) {
+            progress += 5;
+            if (progress >= 100) {
+              progress = 0;
+              // Hide download animation
+              id(download_anim)->add_flag(LV_OBJ_FLAG_HIDDEN);
+              // Show success
+              id(success_animation)->clear_flag(LV_OBJ_FLAG_HIDDEN);
+              id(status_label)->set_text("Download Complete!");
+            } else {
+              id(status_label)->set_text(("Downloading: " + to_string(progress) + "%").c_str());
+            }
+          }
+
+# File upload example (store Lottie JSON files)
+# Files should be stored in /animations/ directory
+# Use ESPHome web interface to upload files or:
+# esphome upload-file config.yaml /animations/loading.json
+
+# Note: Lottie files can be downloaded from https://lottiefiles.com/
+# Recommended file size: < 100KB for best performance

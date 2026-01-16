@@ -1,0 +1,229 @@
+# ESPHome LVGL Spangroup Widget Example
+# Demonstrates rich text formatting in LVGL v9.4
+
+lvgl:
+  displays:
+    - display_id: my_display
+      pages:
+        - id: text_demo_page
+          widgets:
+            # Example 1: Simple Rich Text
+            - spangroup:
+                id: welcome_text
+                x: 10
+                y: 10
+                width: 460
+                mode: BREAK
+                spans:
+                  - text: "Welcome to "
+                    text_color: 0x000000
+                    text_font: roboto_16
+                  - text: "LVGL v9.4"
+                    text_color: 0x2196F3
+                    text_font: roboto_16_bold
+                  - text: " on ESPHome!"
+                    text_color: 0x000000
+                    text_font: roboto_16
+
+            # Example 2: Warning Message
+            - spangroup:
+                id: warning_message
+                x: 10
+                y: 70
+                width: 460
+                mode: BREAK
+                bg_color: 0xFFF3E0
+                border_width: 1
+                border_color: 0xFF9800
+                pad_all: 10
+                radius: 5
+                spans:
+                  - text: "⚠️ Warning: "
+                    text_color: 0xFF9800
+                    text_font: roboto_14_bold
+                  - text: "Temperature exceeds "
+                    text_color: 0x333333
+                    text_font: roboto_14
+                  - text: "safe limits"
+                    text_color: 0xFF0000
+                    text_font: roboto_14_bold
+                    text_decor: UNDERLINE
+
+            # Example 3: Status Display
+            - spangroup:
+                id: status_display
+                x: 10
+                y: 150
+                width: 460
+                mode: BREAK
+                bg_color: 0xFFFFFF
+                pad_all: 8
+                spans:
+                  - text: "System Status: "
+                    text_color: 0x666666
+                    text_font: roboto_12
+                  - text: "● Online"
+                    text_color: 0x00AA00
+                    text_font: roboto_12_bold
+
+            # Example 4: Sensor Data
+            - spangroup:
+                id: sensor_data
+                x: 10
+                y: 200
+                width: 220
+                mode: BREAK
+                bg_color: 0xF5F5F5
+                pad_all: 12
+                radius: 8
+                spans:
+                  - text: "🌡️ Temp: "
+                    text_color: 0x666666
+                  - text: "25.5°C\n"
+                    text_color: 0xFF5722
+                    text_font: roboto_14_bold
+                  - text: "💧 Humidity: "
+                    text_color: 0x666666
+                  - text: "60%"
+                    text_color: 0x2196F3
+                    text_font: roboto_14_bold
+
+            # Example 5: Highlighted Search
+            - spangroup:
+                id: search_result
+                x: 10
+                y: 320
+                width: 460
+                mode: BREAK
+                spans:
+                  - text: "Found "
+                    text_color: 0x000000
+                  - text: "3 matches"
+                    text_color: 0xFF0000
+                    text_font: roboto_14_bold
+                  - text: " for "
+                    text_color: 0x000000
+                  - text: "sensor"
+                    text_color: 0x2196F3
+                    text_decor: UNDERLINE
+
+            # Example 6: Code Snippet
+            - spangroup:
+                id: code_snippet
+                x: 10
+                y: 380
+                width: 460
+                mode: BREAK
+                bg_color: 0x263238
+                pad_all: 12
+                radius: 5
+                spans:
+                  - text: "sensor:\n  "
+                    text_color: 0xCFD8DC
+                  - text: "- platform"
+                    text_color: 0x89DDFF
+                  - text: ": "
+                    text_color: 0xCFD8DC
+                  - text: "bme280"
+                    text_color: 0xC3E88D
+
+            # Example 7: Price Display
+            - spangroup:
+                id: price_display
+                x: 10
+                y: 480
+                width: 200
+                mode: BREAK
+                spans:
+                  - text: "Old price: "
+                    text_color: 0x999999
+                  - text: "$99.99"
+                    text_color: 0x999999
+                    text_decor: STRIKETHROUGH
+                  - text: "\nNew price: "
+                    text_color: 0x000000
+                  - text: "$79.99"
+                    text_color: 0xFF0000
+                    text_font: roboto_20_bold
+
+            # Example 8: Multi-line Text
+            - spangroup:
+                id: multiline_text
+                x: 10
+                y: 580
+                width: 460
+                mode: BREAK
+                spans:
+                  - text: "Line 1: "
+                    text_color: 0x000000
+                    text_font: roboto_14_bold
+                  - text: "Normal text\n"
+                    text_color: 0x000000
+                  - text: "Line 2: "
+                    text_color: 0x2196F3
+                    text_font: roboto_14_bold
+                  - text: "Blue text\n"
+                    text_color: 0x2196F3
+                  - text: "Line 3: "
+                    text_color: 0xFF5722
+                    text_font: roboto_14_bold
+                  - text: "Orange text"
+                    text_color: 0xFF5722
+
+# Dynamic updates with sensor data
+sensor:
+  - platform: bme280
+    temperature:
+      name: "Temperature"
+      id: temp_sensor
+      on_value:
+        then:
+          - lambda: |-
+              // Clear and rebuild sensor_data spangroup
+              lv_spangroup_del_span(id(sensor_data), nullptr);
+
+              // Temperature
+              auto span1 = lv_spangroup_new_span(id(sensor_data));
+              lv_span_set_text(span1, "🌡️ Temp: ");
+              lv_style_set_text_color(&span1->style, lv_color_hex(0x666666));
+
+              auto span2 = lv_spangroup_new_span(id(sensor_data));
+              char temp_buf[16];
+              snprintf(temp_buf, sizeof(temp_buf), "%.1f°C\n", x);
+              lv_span_set_text(span2, temp_buf);
+              // Color based on temperature
+              uint32_t temp_color = (x > 30) ? 0xFF0000 : (x > 20) ? 0xFF5722 : 0x2196F3;
+              lv_style_set_text_color(&span2->style, lv_color_hex(temp_color));
+
+    humidity:
+      name: "Humidity"
+      id: humidity_sensor
+      on_value:
+        then:
+          - lambda: |-
+              // Add humidity span
+              auto span3 = lv_spangroup_new_span(id(sensor_data));
+              lv_span_set_text(span3, "💧 Humidity: ");
+              lv_style_set_text_color(&span3->style, lv_color_hex(0x666666));
+
+              auto span4 = lv_spangroup_new_span(id(sensor_data));
+              char hum_buf[16];
+              snprintf(hum_buf, sizeof(hum_buf), "%.0f%%", x);
+              lv_span_set_text(span4, hum_buf);
+              lv_style_set_text_color(&span4->style, lv_color_hex(0x2196F3));
+
+# Update status display
+interval:
+  - interval: 5s
+    then:
+      - lambda: |-
+          lv_spangroup_del_span(id(status_display), nullptr);
+
+          auto span1 = lv_spangroup_new_span(id(status_display));
+          lv_span_set_text(span1, "System Status: ");
+          lv_style_set_text_color(&span1->style, lv_color_hex(0x666666));
+
+          auto span2 = lv_spangroup_new_span(id(status_display));
+          bool online = WiFi.isConnected();
+          lv_span_set_text(span2, online ? "● Online" : "● Offline");
+          lv_style_set_text_color(&span2->style, lv_color_hex(online ? 0x00AA00 : 0xFF0000));
