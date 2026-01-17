@@ -1,6 +1,7 @@
 """
 Auto-download des dépendances ESP-Video (comme LVGL 9.4)
 Télécharge automatiquement esp_h264, esp_cam_sensor, esp_ipa, etc. depuis GitHub
+Avec barre de progression visuelle comme PlatformIO
 """
 
 import os
@@ -8,8 +9,46 @@ import subprocess
 import logging
 import hashlib
 import json
+import sys
+import time
+import threading
 
 _LOGGER = logging.getLogger(__name__)
+
+
+class ProgressBar:
+    """Barre de progression comme PlatformIO"""
+
+    def __init__(self, total=100, width=40, prefix=""):
+        self.total = total
+        self.width = width
+        self.prefix = prefix
+        self.current = 0
+        self._lock = threading.Lock()
+
+    def update(self, current):
+        """Met à jour la progression"""
+        with self._lock:
+            self.current = min(current, self.total)
+            self._render()
+
+    def _render(self):
+        """Affiche la barre de progression"""
+        percent = int((self.current / self.total) * 100)
+        filled = int((self.current / self.total) * self.width)
+        bar = '#' * filled + '-' * (self.width - filled)
+
+        # Format comme PlatformIO: "Downloading  [####---]  XX%"
+        sys.stdout.write(f'\r{self.prefix}  [{bar}]  {percent:3d}%')
+        sys.stdout.flush()
+
+        if self.current >= self.total:
+            sys.stdout.write('\n')
+            sys.stdout.flush()
+
+    def finish(self):
+        """Termine la barre de progression"""
+        self.update(self.total)
 
 # Configuration des dépendances
 # NOTE: esp_cam_sensor, esp_ipa, et esp_sccb_intf sont des composants ESP-IDF
@@ -128,12 +167,12 @@ def is_component_downloaded(dep, target_dir):
 
 def download_component_sparse(dep, target_dir):
     """
-    Télécharge un composant depuis esp-adf-libs.
+    Télécharge un composant depuis esp-adf-libs avec barre de progression.
     Équivalent à `cg.add_library()` mais pour des repos Git.
 
     Stratégie :
-    1. Clone le repo complet dans un cache (une seule fois)
-    2. Copie seulement les composants nécessaires vers target_dir
+    1. Clone le repo complet dans un cache (une seule fois) - avec progression
+    2. Copie seulement les composants nécessaires vers target_dir - avec progression
     """
     import shutil
 
@@ -142,7 +181,7 @@ def download_component_sparse(dep, target_dir):
     tag = dep['tag']
     sparse_paths = dep['sparse_paths']
 
-    _LOGGER.info(f"📥 Downloading {component_name}...")
+    _LOGGER.info(f"Installing {component_name}")
 
     # Répertoire de cache pour le clone complet
     cache_dir = get_component_cache_dir()
@@ -151,44 +190,71 @@ def download_component_sparse(dep, target_dir):
     try:
         # Étape 1: Cloner le repo dans le cache (si pas déjà fait)
         if not os.path.exists(repo_cache_dir):
-            _LOGGER.info(f"   Cloning esp-adf-libs to cache...")
-            subprocess.run(
-                ["git", "clone", "--depth=1", repo_url, repo_cache_dir],
+            # Afficher la progression du téléchargement
+            progress = ProgressBar(total=100, width=40, prefix="Downloading")
+            progress.update(0)
+
+            # Fonction pour simuler la progression pendant le clone
+            def update_clone_progress():
+                for i in range(0, 100, 5):
+                    progress.update(i)
+                    time.sleep(0.1)
+
+            # Lancer le thread de progression
+            progress_thread = threading.Thread(target=update_clone_progress, daemon=True)
+            progress_thread.start()
+
+            # Clone Git en arrière-plan
+            result = subprocess.run(
+                ["git", "clone", "--depth=1", "--progress", repo_url, repo_cache_dir],
                 check=True,
                 capture_output=True,
                 text=True
             )
-            _LOGGER.info(f"   ✓ Repository cloned to cache")
+
+            # Finir la barre de progression
+            progress.finish()
+
         else:
-            # Pull les dernières modifications
-            _LOGGER.debug(f"   Using cached repository")
-            try:
-                subprocess.run(
-                    ["git", "-C", repo_cache_dir, "pull", "--depth=1"],
-                    check=False,  # Pas critique si ça échoue
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-            except:
-                pass  # Ignorer les erreurs de pull
+            # Déjà en cache, pas besoin de re-télécharger
+            _LOGGER.info("Using cached repository")
 
         # Étape 2: Copier le composant depuis le cache vers target_dir
         for sparse_path in sparse_paths:
             src_path = os.path.join(repo_cache_dir, sparse_path)
 
             if not os.path.exists(src_path):
-                _LOGGER.error(f"   ✗ Component path not found in repo: {sparse_path}")
+                _LOGGER.error(f"Component path not found in repo: {sparse_path}")
                 return False
 
             # Supprimer le target existant
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir)
 
-            # Copier le composant
-            _LOGGER.info(f"   Copying {sparse_path} to {os.path.basename(target_dir)}...")
-            shutil.copytree(src_path, target_dir, dirs_exist_ok=True)
-            _LOGGER.info(f"   ✓ Copied successfully")
+            # Afficher la progression du unpacking/copie
+            progress = ProgressBar(total=100, width=40, prefix="Unpacking")
+            progress.update(0)
+
+            # Fonction pour mettre à jour la progression pendant la copie
+            def copy_with_progress(src, dst):
+                """Copie avec progression"""
+                # Compter le nombre total de fichiers
+                total_files = sum(len(files) for _, _, files in os.walk(src))
+                copied_files = 0
+
+                def copy_function(src_file, dst_file):
+                    nonlocal copied_files
+                    shutil.copy2(src_file, dst_file)
+                    copied_files += 1
+                    percent = int((copied_files / max(total_files, 1)) * 100)
+                    progress.update(percent)
+
+                # Copier avec la fonction custom
+                shutil.copytree(src, dst, copy_function=copy_function, dirs_exist_ok=True)
+
+            # Copier avec progression
+            copy_with_progress(src_path, target_dir)
+            progress.finish()
 
         # Sauvegarder le state
         state = load_download_state()
@@ -199,18 +265,17 @@ def download_component_sparse(dep, target_dir):
         }
         save_download_state(state)
 
-        _LOGGER.info(f"✅ {component_name} ready")
         return True
 
     except subprocess.CalledProcessError as e:
-        _LOGGER.error(f"❌ Failed to download {component_name}")
+        _LOGGER.error(f"Failed to download {component_name}")
         if e.stdout:
-            _LOGGER.debug(f"   stdout: {e.stdout}")
+            _LOGGER.debug(f"stdout: {e.stdout}")
         if e.stderr:
-            _LOGGER.debug(f"   stderr: {e.stderr}")
+            _LOGGER.debug(f"stderr: {e.stderr}")
         return False
     except Exception as e:
-        _LOGGER.error(f"❌ Unexpected error downloading {component_name}: {e}")
+        _LOGGER.error(f"Unexpected error downloading {component_name}: {e}")
         import traceback
         _LOGGER.debug(traceback.format_exc())
         return False
@@ -227,10 +292,6 @@ def ensure_esp_video_dependencies(components_dir):
     Returns:
         True si tout est OK, False sinon
     """
-    _LOGGER.info("=" * 60)
-    _LOGGER.info("ESP-Video Auto-Download (like LVGL 9.4)")
-    _LOGGER.info("=" * 60)
-
     all_ok = True
     downloaded_count = 0
     local_count = 0
@@ -241,44 +302,36 @@ def ensure_esp_video_dependencies(components_dir):
         target_dir = os.path.join(components_dir, component_name)
         has_repo = dep['repo'] is not None
 
-        _LOGGER.info(f"📦 {component_name}: {dep['description']}")
-
         # Vérifier si déjà présent localement
         if is_component_downloaded(dep, target_dir):
-            _LOGGER.info(f"   ✓ Found locally")
+            # Silencieux si déjà présent (comme PlatformIO)
             local_count += 1
             continue
 
         # Si pas de repo, on ne peut pas télécharger
         if not has_repo:
-            _LOGGER.warning(f"   ⚠️ Not found locally and no download source available")
+            _LOGGER.warning(f"Component {component_name} not found locally and no download source available")
             if dep.get('required', True):
                 missing_components.append(component_name)
                 all_ok = False
             continue
 
-        # Télécharger depuis le repo
-        _LOGGER.info(f"   Downloading from {dep['repo']}...")
+        # Télécharger depuis le repo (avec barre de progression)
         if download_component_sparse(dep, target_dir):
             downloaded_count += 1
         else:
-            _LOGGER.error(f"   ✗ Download failed!")
+            _LOGGER.error(f"Failed to download {component_name}")
             if dep.get('required', True):
                 missing_components.append(component_name)
                 all_ok = False
 
-    _LOGGER.info("=" * 60)
-    if all_ok:
-        if downloaded_count > 0:
-            _LOGGER.info(f"✅ Downloaded {downloaded_count} component(s)")
-        if local_count > 0:
-            _LOGGER.info(f"📦 Found {local_count} local component(s)")
-        _LOGGER.info("✅ All ESP-Video dependencies ready!")
-    else:
-        _LOGGER.error(f"❌ Missing required components: {', '.join(missing_components)}")
-        _LOGGER.error(f"   Please ensure these components are in: {components_dir}/")
+    # Afficher un résumé seulement si des composants ont été téléchargés
+    if downloaded_count > 0:
+        _LOGGER.info(f"Downloaded {downloaded_count} component(s)")
 
-    _LOGGER.info("=" * 60)
+    if not all_ok:
+        _LOGGER.error(f"Missing required components: {', '.join(missing_components)}")
+        _LOGGER.error(f"Please ensure these components are in: {components_dir}/")
 
     return all_ok
 
