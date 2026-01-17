@@ -11,35 +11,43 @@ import json
 
 _LOGGER = logging.getLogger(__name__)
 
-# Configuration des dépendances à télécharger
+# Configuration des dépendances
+# NOTE: esp_cam_sensor, esp_ipa, et esp_sccb_intf sont des composants ESP-IDF
+# disponibles sur le Component Registry ou GitHub, mais pas dans esp-adf-libs.
+# Pour l'instant, on vérifie juste qu'ils existent localement.
+
 ESP_VIDEO_DEPENDENCIES = [
     {
         "name": "esp_h264",
         "repo": "https://github.com/espressif/esp-adf-libs.git",
-        "tag": "f8baa69620b3e4cd2170098d57b1c2e7e47f9b7c",  # Version stable
+        "tag": "master",  # Utiliser master pour la dernière version
         "sparse_paths": ["esp_h264"],
-        "description": "Encodeur/décodeur H.264 (OpenH264 + TinyH264)"
+        "description": "Encodeur/décodeur H.264 (OpenH264 + TinyH264)",
+        "required": True
     },
     {
         "name": "esp_cam_sensor",
-        "repo": "https://github.com/espressif/esp-adf-libs.git",
-        "tag": "f8baa69620b3e4cd2170098d57b1c2e7e47f9b7c",
-        "sparse_paths": ["esp_cam_sensor"],
-        "description": "Drivers caméra (OV5647, SC202CS, OV02C10)"
+        "repo": None,  # Composant ESP-IDF - doit être présent localement
+        "tag": None,
+        "sparse_paths": [],
+        "description": "Drivers caméra (OV5647, SC202CS, OV02C10)",
+        "required": True
     },
     {
         "name": "esp_ipa",
-        "repo": "https://github.com/espressif/esp-adf-libs.git",
-        "tag": "f8baa69620b3e4cd2170098d57b1c2e7e47f9b7c",
-        "sparse_paths": ["esp_ipa"],
-        "description": "Image Processing Algorithms (AWB, denoise, sharpen)"
+        "repo": None,  # Composant ESP-IDF - doit être présent localement
+        "tag": None,
+        "sparse_paths": [],
+        "description": "Image Processing Algorithms (AWB, denoise, sharpen)",
+        "required": True
     },
     {
         "name": "esp_sccb_intf",
-        "repo": "https://github.com/espressif/esp-adf-libs.git",
-        "tag": "f8baa69620b3e4cd2170098d57b1c2e7e47f9b7c",
-        "sparse_paths": ["esp_sccb_intf"],
-        "description": "Interface I2C/SCCB pour caméras"
+        "repo": None,  # Composant ESP-IDF - doit être présent localement
+        "tag": None,
+        "sparse_paths": [],
+        "description": "Interface I2C/SCCB pour caméras",
+        "required": True
     },
 ]
 
@@ -92,20 +100,30 @@ def is_component_downloaded(dep, target_dir):
         return False
 
     # Vérifier si le répertoire contient des fichiers
-    if not os.listdir(target_dir):
+    try:
+        dir_contents = os.listdir(target_dir)
+        if not dir_contents:
+            return False
+    except Exception:
         return False
 
-    # Vérifier le state file
+    # Si le répertoire existe et contient des fichiers, c'est OK
+    # (même si le state file n'existe pas - compatibilité avec composants existants)
+    _LOGGER.debug(f"Component {dep['name']} found locally at {target_dir}")
+
+    # Vérifier le state file pour la version (optionnel)
     state = load_download_state()
     dep_hash = component_hash(dep)
     component_name = dep['name']
 
     if component_name in state:
         if state[component_name].get('hash') == dep_hash:
-            # Même version, déjà téléchargé
-            return True
+            _LOGGER.debug(f"  → Version matches (hash: {dep_hash})")
+        else:
+            _LOGGER.debug(f"  → Different version in state, but keeping local component")
 
-    return False
+    # Retourner True si le composant existe localement (peu importe le state)
+    return True
 
 
 def download_component_sparse(dep, target_dir):
@@ -200,7 +218,7 @@ def download_component_sparse(dep, target_dir):
 
 def ensure_esp_video_dependencies(components_dir):
     """
-    S'assure que toutes les dépendances ESP-Video sont téléchargées.
+    S'assure que toutes les dépendances ESP-Video sont présentes.
     Fonctionne comme `cg.add_library("lvgl/lvgl", "9.4.0")`.
 
     Args:
@@ -215,36 +233,50 @@ def ensure_esp_video_dependencies(components_dir):
 
     all_ok = True
     downloaded_count = 0
-    cached_count = 0
+    local_count = 0
+    missing_components = []
 
     for dep in ESP_VIDEO_DEPENDENCIES:
         component_name = dep['name']
         target_dir = os.path.join(components_dir, component_name)
+        has_repo = dep['repo'] is not None
 
         _LOGGER.info(f"📦 {component_name}: {dep['description']}")
 
-        # Vérifier si déjà téléchargé
+        # Vérifier si déjà présent localement
         if is_component_downloaded(dep, target_dir):
-            _LOGGER.info(f"   ✓ Already downloaded (cached)")
-            cached_count += 1
+            _LOGGER.info(f"   ✓ Found locally")
+            local_count += 1
             continue
 
-        # Télécharger
+        # Si pas de repo, on ne peut pas télécharger
+        if not has_repo:
+            _LOGGER.warning(f"   ⚠️ Not found locally and no download source available")
+            if dep.get('required', True):
+                missing_components.append(component_name)
+                all_ok = False
+            continue
+
+        # Télécharger depuis le repo
+        _LOGGER.info(f"   Downloading from {dep['repo']}...")
         if download_component_sparse(dep, target_dir):
             downloaded_count += 1
         else:
             _LOGGER.error(f"   ✗ Download failed!")
-            all_ok = False
+            if dep.get('required', True):
+                missing_components.append(component_name)
+                all_ok = False
 
     _LOGGER.info("=" * 60)
     if all_ok:
         if downloaded_count > 0:
             _LOGGER.info(f"✅ Downloaded {downloaded_count} component(s)")
-        if cached_count > 0:
-            _LOGGER.info(f"📦 Used {cached_count} cached component(s)")
+        if local_count > 0:
+            _LOGGER.info(f"📦 Found {local_count} local component(s)")
         _LOGGER.info("✅ All ESP-Video dependencies ready!")
     else:
-        _LOGGER.error("❌ Some dependencies failed to download")
+        _LOGGER.error(f"❌ Missing required components: {', '.join(missing_components)}")
+        _LOGGER.error(f"   Please ensure these components are in: {components_dir}/")
 
     _LOGGER.info("=" * 60)
 
