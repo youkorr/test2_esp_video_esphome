@@ -215,11 +215,13 @@ void ESPVideoComponent::setup() {
   esp_video_init_csi_config_t csi_config = {};
 
   // Initialize SCCB/I2C - esp_video 1.4.1 will create the I2C bus
+  // IMPORTANT: These pins MUST match the ESPHome i2c bus configuration
+  // to avoid conflicts with shared I2C devices (ES8311 audio codec, etc.)
   csi_config.sccb_config.init_sccb = true;
   csi_config.sccb_config.i2c_config.port = 0;  // I2C port 0
-  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_8;  // Default SDA for ESP32-P4
-  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_9;  // Default SCL for ESP32-P4
-  csi_config.sccb_config.freq = 400000;  // I2C frequency 400kHz
+  csi_config.sccb_config.i2c_config.sda_pin = this->i2c_sda_pin_;  // Use configured SDA pin
+  csi_config.sccb_config.i2c_config.scl_pin = this->i2c_scl_pin_;  // Use configured SCL pin
+  csi_config.sccb_config.freq = this->i2c_frequency_;  // Use configured I2C frequency
 
   csi_config.reset_pin = (gpio_num_t)-1;  // No reset pin
   csi_config.pwdn_pin = (gpio_num_t)-1;   // No power-down pin
