@@ -1,5 +1,4 @@
 #include "esp_video_component.h"
-#include "i2c_helper.h"
 #include "esphome/core/log.h"
 #include "esp_heap_caps.h"
 #include <sys/stat.h>
