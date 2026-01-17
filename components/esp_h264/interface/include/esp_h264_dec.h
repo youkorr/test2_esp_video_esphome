@@ -13,26 +13,10 @@ extern "C" {
 #endif
 
 /**
- * @brief  H.264 Profile IDC values
- *         These values are defined in the H.264 specification
- */
-typedef enum {
-    ESP_H264_PROFILE_BASELINE = 66,   /*<! Baseline profile - most compatible */
-    ESP_H264_PROFILE_MAIN = 77,       /*<! Main profile - better compression */
-    ESP_H264_PROFILE_EXTENDED = 88,   /*<! Extended profile - streaming optimized */
-    ESP_H264_PROFILE_HIGH = 100,      /*<! High profile - highest quality */
-    ESP_H264_PROFILE_HIGH10 = 110,    /*<! High 10 profile - 10-bit samples */
-    ESP_H264_PROFILE_HIGH422 = 122,   /*<! High 4:2:2 profile */
-    ESP_H264_PROFILE_HIGH444 = 244,   /*<! High 4:4:4 profile */
-    ESP_H264_PROFILE_AUTO = 0,        /*<! Auto-detect profile from stream (decoder only) */
-} esp_h264_profile_idc_t;
-
-/**
  * @brief  Decoder configure information
  */
 typedef struct {
-    esp_h264_raw_format_t pic_type;     /*<! Data format after decoding */
-    esp_h264_profile_idc_t profile_idc; /*<! H.264 profile (AUTO for auto-detection) */
+    esp_h264_raw_format_t pic_type;  /*<! Data format after decoding */
 } esp_h264_dec_cfg_t;
 
 /**
