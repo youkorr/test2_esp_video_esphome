@@ -3,7 +3,7 @@ import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
 DEPENDENCIES = ["esp32"]
-CODEOWNERS = ["@clydebarrow"]
+CODEOWNERS = ["@youkorr"]  # ESP LDO component for ESP32
 
 esp_ldo_ns = cg.esphome_ns.namespace("esp_ldo")
 EspLdo = esp_ldo_ns.class_("EspLdo", cg.Component)
