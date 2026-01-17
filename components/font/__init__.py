@@ -43,7 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 DOMAIN = "font"
 MULTI_CONF = True
 
-CODEOWNERS = ["@esphome/core", "@clydebarrow"]
+CODEOWNERS = ["@youkorr"]  # Autonomous implementation, forked from ESPHome core
 
 font_ns = cg.esphome_ns.namespace("font")
 
