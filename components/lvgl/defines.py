@@ -222,6 +222,8 @@ class LvConstant(LValidator):
 
 # Parts
 CONF_MAIN = "main"
+CONF_HEADER = "header"
+CONF_SIDEBAR = "sidebar"
 CONF_SCROLLBAR = "scrollbar"
 CONF_INDICATOR = "indicator"
 CONF_KNOB = "knob"
@@ -328,6 +330,8 @@ STATES = (
 
 PARTS = (
     CONF_MAIN,
+    CONF_HEADER,
+    CONF_SIDEBAR,
     CONF_SCROLLBAR,
     CONF_INDICATOR,
     CONF_KNOB,

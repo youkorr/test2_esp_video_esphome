@@ -1,5 +1,6 @@
+import builtins
 import sys
-from typing import Any
+from typing import Any, Union
 
 from esphome import codegen as cg, config_validation as cv
 from esphome.automation import register_action
@@ -372,7 +373,7 @@ class Widget:
     def get_value(self):
         if isinstance(self.type.w_type, LvType):
             result = self.type.w_type.value(self)
-            if isinstance(result, list):
+            if isinstance(result, builtins.list):
                 return result[0]
             return result
         return self.obj
@@ -380,7 +381,7 @@ class Widget:
     def get_values(self):
         if isinstance(self.type.w_type, LvType):
             result = self.type.w_type.value(self)
-            if isinstance(result, list):
+            if isinstance(result, builtins.list):
                 return result
             return [result]
         return [self.obj]
@@ -458,10 +459,10 @@ async def wait_for_widgets():
     await FakeAwaitable(widgets_wait_generator())
 
 
-async def get_widgets(config: dict | list, id: str = CONF_ID) -> list[Widget]:
+async def get_widgets(config: Union[dict, list], id: str = CONF_ID) -> list[Widget]:
     if not config:
         return []
-    if not isinstance(config, list):
+    if not isinstance(config, builtins.list):
         config = [config]
     return [await get_widget_(c[id]) for c in config if id in c]
 
