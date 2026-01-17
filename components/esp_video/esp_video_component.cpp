@@ -179,19 +179,13 @@ void ESPVideoComponent::setup() {
     return;
   }
 
-  // Extraire le handle I2C ESP-IDF depuis le bus ESPHome
+  // Get I2C bus parameters from ESPHome
   // ESP_LOGI(TAG, "Configuration esp_video:");
-  // ESP_LOGI(TAG, "  init_sccb: false (utilise le bus I2C ESPHome)");
+  // ESP_LOGI(TAG, "  init_sccb: true (esp_video will initialize I2C)");
   // ESP_LOGI(TAG, "  Setup priority: DATA (après I2C BUS:1000)");
 
-  i2c_master_bus_handle_t i2c_handle = get_i2c_bus_handle(this->i2c_bus_);
-  if (i2c_handle == nullptr) {
-    ESP_LOGE(TAG, "❌ Impossible d'extraire le handle I2C ESP-IDF");
-    this->mark_failed();
-    return;
-  }
-
-  // ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
+  // For esp_video 1.4.1, we let esp_video_init initialize the I2C bus itself
+  // This avoids compatibility issues with different ESPHome I2C implementations
 
   // Initialize XCLK via LEDC if enabled (for non-M5Stack boards)
   // M5Stack Tab5 BSP already initializes XCLK, so this should be disabled for M5Stack
@@ -220,23 +214,19 @@ void ESPVideoComponent::setup() {
 
   esp_video_init_csi_config_t csi_config = {};
 
-  // Ne PAS initialiser SCCB - utiliser le bus I2C ESPHome existant
-  csi_config.sccb_config.init_sccb = false;
+  // Initialize SCCB/I2C - esp_video 1.4.1 will create the I2C bus
+  csi_config.sccb_config.init_sccb = true;
+  csi_config.sccb_config.i2c_config.port = 0;  // I2C port 0
+  csi_config.sccb_config.i2c_config.sda_pin = GPIO_NUM_8;  // Default SDA for ESP32-P4
+  csi_config.sccb_config.i2c_config.scl_pin = GPIO_NUM_9;  // Default SCL for ESP32-P4
+  csi_config.sccb_config.freq = 400000;  // I2C frequency 400kHz
 
-  // Utiliser i2c_handle (union) car init_sccb = false
-  csi_config.sccb_config.i2c_handle = i2c_handle;
-  csi_config.sccb_config.freq = 400000;  // Fréquence I2C
+  csi_config.reset_pin = (gpio_num_t)-1;  // No reset pin
+  csi_config.pwdn_pin = (gpio_num_t)-1;   // No power-down pin
+  csi_config.dont_init_ldo = false;  // Allow esp_video to initialize LDO for MIPI-CSI
 
-  csi_config.reset_pin = (gpio_num_t)-1;  // Pas de pin de reset
-  csi_config.pwdn_pin = (gpio_num_t)-1;   // Pas de pin de power-down
-
-  // NOTE: xclk_pin and xclk_freq are NOT used by esp_video_init() for MIPI-CSI!
-  // XCLK initialization only happens for DVP sensors in esp_video_init.c.
-  // For MIPI-CSI, XCLK must be initialized BEFORE calling esp_video_init(),
-  // which we did above using init_xclk_ledc().
-  // Setting these fields here for documentation/completeness only:
-  csi_config.xclk_pin = this->xclk_pin_;      // IGNORED for MIPI-CSI
-  csi_config.xclk_freq = this->xclk_freq_;    // IGNORED for MIPI-CSI
+  // NOTE: xclk_pin and xclk_freq are no longer in csi_config for esp_video 1.4.1
+  // XCLK initialization for MIPI-CSI must be done separately (which we did above using init_xclk_ledc())
 
   esp_video_init_config_t video_config = {};
   video_config.csi = &csi_config;
