@@ -1,8 +1,10 @@
 """
-Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
+Composant ESPHome pour ESP-Video d'Espressif (v1.4.1)
 Support complet H264 + JPEG avec dépendances ESP-IDF
 
-Ce composant initialise ESP-Video en utilisant le bus I2C d'ESPHome.
+Ce composant initialise ESP-Video avec sa propre configuration I2C.
+IMPORTANT: Les pins I2C doivent correspondre à celles du bus i2c: ESPHome
+pour éviter les conflits avec les autres périphériques I2C (ES8311, etc.)
 """
 
 import esphome.codegen as cg
@@ -25,6 +27,9 @@ CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
+CONF_I2C_SDA_PIN = "i2c_sda_pin"
+CONF_I2C_SCL_PIN = "i2c_scl_pin"
+CONF_I2C_FREQUENCY = "i2c_frequency"
 CONF_XCLK_PIN = "xclk_pin"
 CONF_XCLK_FREQ = "xclk_freq"
 CONF_ENABLE_XCLK_INIT = "enable_xclk_init"
@@ -70,6 +75,10 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
+        # I2C pins - MUST match ESPHome i2c bus config to avoid conflicts
+        cv.Optional(CONF_I2C_SDA_PIN, default="GPIO8"): cv.Any(cv.string, cv.int_range(min=0, max=48)),
+        cv.Optional(CONF_I2C_SCL_PIN, default="GPIO9"): cv.Any(cv.string, cv.int_range(min=0, max=48)),
+        cv.Optional(CONF_I2C_FREQUENCY, default=400000): cv.int_range(min=100000, max=1000000),  # 100kHz-1MHz
         # XCLK pin accepte: "GPIO36", 36, -1, ou "NO_CLOCK"
         cv.Optional(CONF_XCLK_PIN, default="GPIO36"): cv.Any(cv.string, cv.int_range(min=-1, max=48)),
         cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_range(min=1000000, max=40000000),  # 1-40 MHz
@@ -88,6 +97,18 @@ async def to_code(config):
     i2c_bus = await cg.get_variable(config[CONF_I2C_ID])
     cg.add(var.set_i2c_bus(i2c_bus))
 
+    # Configure I2C pins - MUST match ESPHome i2c bus configuration
+    # CRITICAL: These pins must be the SAME as your i2c: component to avoid conflicts!
+    i2c_sda_pin_raw = config[CONF_I2C_SDA_PIN]
+    i2c_sda_pin = parse_gpio_pin(i2c_sda_pin_raw)
+    i2c_scl_pin_raw = config[CONF_I2C_SCL_PIN]
+    i2c_scl_pin = parse_gpio_pin(i2c_scl_pin_raw)
+    i2c_frequency = config[CONF_I2C_FREQUENCY]
+
+    cg.add(var.set_i2c_sda_pin(cg.RawExpression(f"static_cast<gpio_num_t>({i2c_sda_pin})")))
+    cg.add(var.set_i2c_scl_pin(cg.RawExpression(f"static_cast<gpio_num_t>({i2c_scl_pin})")))
+    cg.add(var.set_i2c_frequency(i2c_frequency))
+
     # Configure XCLK pour la détection des capteurs MIPI-CSI
     # CRITICAL: Les capteurs ont besoin de XCLK actif pour répondre sur I2C!
     xclk_pin_raw = config[CONF_XCLK_PIN]
@@ -100,8 +121,9 @@ async def to_code(config):
     cg.add(var.set_xclk_freq(xclk_freq))
     cg.add(var.set_enable_xclk_init(config[CONF_ENABLE_XCLK_INIT]))
 
-    # Logs silencieux sauf erreurs
-    logging.debug(f"[ESP-Video] I2C bus: '{config[CONF_I2C_ID]}'")
+    # Logs configuration
+    logging.debug(f"[ESP-Video] I2C: SDA=GPIO{i2c_sda_pin}, SCL=GPIO{i2c_scl_pin} @ {i2c_frequency/1000}kHz")
+    logging.debug(f"[ESP-Video] Note: I2C pins must match ESPHome i2c: component!")
     if has_ext_clock:
         logging.debug(f"[ESP-Video] XCLK: GPIO{xclk_pin} @ {xclk_freq/1000000:.1f} MHz")
     else:

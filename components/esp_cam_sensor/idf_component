@@ -1,5 +1,5 @@
-version: "1.0.0"
-description: ESP Camera Sensor drivers
-url: https://github.com/espressif/esp-video
+version: "1.7.0"
+description: Espressif camera sensor drivers
+url: https://github.com/espressif/esp-video-components/tree/master/esp_cam_sensor
 dependencies:
-  idf: ">=5.0"
+  idf: ">=5.3"

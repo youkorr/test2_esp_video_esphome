@@ -16,6 +16,9 @@
 #if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
 #include "driver/jpeg_encode.h"
 #endif
+#if CONFIG_ESP_VIDEO_ENABLE_SPI_VIDEO_DEVICE
+#include "esp_cam_ctlr_spi.h"
+#endif
 #include "esp_cam_sensor_xclk.h"
 
 #ifdef __cplusplus
@@ -59,9 +62,7 @@ typedef struct esp_video_init_csi_config {
     gpio_num_t  reset_pin;                      /*!< Camera sensor reset pin, if hardware has no reset pin, set reset_pin to be -1 */
     gpio_num_t  pwdn_pin;                       /*!< Camera sensor power down pin, if hardware has no power down pin, set pwdn_pin to be -1 */
 
-    /* XCLK configuration for camera sensor */
-    gpio_num_t  xclk_pin;                       /*!< Camera sensor XCLK pin, set to -1 if not used (for ESPHome/PlatformIO builds) */
-    uint32_t    xclk_freq;                      /*!< Camera sensor XCLK frequency in Hz (typically 24MHz for MIPI-CSI sensors) */
+    bool dont_init_ldo;                         /*!< If true, MIPI-CSI video device will not initialize the LDO; otherwise, MIPI-CSI video device will initialize the LDO */
 } esp_video_init_csi_config_t;
 #endif /* CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE */
 
@@ -88,10 +89,19 @@ typedef struct esp_video_init_dvp_config {
 typedef struct esp_video_init_spi_config {
     esp_video_init_sccb_config_t sccb_config;   /*!< Camera sensor SCCB configuration */
 
+    esp_cam_ctlr_spi_cam_intf_t intf;           /*!< SPI CAM interface type:
+                                                     - ESP_CAM_CTLR_SPI_CAM_INTF_SPI: SPI interface
+                                                     - ESP_CAM_CTLR_SPI_CAM_INTF_PARLIO: Parallel I/O interface */
+
+    esp_cam_ctlr_spi_cam_io_mode_t io_mode;     /*!< SPI CAM data I/O mode(SPI interface only supports 1-bit):
+                                                     - ESP_CAM_CTLR_SPI_CAM_IO_MODE_1BIT: data bus 1-bit
+                                                     - ESP_CAM_CTLR_SPI_CAM_IO_MODE_2BIT: data bus 2-bit */
+
     uint8_t spi_port;                           /*!< SPI port */
     gpio_num_t spi_cs_pin;                      /*!< SPI CS pin */
     gpio_num_t spi_sclk_pin;                    /*!< SPI SCLK pin */
     gpio_num_t spi_data0_io_pin;                /*!< SPI data0 I/O pin */
+    gpio_num_t spi_data1_io_pin;                /*!< SPI data1 I/O pin (only required when io_mode is ESP_CAM_CTLR_SPI_CAM_IO_MODE_2BIT, set to -1 if not used) */
 
     gpio_num_t  reset_pin;                      /*!< SPI interface camera sensor reset pin, if hardware has no reset pin, set reset_pin to be -1 */
     gpio_num_t  pwdn_pin;                       /*!< SPI interface camera sensor power down pin, if hardware has no power down pin, set pwdn_pin to be -1 */
@@ -129,6 +139,7 @@ typedef struct esp_video_init_usb_uvc_config {
 
     struct {
         bool init_usb_host_lib;                 /*!< Init USB Host Lib in esp_video */
+        unsigned peripheral_map;                /*!< Selects the USB peripheral(s) to use. */
         // USB Host Lib task configuration: Ignored if init_usb_host_lib is false
         uint32_t task_stack;                    /*!< USB Host Lib task stack size */
         uint8_t task_priority;                  /*!< USB Host Lib task priority */

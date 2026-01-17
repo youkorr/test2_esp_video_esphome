@@ -1,5 +1,5 @@
-version: "1.0.0"
-description: ESP Image Processing Accelerator (IPA)
-url: https://github.com/espressif/esp-video
+version: "1.3.1"
+description: Image process algorithms pipeline system for ISP
+url: https://github.com/espressif/esp-video-components/tree/master/esp_ipa
 dependencies:
-  idf: ">=5.0"
+  idf: ">=5.4"

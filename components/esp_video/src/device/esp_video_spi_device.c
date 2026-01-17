@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2025-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
@@ -28,6 +28,12 @@
 #define ARRAY_SIZE(x)                   sizeof(x) / sizeof((x)[0])
 #endif
 
+#if CONFIG_IDF_TARGET_ESP32P4
+#define PARLIO_RX_CLK_MAX_HZ            (48 * 1000 * 1000)
+#else
+#define PARLIO_RX_CLK_MAX_HZ            (30 * 1000 * 1000)
+#endif
+
 struct spi_video {
     cam_ctlr_color_t in_color;
     esp_cam_ctlr_handle_t cam_ctrl_handle;
@@ -45,14 +51,24 @@ static esp_err_t spi_get_input_frame_type(esp_cam_sensor_output_format_t sensor_
     esp_err_t ret = ESP_OK;
 
     switch (sensor_format) {
-    case ESP_CAM_SENSOR_PIXFORMAT_RGB565:
+    case ESP_CAM_SENSOR_PIXFORMAT_RGB565_LE:
         *in_color = CAM_CTLR_COLOR_RGB565;
         *v4l2_format = V4L2_PIX_FMT_RGB565;
         *bpp = 16;
         break;
-    case ESP_CAM_SENSOR_PIXFORMAT_YUV422:
+    case ESP_CAM_SENSOR_PIXFORMAT_RGB565_BE:
+        *in_color = CAM_CTLR_COLOR_RGB565;
+        *v4l2_format = V4L2_PIX_FMT_RGB565X;
+        *bpp = 16;
+        break;
+    case ESP_CAM_SENSOR_PIXFORMAT_YUV422_UYVY:
         *in_color = CAM_CTLR_COLOR_YUV422;
-        *v4l2_format = V4L2_PIX_FMT_YUV422P;
+        *v4l2_format = V4L2_PIX_FMT_UYVY;
+        *bpp = 16;
+        break;
+    case ESP_CAM_SENSOR_PIXFORMAT_YUV422_YUYV:
+        *in_color = CAM_CTLR_COLOR_YUV422;
+        *v4l2_format = V4L2_PIX_FMT_YUYV;
         *bpp = 16;
         break;
     case ESP_CAM_SENSOR_PIXFORMAT_RGB888:
@@ -136,24 +152,20 @@ static esp_err_t init_config(struct esp_video *video)
                              sensor_format.height,
                              v4l2_format);
 
-    uint32_t buf_size;
+    struct v4l2_format format = {
+        .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+        .fmt.pix = {
+            .width = sensor_format.width,
+            .height = sensor_format.height,
+            .pixelformat = v4l2_format,
+        },
+    };
+
     if (sensor_format.spi_info.frame_info) {
-        buf_size = sensor_format.spi_info.frame_info->frame_size;
-    } else {
-        buf_size = CAPTURE_VIDEO_GET_FORMAT_WIDTH(video) * CAPTURE_VIDEO_GET_FORMAT_HEIGHT(video) * in_bpp / 8;
+        format.fmt.pix.sizeimage = sensor_format.spi_info.frame_info->frame_size;
     }
 
-    ESP_LOGD(TAG, "buffer size=%" PRIu32, buf_size);
-
-    size_t alignments = 0;
-#if CONFIG_SPIRAM
-    ESP_RETURN_ON_ERROR(esp_cache_get_alignment(SPI_MEM_CAPS, &alignments), TAG, "failed to get cache alignment");
-#else
-    alignments = 4;
-#endif
-    ESP_LOGD(TAG, "alignments=%zu", alignments);
-
-    CAPTURE_VIDEO_SET_BUF_INFO(video, buf_size, alignments, SPI_MEM_CAPS);
+    ESP_RETURN_ON_ERROR(esp_video_config_buffer(video, &format, SPI_MEM_CAPS), TAG, "failed to configure stream buffer");
 
     return ESP_OK;
 }
@@ -161,6 +173,19 @@ static esp_err_t init_config(struct esp_video *video)
 static esp_err_t spi_video_init(struct esp_video *video)
 {
     struct spi_video *spi_video = VIDEO_PRIV_DATA(struct spi_video *, video);
+
+#ifdef CONFIG_CAM_CTLR_SPI_ENABLE_PARLIO
+    if (spi_video->spi_config.intf == ESP_CAM_CTLR_SPI_CAM_INTF_PARLIO) {
+        esp_cam_sensor_format_t sensor_format;
+
+        ESP_RETURN_ON_ERROR(esp_cam_sensor_get_format(spi_video->cam.sensor, &sensor_format), TAG, "failed to get sensor format");
+
+        if (sensor_format.spi_info.pclk > PARLIO_RX_CLK_MAX_HZ) {
+            ESP_LOGE(TAG, "sensor output data clock frequency %" PRIu32 " is too high, beyond the parlio maximum supported clock frequency %d", sensor_format.spi_info.pclk, PARLIO_RX_CLK_MAX_HZ);
+            return ESP_FAIL;
+        }
+    }
+#endif
 
     ESP_RETURN_ON_ERROR(esp_cam_sensor_set_format(spi_video->cam.sensor, NULL), TAG, "failed to set basic format");
     ESP_RETURN_ON_ERROR(init_config(video), TAG, "failed to initialize config");
@@ -178,14 +203,18 @@ static esp_err_t spi_video_start(struct esp_video *video, uint32_t type)
     ESP_RETURN_ON_ERROR(esp_cam_sensor_get_format(cam_dev, &sensor_format), TAG, "failed to get sensor format");
 
     esp_cam_ctlr_spi_config_t spi_config = {
+        .intf = spi_video->spi_config.intf,
+        .io_mode = spi_video->spi_config.io_mode,
         .spi_port = spi_video->spi_config.spi_port,
         .spi_cs_pin = spi_video->spi_config.spi_cs_pin,
         .spi_sclk_pin = spi_video->spi_config.spi_sclk_pin,
         .spi_data0_io_pin = spi_video->spi_config.spi_data0_io_pin,
+        .spi_data1_io_pin = spi_video->spi_config.spi_data1_io_pin,
         .input_data_color_type = spi_video->in_color,
         .h_res = CAPTURE_VIDEO_GET_FORMAT_WIDTH(video),
         .v_res = CAPTURE_VIDEO_GET_FORMAT_HEIGHT(video),
         .frame_info = sensor_format.spi_info.frame_info,
+        .frame_buffer_count = CAPTURE_VIDEO_BUF_COUNT(video),
         .auto_decode_dis = 1,
     };
 
@@ -249,13 +278,29 @@ static esp_err_t spi_video_enum_format(struct esp_video *video, uint32_t type, u
 
 static esp_err_t spi_video_set_format(struct esp_video *video, const struct v4l2_format *format)
 {
+    esp_cam_sensor_format_t sensor_format;
     const struct v4l2_pix_format *pix = &format->fmt.pix;
+    struct spi_video *spi_video = VIDEO_PRIV_DATA(struct spi_video *, video);
+    esp_cam_sensor_device_t *cam_dev = spi_video->cam.sensor;
 
     if (pix->width != CAPTURE_VIDEO_GET_FORMAT_WIDTH(video) ||
             pix->height != CAPTURE_VIDEO_GET_FORMAT_HEIGHT(video) ||
             pix->pixelformat != CAPTURE_VIDEO_GET_FORMAT_PIXEL_FORMAT(video)) {
         ESP_LOGE(TAG, "format is not supported");
         return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_RETURN_ON_ERROR(esp_cam_sensor_get_format(cam_dev, &sensor_format), TAG, "failed to get sensor format");
+
+    if (sensor_format.spi_info.frame_info) {
+        if (pix->sizeimage > 0) {
+            if (pix->sizeimage < sensor_format.spi_info.frame_info->frame_size) {
+                ESP_LOGE(TAG, "sizeimage is less than the required size");
+                return ESP_ERR_INVALID_ARG;
+            } else {
+                ESP_RETURN_ON_ERROR(esp_video_config_buffer(video, format, SPI_MEM_CAPS), TAG, "failed to configure stream buffer");
+            }
+        }
     }
 
     return ESP_OK;

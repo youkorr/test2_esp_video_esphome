@@ -163,17 +163,9 @@ static esp_err_t h264_video_start(struct esp_video *video, uint32_t type)
         };
 
         if (h264_video->hw_codec) {
-#ifdef CONFIG_ESP_DRIVER_H264_ENCODER_SUPPORTED
-            // Hardware H.264 encoder available (ESP-IDF driver component)
             h264_err = esp_h264_enc_hw_new(&config, &h264_video->enc_handle);
-#else
-            // Hardware H.264 driver not available in this build, fall back to software
-            ESP_LOGW(TAG, "Hardware H.264 encoder not available - falling back to software encoder");
-            h264_err = esp_h264_enc_sw_new((const esp_h264_enc_cfg_sw_t *)&config, &h264_video->enc_handle);
-#endif
         } else {
-            // Software encoder explicitly requested
-            h264_err = esp_h264_enc_sw_new((const esp_h264_enc_cfg_sw_t *)&config, &h264_video->enc_handle);
+            h264_err = ESP_H264_ERR_UNSUPPORTED;
         }
 
         if (h264_err != ESP_H264_ERR_OK) {
@@ -252,14 +244,6 @@ static esp_err_t h264_video_set_format(struct esp_video *video, const struct v4l
     const struct v4l2_pix_format *pix = &format->fmt.pix;
     struct h264_video *h264_video = VIDEO_PRIV_DATA(struct h264_video *, video);
 
-    size_t alignments = 0;
-#if CONFIG_SPIRAM
-    ESP_RETURN_ON_ERROR(esp_cache_get_alignment(H264_MEM_CAPS, &alignments), TAG, "failed to get cache alignment");
-#else
-    alignments = 4;
-#endif
-    ESP_LOGD(TAG, "alignments=%zu", alignments);
-
     if (format->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
         uint32_t width = M2M_VIDEO_GET_OUTPUT_FORMAT_WIDTH(video);
         uint32_t height = M2M_VIDEO_GET_OUTPUT_FORMAT_HEIGHT(video);
@@ -270,13 +254,6 @@ static esp_err_t h264_video_set_format(struct esp_video *video, const struct v4l
             ESP_LOGE(TAG, "pixel format or width or height is invalid");
             return ESP_ERR_INVALID_ARG;
         }
-
-        uint32_t buf_size = pix->width * pix->height * 8 / 2;
-
-        ESP_LOGD(TAG, "capture buffer size=%" PRIu32, buf_size);
-
-        M2M_VIDEO_SET_CAPTURE_BUF_INFO(video, buf_size, alignments, H264_MEM_CAPS);
-        M2M_VIDEO_SET_CAPTURE_FORMAT(video, width, height, pix->pixelformat);
     } else if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT) {
         uint8_t input_bpp;
         uint32_t width = M2M_VIDEO_GET_CAPTURE_FORMAT_WIDTH(video);
@@ -293,16 +270,11 @@ static esp_err_t h264_video_set_format(struct esp_video *video, const struct v4l
             ESP_LOGE(TAG, "pixel format is invalid");
             return ret;
         }
-
-        uint32_t buf_size = pix->width * pix->height * input_bpp / 8;
-
-        ESP_LOGD(TAG, "output buffer size=%" PRIu32, buf_size);
-
-        M2M_VIDEO_SET_OUTPUT_BUF_INFO(video, buf_size, alignments, H264_MEM_CAPS);
-        M2M_VIDEO_SET_OUTPUT_FORMAT(video, width, height, pix->pixelformat);
     } else {
         return ESP_ERR_NOT_SUPPORTED;
     }
+
+    ESP_RETURN_ON_ERROR(esp_video_config_buffer(video, format, H264_MEM_CAPS), TAG, "failed to configure stream buffer");
 
     return ESP_OK;
 }
@@ -478,14 +450,16 @@ esp_err_t esp_video_create_h264_video_device(bool hw_codec)
     uint32_t device_caps = V4L2_CAP_VIDEO_M2M | V4L2_CAP_EXT_PIX_FORMAT | V4L2_CAP_STREAMING;
     uint32_t caps = device_caps | V4L2_CAP_DEVICE_CAPS;
 
+    if (hw_codec == false) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     h264_video = heap_caps_calloc(1, sizeof(struct h264_video), MALLOC_CAP_8BIT | MALLOC_CAP_INTERNAL);
     if (!h264_video) {
         return ESP_ERR_NO_MEM;
     }
 
-    // Set hw_codec flag (will use software encoding if hardware not available)
     h264_video->hw_codec = hw_codec;
-    ESP_LOGI(TAG, "Creating H.264 video device (hw_codec=%s)", hw_codec ? "true" : "false");
     h264_video->gop = H264_VIDEO_DEVICE_GOP;
     h264_video->min_qp = H264_VIDEO_DEVICE_MIN_QP;
     h264_video->max_qp = H264_VIDEO_DEVICE_MAX_QP;
@@ -503,7 +477,7 @@ esp_err_t esp_video_create_h264_video_device(bool hw_codec)
 /**
  * @brief Destroy H.264 video device
  *
- * @param hw_codec true: hardware H.264, false: software H.264
+ * @param hw_codec true: hardware H.264, false: software H.264(has not supported)
  *
  * @return
  *      - ESP_OK on success
@@ -514,6 +488,10 @@ esp_err_t esp_video_destroy_h264_video_device(bool hw_codec)
     esp_err_t ret;
     struct esp_video *video;
     struct h264_video *h264_video;
+
+    if (hw_codec == false) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
 
     video = esp_video_device_get_object(H264_NAME);
     if (!video) {

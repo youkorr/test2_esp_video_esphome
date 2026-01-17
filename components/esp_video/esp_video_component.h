@@ -28,8 +28,13 @@ class ESPVideoComponent : public Component {
     return setup_priority::DATA;
   }
 
-  // Setter pour le bus I2C ESPHome
+  // Setter pour le bus I2C ESPHome (kept for compatibility but not used with init_sccb=true)
   void set_i2c_bus(i2c::I2CBus *bus) { this->i2c_bus_ = bus; }
+
+  // Setters pour I2C pins (REQUIRED - must match ESPHome i2c bus pins to avoid conflicts)
+  void set_i2c_sda_pin(gpio_num_t pin) { this->i2c_sda_pin_ = pin; }
+  void set_i2c_scl_pin(gpio_num_t pin) { this->i2c_scl_pin_ = pin; }
+  void set_i2c_frequency(uint32_t freq) { this->i2c_frequency_ = freq; }
 
   // Setters pour XCLK (requis pour la détection des capteurs MIPI-CSI)
   void set_xclk_pin(gpio_num_t pin) { this->xclk_pin_ = pin; }
@@ -39,6 +44,13 @@ class ESPVideoComponent : public Component {
  protected:
   bool initialized_{false};
   i2c::I2CBus *i2c_bus_{nullptr};
+
+  // I2C pins - MUST match the ESPHome i2c bus configuration
+  gpio_num_t i2c_sda_pin_{GPIO_NUM_8};   // Default SDA for ESP32-P4
+  gpio_num_t i2c_scl_pin_{GPIO_NUM_9};   // Default SCL for ESP32-P4
+  uint32_t i2c_frequency_{400000};       // Default 400kHz
+
+  // XCLK configuration
   gpio_num_t xclk_pin_{GPIO_NUM_36};     // Default XCLK pin for ESP32-P4
   uint32_t xclk_freq_{24000000};         // Default 24MHz for MIPI-CSI sensors
   bool enable_xclk_init_{false};         // Enable XCLK initialization via LEDC (for non-M5Stack boards)

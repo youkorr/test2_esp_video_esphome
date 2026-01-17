@@ -15,17 +15,12 @@
 #include "esp_video_device.h"
 #include "hal/cam_ctlr_types.h"
 #include "esp_cam_ctlr_spi.h"
+#include "esp_video_caps.h"
+#include "linux/videodev2.h"
 #include "linux/videodev2.h"
 
 #ifdef __cplusplus
 extern "C" {
-#endif
-
-/**
- * @brief ISP video device configuration
- */
-#if CONFIG_SOC_ISP_LSC_SUPPORTED && (CONFIG_ESP32P4_REV_MIN_FULL >= 100)
-#define ESP_VIDEO_ISP_DEVICE_LSC    1       /*!< ISP video device enable LSC */
 #endif
 
 /**
@@ -41,6 +36,15 @@ typedef struct esp_video_csi_state {
     bool line_sync;                         /*!< true: line has start and end packet; false. line has no start and end packet */
     bool bypass_isp;                        /*!< true: ISP directly output data from input port with processing. false: ISP output processed data by pipeline  */
     color_raw_element_order_t bayer_order;  /*!< Bayer order of raw data */
+
+#if ESP_VIDEO_ISP_DEVICE_CROP
+    struct v4l2_rect *crop;                 /*!< ISP video device crop rectangle pointer */
+
+    uint32_t raw_width;                     /*!< MIPI-CSI raw data width */
+    uint32_t raw_height;                    /*!< MIPI-CSI raw data height */
+
+    uint32_t out_fmt;                       /*!< MIPI-CSI output V4L2 format from ISP */
+#endif
 } esp_video_csi_state_t;
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_SPI_VIDEO_DEVICE
@@ -48,10 +52,13 @@ typedef struct esp_video_csi_state {
  * @brief SPI video device configuration
  */
 typedef struct esp_video_spi_device_config {
+    esp_cam_ctlr_spi_cam_intf_t intf;       /*!< SPI CAM interface type */
+    esp_cam_ctlr_spi_cam_io_mode_t io_mode; /*!< SPI CAM data I/O mode */
     spi_host_device_t spi_port;             /*!< SPI port */
     gpio_num_t spi_cs_pin;                  /*!< SPI CS pin */
     gpio_num_t spi_sclk_pin;                /*!< SPI SCLK pin */
     gpio_num_t spi_data0_io_pin;            /*!< SPI data0 I/O pin */
+    gpio_num_t spi_data1_io_pin;            /*!< SPI data1 I/O pin */
 } esp_video_spi_device_config_t;
 #endif
 
@@ -70,6 +77,13 @@ typedef struct esp_video_usb_uvc_device_config {
 
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
 /**
+ * @brief MIPI CSI video device configuration
+ */
+typedef struct esp_video_csi_device_config {
+    bool dont_init_ldo;                     /*!< If true, MIPI-CSI video device will not initialize the LDO; otherwise, MIPI-CSI video device will initialize the LDO */
+} esp_video_csi_device_config_t;
+
+/**
  * @brief Create MIPI CSI video device
  *
  * @param cam_dev camera sensor device
@@ -78,7 +92,7 @@ typedef struct esp_video_usb_uvc_device_config {
  *      - ESP_OK on success
  *      - Others if failed
  */
-esp_err_t esp_video_create_csi_video_device(esp_cam_sensor_device_t *cam_dev);
+esp_err_t esp_video_create_csi_video_device(esp_cam_sensor_device_t *cam_dev, const esp_video_csi_device_config_t *config);
 
 /**
  * @brief Destroy MIPI-CSI video device
