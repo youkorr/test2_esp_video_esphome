@@ -200,8 +200,8 @@ async def to_code(config):
 
     if not includes_found:
         logging.warning(
-            "[ESP-Video] ⚠️ Aucun répertoire d'include trouvé! "
-            "Vérifiez la structure du composant ESP-Video."
+            "[ESP-Video] No include directories found! "
+            "Check ESP-Video component structure."
         )
 
     # -----------------------------------------------------------------------
