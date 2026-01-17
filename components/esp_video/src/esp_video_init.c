@@ -4,23 +4,6 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
-/* FORCE_REBUILD_MARKER: Modified to force SCons recompilation - 2025-11-08 v7 */
-
-/*
- * CRITICAL FIX: Force enable ISP Pipeline Controller for JSON IPA loading
- * These defines MUST be set for OV02C10 JSON configuration to be loaded.
- * Without these, the JSON exists in firmware but is never applied to ISP.
- *
- * IMPORTANT: Using unconditional #undef to ensure we override ANY previous definition
- * (whether from build system, sdkconfig, or nowhere). This MUST be the first thing
- * in the file before ANY #include directives.
- */
-#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
-
-#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
-#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
-
 #include <string.h>
 #include <inttypes.h>
 #include "hal/gpio_ll.h"
@@ -28,18 +11,6 @@
 #include "esp_err.h"
 #include "esp_log.h"
 #include "esp_check.h"
-
-/*
- * CRITICAL: Redefine CONFIG values AFTER all #include directives
- * because esp_log.h or esp_check.h may include sdkconfig.h which
- * overrides our earlier definitions with values from build system.
- * This MUST come after ALL includes to ensure it's the final value.
- */
-#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
-
-#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
-#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
 
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
 #include "usb/usb_host.h"
@@ -59,22 +30,9 @@
 #if CONFIG_ESP_VIDEO_ENABLE_DVP_VIDEO_DEVICE
 #include "esp_private/esp_cam_dvp.h"
 #endif
-
-/*
- * CRITICAL (v3): Final redefinition of CONFIG values AFTER all non-conditional
- * #include directives and just BEFORE the conditional #if that depends on it.
- * This ensures CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1 is active
- * when the preprocessor evaluates the #if on the next line.
- */
-#undef CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
-#define CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER 1
-
-#undef CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE
-#define CONFIG_CAMERA_OV02C10_DEFAULT_IPA_JSON_CONFIGURATION_FILE 1
-
-// CRITICAL FIX: Force include ISP pipeline header regardless of CONFIG
-// This is safe for all sensors - the code detects sensor type at runtime
+#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
 #include "esp_video_pipeline_isp.h"
+#endif
 
 #if ESP_VIDEO_ENABLE_SCCB_DEVICE
 #define SCCB_NUM_MAX                I2C_NUM_MAX
@@ -127,6 +85,8 @@ static esp_cam_sensor_xclk_handle_t s_spi_xclk_handle[ESP_VIDEO_SPI_XCLK_NUM]; /
 static const char *TAG = "esp_video_init";
 
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
+static bool s_usb_host_installed = false;
+
 static void usb_lib_task(void *arg)
 {
     ESP_LOGD(TAG, "USB Host installed");
@@ -356,7 +316,22 @@ static bool sensor_is_detected(esp_cam_sensor_detect_fn_t *p, esp_cam_sensor_dev
 {
     return true;
 }
-#endif
+
+#if CONFIG_ESP_VIDEO_CHECK_PARAMETERS
+static void check_cam_dev_clock(esp_cam_sensor_device_t *cam_dev, int xclk_freq)
+{
+    esp_err_t ret;
+    esp_cam_sensor_format_t sensor_format;
+
+    ret = esp_cam_sensor_get_format(cam_dev, &sensor_format);
+    if (ret == ESP_OK) {
+        if ((sensor_format.xclk > 0) && (sensor_format.xclk != xclk_freq)) {
+            ESP_LOGW(TAG, "Configured xclk frequency %d is not equal to sensor xclk frequency %d, the sensor output image may be unexpected", xclk_freq, sensor_format.xclk);
+        }
+    }
+}
+#endif /* CONFIG_ESP_VIDEO_CHECK_PARAMETERS */
+#endif /* ESP_VIDEO_ENABLE_SCCB_DEVICE */
 
 /**
  * @brief Initialize video hardware and software, including I2C, MIPI CSI and so on.
@@ -388,8 +363,6 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    ESP_LOGE(TAG, "Config is valid, continuing initialization...");
-
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE
     ret = esp_video_create_isp_video_device();
     if (ret != ESP_OK) {
@@ -410,6 +383,7 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             usb_host_config_t host_config = {
                 .skip_phy_setup = false,
                 .intr_flags = ESP_INTR_FLAG_LEVEL1,
+                .peripheral_map = config->usb_uvc->usb.peripheral_map,
             };
             if (usb_host_install(&host_config) != ESP_OK) {
                 ESP_LOGE(TAG, "Failed to install USB Host driver");
@@ -438,24 +412,13 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
         };
 
         ESP_RETURN_ON_ERROR(esp_video_install_usb_uvc_driver(&cfg), TAG, "Failed to install USB UVC driver");
+        s_usb_host_installed = true;
     }
 #endif
 
-    ESP_LOGE(TAG, "");
-    ESP_LOGE(TAG, "Starting sensor detection loop...");
-    ESP_LOGE(TAG, "  DEBUG: __esp_cam_sensor_detect_fn_array_start = %p", (void*)__esp_cam_sensor_detect_fn_array_start);
-    ESP_LOGE(TAG, "  DEBUG: &__esp_cam_sensor_detect_fn_array_end = %p", (void*)&__esp_cam_sensor_detect_fn_array_end);
-    ESP_LOGE(TAG, "  DEBUG: Pointer difference = %ld bytes",
-             (long)((char*)&__esp_cam_sensor_detect_fn_array_end - (char*)__esp_cam_sensor_detect_fn_array_start));
-    ESP_LOGE(TAG, "  DEBUG: sizeof(esp_cam_sensor_detect_fn_t) = %u bytes", (unsigned)sizeof(esp_cam_sensor_detect_fn_t));
-    ESP_LOGE(TAG, "");
-
-    for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
-        ESP_LOGE(TAG, "  Checking sensor at %p: port=%d, sccb_addr=0x%x, detect=%p",
-                 (void*)p, p->port, p->sccb_addr, (void*)p->detect);
+    for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_inited && p->port == ESP_CAM_SENSOR_MIPI_CSI && config->csi != NULL) {
-            ESP_LOGE(TAG, "  Attempting to detect MIPI-CSI sensor...");
             esp_cam_sensor_config_t cfg;
             esp_cam_sensor_device_t *cam_dev;
 
@@ -464,42 +427,23 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 return ESP_FAIL;
             }
 
-            cfg.reset_pin = config->csi->reset_pin;
-            cfg.pwdn_pin = config->csi->pwdn_pin;
-            cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
-            cfg.xclk_pin = config->csi->xclk_pin;       // Initialize XCLK pin (critical for sensor detection!)
-            cfg.xclk_freq_hz = config->csi->xclk_freq;  // Initialize XCLK frequency
-
-            ESP_LOGE(TAG, "  Calling detect function at %p with config:", (void*)p->detect);
-            ESP_LOGE(TAG, "     sccb_handle=%p, reset_pin=%d, pwdn_pin=%d",
-                     cfg.sccb_handle, cfg.reset_pin, cfg.pwdn_pin);
-            ESP_LOGE(TAG, "     xclk_pin=%d, xclk_freq=%lu Hz", cfg.xclk_pin, cfg.xclk_freq_hz);
-
+            cfg.reset_pin = config->csi->reset_pin,
+            cfg.pwdn_pin = config->csi->pwdn_pin,
             cam_dev = (*(p->detect))((void *)&cfg);
-
-            ESP_LOGE(TAG, "  detect() returned: cam_dev=%p", (void*)cam_dev);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->csi->sccb_config);
-                ESP_LOGE(TAG, "  Sensor detection FAILED for address 0x%x (cam_dev is NULL)", p->sccb_addr);
+                ESP_LOGE(TAG, "failed to detect MIPI-CSI camera sensor with address=%x", p->sccb_addr);
                 continue;
             }
 
-            ESP_LOGE(TAG, "  Sensor detection SUCCEEDED! cam_dev->name=%s, cam_dev->id.pid=0x%x",
-                     cam_dev->name ? cam_dev->name : "NULL", cam_dev->id.pid);
-
-            ESP_LOGW(TAG, "  Sensor detected successfully: %s (addr 0x%x)",
-                     cam_dev->name ? cam_dev->name : "unknown", p->sccb_addr);
-
-            ESP_LOGE(TAG, "  About to call esp_video_create_csi_video_device(cam_dev=%p)...", (void*)cam_dev);
-            ret = esp_video_create_csi_video_device(cam_dev);
-            ESP_LOGE(TAG, "  esp_video_create_csi_video_device() returned: ret=%d (%s)",
-                     ret, esp_err_to_name(ret));
-
+            esp_video_csi_device_config_t csi_dev_config = {
+                .dont_init_ldo = config->csi->dont_init_ldo,
+            };
+            ret = esp_video_create_csi_video_device(cam_dev, &csi_dev_config);
             if (ret != ESP_OK) {
-                ESP_LOGE(TAG, "  Failed to create MIPI-CSI video device: %d (%s)", ret, esp_err_to_name(ret));
+                ESP_LOGE(TAG, "failed to create MIPI-CSI video device");
                 return ret;
             }
-            ESP_LOGE(TAG, "  MIPI-CSI video device created successfully - /dev/video0 should exist now");
 
 #if CONFIG_ESP_VIDEO_ENABLE_CAMERA_MOTOR_CONTROLLER
             if (config->cam_motor) {
@@ -532,32 +476,26 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
             }
 #endif
 
-            // ISP Pipeline initialization with IPA (Image Processing Algorithms)
-            // Automatically loads sensor-specific JSON configuration (CCM, AWB, sharpen, denoise)
-            if (cam_dev && cam_dev->cur_format && cam_dev->cur_format->isp_info) {
+#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+            if (cam_dev->cur_format && cam_dev->cur_format->isp_info) {
                 const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(cam_dev->name);
                 if (ipa_config) {
                     esp_video_isp_config_t isp_config = {
                         .cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
                         .isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME,
-                        .ipa_config = ipa_config,
-                        .sensor_name = cam_dev->name
+                        .ipa_config = ipa_config
                     };
 
-                    ESP_LOGI(TAG, "Initializing ISP pipeline with IPA for sensor '%s'", cam_dev->name);
                     ret = esp_video_isp_pipeline_init(&isp_config);
                     if (ret != ESP_OK) {
-                        ESP_LOGE(TAG, "Failed to initialize ISP pipeline: %s", esp_err_to_name(ret));
+                        ESP_LOGE(TAG, "failed to create ISP pipeline controller");
                         return ret;
                     }
-                    ESP_LOGI(TAG, "ISP pipeline initialized successfully");
                 } else {
-                    ESP_LOGW(TAG, "No IPA config found for sensor '%s' - ISP will use defaults", cam_dev->name);
+                    ESP_LOGW(TAG, "failed to get configuration to initialize ISP controller");
                 }
-            } else {
-                ESP_LOGD(TAG, "ISP not available for current format");
             }
-
+#endif
             csi_inited = true;
         }
 #endif
@@ -587,7 +525,6 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
             cfg.reset_pin = config->dvp->reset_pin,
             cfg.pwdn_pin = config->dvp->pwdn_pin,
-            cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
             cam_dev = (*(p->detect))((void *)&cfg);
             if (!cam_dev) {
                 destroy_sccb_device(cfg.sccb_handle, sccb_mark, &config->dvp->sccb_config);
@@ -595,6 +532,12 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                 ESP_LOGE(TAG, "failed to detect DVP camera with address=%x", p->sccb_addr);
                 continue;
             }
+
+#if CONFIG_ESP_VIDEO_CHECK_PARAMETERS
+            if (config->dvp->dvp_pin.xclk_io >= 0 && config->dvp->xclk_freq > 0) {
+                check_cam_dev_clock(cam_dev, config->dvp->xclk_freq);
+            }
+#endif /* CONFIG_ESP_VIDEO_CHECK_PARAMETERS */
 
             ret = esp_video_create_dvp_video_device(cam_dev);
             if (ret != ESP_OK) {
@@ -668,7 +611,6 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
 
                 cfg.reset_pin = spi_config->reset_pin;
                 cfg.pwdn_pin = spi_config->pwdn_pin;
-                cfg.sensor_port = p->port;  // Initialize sensor_port from detection array
                 cam_dev = (*(p->detect))((void *)&cfg);
                 if (!cam_dev) {
                     destroy_sccb_device(cfg.sccb_handle, sccb_mark, &spi_config->sccb_config);
@@ -680,11 +622,20 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                     continue;
                 }
 
+#if CONFIG_ESP_VIDEO_CHECK_PARAMETERS
+                if (spi_config->xclk_pin >= 0 && spi_config->xclk_freq > 0) {
+                    check_cam_dev_clock(cam_dev, spi_config->xclk_freq);
+                }
+#endif /* CONFIG_ESP_VIDEO_CHECK_PARAMETERS */
+
                 esp_video_spi_device_config_t spi_dev_config = {
+                    .intf = spi_config->intf,
+                    .io_mode = spi_config->io_mode,
                     .spi_port = spi_config->spi_port,
                     .spi_cs_pin = spi_config->spi_cs_pin,
                     .spi_sclk_pin = spi_config->spi_sclk_pin,
-                    .spi_data0_io_pin = spi_config->spi_data0_io_pin
+                    .spi_data0_io_pin = spi_config->spi_data0_io_pin,
+                    .spi_data1_io_pin = spi_config->spi_data1_io_pin,
                 };
                 ret = esp_video_create_spi_video_device(cam_dev, &spi_dev_config, i);
                 if (ret != ESP_OK) {
@@ -700,15 +651,11 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
     }
 
 #if CONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE
-    ESP_LOGI(TAG, "Creating hardware H.264 encoder/decoder device...");
     ret = esp_video_create_h264_video_device(true);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create hardware H.264 video device: %d (%s)", ret, esp_err_to_name(ret));
+        ESP_LOGE(TAG, "failed to create hardware H.264 video device");
         return ret;
     }
-    ESP_LOGI(TAG, "Hardware H.264 video device created (/dev/video11)");
-#else
-    ESP_LOGW(TAG, " Hardware H.264 encoder disabled (CONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE not set)");
 #endif
 
 #if CONFIG_ESP_VIDEO_ENABLE_HW_JPEG_VIDEO_DEVICE
@@ -757,7 +704,7 @@ esp_err_t esp_video_deinit(void)
     ESP_RETURN_ON_ERROR(esp_video_destroy_h264_video_device(true), TAG, "Failed to destroy H.264 video device");
 #endif
 
-    for (esp_cam_sensor_detect_fn_t *p = __esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
+    for (esp_cam_sensor_detect_fn_t *p = &__esp_cam_sensor_detect_fn_array_start; p < &__esp_cam_sensor_detect_fn_array_end; ++p) {
 #if CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
         if (!csi_deinited && p->port == ESP_CAM_SENSOR_MIPI_CSI) {
             esp_cam_sensor_device_t *cam_dev;
@@ -862,7 +809,10 @@ esp_err_t esp_video_deinit(void)
 #endif /* ESP_VIDEO_ENABLE_SCCB_DEVICE */
 
 #if CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
-    ESP_RETURN_ON_ERROR(esp_video_uninstall_usb_uvc_driver(), TAG, "Failed to uninstall USB UVC driver");
+    if (s_usb_host_installed) {
+        ESP_RETURN_ON_ERROR(esp_video_uninstall_usb_uvc_driver(), TAG, "Failed to uninstall USB UVC driver");
+        s_usb_host_installed = false;
+    }
 #endif
 
 #if CONFIG_ESP_VIDEO_ENABLE_ISP_VIDEO_DEVICE

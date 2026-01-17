@@ -1,0 +1,8 @@
+## IDF Component Manager Manifest File
+dependencies:
+  espressif/esp_tinyusb: "^1.4.2"
+  idf: ">=5.4"
+  esp_video:
+    override_path: "../../../../"
+  example_video_common:
+    override_path: "../../../common_components/example_video_common"

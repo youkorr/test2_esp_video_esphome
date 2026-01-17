@@ -63,11 +63,25 @@ static esp_err_t jpeg_get_input_format_from_v4l2(uint32_t v4l2_format, jpeg_enc_
         *src_bpp = 24;
         *sub_sample = JPEG_DOWN_SAMPLING_YUV444;
         break;
-    case V4L2_PIX_FMT_YUV422P:
+    case V4L2_PIX_FMT_UYVY:
         *src_type = JPEG_ENCODE_IN_FORMAT_YUV422;
         *src_bpp = 16;
         *sub_sample = JPEG_DOWN_SAMPLING_YUV422;
         break;
+#if ESP_VIDEO_JPEG_DEVICE_YUV420
+    case V4L2_PIX_FMT_YUV420:
+        *src_type = JPEG_ENCODE_IN_FORMAT_YUV420;
+        *src_bpp = 12;
+        *sub_sample = JPEG_DOWN_SAMPLING_YUV420;
+        break;
+#endif
+#if ESP_VIDEO_JPEG_DEVICE_YUV444
+    case V4L2_PIX_FMT_YUV444:
+        *src_type = JPEG_ENCODE_IN_FORMAT_YUV444;
+        *src_bpp = 24;
+        *sub_sample = JPEG_DOWN_SAMPLING_YUV444;
+        break;
+#endif
     case V4L2_PIX_FMT_GREY:
         *src_type = JPEG_ENCODE_IN_FORMAT_GRAY;
         *src_bpp = 8;
@@ -79,19 +93,6 @@ static esp_err_t jpeg_get_input_format_from_v4l2(uint32_t v4l2_format, jpeg_enc_
     }
 
     return ret;
-}
-
-static uint32_t jpeg_capture_size(uint32_t output_size)
-{
-    size_t alignments = 0;
-#if CONFIG_SPIRAM
-    ESP_RETURN_ON_ERROR(esp_cache_get_alignment(JPEG_MEM_CAPS, &alignments), TAG, "failed to get cache alignment");
-#else
-    alignments = 4;
-#endif
-    ESP_LOGD(TAG, "alignments=%zu", alignments);
-
-    return ESP_VIDEO_ALIGN((uint32_t)(output_size * JPEG_MAX_COMP_RATE), alignments);
 }
 
 static esp_err_t jpeg_video_m2m_process(struct esp_video *video, uint8_t *src, uint32_t src_size, uint8_t *dst, uint32_t dst_size, uint32_t *dst_out_size)
@@ -195,7 +196,7 @@ static esp_err_t jpeg_video_enum_format(struct esp_video *video, uint32_t type, 
         static const uint32_t jpeg_output_format[] = {
             V4L2_PIX_FMT_RGB565,
             V4L2_PIX_FMT_RGB24,
-            V4L2_PIX_FMT_YUV422P,
+            V4L2_PIX_FMT_UYVY,
             V4L2_PIX_FMT_GREY,
         };
 
@@ -217,14 +218,6 @@ static esp_err_t jpeg_video_set_format(struct esp_video *video, const struct v4l
     const struct v4l2_pix_format *pix = &format->fmt.pix;
     struct jpeg_video *jpeg_video = VIDEO_PRIV_DATA(struct jpeg_video *, video);
 
-    size_t alignments = 0;
-#if CONFIG_SPIRAM
-    ESP_RETURN_ON_ERROR(esp_cache_get_alignment(JPEG_MEM_CAPS, &alignments), TAG, "failed to get cache alignment");
-#else
-    alignments = 4;
-#endif
-    ESP_LOGD(TAG, "alignments=%zu", alignments);
-
     if (format->type == V4L2_BUF_TYPE_VIDEO_CAPTURE) {
         uint32_t width = M2M_VIDEO_GET_OUTPUT_FORMAT_WIDTH(video);
         uint32_t height = M2M_VIDEO_GET_OUTPUT_FORMAT_HEIGHT(video);
@@ -235,17 +228,6 @@ static esp_err_t jpeg_video_set_format(struct esp_video *video, const struct v4l
             ESP_LOGE(TAG, "pixel format or width or height is invalid");
             return ESP_ERR_INVALID_ARG;
         }
-
-        uint32_t buf_size = jpeg_capture_size(M2M_VIDEO_OUTPUT_BUF_SIZE(video));
-        if (!buf_size) {
-            ESP_LOGE(TAG, "output buffer format should be set fistly");
-            return ESP_ERR_INVALID_STATE;
-        }
-
-        ESP_LOGD(TAG, "capture buffer size=%" PRIu32, buf_size);
-
-        M2M_VIDEO_SET_CAPTURE_FORMAT(video, width, height, pix->pixelformat);
-        M2M_VIDEO_SET_CAPTURE_BUF_INFO(video, buf_size, alignments, JPEG_MEM_CAPS);
     } else if (format->type == V4L2_BUF_TYPE_VIDEO_OUTPUT) {
         uint8_t input_bpp;
         uint32_t width = M2M_VIDEO_GET_CAPTURE_FORMAT_WIDTH(video);
@@ -262,16 +244,11 @@ static esp_err_t jpeg_video_set_format(struct esp_video *video, const struct v4l
             ESP_LOGE(TAG, "pixel format is invalid");
             return ret;
         }
-
-        uint32_t buf_size = pix->width * pix->height * input_bpp / 8;
-
-        ESP_LOGD(TAG, "output buffer size=%" PRIu32, buf_size);
-
-        M2M_VIDEO_SET_OUTPUT_BUF_INFO(video, buf_size, alignments, JPEG_MEM_CAPS);
-        M2M_VIDEO_SET_OUTPUT_FORMAT(video, width, height, pix->pixelformat);
     } else {
         return ESP_ERR_NOT_SUPPORTED;
     }
+
+    ESP_RETURN_ON_ERROR(esp_video_config_buffer(video, format, JPEG_MEM_CAPS), TAG, "failed to configure stream buffer");
 
     return ESP_OK;
 }

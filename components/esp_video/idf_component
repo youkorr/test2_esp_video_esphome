@@ -1,4 +1,4 @@
-version: "1.0.0"
+version: "1.4.1"
 description: ESP-Video component for camera and video encoding
 url: https://github.com/espressif/esp-video
 dependencies:
