@@ -39,12 +39,9 @@ class ProgressBar:
         bar = '#' * filled + '-' * (self.width - filled)
 
         # Format comme PlatformIO: "Downloading  [####---]  XX%"
-        sys.stdout.write(f'\r{self.prefix}  [{bar}]  {percent:3d}%')
-        sys.stdout.flush()
-
-        if self.current >= self.total:
-            sys.stdout.write('\n')
-            sys.stdout.flush()
+        # Afficher seulement les jalons importants (0%, 25%, 50%, 75%, 100%)
+        if percent in [0, 25, 50, 75, 100] or self.current >= self.total:
+            _LOGGER.info(f'{self.prefix}  [{bar}]  {percent:3d}%')
 
     def finish(self):
         """Termine la barre de progression"""
