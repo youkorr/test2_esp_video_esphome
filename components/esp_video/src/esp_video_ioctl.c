@@ -11,7 +11,6 @@
 #include "esp_video.h"
 #include "esp_video_vfs.h"
 #include "esp_video_ioctl_internal.h"
-#include "esp_video_version.h"
 
 #define BUF_OFF(type, element_index)        (((uint32_t)type << 24) + element_index)
 #define BUF_OFF_2_INDEX(buf_off)            ((buf_off) & 0x00ffffff)

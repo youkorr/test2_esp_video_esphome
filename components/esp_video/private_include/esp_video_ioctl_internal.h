@@ -10,6 +10,13 @@
 #include "esp_video.h"
 #include "esp_video_ioctl.h"
 
+/**
+ * @brief ESP Video component version definitions
+ */
+#define ESP_VIDEO_VER_MAJOR 1
+#define ESP_VIDEO_VER_MINOR 0
+#define ESP_VIDEO_VER_PATCH 0
+
 #ifdef __cplusplus
 extern "C" {
 #endif
