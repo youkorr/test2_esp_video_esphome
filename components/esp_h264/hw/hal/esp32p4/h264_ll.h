@@ -8,7 +8,15 @@
 
 #include <stdbool.h>
 #include "h264_config.h"
-#include "h264_struct.h"
+
+// For ESPHome/PlatformIO builds: Use hw_ver1 by default (most compatible)
+// For ESP-IDF builds: CMakeLists.txt adds the correct hw_verX path to includes
+#if defined(CONFIG_ESP32P4_REV_MIN_FULL) && (CONFIG_ESP32P4_REV_MIN_FULL >= 300)
+    #include "../../soc/esp32p4/hw_ver3/h264_struct.h"
+#else
+    #include "../../soc/esp32p4/hw_ver1/h264_struct.h"
+#endif
+
 #include "soc/hp_sys_clkrst_struct.h"
 
 #ifdef __cplusplus
