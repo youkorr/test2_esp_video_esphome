@@ -248,9 +248,10 @@ if os.path.exists(esp_h264_dir):
 # ========================================================================
 esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
 esp_ipa_sources = [
-    "src/version.c",              # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
-    "src/esp_ipa_detect_stubs.c", # Detection array
-    "src/esp_ipa_json_loader.c",  # JSON IPA parser pour charger configs OV02C10/OV5647
+    "src/version.c",                       # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
+    "src/esp_ipa_detect_stubs.c",          # Detection array
+    "src/esp_ipa_json_loader.c",           # JSON IPA parser pour charger configs OV02C10/OV5647
+    "src/esp_ipa_pipeline_get_config.c",   # Pipeline stub (returns NULL - use JSON loader instead)
 ]
 
 # print("")
