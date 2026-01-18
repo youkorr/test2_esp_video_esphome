@@ -7,7 +7,16 @@
 #pragma once
 
 #include "h264_config.h"
-#include "h264_dma_struct.h"
+
+// For ESPHome/PlatformIO builds: Use hw_ver3 for ESP32-P4 rev 3.0+
+// For ESP-IDF builds: CMakeLists.txt adds the correct hw_verX path to includes
+#if defined(CONFIG_ESP32P4_REV_MIN_FULL) && (CONFIG_ESP32P4_REV_MIN_FULL >= 300)
+    #include "../../soc/esp32p4/hw_ver3/h264_dma_struct.h"
+#else
+    // Default to hw_ver3 for modern ESP32-P4 boards (rev 3.0+)
+    // Change to hw_ver1 if you have older revision boards (rev < 3.0)
+    #include "../../soc/esp32p4/hw_ver3/h264_dma_struct.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
