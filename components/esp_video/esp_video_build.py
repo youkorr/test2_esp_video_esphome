@@ -121,13 +121,13 @@ esp_h264_sources = [
     "hw/src/h264_rc.c",                    # Rate control
     "hw/hal/esp32p4/h264_hal.c",           # HAL H.264 pour ESP32-P4
     "hw/hal/esp32p4/h264_dma_hal.c",       # HAL DMA H.264
-    "interface/include/src/esp_h264_enc_param.c",
-    "interface/include/src/esp_h264_enc_param_hw.c",
-    "interface/include/src/esp_h264_enc_dual.c",
-    "interface/include/src/esp_h264_dec_param.c",
-    "interface/include/src/esp_h264_version.c",
-    "interface/include/src/esp_h264_dec.c",
-    "interface/include/src/esp_h264_enc_single.c",
+    "interface/src/esp_h264_enc_param.c",
+    "interface/src/esp_h264_enc_param_hw.c",
+    "interface/src/esp_h264_enc_dual.c",
+    "interface/src/esp_h264_dec_param.c",
+    "interface/src/esp_h264_version.c",
+    "interface/src/esp_h264_dec.c",
+    "interface/src/esp_h264_enc_single.c",
 ]
 
 if os.path.exists(esp_h264_dir):
