@@ -36,15 +36,35 @@ extern const size_t ov02c10_ipa_config_json_size;
 /**
  * @brief Get IPA configuration for a specific sensor
  *
- * This function replaces the auto-detection mechanism used in ESP-IDF builds.
- * Instead of iterating over registered IPA detection functions, it directly
- * returns a pointer to the embedded JSON configuration based on sensor name.
+ * This function provides ISP/IPA configurations for camera sensors.
+ *
+ * In ESP-IDF builds:
+ * - IPAs are auto-detected via ESP_IPA_DETECT_FN() macro
+ * - Linker creates detection array automatically
+ * - This function iterates array to find matching sensor
+ *
+ * In ESPHome/PlatformIO builds:
+ * - Linker doesn't support custom sections → no auto-detection
+ * - JSON configs are embedded but not parsed (would need cJSON + 2000 lines mapping)
+ * - Returning NULL = ISP/IPA pipeline disabled
+ *
+ * **IMPACT OF RETURNING NULL:**
+ * - ✅ Camera works normally (capture, H.264 encoding, streaming)
+ * - ❌ No automatic white balance (colors may look off)
+ * - ❌ No automatic exposure (may be too bright/dark)
+ * - ❌ No noise reduction (grainy in low light)
+ * - ❌ No auto sharpness/gamma/contrast
+ *
+ * Camera produces **functional but unoptimized** images.
  *
  * @param sensor_name Name of the sensor (e.g., "ov5647", "ov02c10", "sc202cs")
- * @return Pointer to IPA config, or NULL if not found
+ * @return Pointer to IPA config (esp_ipa_config_t*), or NULL to disable ISP/IPA
  *
- * @note For ESPHome, we use JSON-based configs embedded at compile time.
- *       The configs are stored as C strings generated from JSON files.
+ * @note To enable ISP/IPA, we would need to:
+ *       1. Parse embedded JSON (ov5647_ipa_config_json_start, etc.)
+ *       2. Convert JSON to 50+ nested C structures
+ *       3. Allocate and populate esp_ipa_config_t with all parameters
+ *       This is complex but doable if image quality becomes critical.
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *sensor_name)
 {
@@ -53,35 +73,39 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *sensor_name)
         return NULL;
     }
 
-    ESP_LOGI(TAG, "Loading IPA config for sensor: %s", sensor_name);
-
-    // For ESPHome builds, we don't use the JSON parser yet
-    // We just return NULL to disable IPA pipeline for now
-    // TODO: Implement JSON parsing when needed
+    // Log once per sensor type to avoid spam
+    static bool logged_ov5647 = false;
+    static bool logged_ov02c10 = false;
+    static bool logged_sc202cs = false;
 
     // Match sensor name to embedded JSON config
     if (strcmp(sensor_name, "ov5647") == 0) {
-        ESP_LOGI(TAG, "OV5647 IPA config available (JSON size: %zu bytes)", ov5647_ipa_config_json_size);
-        // TODO: Parse ov5647_ipa_config_json_start and return parsed config
-        // For now, return NULL to skip IPA pipeline
-        ESP_LOGW(TAG, "IPA JSON parsing not implemented yet - IPA pipeline disabled");
-        return NULL;
+        if (!logged_ov5647) {
+            ESP_LOGW(TAG, "OV5647: ISP/IPA pipeline DISABLED (JSON config available but not parsed)");
+            ESP_LOGW(TAG, "       Camera will work with RAW image quality (no AWB/AGC/AEN)");
+            ESP_LOGW(TAG, "       JSON size: %zu bytes - see ISP_IPA_PIPELINE_ANALYSIS.md", ov5647_ipa_config_json_size);
+            logged_ov5647 = true;
+        }
+        return NULL;  // Disable ISP/IPA for now
     } else if (strcmp(sensor_name, "ov02c10") == 0) {
-        ESP_LOGI(TAG, "OV02C10 IPA config available (JSON size: %zu bytes)", ov02c10_ipa_config_json_size);
-        // TODO: Parse ov02c10_ipa_config_json_start and return parsed config
-        // For now, return NULL to skip IPA pipeline
-        ESP_LOGW(TAG, "IPA JSON parsing not implemented yet - IPA pipeline disabled");
-        return NULL;
+        if (!logged_ov02c10) {
+            ESP_LOGW(TAG, "OV02C10: ISP/IPA pipeline DISABLED (JSON config available but not parsed)");
+            ESP_LOGW(TAG, "        Camera will work with RAW image quality (no AWB/AGC/AEN)");
+            ESP_LOGW(TAG, "        JSON size: %zu bytes - see ISP_IPA_PIPELINE_ANALYSIS.md", ov02c10_ipa_config_json_size);
+            logged_ov02c10 = true;
+        }
+        return NULL;  // Disable ISP/IPA for now
     } else if (strcmp(sensor_name, "sc202cs") == 0) {
-        ESP_LOGI(TAG, "SC202CS sensor detected - no IPA config available");
-        // SC202CS doesn't have IPA config yet
-        return NULL;
+        if (!logged_sc202cs) {
+            ESP_LOGW(TAG, "SC202CS: ISP/IPA pipeline DISABLED (no config available)");
+            ESP_LOGW(TAG, "        Camera will work with RAW image quality");
+            logged_sc202cs = true;
+        }
+        return NULL;  // No config for SC202CS
     } else {
-        ESP_LOGW(TAG, "Unknown sensor: %s - no IPA config available", sensor_name);
+        ESP_LOGW(TAG, "Unknown sensor '%s': ISP/IPA pipeline disabled", sensor_name);
         return NULL;
     }
-
-    return NULL;
 }
 
 /**
