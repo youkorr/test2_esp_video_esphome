@@ -197,7 +197,7 @@ esp_h264_err_t esp_h264_enc_hw_set_rc_rate_pred(esp_h264_enc_param_hw_handle_t h
  */
 esp_h264_err_t esp_h264_enc_hw_get_mbres(esp_h264_enc_param_hw_handle_t handle, uint8_t *out_mb_width, uint8_t *out_mb_height);
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 /**
  * @brief  Set the pbyte of DMA2D
  *
