@@ -364,7 +364,7 @@ static inline void h264_dma_ll_set_in5_block(h264_dma_dev_t *dma, uint32_t buf, 
     dma->dma_in_ch5.conf3.block_length_4line = H264_DMA_DB_4_LINES_ROW_LENGTH;
 }
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Set the bytes per pixel

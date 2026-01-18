@@ -700,7 +700,10 @@ static inline uint32_t h264_ll_get_coded_len(h264_dev_t *h264)
     return h264->frame_code_length.frame_code_length;
 }
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) < 300
+// CRITICAL FIX for ESPHome/PlatformIO with ESP32-P4 rev 3.0+:
+// Force disable hw_ver1-specific code since macro evaluation doesn't work reliably
+// For ESP32-P4 rev < 3.0, change this to #if 1
+#if 0  // Disabled for ESP32-P4 rev 3.0+ (change to #if 1 for older revisions)
 
 /**
  * @brief  Get bs error (Version 1 hardware)

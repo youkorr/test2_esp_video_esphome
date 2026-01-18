@@ -18,7 +18,7 @@ extern "C" {
 #define H264_INTR_REC_READY       (0x1 << 1)
 #define H264_INTR_FRAME_DONE      (0x1 << 2)
 #define H264_INTR_2MB_LINE_DONE   (0x1 << 3)
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 #define H264_INTR_BS_BIT_OVERFLOW (0x1 << 4)
 #endif
 #define H264_INTR_MASK            (0xf)
@@ -29,7 +29,7 @@ extern "C" {
 
 typedef h264_ctrl_regs_t *esp_h264_set_dev_t;  /*<! The hardware h264 device configure handle */
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Original picture color space
@@ -362,7 +362,7 @@ void h264_hal_set_roi_reg(esp_h264_set_dev_t device, bool ena, uint8_t x, uint8_
  */
 void h264_hal_get_roi_reg(esp_h264_set_dev_t device, uint8_t *x, uint8_t *y, uint8_t *xlen, uint8_t *ylen, int8_t *qp, uint8_t reg_idx);
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) < 300
+#if 0  // Disabled for ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Get bs error

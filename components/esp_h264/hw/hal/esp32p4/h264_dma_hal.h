@@ -19,7 +19,7 @@ extern "C" {
 #define H264_DMA_BURST_SIZE           (4)
 #define H264_DMA_END_ADDR             (~0)
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Bytes per pixel
@@ -219,7 +219,7 @@ void h264_dma_hal_cfg_bs_dsc(h264_dma_hal_context_t *hal, uint32_t dsc_addr);
  */
 void h264_dma_hal_cfg_mvm_dsc(h264_dma_hal_context_t *hal, uint32_t dsc_addr);
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Set the bytes per pixel
