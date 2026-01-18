@@ -38,7 +38,7 @@ extern "C" {
 /**
  * @brief camera sensor auto detect function array start.
  */
-extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start;
+extern esp_cam_sensor_detect_fn_t __esp_cam_sensor_detect_fn_array_start[];
 
 /**
  * @brief camera sensor auto detect function array end.
