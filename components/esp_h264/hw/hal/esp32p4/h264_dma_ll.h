@@ -8,6 +8,11 @@
 
 #include "h264_config.h"
 
+// CRITICAL FIX for ESPHome/PlatformIO: Ensure HAL_CONFIG_CHIP_SUPPORT_MIN_REV is defined
+#ifndef HAL_CONFIG_CHIP_SUPPORT_MIN_REV
+#define HAL_CONFIG_CHIP_SUPPORT_MIN_REV 300  // Default to rev 3.0+ for modern ESP32-P4
+#endif
+
 // For ESPHome/PlatformIO builds: Use hw_ver3 for ESP32-P4 rev 3.0+
 // For ESP-IDF builds: CMakeLists.txt adds the correct hw_verX path to includes
 #if defined(CONFIG_ESP32P4_REV_MIN_FULL) && (CONFIG_ESP32P4_REV_MIN_FULL >= 300)
