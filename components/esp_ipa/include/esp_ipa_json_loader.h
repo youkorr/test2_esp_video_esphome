@@ -64,6 +64,35 @@ typedef struct {
 } esp_ipa_json_contrast_config_t;
 
 /**
+ * @brief BF (Bilateral Filter / Denoising) configuration from JSON
+ *
+ * Réduit le bruit de l'image en fonction du gain
+ */
+typedef struct {
+    uint8_t level;               /*!< Denoising level [2, 20] */
+    uint8_t matrix[3][3];        /*!< 3x3 BF matrix [0, 15] */
+} esp_ipa_json_bf_config_t;
+
+/**
+ * @brief Demosaic configuration from JSON
+ *
+ * Améliore la débayerisation pour une meilleure qualité des couleurs
+ */
+typedef struct {
+    float gradient_ratio;        /*!< Demosaic gradient ratio */
+} esp_ipa_json_demosaic_config_t;
+
+/**
+ * @brief Saturation configuration from JSON
+ *
+ * Contrôle la saturation des couleurs
+ */
+typedef struct {
+    uint32_t color_temp;         /*!< Color temperature */
+    uint32_t value;              /*!< Saturation value */
+} esp_ipa_json_saturation_config_t;
+
+/**
  * @brief Complete IPA JSON configuration
  *
  * Contient tous les paramètres parsés du JSON IPA
@@ -83,6 +112,15 @@ typedef struct {
 
     bool has_contrast;                       /*!< Contrast configuration available */
     esp_ipa_json_contrast_config_t contrast; /*!< Contrast configuration */
+
+    bool has_bf;                       /*!< BF (denoising) configuration available */
+    esp_ipa_json_bf_config_t bf;      /*!< BF configuration */
+
+    bool has_demosaic;                       /*!< Demosaic configuration available */
+    esp_ipa_json_demosaic_config_t demosaic; /*!< Demosaic configuration */
+
+    bool has_saturation;                           /*!< Saturation configuration available */
+    esp_ipa_json_saturation_config_t saturation;   /*!< Saturation configuration */
 } esp_ipa_json_config_t;
 
 /**
@@ -111,7 +149,11 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
  * - CCM (Color Correction Matrix) : Corrige les couleurs et teintes
  * - AWB ranges : Plages optimisées pour la balance des blancs
  * - Sharpen : Améliore la netteté de l'image
+ * - Gamma : Ajuste la courbe gamma
  * - Contrast : Ajuste le contraste
+ * - BF (Bilateral Filter) : Réduit le bruit de l'image
+ * - Demosaic : Optimise la débayerisation
+ * - Saturation : Contrôle la saturation des couleurs
  *
  * @param isp_fd ISP device file descriptor (from open("/dev/video0"))
  * @param ipa_json_config Parsed JSON configuration
