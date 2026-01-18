@@ -5,6 +5,14 @@
  */
 
 #pragma once
+/**
+ * @brief ESP IPA component version definitions
+ * These macros are used for version reporting in ESPHome/PlatformIO builds
+ */
+#define ESP_IPA_VER_MAJOR 1
+#define ESP_IPA_VER_MINOR 3
+#define ESP_IPA_VER_PATCH 1
+
 
 #ifdef __cplusplus
 extern "C" {

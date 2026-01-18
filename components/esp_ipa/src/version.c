@@ -5,6 +5,7 @@
  */
 
 #include "esp_log.h"
+#include "esp_ipa_version.h"
 
 static const char *TAG = "esp_ipa";
 
