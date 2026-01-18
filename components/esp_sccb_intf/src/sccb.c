@@ -14,6 +14,14 @@
 #include "esp_sccb_io_interface.h"
 #include "esp_sccb_intf.h"
 
+/**
+ * @brief Default SCCB transaction timeout for ESPHome/PlatformIO builds
+ * Set to 1000ms (1 second) as a reasonable default for camera I2C operations
+ */
+#ifndef CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT
+#define CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT 1000
+#endif
+
 #define ESP_SCCB_TRANS_DEALY CONFIG_ESP_SCCB_TRANS_TIMEOUT_DEFAULT
 
 static const char *TAG = "sccb";

@@ -23,7 +23,7 @@ extern "C" {
  *
  * @return None
  */
-void esp_ipa_print_version(void)
+void esp_ipa_print_version(void);
 
 #ifdef __cplusplus
 }
