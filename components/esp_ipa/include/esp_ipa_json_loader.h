@@ -21,7 +21,7 @@ extern "C" {
 typedef struct {
     uint32_t color_temp;         /*!< Color temperature in Kelvin */
     float matrix[3][3];          /*!< 3x3 Color correction matrix */
-} esp_ipa_ccm_config_t;
+} esp_ipa_json_ccm_config_t;
 
 /**
  * @brief AWB (Auto White Balance) configuration from JSON
@@ -34,7 +34,7 @@ typedef struct {
     float bg_min;                /*!< BG ratio minimum */
     float bg_max;                /*!< BG ratio maximum */
     uint32_t min_counted;        /*!< Minimum white patches to count */
-} esp_ipa_awb_config_t;
+} esp_ipa_json_awb_config_t;
 
 /**
  * @brief Sharpen configuration from JSON
@@ -46,7 +46,7 @@ typedef struct {
     float m_coeff;               /*!< Medium coefficient */
     bool has_matrix;             /*!< Matrix is available */
     uint8_t matrix[3][3];        /*!< 3x3 sharpen matrix */
-} esp_ipa_sharpen_config_t;
+} esp_ipa_json_sharpen_config_t;
 
 /**
  * @brief Gamma configuration from JSON
@@ -54,14 +54,14 @@ typedef struct {
 typedef struct {
     bool use_gamma_param;        /*!< Use gamma parameter (vs curve) */
     float gamma_param;           /*!< Gamma parameter value */
-} esp_ipa_gamma_config_t;
+} esp_ipa_json_gamma_config_t;
 
 /**
  * @brief Contrast configuration from JSON
  */
 typedef struct {
     uint32_t value;              /*!< Contrast value */
-} esp_ipa_contrast_config_t;
+} esp_ipa_json_contrast_config_t;
 
 /**
  * @brief Complete IPA JSON configuration
@@ -69,20 +69,20 @@ typedef struct {
  * Contient tous les paramètres parsés du JSON IPA
  */
 typedef struct {
-    bool has_ccm;                /*!< CCM configuration available */
-    esp_ipa_ccm_config_t ccm;    /*!< CCM configuration */
+    bool has_ccm;                      /*!< CCM configuration available */
+    esp_ipa_json_ccm_config_t ccm;    /*!< CCM configuration */
 
-    bool has_awb;                /*!< AWB configuration available */
-    esp_ipa_awb_config_t awb;    /*!< AWB configuration */
+    bool has_awb;                      /*!< AWB configuration available */
+    esp_ipa_json_awb_config_t awb;    /*!< AWB configuration */
 
-    bool has_sharpen;            /*!< Sharpen configuration available */
-    esp_ipa_sharpen_config_t sharpen; /*!< Sharpen configuration */
+    bool has_sharpen;                        /*!< Sharpen configuration available */
+    esp_ipa_json_sharpen_config_t sharpen;   /*!< Sharpen configuration */
 
-    bool has_gamma;              /*!< Gamma configuration available */
-    esp_ipa_gamma_config_t gamma;     /*!< Gamma configuration */
+    bool has_gamma;                    /*!< Gamma configuration available */
+    esp_ipa_json_gamma_config_t gamma; /*!< Gamma configuration */
 
-    bool has_contrast;           /*!< Contrast configuration available */
-    esp_ipa_contrast_config_t contrast; /*!< Contrast configuration */
+    bool has_contrast;                       /*!< Contrast configuration available */
+    esp_ipa_json_contrast_config_t contrast; /*!< Contrast configuration */
 } esp_ipa_json_config_t;
 
 /**

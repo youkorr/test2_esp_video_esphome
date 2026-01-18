@@ -32,7 +32,7 @@ extern const size_t ov5647_ipa_config_json_size;
  *
  * Extrait la matrice CCM calibrée du JSON pour améliorer les couleurs
  */
-static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *ccm_config)
+static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_json_ccm_config_t *ccm_config)
 {
     cJSON *acc = cJSON_GetObjectItem(sensor_root, "acc");
     if (!acc) {
@@ -95,7 +95,7 @@ static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *c
  *
  * Extrait les plages RG/BG optimisées pour une meilleure balance des blancs
  */
-static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *awb_config)
+static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_json_awb_config_t *awb_config)
 {
     cJSON *awb = cJSON_GetObjectItem(sensor_root, "awb");
     if (!awb) {
@@ -147,7 +147,7 @@ static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *a
 /**
  * @brief Parse Sharpen parameters from JSON
  */
-static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_config_t *sharpen_config)
+static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_json_sharpen_config_t *sharpen_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
@@ -212,7 +212,7 @@ static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_con
 /**
  * @brief Parse Gamma parameters from JSON
  */
-static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_gamma_config_t *gamma_config)
+static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_json_gamma_config_t *gamma_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
@@ -250,7 +250,7 @@ static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_gamma_config_
 /**
  * @brief Parse Contrast from JSON
  */
-static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_config_t *contrast_config)
+static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_json_contrast_config_t *contrast_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
