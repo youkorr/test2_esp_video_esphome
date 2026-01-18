@@ -26,6 +26,9 @@ extern const size_t ov02c10_ipa_config_json_size;
 extern const char ov5647_ipa_config_json_start[];
 extern const char *ov5647_ipa_config_json_end;
 extern const size_t ov5647_ipa_config_json_size;
+extern const char sc202cs_ipa_config_json_start[];
+extern const char *sc202cs_ipa_config_json_end;
+extern const size_t sc202cs_ipa_config_json_size;
 
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
@@ -305,8 +308,12 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         json_data = ov5647_ipa_config_json_start;
         json_size = ov5647_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV5647 JSON (%zu bytes)", json_size);
+    } else if (strcmp(sensor_name, "SC202CS") == 0 || strcmp(sensor_name, "sc202cs") == 0) {
+        json_data = sc202cs_ipa_config_json_start;
+        json_size = sc202cs_ipa_config_json_size;
+        ESP_LOGI(TAG, "Using SC202CS JSON (%zu bytes)", json_size);
     } else {
-        ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);
+        ESP_LOGE(TAG, "Unknown sensor: %s (supported: OV02C10, OV5647, SC202CS)", sensor_name);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
