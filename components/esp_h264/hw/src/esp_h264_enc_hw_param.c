@@ -38,13 +38,13 @@ typedef struct esp_h264_param {
     h264_dma_desc_t           *dsc_db[4];
     h264_dma_desc_t           *dsc_mvm;
     esp_h264_mutex_t           mutex;
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
     h264_dma_pbyte_t           pbyte;
 #endif
     float                      bpp;
 } esp_h264_param_t;
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 static h264_dma_pbyte_t esp_h264_get_pbyte_by_pic_type(esp_h264_raw_format_t pic_type)
 {
@@ -79,7 +79,7 @@ static h264_ori_color_space_t esp_h264_get_color_space_by_pic_type(esp_h264_raw_
     }
 }
 
-#endif  /* HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300 */
+#endif  /* ESP32-P4 rev 3.0+ */
 
 /** Basic parameter configure */
 static esp_h264_err_t get_res(esp_h264_enc_param_handle_t handle, esp_h264_resolution_t *res)
@@ -380,7 +380,7 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     param->mutex = xSemaphoreCreateMutex();
     ESP_H264_GOTO_ON_FALSE(param->mutex, ESP_H264_ERR_MEM, __exit__, TAG, "No memory for mutex semaphore");
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
     /** Set the picture type */
     h264_hal_set_ori_color_space(param->device, esp_h264_get_color_space_by_pic_type(cfg->pic_type));
     param->pbyte = esp_h264_get_pbyte_by_pic_type(cfg->pic_type);
@@ -529,7 +529,7 @@ esp_h264_err_t esp_h264_enc_hw_get_mbres(esp_h264_enc_param_hw_handle_t handle, 
     return ESP_H264_ERR_OK;
 }
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 void esp_h264_enc_hw_set_pbyte(esp_h264_enc_param_hw_handle_t handle, h264_dma_hal_context_t *dma2d_hal)
 {
     esp_h264_param_t *param = __containerof(handle, esp_h264_param_t, hw_base);

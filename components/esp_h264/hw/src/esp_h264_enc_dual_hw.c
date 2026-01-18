@@ -25,7 +25,7 @@ typedef struct esp_h264_hw_handle {
     uint8_t                     gop;
     esp_h264_mutex_t            frame_done;
     esp_h264_intr_hd_t          intr_hd;
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
     bool                        bs_bit_overflow;
 #endif
 } esp_h264_hw_handle_t;
@@ -55,7 +55,7 @@ static void h264_frame_isr(void *arg)
         } else if (status & H264_INTR_FRAME_DONE) {
             h264_hal_clear_intr_status(&hw_hd->h264_hal, H264_INTR_FRAME_DONE);
             esp_h264_mutex_unlock_from_isr(hw_hd->frame_done, &xHigherPriorityTaskWoken);
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
         } else if (status & H264_INTR_BS_BIT_OVERFLOW) {
             h264_hal_clear_intr_status(&hw_hd->h264_hal, H264_INTR_BS_BIT_OVERFLOW);
             hw_hd->bs_bit_overflow = true;
@@ -113,7 +113,7 @@ static inline esp_h264_err_t h264_hw_enc_frame_mode_process(esp_h264_hw_handle_t
     }
 
     /** Set the pbyte of DMA2D*/
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
     esp_h264_enc_hw_set_pbyte(param_hd, &hw_hd->dma2d_hal);
 #endif
 
@@ -180,7 +180,7 @@ static inline esp_h264_err_t h264_hw_enc_frame_mode_process(esp_h264_hw_handle_t
         esp_h264_rc_end(rc_hd, enc_bits, qp_sum, mad);
     }
     *out_len += out_frame_len;
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) < 300
+#if 0  // Disabled for ESP32-P4 rev 3.0+ (ESPHome forced)
     if (h264_hal_get_bs_bit_overflow(&hw_hd->h264_hal)) {
         return ESP_H264_ERR_OVERFLOW;
     }
