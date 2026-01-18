@@ -44,9 +44,9 @@ if(COMMAND idf_build_get_property)
         list(APPEND private_include_dirs "./hw/soc/esp32p4/hw_ver1")
     endif()
 else()
-    # ESPHome/PlatformIO build - use hw_ver1 by default (most compatible)
-    message(STATUS "ESPHome/PlatformIO detected, using hw_ver1 for h264_struct.h")
-    list(APPEND private_include_dirs "./hw/soc/esp32p4/hw_ver1")
+    # ESPHome/PlatformIO build - use hw_ver3 by default (for rev 3.0+ boards)
+    message(STATUS "ESPHome/PlatformIO detected, using hw_ver3 for h264_struct.h")
+    list(APPEND private_include_dirs "./hw/soc/esp32p4/hw_ver3")
 endif()
 
 list(APPEND src_dirs "./hw/src"
