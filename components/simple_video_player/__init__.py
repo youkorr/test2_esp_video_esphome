@@ -4,7 +4,8 @@ from esphome.const import CONF_ID
 from esphome import automation
 from esphome.components import speaker
 
-DEPENDENCIES = ["lvgl", "esp_audio_codec"]
+DEPENDENCIES = ["lvgl"]
+AUTO_LOAD = ["esp_audio_codec"]  # Automatically load without requiring it in YAML
 CODEOWNERS = ["@youkorr"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
