@@ -209,6 +209,39 @@ print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx remo
 # Audio codec library (AAC decoder)
 # ========================================================================
 # esp_audio_codec is available in /components/esp_audio_codec
-print("[Simple Video Player] AAC audio codec ENABLED (USE_ESP_AUDIO_CODEC=1)")
+esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+if os.path.exists(esp_audio_codec_dir):
+    print("[Simple Video Player] AAC audio codec ENABLED (USE_ESP_AUDIO_CODEC=1)")
+
+    # Add esp_audio_codec include paths
+    audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
+    if os.path.exists(audio_codec_inc):
+        env.Append(CPPPATH=[audio_codec_inc])
+        print(f"[Simple Video Player] Added esp_audio_codec include path: {audio_codec_inc}")
+
+    # Link esp_audio_codec library for ESP32-P4
+    audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+    if os.path.exists(audio_codec_lib_dir):
+        env.Append(LIBPATH=[audio_codec_lib_dir])
+
+        # Link AAC decoder library
+        aac_lib = os.path.join(audio_codec_lib_dir, "libesp_audio_codec.a")
+        if os.path.exists(aac_lib):
+            lib_size_kb = os.path.getsize(aac_lib) / 1024
+            print(f"[Simple Video Player] ========================================")
+            print(f"[Simple Video Player] Using esp_audio_codec library")
+            print(f"[Simple Video Player]   Path: {aac_lib}")
+            print(f"[Simple Video Player]   Size: {lib_size_kb:.1f} KB")
+            print(f"[Simple Video Player]   Codecs: AAC-LC, AAC-HE, AAC-HEv2")
+            print(f"[Simple Video Player] ========================================")
+
+            env.Append(LINKFLAGS=[aac_lib])
+            print(f"[Simple Video Player] Linked esp_audio_codec library")
+        else:
+            print(f"[Simple Video Player]  WARNING: libesp_audio_codec.a not found in {audio_codec_lib_dir}")
+    else:
+        print(f"[Simple Video Player]  WARNING: Library directory not found: {audio_codec_lib_dir}")
+else:
+    print("[Simple Video Player]  WARNING: esp_audio_codec component not found - AAC audio disabled")
 
 print("[Simple Video Player] Build script completed")
