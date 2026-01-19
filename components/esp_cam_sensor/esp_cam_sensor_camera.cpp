@@ -30,6 +30,9 @@ extern "C" {
 #include "linux/videodev2.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/event_groups.h"
 }
 
 // Custom format configurations for all sensors
@@ -1238,6 +1241,40 @@ bool MipiDSICamComponent::start_streaming() {
   //   - Saturation: initial_value: 135 (testov5647)
   // Voir CAMERA_CONTROLS_YAML.md pour la configuration complète
 
+  // ============================================================================
+  // FreeRTOS Streaming Task (V4L2 Snippet #3 - Waveshare fork pattern)
+  // ============================================================================
+  // Create event group for task synchronization
+  if (!this->stream_event_group_) {
+    this->stream_event_group_ = xEventGroupCreate();
+    if (!this->stream_event_group_) {
+      ESP_LOGE(TAG, "Failed to create stream event group");
+      this->stop_streaming();
+      return false;
+    }
+  }
+
+  // Create streaming task on Core 1 (WiFi on Core 0)
+  BaseType_t result = xTaskCreatePinnedToCore(
+      stream_task_static_,
+      "cam_stream",
+      STREAM_TASK_STACK_SIZE,
+      this,  // Pass this pointer as argument
+      STREAM_TASK_PRIORITY,
+      &this->stream_task_handle_,
+      STREAM_TASK_CORE
+  );
+
+  if (result != pdPASS) {
+    ESP_LOGE(TAG, "Failed to create streaming task");
+    this->stop_streaming();
+    return false;
+  }
+
+  // Signal task to start
+  xEventGroupSetBits(this->stream_event_group_, STREAM_START_BIT);
+  ESP_LOGI(TAG, "FreeRTOS streaming task created on Core %d", STREAM_TASK_CORE);
+
   return true;
 }
 
@@ -1383,7 +1420,26 @@ void MipiDSICamComponent::stop_streaming() {
 
   // ESP_LOGI(TAG, "=== STOP STREAMING ===");
 
-  // 1. Arrêter le streaming V4L2
+  // ============================================================================
+  // FreeRTOS Streaming Task Cleanup (V4L2 Snippet #3)
+  // ============================================================================
+  // 1. Stop streaming task first (before stopping V4L2)
+  if (this->stream_task_handle_ != nullptr) {
+    // Signal task to stop
+    if (this->stream_event_group_) {
+      xEventGroupSetBits(this->stream_event_group_, STREAM_STOP_BIT);
+    }
+
+    // Wait for task to finish (max 500ms)
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Force delete if still running
+    vTaskDelete(this->stream_task_handle_);
+    this->stream_task_handle_ = nullptr;
+    ESP_LOGI(TAG, "Streaming task stopped");
+  }
+
+  // 2. Arrêter le streaming V4L2
   if (this->video_fd_ >= 0) {
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(this->video_fd_, VIDIOC_STREAMOFF, &type) < 0) {
@@ -1441,6 +1497,124 @@ void MipiDSICamComponent::stop_streaming() {
   // ESP_LOGI(TAG, "Streaming stopped, resources freed");
 }
 
+// ============================================================================
+// FreeRTOS Streaming Task (V4L2 Snippet #3 - Waveshare fork pattern)
+// ============================================================================
+
+void MipiDSICamComponent::stream_task_static_(void *arg) {
+  MipiDSICamComponent *camera = static_cast<MipiDSICamComponent*>(arg);
+  camera->stream_task_();
+}
+
+void MipiDSICamComponent::stream_task_() {
+  ESP_LOGI(TAG, "Camera streaming task started on Core %d", xPortGetCoreID());
+
+  uint32_t frame_count = 0;
+  uint64_t last_fps_time = esp_timer_get_time();
+  float current_fps = 0.0f;
+
+  while (1) {
+    // Check stop signal (non-blocking)
+    if (this->stream_event_group_) {
+      EventBits_t bits = xEventGroupWaitBits(
+          this->stream_event_group_,
+          STREAM_STOP_BIT,
+          pdFALSE,  // Don't clear on exit
+          pdFALSE,  // Wait for any bit
+          0  // No timeout (non-blocking)
+      );
+
+      if (bits & STREAM_STOP_BIT) {
+        ESP_LOGI(TAG, "Stop signal received, exiting stream task");
+        break;
+      }
+    }
+
+    // === PIPELINE: DQBUF → Callback → QBUF ===
+
+    // 1. DQBUF - Dequeue filled buffer (BLOCKING until frame is ready)
+    struct v4l2_buffer buf;
+    memset(&buf, 0, sizeof(buf));
+    buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    buf.memory = V4L2_MEMORY_USERPTR;
+
+    if (ioctl(this->video_fd_, VIDIOC_DQBUF, &buf) < 0) {
+      if (errno == EAGAIN) {
+        // No frame available (non-blocking mode)
+        vTaskDelay(pdMS_TO_TICKS(1));
+        continue;
+      }
+      ESP_LOGE(TAG, "VIDIOC_DQBUF failed in stream task: %s", strerror(errno));
+      break;
+    }
+
+    int buffer_idx = buf.index;
+    uint8_t *frame_data = this->simple_buffers_[buffer_idx].data;
+
+    // 2. Apply PPA transformation if enabled
+    uint8_t *display_buffer = frame_data;
+    if (this->ppa_enabled_ && this->image_buffer_) {
+      if (this->apply_ppa_transform_(frame_data, this->image_buffer_)) {
+        display_buffer = this->image_buffer_;
+      }
+    }
+
+    // 3. Update current_buffer_index (thread-safe)
+    portENTER_CRITICAL(&this->buffer_mutex_);
+    if (this->current_buffer_index_ >= 0 && this->current_buffer_index_ != buffer_idx) {
+      if (!this->ppa_enabled_) {
+        this->simple_buffers_[this->current_buffer_index_].allocated = false;
+      }
+    }
+    this->simple_buffers_[buffer_idx].allocated = true;
+    this->current_buffer_index_ = buffer_idx;
+
+    if (this->ppa_enabled_ && this->image_buffer_) {
+      this->simple_buffers_[buffer_idx].data = this->image_buffer_;
+    }
+    if (!this->ppa_enabled_) {
+      this->image_buffer_ = display_buffer;
+    }
+    portEXIT_CRITICAL(&this->buffer_mutex_);
+
+    this->frame_sequence_++;
+
+    // 4. Call user callback if set (for lvgl_camera_display)
+    if (this->frame_callback_) {
+      this->frame_callback_(display_buffer, buf.bytesused, buffer_idx);
+    }
+
+    // 5. Restore V4L2 buffer pointer before queuing back
+    if (this->ppa_enabled_ && this->simple_buffers_[buffer_idx].data != frame_data) {
+      portENTER_CRITICAL(&this->buffer_mutex_);
+      this->simple_buffers_[buffer_idx].data = frame_data;
+      portEXIT_CRITICAL(&this->buffer_mutex_);
+    }
+
+    // 6. QBUF - Re-queue buffer for next capture
+    buf.m.userptr = (unsigned long)frame_data;
+    buf.length = this->image_buffer_size_;
+    if (ioctl(this->video_fd_, VIDIOC_QBUF, &buf) < 0) {
+      ESP_LOGE(TAG, "VIDIOC_QBUF failed in stream task: %s", strerror(errno));
+      break;
+    }
+
+    // 7. FPS stats (every 30 frames)
+    frame_count++;
+    if (frame_count % 30 == 0) {
+      uint64_t now = esp_timer_get_time();
+      uint64_t delta = now - last_fps_time;
+      current_fps = 30000000.0f / delta;  // 30 frames / delta_us * 1000000
+      last_fps_time = now;
+
+      ESP_LOGD(TAG, "Streaming: Frame %u, FPS: %.1f, Buffer: %u",
+               frame_count, current_fps, buffer_idx);
+    }
+  }
+
+  ESP_LOGI(TAG, "Camera streaming task stopped (total frames: %u)", frame_count);
+  vTaskDelete(NULL);
+}
 
 bool MipiDSICamComponent::set_exposure(int value) {
   if (!this->streaming_active_ || this->isp_fd_ < 0) {
