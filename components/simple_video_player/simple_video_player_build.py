@@ -209,8 +209,33 @@ print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx remo
 # Audio codec library (AAC decoder)
 # ========================================================================
 # esp_audio_codec is available in /components/esp_audio_codec
-esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
-if os.path.exists(esp_audio_codec_dir):
+# Try multiple locations (external build dir, then source project dir)
+esp_audio_codec_dir = None
+
+# Try location 1: parent_components_dir (external build directory)
+candidate = os.path.join(parent_components_dir, "esp_audio_codec")
+if os.path.exists(candidate):
+    esp_audio_codec_dir = candidate
+    print(f"[Simple Video Player] Found esp_audio_codec in external build: {candidate}")
+
+# Try location 2: Navigate up from script_dir to find project root
+if not esp_audio_codec_dir:
+    # script_dir is usually .../components/simple_video_player
+    # Go up 2 levels to get project root, then components/esp_audio_codec
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    candidate = os.path.join(project_root, "components", "esp_audio_codec")
+    if os.path.exists(candidate):
+        esp_audio_codec_dir = candidate
+        print(f"[Simple Video Player] Found esp_audio_codec in project source: {candidate}")
+
+# Try location 3: Absolute fallback path (if running from known location)
+if not esp_audio_codec_dir:
+    candidate = "/home/user/test2_esp_video_esphome/components/esp_audio_codec"
+    if os.path.exists(candidate):
+        esp_audio_codec_dir = candidate
+        print(f"[Simple Video Player] Found esp_audio_codec in fallback path: {candidate}")
+
+if esp_audio_codec_dir:
     print("[Simple Video Player] AAC audio codec ENABLED (USE_ESP_AUDIO_CODEC=1)")
 
     # Add esp_audio_codec include paths
