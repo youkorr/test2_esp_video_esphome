@@ -243,6 +243,11 @@ if esp_audio_codec_dir:
     if os.path.exists(audio_codec_inc):
         env.Append(CPPPATH=[audio_codec_inc])
         print(f"[Simple Video Player] Added esp_audio_codec include path: {audio_codec_inc}")
+        # Also add decoder subdirectory for esp_audio_dec_reg.h
+        audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
+        if os.path.exists(audio_codec_dec_inc):
+            env.Append(CPPPATH=[audio_codec_dec_inc])
+            print(f"[Simple Video Player] Added esp_audio_codec decoder include path: {audio_codec_dec_inc}")
 
     # Compile C source files (codec registration)
     audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")

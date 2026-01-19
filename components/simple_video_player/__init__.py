@@ -111,10 +111,14 @@ async def to_code(config):
     # This ensures proper timing and avoids conflicts with ESPHome's build system
     esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
     if os.path.exists(esp_audio_codec_dir):
-        # Add include path for AAC decoder headers (early, before compilation)
+        # Add include paths for AAC decoder headers (early, before compilation)
         audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
         if os.path.exists(audio_codec_inc):
             cg.add_platformio_option("build_flags", [f"-I{audio_codec_inc}"])
+            # Also add decoder subdirectory for esp_audio_dec_reg.h
+            audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
+            if os.path.exists(audio_codec_dec_inc):
+                cg.add_platformio_option("build_flags", [f"-I{audio_codec_dec_inc}"])
 
     # esp_image_effects (esp_imgfx) - only used for hardware rotation
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
