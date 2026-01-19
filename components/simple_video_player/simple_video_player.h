@@ -42,7 +42,7 @@ extern "C" {
 extern "C" {
 #include "decoder/impl/esp_aac_dec.h"
 #include "decoder/esp_audio_dec.h"
-#include "decoder/esp_audio_types.h"
+#include "esp_audio_types.h"
 }
 #endif
 
