@@ -64,6 +64,13 @@ void LVGLCameraDisplay::loop() {
   // Stop timer when disabled
   if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
     ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
+
+    // Release currently displayed buffer before stopping
+    if (this->displayed_buffer_ != nullptr && this->camera_ != nullptr) {
+      this->camera_->release_buffer(this->displayed_buffer_);
+      this->displayed_buffer_ = nullptr;
+    }
+
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
     ESP_LOGI(TAG, "LVGL Camera Display stopped");

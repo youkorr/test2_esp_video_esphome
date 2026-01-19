@@ -1446,7 +1446,13 @@ void MipiDSICamComponent::stop_streaming() {
     ESP_LOGI(TAG, "Streaming task stopped");
   }
 
-  // 2. Arrêter le streaming V4L2
+  // 2. Delete event group (after task is stopped)
+  if (this->stream_event_group_ != nullptr) {
+    vEventGroupDelete(this->stream_event_group_);
+    this->stream_event_group_ = nullptr;
+  }
+
+  // 3. Arrêter le streaming V4L2
   if (this->video_fd_ >= 0) {
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(this->video_fd_, VIDIOC_STREAMOFF, &type) < 0) {
@@ -1454,7 +1460,7 @@ void MipiDSICamComponent::stop_streaming() {
     }
   }
 
-  // 2. Libérer les buffers SPIRAM (USERPTR mode - pas de munmap nécessaire)
+  // 4. Libérer les buffers SPIRAM (USERPTR mode - pas de munmap nécessaire)
   portENTER_CRITICAL(&this->buffer_mutex_);
   this->current_buffer_index_ = -1;
   portEXIT_CRITICAL(&this->buffer_mutex_);
