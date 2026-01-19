@@ -244,6 +244,16 @@ if esp_audio_codec_dir:
         env.Append(CPPPATH=[audio_codec_inc])
         print(f"[Simple Video Player] Added esp_audio_codec include path: {audio_codec_inc}")
 
+    # Compile C source files (codec registration)
+    audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")
+    if os.path.exists(audio_codec_src_dir):
+        src_files = ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]
+        for src_file in src_files:
+            src_path = os.path.join(audio_codec_src_dir, src_file)
+            if os.path.exists(src_path):
+                env.StaticObject(src_path)
+                print(f"[Simple Video Player] Compiling {src_file}")
+
     # Link esp_audio_codec library for ESP32-P4
     audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
     if os.path.exists(audio_codec_lib_dir):
