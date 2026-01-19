@@ -5,7 +5,7 @@ from esphome import automation
 from esphome.components import speaker
 
 DEPENDENCIES = ["lvgl"]
-AUTO_LOAD = ["esp_audio_codec"]  # Automatically load without requiring it in YAML
+# AUTO_LOAD = ["esp_audio_codec"]  # Disabled - causes issues with external repos
 CODEOWNERS = ["@youkorr"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
@@ -105,6 +105,31 @@ async def to_code(config):
         for inc_path in h264_inc_paths:
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
+
+    # esp_audio_codec - AAC audio decoder
+    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(esp_audio_codec_dir):
+        # Add include path for AAC decoder headers
+        audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
+        if os.path.exists(audio_codec_inc):
+            cg.add_platformio_option("build_flags", [f"-I{audio_codec_inc}"])
+
+        # Add C source files to be compiled (registration files)
+        audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")
+        if os.path.exists(audio_codec_src_dir):
+            src_files = ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]
+            for src_file in src_files:
+                src_path = os.path.join(audio_codec_src_dir, src_file)
+                if os.path.exists(src_path):
+                    cg.add_library(None, None, src_path)
+
+        # Link esp_audio_codec library (prebuilt)
+        audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+        if os.path.exists(audio_codec_lib_dir):
+            cg.add_build_flag(f"-L{audio_codec_lib_dir}")
+            audio_codec_lib = os.path.join(audio_codec_lib_dir, "libesp_audio_codec.a")
+            if os.path.exists(audio_codec_lib):
+                cg.add_platformio_option("build_flags", [f"-Wl,{audio_codec_lib}"])
 
     # esp_image_effects (esp_imgfx) - only used for hardware rotation
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
