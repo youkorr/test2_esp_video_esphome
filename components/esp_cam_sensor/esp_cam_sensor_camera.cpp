@@ -1286,7 +1286,11 @@ bool MipiDSICamComponent::capture_frame() {
   // DEPRECATED: If streaming task is active (callback registered), this function should not be called
   // The streaming task automatically captures frames and calls the callback
   if (this->stream_task_handle_ != nullptr) {
-    ESP_LOGW_ONCE(TAG, "capture_frame() called while streaming task is active - ignored (use frame callback instead)");
+    static bool warning_shown = false;
+    if (!warning_shown) {
+      ESP_LOGW(TAG, "capture_frame() called while streaming task is active - ignored (use frame callback instead)");
+      warning_shown = true;
+    }
     return false;
   }
 

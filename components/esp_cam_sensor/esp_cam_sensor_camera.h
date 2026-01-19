@@ -86,6 +86,7 @@ class MipiDSICamComponent : public Component {
   bool capture_frame();
 
   // Frame callback system (V4L2 Snippet #3 - automatic streaming via FreeRTOS task)
+  using FrameCallback = std::function<void(uint8_t* buffer, uint32_t size, uint32_t index)>;
   void set_frame_callback(FrameCallback cb) { frame_callback_ = cb; }
 
   // Buffer pool APIs (thread-safe, zero-tearing)
@@ -234,7 +235,6 @@ class MipiDSICamComponent : public Component {
   static constexpr int STREAM_TASK_CORE = 1;  // Core 1 (WiFi on Core 0)
 
   // Frame callback for lvgl_camera_display (called from stream task)
-  using FrameCallback = std::function<void(uint8_t* buffer, uint32_t size, uint32_t index)>;
   FrameCallback frame_callback_;
 
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
