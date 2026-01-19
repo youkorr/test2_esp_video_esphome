@@ -6,6 +6,7 @@ through Espressif's precompiled esp_audio_codec library.
 """
 
 import esphome.codegen as cg
+import esphome.config_validation as cv
 import os
 
 CODEOWNERS = ["@youkorr"]
@@ -13,7 +14,7 @@ CODEOWNERS = ["@youkorr"]
 # No user configuration needed - this component is used internally
 # by other components like simple_video_player
 
-CONFIG_SCHEMA = {}  # Empty schema - no user-facing configuration
+CONFIG_SCHEMA = cv.Schema({}).extend(cv.COMPONENT_SCHEMA)
 
 
 async def to_code(config):
