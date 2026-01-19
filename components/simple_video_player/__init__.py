@@ -80,12 +80,12 @@ async def to_code(config):
     if CONF_MEDIA_PLAYER_ENTITY in config:
         cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
 
-    # esp_audio_codec has been removed (not working)
+    # esp_audio_codec is now ENABLED (USE_ESP_AUDIO_CODEC=1)
     import os
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
-    # Add build script for linking H264 and audio codec libraries
+    # Add build script for linking H264 and AAC audio codec libraries
     # AND compiling additional source files
     build_script_path = os.path.join(component_dir, "simple_video_player_build.py")
     if os.path.exists(build_script_path):

@@ -206,9 +206,9 @@ else:
 print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx removed)")
 
 # ========================================================================
-# Audio codec library - REMOVED (not working)
+# Audio codec library (AAC decoder)
 # ========================================================================
-# esp_audio_codec has been removed because it does not work properly
-print("[Simple Video Player] Audio codec disabled (esp_audio_codec removed)")
+# esp_audio_codec is available in /components/esp_audio_codec
+print("[Simple Video Player] AAC audio codec ENABLED (USE_ESP_AUDIO_CODEC=1)")
 
 print("[Simple Video Player] Build script completed")
