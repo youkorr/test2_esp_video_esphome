@@ -76,6 +76,10 @@ class LVGLCameraDisplay : public Component {
   // Buffer pool tracking (pour release apres affichage)
   esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};
 
+  // Frame callback system (V4L2 Snippet #3 - called from streaming task)
+  volatile bool frame_ready_{false};  // Atomic flag set by callback, cleared by loop()
+  void on_frame_callback_(uint8_t* buffer, uint32_t size, uint32_t index);
+
   void update_camera_frame_();
   void update_canvas_();
 };
