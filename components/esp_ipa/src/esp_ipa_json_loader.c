@@ -26,13 +26,16 @@ extern const size_t ov02c10_ipa_config_json_size;
 extern const char ov5647_ipa_config_json_start[];
 extern const char *ov5647_ipa_config_json_end;
 extern const size_t ov5647_ipa_config_json_size;
+extern const char sc202cs_ipa_config_json_start[];
+extern const char *sc202cs_ipa_config_json_end;
+extern const size_t sc202cs_ipa_config_json_size;
 
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
  *
  * Extrait la matrice CCM calibrée du JSON pour améliorer les couleurs
  */
-static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *ccm_config)
+static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_json_ccm_config_t *ccm_config)
 {
     cJSON *acc = cJSON_GetObjectItem(sensor_root, "acc");
     if (!acc) {
@@ -95,7 +98,7 @@ static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *c
  *
  * Extrait les plages RG/BG optimisées pour une meilleure balance des blancs
  */
-static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *awb_config)
+static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_json_awb_config_t *awb_config)
 {
     cJSON *awb = cJSON_GetObjectItem(sensor_root, "awb");
     if (!awb) {
@@ -147,7 +150,7 @@ static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *a
 /**
  * @brief Parse Sharpen parameters from JSON
  */
-static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_config_t *sharpen_config)
+static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_json_sharpen_config_t *sharpen_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
@@ -212,7 +215,7 @@ static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_con
 /**
  * @brief Parse Gamma parameters from JSON
  */
-static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_gamma_config_t *gamma_config)
+static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_json_gamma_config_t *gamma_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
@@ -250,7 +253,7 @@ static esp_err_t parse_gamma_from_json(cJSON *sensor_root, esp_ipa_gamma_config_
 /**
  * @brief Parse Contrast from JSON
  */
-static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_config_t *contrast_config)
+static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_json_contrast_config_t *contrast_config)
 {
     cJSON *aen = cJSON_GetObjectItem(sensor_root, "aen");
     if (!aen) {
@@ -279,9 +282,141 @@ static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_c
 }
 
 /**
+ * @brief Parse BF (Bilateral Filter / Denoising) from JSON
+ *
+ * Extrait les paramètres de denoising pour réduire le bruit de l'image
+ */
+static esp_err_t parse_bf_from_json(cJSON *sensor_root, esp_ipa_json_bf_config_t *bf_config)
+{
+    cJSON *adn = cJSON_GetObjectItem(sensor_root, "adn");
+    if (!adn) {
+        ESP_LOGW(TAG, "No 'adn' section in JSON");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    cJSON *bf = cJSON_GetObjectItem(adn, "bf");
+    if (!bf || !cJSON_IsArray(bf) || cJSON_GetArraySize(bf) == 0) {
+        ESP_LOGW(TAG, "No 'bf' array in 'adn' section");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Prendre la première entrée (gain=1)
+    cJSON *bf_entry = cJSON_GetArrayItem(bf, 0);
+    if (!bf_entry) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *param = cJSON_GetObjectItem(bf_entry, "param");
+    if (!param) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Parse level
+    cJSON *level = cJSON_GetObjectItem(param, "level");
+    if (level) {
+        bf_config->level = level->valueint;
+    } else {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Parse matrix [9] -> matrix[3][3]
+    cJSON *matrix = cJSON_GetObjectItem(param, "matrix");
+    if (matrix && cJSON_IsArray(matrix)) {
+        int size = cJSON_GetArraySize(matrix);
+        if (size >= 9) {
+            for (int i = 0; i < 3; i++) {
+                for (int j = 0; j < 3; j++) {
+                    cJSON *item = cJSON_GetArrayItem(matrix, i * 3 + j);
+                    if (item) {
+                        bf_config->matrix[i][j] = item->valueint;
+                    }
+                }
+            }
+            ESP_LOGI(TAG, "BF loaded: level=%d", bf_config->level);
+            return ESP_OK;
+        }
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+/**
+ * @brief Parse Demosaic from JSON
+ *
+ * Extrait le gradient_ratio pour optimiser la débayerisation
+ */
+static esp_err_t parse_demosaic_from_json(cJSON *sensor_root, esp_ipa_json_demosaic_config_t *demosaic_config)
+{
+    cJSON *adn = cJSON_GetObjectItem(sensor_root, "adn");
+    if (!adn) {
+        ESP_LOGW(TAG, "No 'adn' section in JSON");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    cJSON *demosaic = cJSON_GetObjectItem(adn, "demosaic");
+    if (!demosaic || !cJSON_IsArray(demosaic) || cJSON_GetArraySize(demosaic) == 0) {
+        ESP_LOGW(TAG, "No 'demosaic' array in 'adn' section");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Prendre la première entrée (gain=1)
+    cJSON *demosaic_entry = cJSON_GetArrayItem(demosaic, 0);
+    if (!demosaic_entry) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *gradient_ratio = cJSON_GetObjectItem(demosaic_entry, "gradient_ratio");
+    if (gradient_ratio) {
+        demosaic_config->gradient_ratio = gradient_ratio->valuedouble;
+        ESP_LOGI(TAG, "Demosaic loaded: gradient_ratio=%.2f", demosaic_config->gradient_ratio);
+        return ESP_OK;
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+/**
+ * @brief Parse Saturation from JSON
+ *
+ * Extrait la valeur de saturation pour contrôler les couleurs
+ */
+static esp_err_t parse_saturation_from_json(cJSON *sensor_root, esp_ipa_json_saturation_config_t *saturation_config)
+{
+    cJSON *acc = cJSON_GetObjectItem(sensor_root, "acc");
+    if (!acc) {
+        ESP_LOGW(TAG, "No 'acc' section in JSON");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    cJSON *saturation = cJSON_GetObjectItem(acc, "saturation");
+    if (!saturation || !cJSON_IsArray(saturation) || cJSON_GetArraySize(saturation) == 0) {
+        ESP_LOGW(TAG, "No 'saturation' array in 'acc' section");
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Prendre la première entrée
+    cJSON *saturation_entry = cJSON_GetArrayItem(saturation, 0);
+    if (!saturation_entry) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    cJSON *color_temp = cJSON_GetObjectItem(saturation_entry, "color_temp");
+    cJSON *value = cJSON_GetObjectItem(saturation_entry, "value");
+
+    if (color_temp && value) {
+        saturation_config->color_temp = color_temp->valueint;
+        saturation_config->value = value->valueint;
+        ESP_LOGI(TAG, "Saturation loaded: value=%d", saturation_config->value);
+        return ESP_OK;
+    }
+
+    return ESP_ERR_NOT_FOUND;
+}
+
+/**
  * @brief Load IPA configuration from embedded JSON
  *
- * @param sensor_name Sensor name (e.g., "OV02C10", "OV5647")
+ * @param sensor_name Sensor name (e.g., "OV02C10", "OV5647", "SC202CS")
  * @param ipa_json_config Output structure with parsed JSON config
  * @return ESP_OK on success, error code otherwise
  */
@@ -305,8 +440,12 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         json_data = ov5647_ipa_config_json_start;
         json_size = ov5647_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV5647 JSON (%zu bytes)", json_size);
+    } else if (strcmp(sensor_name, "SC202CS") == 0 || strcmp(sensor_name, "sc202cs") == 0) {
+        json_data = sc202cs_ipa_config_json_start;
+        json_size = sc202cs_ipa_config_json_size;
+        ESP_LOGI(TAG, "Using SC202CS JSON (%zu bytes)", json_size);
     } else {
-        ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);
+        ESP_LOGE(TAG, "Unknown sensor: %s (supported: OV02C10, OV5647, SC202CS)", sensor_name);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
@@ -371,14 +510,33 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         ipa_json_config->has_contrast = true;
     }
 
+    // BF (Bilateral Filter / Denoising) - Réduit le bruit
+    if (parse_bf_from_json(sensor_root, &ipa_json_config->bf) == ESP_OK) {
+        ipa_json_config->has_bf = true;
+    }
+
+    // Demosaic - Améliore la débayerisation
+    if (parse_demosaic_from_json(sensor_root, &ipa_json_config->demosaic) == ESP_OK) {
+        ipa_json_config->has_demosaic = true;
+    }
+
+    // Saturation - Contrôle la saturation des couleurs
+    if (parse_saturation_from_json(sensor_root, &ipa_json_config->saturation) == ESP_OK) {
+        ipa_json_config->has_saturation = true;
+    }
+
     cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "IPA JSON loaded - CCM: %s, AWB: %s, Sharpen: %s, Gamma: %s",
+    ESP_LOGI(TAG, "IPA JSON loaded - CCM: %s, AWB: %s, Sharpen: %s, Gamma: %s, Contrast: %s",
              ipa_json_config->has_ccm ? "Yes" : "No",
              ipa_json_config->has_awb ? "Yes" : "No",
              ipa_json_config->has_sharpen ? "Yes" : "No",
-             ipa_json_config->has_gamma ? "Yes" : "No");
-    ESP_LOGI(TAG, "  Contrast: %s", ipa_json_config->has_contrast ? "Loaded" : "Not found");
+             ipa_json_config->has_gamma ? "Yes" : "No",
+             ipa_json_config->has_contrast ? "Yes" : "No");
+    ESP_LOGI(TAG, "  BF: %s, Demosaic: %s, Saturation: %s",
+             ipa_json_config->has_bf ? "Yes" : "No",
+             ipa_json_config->has_demosaic ? "Yes" : "No",
+             ipa_json_config->has_saturation ? "Yes" : "No");
 
     return ESP_OK;
 }
@@ -515,12 +673,76 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
         }
     }
 
+    // 6. Apply BF (Bilateral Filter / Denoising)
+    if (ipa_json_config->has_bf) {
+        esp_video_isp_bf_t bf = {
+            .enable = true,
+            .level = ipa_json_config->bf.level,
+        };
+        memcpy(bf.matrix, ipa_json_config->bf.matrix, sizeof(bf.matrix));
+
+        controls.ctrl_class = V4L2_CID_USER_CLASS;
+        controls.count = 1;
+        controls.controls = control;
+        control[0].id = V4L2_CID_USER_ESP_ISP_BF;
+        control[0].size = sizeof(esp_video_isp_bf_t);
+        control[0].ptr = &bf;
+
+        if (ioctl(isp_fd, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
+            ESP_LOGI(TAG, "  BF (Denoising) applied: level=%d", bf.level);
+            applied_count++;
+        } else {
+            ESP_LOGE(TAG, "  Failed to apply BF: errno=%d", errno);
+        }
+    }
+
+    // 7. Apply Demosaic
+    if (ipa_json_config->has_demosaic) {
+        esp_video_isp_demosaic_t demosaic = {
+            .enable = true,
+            .gradient_ratio = ipa_json_config->demosaic.gradient_ratio,
+        };
+
+        controls.ctrl_class = V4L2_CID_USER_CLASS;
+        controls.count = 1;
+        controls.controls = control;
+        control[0].id = V4L2_CID_USER_ESP_ISP_DEMOSAIC;
+        control[0].size = sizeof(esp_video_isp_demosaic_t);
+        control[0].ptr = &demosaic;
+
+        if (ioctl(isp_fd, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
+            ESP_LOGI(TAG, "  Demosaic applied: gradient_ratio=%.2f", demosaic.gradient_ratio);
+            applied_count++;
+        } else {
+            ESP_LOGE(TAG, "  Failed to apply demosaic: errno=%d", errno);
+        }
+    }
+
+    // 8. Apply Saturation
+    if (ipa_json_config->has_saturation) {
+        controls.ctrl_class = V4L2_CID_USER_CLASS;
+        controls.count = 1;
+        controls.controls = control;
+        control[0].id = V4L2_CID_SATURATION;
+        control[0].value = ipa_json_config->saturation.value;
+
+        if (ioctl(isp_fd, VIDIOC_S_EXT_CTRLS, &controls) == 0) {
+            ESP_LOGI(TAG, "  Saturation applied: %d", ipa_json_config->saturation.value);
+            applied_count++;
+        } else {
+            ESP_LOGE(TAG, "  Failed to apply saturation: errno=%d", errno);
+        }
+    }
+
     ESP_LOGI(TAG, "JSON IPA application complete: %d/%d parameters applied successfully",
              applied_count,
              (ipa_json_config->has_ccm ? 1 : 0) +
              (ipa_json_config->has_awb ? 1 : 0) +
              (ipa_json_config->has_sharpen ? 1 : 0) +
-             (ipa_json_config->has_contrast ? 1 : 0));
+             (ipa_json_config->has_contrast ? 1 : 0) +
+             (ipa_json_config->has_bf ? 1 : 0) +
+             (ipa_json_config->has_demosaic ? 1 : 0) +
+             (ipa_json_config->has_saturation ? 1 : 0));
 
     return applied_count > 0 ? ESP_OK : ret;
 }

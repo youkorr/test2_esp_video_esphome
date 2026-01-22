@@ -206,9 +206,82 @@ else:
 print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx removed)")
 
 # ========================================================================
-# Audio codec library - REMOVED (not working)
+# Audio codec library (AAC decoder)
 # ========================================================================
-# esp_audio_codec has been removed because it does not work properly
-print("[Simple Video Player] Audio codec disabled (esp_audio_codec removed)")
+# esp_audio_codec is available in /components/esp_audio_codec
+# Try multiple locations (external build dir, then source project dir)
+esp_audio_codec_dir = None
+
+# Try location 1: parent_components_dir (external build directory)
+candidate = os.path.join(parent_components_dir, "esp_audio_codec")
+if os.path.exists(candidate):
+    esp_audio_codec_dir = candidate
+    print(f"[Simple Video Player] Found esp_audio_codec in external build: {candidate}")
+
+# Try location 2: Navigate up from script_dir to find project root
+if not esp_audio_codec_dir:
+    # script_dir is usually .../components/simple_video_player
+    # Go up 2 levels to get project root, then components/esp_audio_codec
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    candidate = os.path.join(project_root, "components", "esp_audio_codec")
+    if os.path.exists(candidate):
+        esp_audio_codec_dir = candidate
+        print(f"[Simple Video Player] Found esp_audio_codec in project source: {candidate}")
+
+# Try location 3: Absolute fallback path (if running from known location)
+if not esp_audio_codec_dir:
+    candidate = "/home/user/test2_esp_video_esphome/components/esp_audio_codec"
+    if os.path.exists(candidate):
+        esp_audio_codec_dir = candidate
+        print(f"[Simple Video Player] Found esp_audio_codec in fallback path: {candidate}")
+
+if esp_audio_codec_dir:
+    print("[Simple Video Player] AAC audio codec ENABLED (USE_ESP_AUDIO_CODEC=1)")
+
+    # Add esp_audio_codec include paths
+    audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
+    if os.path.exists(audio_codec_inc):
+        env.Append(CPPPATH=[audio_codec_inc])
+        print(f"[Simple Video Player] Added esp_audio_codec include path: {audio_codec_inc}")
+        # Also add decoder subdirectory for esp_audio_dec_reg.h
+        audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
+        if os.path.exists(audio_codec_dec_inc):
+            env.Append(CPPPATH=[audio_codec_dec_inc])
+            print(f"[Simple Video Player] Added esp_audio_codec decoder include path: {audio_codec_dec_inc}")
+
+    # Compile C source files (codec registration)
+    audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")
+    if os.path.exists(audio_codec_src_dir):
+        src_files = ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]
+        for src_file in src_files:
+            src_path = os.path.join(audio_codec_src_dir, src_file)
+            if os.path.exists(src_path):
+                env.StaticObject(src_path)
+                print(f"[Simple Video Player] Compiling {src_file}")
+
+    # Link esp_audio_codec library for ESP32-P4
+    audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+    if os.path.exists(audio_codec_lib_dir):
+        env.Append(LIBPATH=[audio_codec_lib_dir])
+
+        # Link AAC decoder library
+        aac_lib = os.path.join(audio_codec_lib_dir, "libesp_audio_codec.a")
+        if os.path.exists(aac_lib):
+            lib_size_kb = os.path.getsize(aac_lib) / 1024
+            print(f"[Simple Video Player] ========================================")
+            print(f"[Simple Video Player] Using esp_audio_codec library")
+            print(f"[Simple Video Player]   Path: {aac_lib}")
+            print(f"[Simple Video Player]   Size: {lib_size_kb:.1f} KB")
+            print(f"[Simple Video Player]   Codecs: AAC-LC, AAC-HE, AAC-HEv2")
+            print(f"[Simple Video Player] ========================================")
+
+            env.Append(LINKFLAGS=[aac_lib])
+            print(f"[Simple Video Player] Linked esp_audio_codec library")
+        else:
+            print(f"[Simple Video Player]  WARNING: libesp_audio_codec.a not found in {audio_codec_lib_dir}")
+    else:
+        print(f"[Simple Video Player]  WARNING: Library directory not found: {audio_codec_lib_dir}")
+else:
+    print("[Simple Video Player]  WARNING: esp_audio_codec component not found - AAC audio disabled")
 
 print("[Simple Video Player] Build script completed")

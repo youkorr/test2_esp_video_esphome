@@ -36,8 +36,14 @@ void LVGLCameraDisplay::setup() {
     return;
   }
 
+  // Register frame callback (V4L2 Snippet #3 - automatic streaming via FreeRTOS task)
+  this->camera_->set_frame_callback([this](uint8_t* buffer, uint32_t size, uint32_t index) {
+    this->on_frame_callback_(buffer, size, index);
+  });
+
   ESP_LOGI(TAG, "LVGL Camera Display initialise (not started yet)");
   ESP_LOGI(TAG, "   Camera: Operationnelle");
+  ESP_LOGI(TAG, "   Frame callback registered with streaming task");
   ESP_LOGI(TAG, "   Update interval: %u ms (~%d FPS) via LVGL timer",
            this->update_interval_, 1000 / this->update_interval_);
   ESP_LOGI(TAG, "Turn on the 'LVGL Camera Display' switch to start");
@@ -58,6 +64,13 @@ void LVGLCameraDisplay::loop() {
   // Stop timer when disabled
   if (!this->enabled_ && this->lvgl_timer_ != nullptr) {
     ESP_LOGI(TAG, "Stopping LVGL Camera Display...");
+
+    // Release currently displayed buffer before stopping
+    if (this->displayed_buffer_ != nullptr && this->camera_ != nullptr) {
+      this->camera_->release_buffer(this->displayed_buffer_);
+      this->displayed_buffer_ = nullptr;
+    }
+
     lv_timer_del(this->lvgl_timer_);
     this->lvgl_timer_ = nullptr;
     ESP_LOGI(TAG, "LVGL Camera Display stopped");
@@ -72,6 +85,13 @@ void LVGLCameraDisplay::lvgl_timer_callback_(lv_timer_t *timer) {
   }
 }
 
+// Frame callback (called from streaming task on Core 1)
+void LVGLCameraDisplay::on_frame_callback_(uint8_t* buffer, uint32_t size, uint32_t index) {
+  // Simply signal that a new frame is ready
+  // The actual canvas update happens in update_camera_frame_() on the main thread
+  this->frame_ready_ = true;
+}
+
 // Mise a jour de la frame camera (appelee par le timer LVGL)
 void LVGLCameraDisplay::update_camera_frame_() {
   // Si la camera est en streaming, capturer ET mettre a jour le canvas
@@ -79,31 +99,24 @@ void LVGLCameraDisplay::update_camera_frame_() {
     return;
   }
 
-  // Statistiques de frames manquees
-  static uint32_t attempts = 0;
-  static uint32_t skipped = 0;
-
-  uint32_t t1 = millis();
-  bool frame_captured = this->camera_->capture_frame();
-  uint32_t t2 = millis();
-
-  attempts++;
-  if (!frame_captured) {
-    skipped++;
+  // Check if a new frame is ready (signaled by callback from streaming task)
+  if (!this->frame_ready_) {
     return;
   }
 
+  // Clear flag
+  this->frame_ready_ = false;
+
+  uint32_t t1 = millis();
   this->update_canvas_();
-  uint32_t t3 = millis();
+  uint32_t t2 = millis();
   this->frame_count_++;
 
   // Accumuler les temps pour statistiques
   static uint32_t last_time = 0;
-  static uint32_t total_capture_ms = 0;
   static uint32_t total_canvas_ms = 0;
 
-  total_capture_ms += (t2 - t1);
-  total_canvas_ms += (t3 - t2);
+  total_canvas_ms += (t2 - t1);
 
   // Logger performance toutes les 100 frames
   if (this->frame_count_ % 100 == 0) {
@@ -112,17 +125,12 @@ void LVGLCameraDisplay::update_camera_frame_() {
     if (last_time > 0) {
       float elapsed = (now_time - last_time) / 1000.0f;  // secondes
       float fps = 100.0f / elapsed;
-      float avg_capture = total_capture_ms / 100.0f;
       float avg_canvas = total_canvas_ms / 100.0f;
-      float skip_rate = (skipped * 100.0f) / attempts;
-      ESP_LOGI(TAG, "%u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
-               this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
+      ESP_LOGI(TAG, "%u frames - FPS: %.2f | canvas: %.1fms",
+               this->frame_count_, fps, avg_canvas);
     }
     last_time = now_time;
-    total_capture_ms = 0;
     total_canvas_ms = 0;
-    attempts = 0;
-    skipped = 0;
   }
 }
 

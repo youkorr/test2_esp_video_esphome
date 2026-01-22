@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2023-2025 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2023-2026 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -24,7 +24,11 @@ extern "C" {
 
 typedef enum {
     ESP_CAM_SENSOR_PIXFORMAT_RGB565 = 1,
+    ESP_CAM_SENSOR_PIXFORMAT_RGB565_LE = ESP_CAM_SENSOR_PIXFORMAT_RGB565,
+    ESP_CAM_SENSOR_PIXFORMAT_RGB565_BE,
     ESP_CAM_SENSOR_PIXFORMAT_YUV422,
+    ESP_CAM_SENSOR_PIXFORMAT_YUV422_UYVY = ESP_CAM_SENSOR_PIXFORMAT_YUV422,
+    ESP_CAM_SENSOR_PIXFORMAT_YUV422_YUYV,
     ESP_CAM_SENSOR_PIXFORMAT_YUV420,
     ESP_CAM_SENSOR_PIXFORMAT_RGB888,
     ESP_CAM_SENSOR_PIXFORMAT_RGB444,
@@ -36,7 +40,6 @@ typedef enum {
     ESP_CAM_SENSOR_PIXFORMAT_GRAYSCALE,
     ESP_CAM_SENSOR_PIXFORMAT_JPEG
 } esp_cam_sensor_output_format_t;
-
 
 typedef enum {
     ESP_CAM_SENSOR_DATA_SEQ_NONE = 0,
@@ -303,6 +306,7 @@ typedef struct _cam_sensor_spi_frame_info_t {
  */
 typedef struct {
     uint8_t rx_lines;                                 /*!< Number of SPI lines used to RX data */
+    uint32_t pclk;                                    /*!< Sensor output data clock frequency, valid when value is larger than 0 */
     const esp_cam_sensor_spi_frame_info *frame_info;  /*!< Info of the transmitted frame */
 } esp_cam_sensor_spi_info_t;
 

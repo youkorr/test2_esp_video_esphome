@@ -7,7 +7,21 @@
 #pragma once
 
 #include "h264_config.h"
-#include "h264_dma_struct.h"
+
+// CRITICAL FIX for ESPHome/PlatformIO: Ensure HAL_CONFIG_CHIP_SUPPORT_MIN_REV is defined
+#ifndef HAL_CONFIG_CHIP_SUPPORT_MIN_REV
+#define HAL_CONFIG_CHIP_SUPPORT_MIN_REV 300  // Default to rev 3.0+ for modern ESP32-P4
+#endif
+
+// For ESPHome/PlatformIO builds: Use hw_ver3 for ESP32-P4 rev 3.0+
+// For ESP-IDF builds: CMakeLists.txt adds the correct hw_verX path to includes
+#if defined(CONFIG_ESP32P4_REV_MIN_FULL) && (CONFIG_ESP32P4_REV_MIN_FULL >= 300)
+    #include "../../soc/esp32p4/hw_ver3/h264_dma_struct.h"
+#else
+    // Default to hw_ver3 for modern ESP32-P4 boards (rev 3.0+)
+    // Change to hw_ver1 if you have older revision boards (rev < 3.0)
+    #include "../../soc/esp32p4/hw_ver3/h264_dma_struct.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -350,7 +364,7 @@ static inline void h264_dma_ll_set_in5_block(h264_dma_dev_t *dma, uint32_t buf, 
     dma->dma_in_ch5.conf3.block_length_4line = H264_DMA_DB_4_LINES_ROW_LENGTH;
 }
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) >= 300
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
 
 /**
  * @brief  Set the bytes per pixel

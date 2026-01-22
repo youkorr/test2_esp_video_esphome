@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2024 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2024-2025 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -27,7 +27,6 @@ typedef struct esp_h264_param {
     uint16_t                   height;
     uint8_t                    mb_width;
     uint8_t                    mb_height;
-    uint8_t                    profile_idc;     /* H.264 profile (66=Baseline, 77=Main, 100=High, etc.) */
     uint8_t                   *nal_buf;
     uint8_t                    nal_buf_len;
     uint16_t                   nal_bit_len;
@@ -39,7 +38,48 @@ typedef struct esp_h264_param {
     h264_dma_desc_t           *dsc_db[4];
     h264_dma_desc_t           *dsc_mvm;
     esp_h264_mutex_t           mutex;
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
+    h264_dma_pbyte_t           pbyte;
+#endif
+    float                      bpp;
 } esp_h264_param_t;
+
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
+
+static h264_dma_pbyte_t esp_h264_get_pbyte_by_pic_type(esp_h264_raw_format_t pic_type)
+{
+    switch (pic_type) {
+    case ESP_H264_RAW_FMT_O_UYY_E_VYY:
+        return H264_DMA_PBYTE_1_5;
+    case ESP_H264_RAW_FMT_BGR565_BE:
+    case ESP_H264_RAW_FMT_UYVY:
+        return H264_DMA_PBYTE_2;
+    case ESP_H264_RAW_FMT_VUY:
+    case ESP_H264_RAW_FMT_BGR888:
+    default:
+        return H264_DMA_PBYTE_3;
+    }
+}
+
+static h264_ori_color_space_t esp_h264_get_color_space_by_pic_type(esp_h264_raw_format_t pic_type)
+{
+    switch (pic_type) {
+    case ESP_H264_RAW_FMT_BGR888:
+        return H264_ORI_COLOR_SPACE_RGB888;
+    case ESP_H264_RAW_FMT_BGR565_BE:
+        return H264_ORI_COLOR_SPACE_RGB565;
+    case ESP_H264_RAW_FMT_VUY:
+        return H264_ORI_COLOR_SPACE_YUV444;
+    case ESP_H264_RAW_FMT_UYVY:
+        return H264_ORI_COLOR_SPACE_YUV422;
+    case ESP_H264_RAW_FMT_O_UYY_E_VYY:
+        return H264_ORI_COLOR_SPACE_YUV420;
+    default:
+        return H264_ORI_COLOR_SPACE_INVALID;
+    }
+}
+
+#endif  /* ESP32-P4 rev 3.0+ */
 
 /** Basic parameter configure */
 static esp_h264_err_t get_res(esp_h264_enc_param_handle_t handle, esp_h264_resolution_t *res)
@@ -60,7 +100,7 @@ static esp_h264_err_t set_fps(esp_h264_enc_param_handle_t handle, uint8_t fps)
     if (param->rc_hd) {
         esp_h264_enc_hw_rc_set_bt_fps(param->rc_hd, param->bitrate, param->fps);
     }
-    esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps, param->profile_idc);
+    esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps);
     esp_h264_mutex_unlock(param->mutex);
     return ESP_H264_ERR_OK;
 }
@@ -137,8 +177,8 @@ static esp_h264_err_t set_roi_reg(esp_h264_enc_param_hw_handle_t handle, esp_h26
     ESP_H264_RET_ON_FALSE(roi_reg.reg_idx < ESP_H264_ROI_SUP_NUM, ESP_H264_ERR_ARG, TAG, "Invalid `reg_idx` parameter");
     int16_t x_size = roi_reg.len_x + roi_reg.x;
     int16_t y_size = roi_reg.len_y + roi_reg.y;
-    ESP_H264_RET_ON_FALSE(x_size <= param->mb_width, ESP_H264_ERR_ARG, TAG, "The sum of `len_x` and `x` is gather than `mb_width` ");
-    ESP_H264_RET_ON_FALSE(y_size <= param->mb_height, ESP_H264_ERR_ARG, TAG, "The sum of `len_y` and `y` is gather than `mb_height` ");
+    ESP_H264_RET_ON_FALSE(x_size <= param->mb_width, ESP_H264_ERR_ARG, TAG, "The sum of `len_x` and `x` is greater than `mb_width` ");
+    ESP_H264_RET_ON_FALSE(y_size <= param->mb_height, ESP_H264_ERR_ARG, TAG, "The sum of `len_y` and `y` is greater than `mb_height` ");
     uint8_t roi_mode = 0;
     int8_t none_roi_delta_qp = 0;
     /* Check ROI function enable*/
@@ -302,7 +342,6 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     param->qp_init = (cfg->qp_min + cfg->qp_max) >> 1;
     param->fps = cfg->fps;
     param->bitrate = cfg->bitrate;
-    param->profile_idc = (cfg->profile_idc == 0) ? 66 : cfg->profile_idc;  /* Default to Baseline (66) if not specified */
     h264_hal_set_qp(param->device, param->qp_init);
     h264_hal_get_mbres(param->device, &param->mb_width, &param->mb_height);
 
@@ -318,7 +357,7 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     param->nal_buf_len = SPS_PPS_BUF_SIZE;
     param->nal_buf = (uint8_t *)esp_h264_calloc_prefer(1, param->nal_buf_len, &actual_size, ESP_H264_MEM_INTERNAL, ESP_H264_MEM_SPIRAM);
     ESP_H264_GOTO_ON_FALSE(param->nal_buf, ESP_H264_ERR_MEM, __exit__, TAG, "No memory for NAL");
-    param->nal_bit_len = esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps, param->profile_idc);
+    param->nal_bit_len = esp_h264_enc_set_sps(param->nal_buf, param->nal_buf_len, param->height, param->width, param->fps);
     param->nal_bit_len += esp_h264_enc_set_pps(param->nal_buf + (param->nal_bit_len >> 3), param->nal_buf_len - (param->nal_bit_len >> 3), param->qp_init, true);
 
     /** Allocated reference frame and DB memory */
@@ -340,6 +379,14 @@ esp_h264_err_t esp_h264_enc_hw_new_param(esp_h264_enc_hw_param_cfg_t *cfg, esp_h
     /** Create MUTEX */
     param->mutex = xSemaphoreCreateMutex();
     ESP_H264_GOTO_ON_FALSE(param->mutex, ESP_H264_ERR_MEM, __exit__, TAG, "No memory for mutex semaphore");
+
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
+    /** Set the picture type */
+    h264_hal_set_ori_color_space(param->device, esp_h264_get_color_space_by_pic_type(cfg->pic_type));
+    param->pbyte = esp_h264_get_pbyte_by_pic_type(cfg->pic_type);
+#endif
+    /** Get the bits per pixel */
+    param->bpp = ESP_H264_GET_BPP_BY_PIC_TYPE(cfg->pic_type);
 
     /** Encoder handle configure */
     param->hw_base.base.get_res = get_res;
@@ -414,7 +461,8 @@ esp_h264_err_t esp_h264_enc_hw_cfg_dma_db_ref(esp_h264_enc_param_hw_handle_t han
 esp_h264_err_t esp_h264_enc_hw_cfg_dma_yuv_bs(esp_h264_enc_param_hw_handle_t handle, h264_dma_hal_context_t *dma2d_hal, h264_dma_desc_t *dsc_yuv, uint8_t *buf_yuv, h264_dma_desc_t *dsc_bs, uint8_t *buf_bs, uint32_t buf_bs_len)
 {
     esp_h264_param_t *param = __containerof(handle, esp_h264_param_t, hw_base);
-    cfg_dsc(dsc_yuv, H264_DMA_2D_ENABLE, H264_DMA_MODE1, H264_DMA_MACRO_SIZE, H264_DMA_MACRO_SIZE * H264_DMA_4_LINES, H264_DMA_EOF_CONTINUE, H264_DMA_OWNER_H264,
+    float hb = 96  / param->bpp;
+    cfg_dsc(dsc_yuv, H264_DMA_2D_ENABLE, H264_DMA_MODE1, H264_DMA_MACRO_SIZE, (int)hb, H264_DMA_EOF_CONTINUE, H264_DMA_OWNER_H264,
             param->height, param->width, buf_yuv, NULL);
     h264_dma_hal_cfg_yuv_dsc(dma2d_hal, (uint32_t)dsc_yuv);
     cfg_dsc(dsc_bs, H264_DMA_2D_DISABLE, H264_DMA_MODE0, buf_bs_len & H264_DMA_MAX_SIZE, 0, H264_DMA_EOF_END, H264_DMA_OWNER_H264, (buf_bs_len >> H264_DMA_SIZE_BIT),
@@ -480,6 +528,14 @@ esp_h264_err_t esp_h264_enc_hw_get_mbres(esp_h264_enc_param_hw_handle_t handle, 
     h264_hal_get_mbres(param->device, out_mb_width, out_mb_height);
     return ESP_H264_ERR_OK;
 }
+
+#if 1  // ESP32-P4 rev 3.0+ (ESPHome forced)
+void esp_h264_enc_hw_set_pbyte(esp_h264_enc_param_hw_handle_t handle, h264_dma_hal_context_t *dma2d_hal)
+{
+    esp_h264_param_t *param = __containerof(handle, esp_h264_param_t, hw_base);
+    h264_dma_hal_set_pbyte(dma2d_hal, param->pbyte);
+}
+#endif
 
 esp_h264_err_t esp_h264_enc_hw_res_check(uint16_t width, uint16_t height)
 {

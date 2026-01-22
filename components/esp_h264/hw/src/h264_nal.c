@@ -128,7 +128,7 @@ static int nal_bs_size(bs_t *b)
     return bits_len;
 }
 
-uint16_t esp_h264_enc_set_sps(uint8_t *buffer, uint16_t len, uint16_t height, uint16_t width, uint8_t fps, uint8_t profile_idc)
+uint16_t esp_h264_enc_set_sps(uint8_t *buffer, uint16_t len, uint16_t height, uint16_t width, uint8_t fps)
 {
     uint32_t *start_code = (uint32_t *)buffer;
     start_code[0] = 0x01000000;
@@ -142,17 +142,13 @@ uint16_t esp_h264_enc_set_sps(uint8_t *buffer, uint16_t len, uint16_t height, ui
     uint8_t forbidden_zero_bit = 0;
     uint8_t nal_ref_idc = 3;
     uint8_t nal_unit_type = 7;
-    /* profile_idc is now a parameter - default to Baseline (66) if not specified (0) */
-    if (profile_idc == 0) {
-        profile_idc = 66;  /* Default to Baseline profile */
-    }
-    /* Constraint flags vary by profile - set defaults based on profile_idc */
-    uint8_t constraint_set0_flag = (profile_idc == 66) ? 1 : 0;  /* Baseline constraint */
-    uint8_t constraint_set1_flag = (profile_idc <= 77) ? 1 : 0;  /* Main constraint */
-    uint8_t constraint_set2_flag = 0;  /* Extended constraint */
-    uint8_t constraint_set3_flag = 0;  /* Level 1b constraint */
-    uint8_t constraint_set4_flag = 0;  /* Reserved */
-    uint8_t constraint_set5_flag = 0;  /* Reserved */
+    uint8_t profile_idc = 66;
+    uint8_t constraint_set0_flag = 1;
+    uint8_t constraint_set1_flag = 1;
+    uint8_t constraint_set2_flag = 0;
+    uint8_t constraint_set3_flag = 0;
+    uint8_t constraint_set4_flag = 0;
+    uint8_t constraint_set5_flag = 0;
     uint8_t reserved_zero_2bits = 0;
     uint8_t level_idc = level_idcl(width, height, fps);
     uint8_t seq_parameter_set_id = 0;

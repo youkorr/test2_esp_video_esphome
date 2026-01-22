@@ -5,6 +5,7 @@ from esphome import automation
 from esphome.components import speaker
 
 DEPENDENCIES = ["lvgl"]
+# AUTO_LOAD = ["esp_audio_codec"]  # Disabled - causes issues with external repos
 CODEOWNERS = ["@youkorr"]
 
 simple_video_player_ns = cg.esphome_ns.namespace("simple_video_player")
@@ -80,12 +81,12 @@ async def to_code(config):
     if CONF_MEDIA_PLAYER_ENTITY in config:
         cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
 
-    # esp_audio_codec has been removed (not working)
+    # esp_audio_codec is now ENABLED (USE_ESP_AUDIO_CODEC=1)
     import os
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
-    # Add build script for linking H264 and audio codec libraries
+    # Add build script for linking H264 and AAC audio codec libraries
     # AND compiling additional source files
     build_script_path = os.path.join(component_dir, "simple_video_player_build.py")
     if os.path.exists(build_script_path):
@@ -104,6 +105,20 @@ async def to_code(config):
         for inc_path in h264_inc_paths:
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
+
+    # esp_audio_codec - AAC audio decoder
+    # Include paths and library linking are handled in simple_video_player_build.py
+    # This ensures proper timing and avoids conflicts with ESPHome's build system
+    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(esp_audio_codec_dir):
+        # Add include paths for AAC decoder headers (early, before compilation)
+        audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
+        if os.path.exists(audio_codec_inc):
+            cg.add_platformio_option("build_flags", [f"-I{audio_codec_inc}"])
+            # Also add decoder subdirectory for esp_audio_dec_reg.h
+            audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
+            if os.path.exists(audio_codec_dec_inc):
+                cg.add_platformio_option("build_flags", [f"-I{audio_codec_dec_inc}"])
 
     # esp_image_effects (esp_imgfx) - only used for hardware rotation
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")

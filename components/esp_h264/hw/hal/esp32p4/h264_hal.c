@@ -179,7 +179,7 @@ bool h264_hal_get_roi_mode(esp_h264_set_dev_t device, uint8_t *roi_mode, int8_t 
     return false;
 }
 
-#if HAL_CONFIG(CHIP_SUPPORT_MIN_REV) < 300
+#if 0  // Disabled for ESP32-P4 rev 3.0+ (ESPHome forced)
 
 bool h264_hal_get_bs_bit_overflow(h264_hal_context_t *hal)
 {

@@ -85,6 +85,10 @@ class MipiDSICamComponent : public Component {
   void stop_streaming();
   bool capture_frame();
 
+  // Frame callback system (V4L2 Snippet #3 - automatic streaming via FreeRTOS task)
+  using FrameCallback = std::function<void(uint8_t* buffer, uint32_t size, uint32_t index)>;
+  void set_frame_callback(FrameCallback cb) { frame_callback_ = cb; }
+
   // Buffer pool APIs (thread-safe, zero-tearing)
   SimpleBufferElement* acquire_buffer();  // Acquiert buffer pour affichage (doit être libéré)
   void release_buffer(SimpleBufferElement *element);  // Libère buffer après affichage
@@ -221,6 +225,18 @@ class MipiDSICamComponent : public Component {
   int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames
   int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
 
+  // FreeRTOS streaming task (V4L2 Snippet #3 - Waveshare fork pattern)
+  TaskHandle_t stream_task_handle_{nullptr};
+  EventGroupHandle_t stream_event_group_{nullptr};
+  static constexpr EventBits_t STREAM_START_BIT = (1 << 0);
+  static constexpr EventBits_t STREAM_STOP_BIT = (1 << 1);
+  static constexpr int STREAM_TASK_STACK_SIZE = 4 * 1024;
+  static constexpr int STREAM_TASK_PRIORITY = 5;
+  static constexpr int STREAM_TASK_CORE = 1;  // Core 1 (WiFi on Core 0)
+
+  // Frame callback for lvgl_camera_display (called from stream task)
+  FrameCallback frame_callback_;
+
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
   SimpleBufferElement simple_buffers_[3];  // Triple buffering
   int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
@@ -244,6 +260,10 @@ class MipiDSICamComponent : public Component {
   bool init_ppa_();
   bool apply_ppa_transform_(uint8_t *src_buffer, uint8_t *dst_buffer);
   void cleanup_ppa_();
+
+  // FreeRTOS streaming task (V4L2 Snippet #3)
+  static void stream_task_static_(void *arg);
+  void stream_task_();
 };
 
 using MipiDsiCam = MipiDSICamComponent;

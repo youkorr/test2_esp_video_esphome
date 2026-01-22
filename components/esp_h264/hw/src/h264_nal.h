@@ -16,17 +16,16 @@ extern "C" {
 /**
  * @brief  Configure sequence parameter set (SPS)
  *
- * @param  buffer      The address is to save network abstract layer(NAL) header + SPS
- * @param  len         The length of `buffer`
- * @param  height      Height of picture
- * @param  width       Width of picture
- * @param  fps         Frame per second
- * @param  profile_idc H.264 profile (66=Baseline, 77=Main, 100=High, etc.)
+ * @param  buffer  The address is to save network abstract layer(NAL) header + SPS
+ * @param  len     The length of `buffer`
+ * @param  height  Height of picture
+ * @param  width   Width of picture
+ * @param  fps     Frame per second
  *
  * @return
  *       - The bit length of SPS
  */
-uint16_t esp_h264_enc_set_sps(uint8_t *buffer, uint16_t len, uint16_t height, uint16_t width, uint8_t fps, uint8_t profile_idc);
+uint16_t esp_h264_enc_set_sps(uint8_t *buffer, uint16_t len, uint16_t height, uint16_t width, uint8_t fps);
 
 /**
  * @brief  Configure picture parameter set (PPS)

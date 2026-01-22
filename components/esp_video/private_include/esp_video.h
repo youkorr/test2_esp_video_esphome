@@ -73,6 +73,8 @@ struct esp_video {
     portMUX_TYPE stream_lock;               /*!< Stream list lock */
     struct esp_video_stream *stream;        /*!< Video device stream, capture-only or output-only device has 1 stream, M2M device has 2 streams */
 
+    TickType_t dqbuf_timeout_ticks;         /*!< Video device DQBUF timeout ticks */
+
     SemaphoreHandle_t mutex;                /*!< Video device mutex lock */
     uint8_t reference;                      /*!< video device open reference count */
 
@@ -698,6 +700,42 @@ esp_err_t esp_video_enum_framesizes(struct esp_video *video, struct v4l2_frmsize
  *      - ESP_OK on success or others if failed
  */
 esp_err_t esp_video_enum_frameintervals(struct esp_video *video, struct v4l2_frmivalenum *frmival);
+
+/**
+ * @brief Configure video stream buffer by given V4L2 format
+ *
+ * @param video     Video object
+ * @param format    Video format pointer
+ * @param frame_caps Frame buffer capabilities
+ *
+ * @return ESP_OK on success or others if failed
+ */
+esp_err_t esp_video_config_buffer(struct esp_video *video, const struct v4l2_format *format, uint32_t frame_caps);
+
+/**
+ * @brief Set DQBUF timeout
+ *
+ * @param video     Video object
+ * @param timeout   Timeout value, consider the FreeRTOS total timeout limit is portMAX_DELAY, so the too
+ *                  long timeout value will be treated as portMAX_DELAY
+ *
+ * @return
+ *      - ESP_OK on success
+ *      - Others if failed
+ */
+esp_err_t esp_video_set_dqbuf_timeout(struct esp_video *video, const struct timeval *timeout);
+
+/**
+ * @brief Get DQBUF timeout
+ *
+ * @param video     Video object
+ * @param timeout   Timeout value
+ *
+ * @return
+ *      - ESP_OK on success
+ *      - Others if failed
+ */
+esp_err_t esp_video_get_dqbuf_timeout(struct esp_video *video, struct timeval *timeout);
 
 #ifdef __cplusplus
 }

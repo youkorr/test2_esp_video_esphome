@@ -121,13 +121,13 @@ esp_h264_sources = [
     "hw/src/h264_rc.c",                    # Rate control
     "hw/hal/esp32p4/h264_hal.c",           # HAL H.264 pour ESP32-P4
     "hw/hal/esp32p4/h264_dma_hal.c",       # HAL DMA H.264
-    "interface/include/src/esp_h264_enc_param.c",
-    "interface/include/src/esp_h264_enc_param_hw.c",
-    "interface/include/src/esp_h264_enc_dual.c",
-    "interface/include/src/esp_h264_dec_param.c",
-    "interface/include/src/esp_h264_version.c",
-    "interface/include/src/esp_h264_dec.c",
-    "interface/include/src/esp_h264_enc_single.c",
+    "interface/src/esp_h264_enc_param.c",
+    "interface/src/esp_h264_enc_param_hw.c",
+    "interface/src/esp_h264_enc_dual.c",
+    "interface/src/esp_h264_dec_param.c",
+    "interface/src/esp_h264_version.c",
+    "interface/src/esp_h264_dec.c",
+    "interface/src/esp_h264_enc_single.c",
 ]
 
 if os.path.exists(esp_h264_dir):
@@ -248,9 +248,10 @@ if os.path.exists(esp_h264_dir):
 # ========================================================================
 esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
 esp_ipa_sources = [
-    "src/version.c",              # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
-    "src/esp_ipa_detect_stubs.c", # Detection array
-    "src/esp_ipa_json_loader.c",  # JSON IPA parser pour charger configs OV02C10/OV5647
+    "src/version.c",                       # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
+    "src/esp_ipa_detect_stubs.c",          # Detection array
+    "src/esp_ipa_json_loader.c",           # JSON IPA parser pour charger configs OV02C10/OV5647
+    "src/esp_ipa_pipeline_get_config.c",   # Pipeline stub (returns NULL - use JSON loader instead)
 ]
 
 # print("")
@@ -312,6 +313,10 @@ json_files_to_embed = [
     {
         "path": os.path.join(esp_cam_sensor_dir, "sensor/ov02c10/cfg/ov02c10_default.json"),
         "symbol": "ov02c10_ipa_config_json",
+    },
+    {
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/sc202cs/cfg/sc202cs_default.json"),
+        "symbol": "sc202cs_ipa_config_json",
     },
 ]
 

@@ -48,9 +48,9 @@ esp_h264_err_t esp_h264_enc_get_resolution(esp_h264_enc_param_handle_t handle, e
  * @brief  This function sets the frames per second (FPS) parameter for the H.264 encoder
  *
  * @note  The higher FPS, the more coherent and realistic the video.
- *        When FPS is gather than 24, the general video seems coherent.
- *        When FPS is gather than 30, the game video seems coherent.
- *        When FPS is gather than 75, increase FPS, the video fluency improve isn't obvious.
+ *        When FPS is greater than 24, the general video seems coherent.
+ *        When FPS is greater than 30, the game video seems coherent.
+ *        When FPS is greater than 75, increase FPS, the video fluency improvement isn't obvious.
  *        Ensure the `fps` value is within the range of 1 to 255.
  *        This function may return ESP_H264_ERR_ARG if `fps` value is out of range.
  *
@@ -133,6 +133,18 @@ esp_h264_err_t esp_h264_enc_set_bitrate(esp_h264_enc_param_handle_t handle, uint
  *       - ESP_H264_ERR_UNSUPPORTED  Get bitrate feature is not supported by the encoder
  */
 esp_h264_err_t esp_h264_enc_get_bitrate(esp_h264_enc_param_handle_t handle, uint32_t *out_bitrate);
+
+/**
+ * @brief  This function is used to retrieve the bits per pixel from the encoder
+ *
+ * @param[in]   handle       It is a pointer to the H.264 encoding parameters structure
+ * @param[out]  out_bpp      Pointer to a variable to store the retrieved bits per pixel value
+ *
+ * @return
+ *       - ESP_H264_ERR_OK           Succeeded
+ *       - ESP_H264_ERR_ARG          Invalid arguments passed
+ */
+esp_h264_err_t esp_h264_enc_get_bpp(esp_h264_enc_param_handle_t handle, float *out_bpp);
 
 #ifdef __cplusplus
 }
