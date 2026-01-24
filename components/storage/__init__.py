@@ -39,6 +39,7 @@ CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
 CONF_AUTO_LOAD = "auto_load"  # Uniquement pour sd_images, pas pour storage
+CONF_FREE_AFTER_DRAW = "free_after_draw"  # Libère la PSRAM après draw_to_canvas() (wallpapers statiques)
 
 # LVGL Advanced Decoders Configuration (fusionné de lvgl_advanced_features)
 CONF_DECODERS = "decoders"
@@ -88,6 +89,7 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
         cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,  # auto_load SEULEMENT pour les sd_images
+        cv.Optional(CONF_FREE_AFTER_DRAW, default=False): cv.boolean,  # Libère PSRAM après affichage (wallpapers)
     }
 )
 
@@ -310,7 +312,10 @@ async def setup_sd_image_component(config, parent_storage):
     
     # Configuration auto_load - SEULEMENT pour les sd_images
     cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
-    
+
+    # Configuration free_after_draw - Libère PSRAM après affichage (wallpapers statiques)
+    cg.add(var.set_free_after_draw(config[CONF_FREE_AFTER_DRAW]))
+
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
     

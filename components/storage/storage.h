@@ -108,6 +108,7 @@ class SdImageComponent : public Component, public image::Image {
   }
   void set_format(ImageFormat format) { this->format_ = format; }
   void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
+  void set_free_after_draw(bool free_after_draw) { this->free_after_draw_ = free_after_draw; }
   
   // Compatibility methods for YAML configuration
   void set_output_format_string(const std::string &format);
@@ -170,6 +171,8 @@ class SdImageComponent : public Component, public image::Image {
   std::vector<uint8_t> image_buffer_;
   bool image_loaded_{false};
   bool auto_load_{true};
+  bool free_after_draw_{false};  // Libère automatiquement la PSRAM après draw_to_canvas() (pour wallpapers statiques)
+  uint32_t pending_unload_time_{0};  // Timestamp pour libération différée (évite crash pendant rendering LVGL)
 
   // Image properties - locales
   int image_width_{0};

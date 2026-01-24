@@ -167,6 +167,13 @@ void SdImageComponent::setup() {
 }
 
 void SdImageComponent::loop() {
+  // CRITICAL: Libération différée de la PSRAM si programmée (évite crash pendant rendering LVGL)
+  if (this->pending_unload_time_ > 0 && millis() >= this->pending_unload_time_) {
+    ESP_LOGI(TAG_IMAGE, "Unloading image (delayed free_after_draw)");
+    this->unload_image();
+    this->pending_unload_time_ = 0;  // Reset
+  }
+
   // Handle GIF animation
   if (!this->is_gif_animated_ || this->gif_frames_.empty()) {
     return;  // Not an animated GIF or no frames
@@ -374,6 +381,12 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
 
   // Invalidate canvas to trigger redraw
   lv_obj_invalidate(canvas);
+
+  // CRITICAL: Programmer la libération de la PSRAM après un délai (pour éviter crash pendant rendering LVGL)
+  if (this->free_after_draw_ && !this->is_gif_animated_ && this->image_loaded_) {
+    ESP_LOGI(TAG_IMAGE, "Scheduling PSRAM release after draw (will free in 100ms to allow LVGL rendering)");
+    this->pending_unload_time_ = millis() + 100;  // Libérer dans 100ms
+  }
 }
 
 bool SdImageComponent::update_canvas_animation(lv_obj_t *canvas, int x, int y) {
@@ -591,6 +604,9 @@ void SdImageComponent::unload_image() {
   this->height_ = 0;
   this->data_start_ = nullptr;
   this->bpp_ = 0;
+
+  // Reset pending unload timer
+  this->pending_unload_time_ = 0;
 
   ESP_LOGD(TAG_IMAGE, "Image unloaded - PSRAM freed successfully");
 }
