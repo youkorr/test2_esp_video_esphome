@@ -529,7 +529,9 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
       full_refresh_(full_refresh),
       resume_on_input_(resume_on_input),
       update_when_display_idle_(update_when_display_idle) {
-  this->disp_ = lv_display_create(240, 240);
+  // Display creation moved to setup() to use correct dimensions from the start.
+  // In LVGL 9.4, creating a display with incorrect dimensions (240x240) and then
+  // changing resolution causes lv_display_set_buffers() to hang in PARTIAL mode.
 }
 
 void LvglComponent::setup() {
@@ -540,6 +542,13 @@ void LvglComponent::setup() {
   this->height_ = display->get_height();
   auto width = (display->get_width() + rounding - 1) / rounding * rounding;
   auto height = (display->get_height() + rounding - 1) / rounding * rounding;
+
+  // LVGL 9.4 fix: Create display with correct dimensions from the start.
+  // Creating with wrong dimensions (e.g., 240x240) and then calling
+  // lv_display_set_resolution() causes lv_display_set_buffers() to hang
+  // when using LV_DISPLAY_RENDER_MODE_PARTIAL.
+  this->disp_ = lv_display_create(this->width_, this->height_);
+
   auto frac = this->buffer_frac_;
   if (frac == 0)
     frac = 1;
@@ -562,7 +571,7 @@ void LvglComponent::setup() {
     return;
   }
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
-  lv_display_set_resolution(this->disp_, this->width_, this->height_);
+  // No need to call lv_display_set_resolution() - display already has correct dimensions
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
   lv_display_set_user_data(this->disp_, this);
