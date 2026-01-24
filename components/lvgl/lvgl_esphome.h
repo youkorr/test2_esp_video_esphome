@@ -20,6 +20,10 @@
 #include "esphome/components/display/display_color_utils.h"
 #include "esphome/core/component.h"
 
+#ifdef USE_ESP_IDF
+#include "esp_task_wdt.h"
+#endif
+
 #include <list>
 #include <lvgl.h>
 #include <map>

@@ -129,7 +129,27 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 
 void LvglComponent::esphome_lvgl_init() {
   lv_init();
-  lv_tick_set_cb([] { return millis(); });
+
+  // Custom tick callback that feeds watchdog periodically during LVGL operations
+  lv_tick_set_cb([] {
+    static uint32_t last_wdt_feed = 0;
+    uint32_t now = millis();
+
+    // Feed watchdog every 100ms during LVGL processing to prevent timeout
+    // This is critical for LVGL 9.4 with complex UIs (images, fonts, widgets)
+    // that can take several seconds to render on first boot
+    if (now - last_wdt_feed >= 100) {
+#ifdef USE_ESP_IDF
+      // Use ESP-IDF watchdog reset directly for reliability
+      esp_task_wdt_reset();
+#endif
+      App.feed_wdt();
+      last_wdt_feed = now;
+    }
+
+    return now;
+  });
+
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
 }
@@ -612,12 +632,18 @@ void LvglComponent::setup() {
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
 
   // Feed watchdog before showing first page (which may trigger initial render)
+#ifdef USE_ESP_IDF
+  esp_task_wdt_reset();
+#endif
   App.feed_wdt();
 
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
 
   // Feed watchdog after initial page setup
+#ifdef USE_ESP_IDF
+  esp_task_wdt_reset();
+#endif
   App.feed_wdt();
 }
 
