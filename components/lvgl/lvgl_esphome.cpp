@@ -537,34 +537,27 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
 void LvglComponent::setup() {
   auto *display = this->displays_[0];
   auto rounding = this->draw_rounding;
-  // cater for displays with dimensions that don't divide by the required rounding
   this->width_ = display->get_width();
   this->height_ = display->get_height();
   auto width = (display->get_width() + rounding - 1) / rounding * rounding;
   auto height = (display->get_height() + rounding - 1) / rounding * rounding;
 
-  ESP_LOGI(TAG, "LVGL setup: display dimensions %d x %d, rounded %d x %d",
-           this->width_, this->height_, width, height);
+  ESP_LOGI(TAG, "LVGL setup: %dx%d, buf_frac=%zu", this->width_, this->height_, this->buffer_frac_);
 
-  // LVGL 9.4 fix: Create display with correct dimensions from the start.
-  // Creating with wrong dimensions (e.g., 240x240) and then calling
-  // lv_display_set_resolution() causes lv_display_set_buffers() to hang
-  // when using LV_DISPLAY_RENDER_MODE_PARTIAL.
+  // Step 1: Create display with correct dimensions (LVGL 9.4)
   this->disp_ = lv_display_create(this->width_, this->height_);
-  ESP_LOGD(TAG, "LVGL display created");
 
+  // Step 2: Allocate draw buffer
   auto frac = this->buffer_frac_;
   if (frac == 0)
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
-  ESP_LOGD(TAG, "Buffer size: %zu bytes (frac=%zu)", buf_bytes, frac);
 
   void *buffer = nullptr;
   if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
     buffer = malloc(buf_bytes);  // NOLINT
   if (buffer == nullptr)
     buffer = lv_malloc_core(buf_bytes);  // NOLINT
-  // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
     buf_bytes /= MIN_BUFFER_FRAC;
@@ -576,27 +569,17 @@ void LvglComponent::setup() {
     this->mark_failed();
     return;
   }
-  ESP_LOGD(TAG, "Buffer allocated at %p", buffer);
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
+  ESP_LOGI(TAG, "Buffer: %zu bytes at %p", buf_bytes, buffer);
 
-  // LVGL 9.4: Set up display properties and buffers in correct order
-  lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-  ESP_LOGD(TAG, "Color format set");
-  lv_display_set_flush_cb(this->disp_, static_flush_cb);
-  ESP_LOGD(TAG, "Flush callback set");
+  // Step 3: Configure display (LVGL 9.4 order: buffers -> flush_cb)
   lv_display_set_user_data(this->disp_, this);
-  ESP_LOGD(TAG, "User data set");
-
-  // LVGL 9.4: Set buffers BEFORE adding event callbacks to avoid issues
-  ESP_LOGD(TAG, "Setting buffers (mode=%s)...",
-           this->full_refresh_ ? "FULL" : "PARTIAL");
   lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
                          this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
-  ESP_LOGD(TAG, "Buffers set successfully");
+  lv_display_set_flush_cb(this->disp_, static_flush_cb);
 
-  // Add event callbacks AFTER buffers are configured
+  // Step 4: Add rounder callback for partial refresh alignment
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
-  ESP_LOGD(TAG, "Rounder callback added");
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
