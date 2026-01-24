@@ -558,6 +558,20 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
 
 void LvglComponent::setup() {
   ESP_LOGI(TAG, "========== LVGL SETUP STARTED ==========");
+
+#ifdef USE_ESP_IDF
+  // CRITICAL: Increase watchdog timeout IMMEDIATELY at start of setup()
+  // Memory allocation (malloc/lv_malloc_core) can take 90+ seconds on first boot
+  ESP_LOGI(TAG, "Increasing watchdog timeout to 120 seconds for setup (memory allocation + render)");
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 120000,  // 120 seconds for entire setup
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
+  esp_task_wdt_reset();
+#endif
+
   // Feed watchdog at start of setup
   App.feed_wdt();
 
@@ -574,11 +588,18 @@ void LvglComponent::setup() {
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
 
+  ESP_LOGI(TAG, "Allocating LVGL buffer: %zu bytes (%dx%d, %d%% of screen)",
+           buf_bytes, width, height, (int)(100 / frac));
+
   // Feed watchdog before potentially long PSRAM allocation
   App.feed_wdt();
 
+  auto alloc_start = millis();
   if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
     buffer = malloc(buf_bytes);  // NOLINT
+
+  auto alloc_time = millis() - alloc_start;
+  ESP_LOGI(TAG, "malloc() took %u ms, result: %s", (unsigned)alloc_time, buffer ? "SUCCESS" : "NULL");
   if (buffer == nullptr)
     buffer = lv_malloc_core(buf_bytes);  // NOLINT
   // if specific buffer size not set and can't get 100%, try for a smaller one
@@ -632,19 +653,7 @@ void LvglComponent::setup() {
   for (auto *disp : this->displays_)
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
 
-#ifdef USE_ESP_IDF
-  // CRITICAL: Increase watchdog timeout BEFORE first page render
-  // show_page() below will trigger LVGL rendering which can take 30+ seconds
-  // with complex UIs loaded from SD card (images, fonts, widgets)
-  ESP_LOGI(TAG, "Increasing watchdog timeout to 60 seconds for initial LVGL render");
-  esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 60000,  // 60 seconds for initial render in setup()
-      .idle_core_mask = 0,
-      .trigger_panic = true,
-  };
-  esp_task_wdt_reconfigure(&wdt_config);
-  esp_task_wdt_reset();
-#endif
+  ESP_LOGI(TAG, "About to show first page - this may take time with complex UI");
 
   // Feed watchdog before showing first page (which triggers initial render)
 #ifdef USE_ESP_IDF
@@ -655,6 +664,8 @@ void LvglComponent::setup() {
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
 
+  ESP_LOGI(TAG, "========== LVGL SETUP COMPLETED ==========");
+
   // Feed watchdog after initial page setup
 #ifdef USE_ESP_IDF
   esp_task_wdt_reset();
@@ -662,10 +673,14 @@ void LvglComponent::setup() {
   App.feed_wdt();
 
 #ifdef USE_ESP_IDF
-  // Restore normal watchdog timeout after initial render
-  ESP_LOGI(TAG, "Initial LVGL render complete - restoring watchdog timeout to 5 seconds");
-  wdt_config.timeout_ms = 5000;
-  esp_task_wdt_reconfigure(&wdt_config);
+  // Restore normal watchdog timeout after setup complete
+  ESP_LOGI(TAG, "Setup complete - restoring watchdog timeout to 5 seconds");
+  esp_task_wdt_config_t wdt_normal = {
+      .timeout_ms = 5000,  // Back to normal
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdt_normal);
   esp_task_wdt_reset();
 #endif
 }
