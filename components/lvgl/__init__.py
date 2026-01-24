@@ -217,8 +217,7 @@ async def to_code(configs):
     # suppress default enabling of extra widgets
     df.add_define("_LV_KCONFIG_PRESENT")
     # Always enable - lots of things use it.
-    df.add_define("LV_DRAW_COMPLEX", "1")
-    df.add_define("LV_DRAW_BUF_ALIGN", "1")
+    df.add_define("LV_DRAW_BUF_ALIGN", "64")  # ESP32-P4 requires 64-byte alignment for PSRAM/cache
     df.add_define("LV_USE_STDLIB_MALLOC", "LV_STDLIB_CUSTOM")
 
     # ============================================
