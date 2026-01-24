@@ -636,28 +636,49 @@ void LvglComponent::setup() {
     return;
   }
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
+
+  ESP_LOGI(TAG, "Setting display resolution: %dx%d", this->width_, this->height_);
   lv_display_set_resolution(this->disp_, this->width_, this->height_);
+
+  ESP_LOGI(TAG, "Setting color format: RGB565");
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
+
+  ESP_LOGI(TAG, "Setting flush callback");
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
+
+  ESP_LOGI(TAG, "Setting user data");
   lv_display_set_user_data(this->disp_, this);
+
+  ESP_LOGI(TAG, "Adding rounder event callback");
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
+
+  ESP_LOGI(TAG, "Setting display buffers (buf_bytes=%zu)", buf_bytes);
   lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
                          this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
+  ESP_LOGI(TAG, "Display buffer configured successfully");
+
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
+    ESP_LOGI(TAG, "Allocating rotation buffer for rotation: %d", this->rotation);
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
     if (this->rotate_buf_ == nullptr) {
       this->status_set_error(LOG_STR("Memory allocation failure"));
       this->mark_failed();
       return;
     }
+    ESP_LOGI(TAG, "Rotation buffer allocated");
   }
+
   if (this->draw_start_callback_ != nullptr) {
+    ESP_LOGI(TAG, "Adding draw start callback");
     lv_display_add_event_cb(this->disp_, render_start_cb, LV_EVENT_RENDER_START, this);
   }
+
   if (this->draw_end_callback_ != nullptr || this->update_when_display_idle_) {
+    ESP_LOGI(TAG, "Adding draw end callback");
     lv_display_add_event_cb(this->disp_, render_end_cb, LV_EVENT_REFR_READY, this);
   }
+  ESP_LOGI(TAG, "Configuring LVGL log callback");
 #if LV_USE_LOG
   lv_log_register_print_cb([](lv_log_level_t level, const char *buf) {
     auto next = strchr(buf, ')');
@@ -670,6 +691,7 @@ void LvglComponent::setup() {
     esp_log_printf_(LOG_LEVEL_MAP[level], TAG, 0, "%.*s", (int) strlen(buf) - 1, buf);
   });
 #endif
+  ESP_LOGI(TAG, "LVGL log callback configured");
   // Rotation will be handled by our drawing function, so reset the display rotation.
   for (auto *disp : this->displays_)
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
