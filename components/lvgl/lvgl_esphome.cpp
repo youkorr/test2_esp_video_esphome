@@ -130,25 +130,8 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 void LvglComponent::esphome_lvgl_init() {
   lv_init();
 
-  // Custom tick callback that feeds watchdog periodically during LVGL operations
-  lv_tick_set_cb([] {
-    static uint32_t last_wdt_feed = 0;
-    uint32_t now = millis();
-
-    // Feed watchdog every 100ms during LVGL processing to prevent timeout
-    // This is critical for LVGL 9.4 with complex UIs (images, fonts, widgets)
-    // that can take several seconds to render on first boot
-    if (now - last_wdt_feed >= 100) {
-#ifdef USE_ESP_IDF
-      // Use ESP-IDF watchdog reset directly for reliability
-      esp_task_wdt_reset();
-#endif
-      App.feed_wdt();
-      last_wdt_feed = now;
-    }
-
-    return now;
-  });
+  // Simple tick callback - watchdog timeout is managed in loop() for first render
+  lv_tick_set_cb([] { return millis(); });
 
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
@@ -663,7 +646,38 @@ void LvglComponent::loop() {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
   } else {
+#ifdef USE_ESP_IDF
+    // On first loop, increase watchdog timeout for initial LVGL 9.4 render
+    // Complex UIs with many images/fonts can take 10+ seconds to render
+    if (this->first_loop_) {
+      ESP_LOGI(TAG, "First LVGL render - increasing watchdog timeout to 15 seconds");
+      esp_task_wdt_config_t wdt_config = {
+          .timeout_ms = 15000,  // 15 seconds for first render
+          .idle_core_mask = 0,
+          .trigger_panic = true,
+      };
+      esp_task_wdt_reconfigure(&wdt_config);
+      esp_task_wdt_reset();
+    }
+#endif
+
+    // Execute LVGL timer handler (may block on first render)
     lv_timer_handler();
+
+#ifdef USE_ESP_IDF
+    // After first render, restore normal watchdog timeout
+    if (this->first_loop_) {
+      this->first_loop_ = false;
+      ESP_LOGI(TAG, "First LVGL render complete - restoring watchdog timeout to 5 seconds");
+      esp_task_wdt_config_t wdt_config = {
+          .timeout_ms = 5000,  // Back to 5 seconds
+          .idle_core_mask = 0,
+          .trigger_panic = true,
+      };
+      esp_task_wdt_reconfigure(&wdt_config);
+      esp_task_wdt_reset();
+    }
+#endif
   }
 }
 
