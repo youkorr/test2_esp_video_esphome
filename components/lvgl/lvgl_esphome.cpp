@@ -132,30 +132,10 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 }
 
 void LvglComponent::esphome_lvgl_init() {
-  ESP_LOGI(TAG, "========== LVGL INIT STARTED ==========");
-
-#ifdef USE_ESP_IDF
-  // Set high watchdog timeout from the very beginning
-  ESP_LOGI(TAG, "Setting initial watchdog timeout to 90 seconds");
-  esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 90000,  // 90 seconds from start
-      .idle_core_mask = 0,
-      .trigger_panic = true,
-  };
-  esp_task_wdt_reconfigure(&wdt_config);
-  esp_task_wdt_reset();
-#endif
-
   lv_init();
-  ESP_LOGI(TAG, "lv_init() completed");
-
-  // Simple tick callback - watchdog timeout is managed in setup() for first render
   lv_tick_set_cb([] { return millis(); });
-
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
-
-  ESP_LOGI(TAG, "========== LVGL INIT COMPLETED ==========");
 }
 
 void LvglComponent::add_event_cb(lv_obj_t *obj, event_callback_t callback, lv_event_code_t event) {
@@ -264,9 +244,6 @@ void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_data *ptr) {
 }
 
 void LvglComponent::flush_cb_(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p) {
-  // Feed watchdog during display flush to prevent timeout on large updates
-  App.feed_wdt();
-
   if (!this->is_paused()) {
     auto now = millis();
     this->draw_buffer_(area, reinterpret_cast<lv_color_data *>(color_p));
@@ -557,28 +534,13 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
       full_refresh_(full_refresh),
       resume_on_input_(resume_on_input),
       update_when_display_idle_(update_when_display_idle) {
-  this->disp_ = lv_display_create(240, 240);
+  // Create display with actual dimensions from the first display
+  // This is critical for LVGL 9.4 - display size must be correct before set_buffers()
+  auto *display = this->displays_[0];
+  this->disp_ = lv_display_create(display->get_width(), display->get_height());
 }
 
 void LvglComponent::setup() {
-  ESP_LOGI(TAG, "========== LVGL SETUP STARTED ==========");
-
-#ifdef USE_ESP_IDF
-  // CRITICAL: Increase watchdog timeout IMMEDIATELY at start of setup()
-  // Memory allocation (malloc/lv_malloc_core) can take 90+ seconds on first boot
-  ESP_LOGI(TAG, "Increasing watchdog timeout to 120 seconds for setup (memory allocation + render)");
-  esp_task_wdt_config_t wdt_config = {
-      .timeout_ms = 120000,  // 120 seconds for entire setup
-      .idle_core_mask = 0,
-      .trigger_panic = true,
-  };
-  esp_task_wdt_reconfigure(&wdt_config);
-  esp_task_wdt_reset();
-#endif
-
-  // Feed watchdog at start of setup
-  App.feed_wdt();
-
   auto *display = this->displays_[0];
   auto rounding = this->draw_rounding;
   // cater for displays with dimensions that don't divide by the required rounding
@@ -592,36 +554,11 @@ void LvglComponent::setup() {
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
 
-  ESP_LOGI(TAG, "Allocating LVGL buffer: %zu bytes (%dx%d, %d%% of screen)",
-           buf_bytes, width, height, (int)(100 / frac));
-
-#ifdef USE_ESP_IDF
-  // Log PSRAM status before allocation
-  multi_heap_info_t heap_info;
-  heap_caps_get_info(&heap_info, MALLOC_CAP_SPIRAM);
-  ESP_LOGI(TAG, "PSRAM before allocation:");
-  ESP_LOGI(TAG, "  Total: %u bytes", heap_info.total_free_bytes + heap_info.total_allocated_bytes);
-  ESP_LOGI(TAG, "  Free: %u bytes", heap_info.total_free_bytes);
-  ESP_LOGI(TAG, "  Allocated: %u bytes", heap_info.total_allocated_bytes);
-  ESP_LOGI(TAG, "  Largest free block: %u bytes", heap_info.largest_free_block);
-#endif
-
-  // Feed watchdog before potentially long PSRAM allocation
-  App.feed_wdt();
-
-  auto alloc_start = millis();
   if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
     buffer = malloc(buf_bytes);  // NOLINT
 
-  auto alloc_time = millis() - alloc_start;
-  ESP_LOGI(TAG, "malloc() took %u ms, result: %s", (unsigned)alloc_time, buffer ? "SUCCESS" : "NULL");
-
   if (buffer == nullptr) {
-    ESP_LOGW(TAG, "malloc() failed, trying lv_malloc_core()...");
-    alloc_start = millis();
     buffer = lv_malloc_core(buf_bytes);  // NOLINT
-    alloc_time = millis() - alloc_start;
-    ESP_LOGI(TAG, "lv_malloc_core() took %u ms, result: %s", (unsigned)alloc_time, buffer ? "SUCCESS" : "NULL");
   }
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
@@ -637,48 +574,32 @@ void LvglComponent::setup() {
   }
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
 
-  ESP_LOGI(TAG, "Setting display resolution: %dx%d", this->width_, this->height_);
-  lv_display_set_resolution(this->disp_, this->width_, this->height_);
-
-  ESP_LOGI(TAG, "Setting color format: RGB565");
+  // Display resolution already set in constructor with correct dimensions
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-
-  ESP_LOGI(TAG, "Setting flush callback");
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
-
-  ESP_LOGI(TAG, "Setting user data");
   lv_display_set_user_data(this->disp_, this);
-
-  ESP_LOGI(TAG, "Adding rounder event callback");
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
 
-  ESP_LOGI(TAG, "Setting display buffers (buf_bytes=%zu)", buf_bytes);
   lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
                          this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
-  ESP_LOGI(TAG, "Display buffer configured successfully");
 
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
-    ESP_LOGI(TAG, "Allocating rotation buffer for rotation: %d", this->rotation);
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
     if (this->rotate_buf_ == nullptr) {
       this->status_set_error(LOG_STR("Memory allocation failure"));
       this->mark_failed();
       return;
     }
-    ESP_LOGI(TAG, "Rotation buffer allocated");
   }
 
   if (this->draw_start_callback_ != nullptr) {
-    ESP_LOGI(TAG, "Adding draw start callback");
     lv_display_add_event_cb(this->disp_, render_start_cb, LV_EVENT_RENDER_START, this);
   }
 
   if (this->draw_end_callback_ != nullptr || this->update_when_display_idle_) {
-    ESP_LOGI(TAG, "Adding draw end callback");
     lv_display_add_event_cb(this->disp_, render_end_cb, LV_EVENT_REFR_READY, this);
   }
-  ESP_LOGI(TAG, "Configuring LVGL log callback");
 #if LV_USE_LOG
   lv_log_register_print_cb([](lv_log_level_t level, const char *buf) {
     auto next = strchr(buf, ')');
@@ -691,41 +612,12 @@ void LvglComponent::setup() {
     esp_log_printf_(LOG_LEVEL_MAP[level], TAG, 0, "%.*s", (int) strlen(buf) - 1, buf);
   });
 #endif
-  ESP_LOGI(TAG, "LVGL log callback configured");
   // Rotation will be handled by our drawing function, so reset the display rotation.
   for (auto *disp : this->displays_)
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
 
-  ESP_LOGI(TAG, "About to show first page - this may take time with complex UI");
-
-  // Feed watchdog before showing first page (which triggers initial render)
-#ifdef USE_ESP_IDF
-  esp_task_wdt_reset();
-#endif
-  App.feed_wdt();
-
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
-
-  ESP_LOGI(TAG, "========== LVGL SETUP COMPLETED ==========");
-
-  // Feed watchdog after initial page setup
-#ifdef USE_ESP_IDF
-  esp_task_wdt_reset();
-#endif
-  App.feed_wdt();
-
-#ifdef USE_ESP_IDF
-  // Restore normal watchdog timeout after setup complete
-  ESP_LOGI(TAG, "Setup complete - restoring watchdog timeout to 5 seconds");
-  esp_task_wdt_config_t wdt_normal = {
-      .timeout_ms = 5000,  // Back to normal
-      .idle_core_mask = 0,
-      .trigger_panic = true,
-  };
-  esp_task_wdt_reconfigure(&wdt_normal);
-  esp_task_wdt_reset();
-#endif
 }
 
 void LvglComponent::update() {
@@ -737,15 +629,10 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
-  // Feed watchdog before LVGL processing to prevent timeout during long render operations
-  App.feed_wdt();
-
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
   } else {
-    // Execute LVGL timer handler
-    // Note: Initial render happens in setup(), not here
     lv_timer_handler();
   }
 }
