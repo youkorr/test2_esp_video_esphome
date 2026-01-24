@@ -2,6 +2,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
+#include "esphome/core/application.h"
 #include "lvgl_esphome.h"
 
 #include "core/lv_obj_class_private.h"
@@ -239,6 +240,9 @@ void LvglComponent::draw_buffer_(const lv_area_t *area, lv_color_data *ptr) {
 }
 
 void LvglComponent::flush_cb_(lv_display_t *disp_drv, const lv_area_t *area, uint8_t *color_p) {
+  // Feed watchdog during display flush to prevent timeout on large updates
+  App.feed_wdt();
+
   if (!this->is_paused()) {
     auto now = millis();
     this->draw_buffer_(area, reinterpret_cast<lv_color_data *>(color_p));
@@ -533,6 +537,9 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
 }
 
 void LvglComponent::setup() {
+  // Feed watchdog at start of setup
+  App.feed_wdt();
+
   auto *display = this->displays_[0];
   auto rounding = this->draw_rounding;
   // cater for displays with dimensions that don't divide by the required rounding
@@ -545,6 +552,10 @@ void LvglComponent::setup() {
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
+
+  // Feed watchdog before potentially long PSRAM allocation
+  App.feed_wdt();
+
   if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
     buffer = malloc(buf_bytes);  // NOLINT
   if (buffer == nullptr)
@@ -599,8 +610,15 @@ void LvglComponent::setup() {
   // Rotation will be handled by our drawing function, so reset the display rotation.
   for (auto *disp : this->displays_)
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
+
+  // Feed watchdog before showing first page (which may trigger initial render)
+  App.feed_wdt();
+
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
+
+  // Feed watchdog after initial page setup
+  App.feed_wdt();
 }
 
 void LvglComponent::update() {
@@ -612,6 +630,9 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
+  // Feed watchdog before LVGL processing to prevent timeout during long render operations
+  App.feed_wdt();
+
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
