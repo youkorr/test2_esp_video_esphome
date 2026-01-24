@@ -89,7 +89,7 @@ static esp_err_t init_xclk_ledc(gpio_num_t gpio_num, uint32_t freq_hz) {
 
   esp_err_t ret = ledc_timer_config(&timer_conf);
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "❌ LEDC timer config failed: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "LEDC timer config failed: %s", esp_err_to_name(ret));
     return ret;
   }
 
@@ -131,27 +131,27 @@ void ESPVideoComponent::setup() {
   // ESP_LOGI(TAG, "Fonctionnalités activées:");
 
 #ifdef ESP_VIDEO_H264_ENABLED
-  // ESP_LOGI(TAG, "  ✓ Encodeur H.264 matériel");
+  // ESP_LOGI(TAG, "  Encodeur H.264 matériel");
 #else
-  // ESP_LOGI(TAG, "  ✗ Encodeur H.264 désactivé");
+  // ESP_LOGI(TAG, "  Encodeur H.264 désactivé");
 #endif
 
 #ifdef ESP_VIDEO_JPEG_ENABLED
-  // ESP_LOGI(TAG, "  ✓ Encodeur JPEG matériel");
+  // ESP_LOGI(TAG, "  Encodeur JPEG matériel");
 #else
-  // ESP_LOGI(TAG, "  ✗ Encodeur JPEG désactivé");
+  // ESP_LOGI(TAG, "  Encodeur JPEG désactivé");
 #endif
 
 #ifdef ESP_VIDEO_ISP_ENABLED
-  // ESP_LOGI(TAG, "  ✓ Image Signal Processor (ISP)");
+  // ESP_LOGI(TAG, "  Image Signal Processor (ISP)");
 #else
-  // ESP_LOGI(TAG, "  ✗ ISP désactivé");
+  // ESP_LOGI(TAG, "  ISP désactivé");
 #endif
 
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
-  // ESP_LOGI(TAG, "  ✓ Support MIPI-CSI");
+  // ESP_LOGI(TAG, "  Support MIPI-CSI");
 #else
-  // ESP_LOGW(TAG, "  ✗ Support MIPI-CSI désactivé");
+  // ESP_LOGW(TAG, "  Support MIPI-CSI désactivé");
 #endif
 
   // Vérification de la mémoire disponible
@@ -175,7 +175,7 @@ void ESPVideoComponent::setup() {
 #ifdef CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE
   // Vérifier que le bus I2C ESPHome est fourni
   if (this->i2c_bus_ == nullptr) {
-    ESP_LOGE(TAG, "❌ Bus I2C non fourni! Vérifiez la configuration i2c_id");
+    ESP_LOGE(TAG, "Bus I2C non fourni! Vérifiez la configuration i2c_id");
     this->mark_failed();
     return;
   }
@@ -187,12 +187,12 @@ void ESPVideoComponent::setup() {
 
   i2c_master_bus_handle_t i2c_handle = get_i2c_bus_handle(this->i2c_bus_);
   if (i2c_handle == nullptr) {
-    ESP_LOGE(TAG, "❌ Impossible d'extraire le handle I2C ESP-IDF");
+    ESP_LOGE(TAG, "Impossible d'extraire le handle I2C ESP-IDF");
     this->mark_failed();
     return;
   }
 
-  // ESP_LOGI(TAG, "  ✓ Handle I2C ESP-IDF récupéré: %p", i2c_handle);
+  // ESP_LOGI(TAG, "  Handle I2C ESP-IDF récupéré: %p", i2c_handle);
 
   // Initialize XCLK via LEDC if enabled (for non-M5Stack boards)
   // M5Stack Tab5 BSP already initializes XCLK, so this should be disabled for M5Stack
@@ -202,7 +202,7 @@ void ESPVideoComponent::setup() {
 
     esp_err_t xclk_ret = init_xclk_ledc(this->xclk_pin_, this->xclk_freq_);
     if (xclk_ret != ESP_OK) {
-      ESP_LOGE(TAG, "❌ XCLK initialization failed: %s", esp_err_to_name(xclk_ret));
+      ESP_LOGE(TAG, "XCLK initialization failed: %s", esp_err_to_name(xclk_ret));
       ESP_LOGE(TAG, "   Sensor detection will fail (Chip ID = 0x0000)");
       this->mark_failed();
       return;
@@ -250,7 +250,7 @@ void ESPVideoComponent::setup() {
   // Create semaphore for task synchronization
   SemaphoreHandle_t done_sem = xSemaphoreCreateBinary();
   if (done_sem == NULL) {
-    ESP_LOGE(TAG, "❌ Failed to create semaphore");
+    ESP_LOGE(TAG, "Failed to create semaphore");
     this->mark_failed();
     return;
   }
@@ -273,7 +273,7 @@ void ESPVideoComponent::setup() {
   );
 
   if (task_created != pdPASS) {
-    ESP_LOGE(TAG, "❌ Failed to create esp_video_init task on core 0");
+    ESP_LOGE(TAG, "Failed to create esp_video_init task on core 0");
     vSemaphoreDelete(done_sem);
     this->mark_failed();
     return;
@@ -283,7 +283,7 @@ void ESPVideoComponent::setup() {
 
   // Wait for task to complete (max 10 seconds)
   if (xSemaphoreTake(done_sem, pdMS_TO_TICKS(10000)) != pdTRUE) {
-    ESP_LOGE(TAG, "❌ esp_video_init() timed out after 10 seconds");
+    ESP_LOGE(TAG, "esp_video_init() timed out after 10 seconds");
     vSemaphoreDelete(done_sem);
     this->mark_failed();
     return;
@@ -295,16 +295,16 @@ void ESPVideoComponent::setup() {
   // Check result
   esp_err_t ret = params.result;
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "❌ Échec esp_video_init() sur core 0: %d (%s)", ret, esp_err_to_name(ret));
+    ESP_LOGE(TAG, "Échec esp_video_init() sur core 0: %d (%s)", ret, esp_err_to_name(ret));
     this->mark_failed();
     return;
   }
 
-  // ESP_LOGI(TAG, "✅ esp_video_init() réussi sur core 0 - Devices vidéo prêts!");
+  // ESP_LOGI(TAG, "esp_video_init() réussi sur core 0 - Devices vidéo prêts!");
 
   // Vérifier quels devices vidéo ont été créés
   // NOTE: stat() ne fonctionne pas avec les devices VFS ESP-IDF, utilisons open() à la place
-  // ESP_LOGW(TAG, "🔍 Vérification des devices vidéo créés (via open test):");
+  // ESP_LOGW(TAG, "Vérification des devices vidéo créés (via open test):");
 
   int fd = open("/dev/video0", O_RDWR);
   if (fd >= 0) {
@@ -343,7 +343,7 @@ void ESPVideoComponent::setup() {
   // Vérifier si l'ISP pipeline est initialisé
 #ifdef ESP_VIDEO_ISP_ENABLED
   bool isp_initialized = esp_video_isp_pipeline_is_initialized();
-  // ESP_LOGI(TAG, "🔍 ISP Pipeline status: %s", isp_initialized ? "INITIALIZED ✅" : "NOT INITIALIZED ❌");
+  // ESP_LOGI(TAG, "ISP Pipeline status: %s", isp_initialized ? "INITIALIZED" : "NOT INITIALIZED");
 
   if (!isp_initialized) {
     ESP_LOGW(TAG, "ISP Pipeline NOT initialized despite enable_isp: true");

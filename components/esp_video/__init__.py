@@ -81,6 +81,41 @@ CONFIG_SCHEMA = cv.All(
 
 
 async def to_code(config):
+    # -----------------------------------------------------------------------
+    # Vérification du framework (CRITICAL: faire ça en premier)
+    # -----------------------------------------------------------------------
+    if not CORE.using_esp_idf:
+        raise cv.Invalid(
+            "ESP-Video nécessite le framework esp-idf. "
+            "Ajoutez 'framework: type: esp-idf' dans votre configuration."
+        )
+
+    # ============================================================================
+    # AUTO-DOWNLOAD DES DÉPENDANCES (comme LVGL 9.4 avec cg.add_library)
+    # ============================================================================
+    # LVGL fait: cg.add_library("lvgl/lvgl", "9.4.0")
+    # ESP-Video fait: Auto-download depuis esp-adf-libs
+
+    component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+
+    # Importer le module de téléchargement
+    from .esp_video_download import ensure_esp_video_dependencies
+
+    # Télécharger automatiquement les dépendances manquantes
+    # (Si les composants existent déjà, cette fonction ne fait rien)
+    try:
+        ensure_esp_video_dependencies(parent_components_dir)
+    except Exception as e:
+        logging.warning(
+            f"[ESP-Video] Auto-download failed: {e}\n"
+            f"If components are already present locally, this is OK."
+        )
+
+    # ============================================================================
+    # Configuration du composant
+    # ============================================================================
+
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
@@ -106,15 +141,6 @@ async def to_code(config):
         logging.debug(f"[ESP-Video] XCLK: GPIO{xclk_pin} @ {xclk_freq/1000000:.1f} MHz")
     else:
         logging.debug(f"[ESP-Video] XCLK: PCB oscillator @ {xclk_freq/1000000:.1f} MHz")
-
-    # -----------------------------------------------------------------------
-    # Vérification du framework
-    # -----------------------------------------------------------------------
-    if not CORE.using_esp_idf:
-        raise cv.Invalid(
-            "ESP-Video nécessite le framework esp-idf. "
-            "Ajoutez 'framework: type: esp-idf' dans votre configuration."
-        )
 
     # -----------------------------------------------------------------------
     # Chemins des composants ESP-IDF
@@ -174,8 +200,8 @@ async def to_code(config):
 
     if not includes_found:
         logging.warning(
-            "[ESP-Video] ⚠️ Aucun répertoire d'include trouvé! "
-            "Vérifiez la structure du composant ESP-Video."
+            "[ESP-Video] No include directories found! "
+            "Check ESP-Video component structure."
         )
 
     # -----------------------------------------------------------------------
