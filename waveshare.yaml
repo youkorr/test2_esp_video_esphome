@@ -103,11 +103,6 @@ substitutions:
 esphome:
   name: waveshare
   friendly_name: waveshare
-  #platformio_options:
-    #build_flags:
-      #- -DCONFIG_ESP_H264_DUAL_TASK=1
-      #- -DCONFIG_ESP_H264_DUAL_TASK_CORE=0
-      #- -DCONFIG_ESP_H264_DUAL_TASK_PRIORITY=5
 
   on_boot:
     priority: 850
@@ -150,10 +145,6 @@ esp32:
       DCONFIG_ESPHOME_ENABLE_PNGLE: "1"
       CONFIG_SPIRAM_SPEED_200M: "y"  # ← NOUVEAU: 200 MHz au lieu de défaut
       CONFIG_SPIRAM_SPEED: "200"
-
-      #CONFIG_HTTPD_MAX_REQ_HDR_LEN: "800"
-      #CONFIG_HTTPD_WS_SUPPORT: "y"
-
 
 http_request:
   #verify_ssl: false
