@@ -128,13 +128,30 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 }
 
 void LvglComponent::esphome_lvgl_init() {
-  lv_init();
+  ESP_LOGI(TAG, "========== LVGL INIT STARTED ==========");
 
-  // Simple tick callback - watchdog timeout is managed in loop() for first render
+#ifdef USE_ESP_IDF
+  // Set high watchdog timeout from the very beginning
+  ESP_LOGI(TAG, "Setting initial watchdog timeout to 90 seconds");
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 90000,  // 90 seconds from start
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
+  esp_task_wdt_reset();
+#endif
+
+  lv_init();
+  ESP_LOGI(TAG, "lv_init() completed");
+
+  // Simple tick callback - watchdog timeout is managed in setup() for first render
   lv_tick_set_cb([] { return millis(); });
 
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
+
+  ESP_LOGI(TAG, "========== LVGL INIT COMPLETED ==========");
 }
 
 void LvglComponent::add_event_cb(lv_obj_t *obj, event_callback_t callback, lv_event_code_t event) {
@@ -540,6 +557,7 @@ LvglComponent::LvglComponent(std::vector<display::Display *> displays, float buf
 }
 
 void LvglComponent::setup() {
+  ESP_LOGI(TAG, "========== LVGL SETUP STARTED ==========");
   // Feed watchdog at start of setup
   App.feed_wdt();
 
