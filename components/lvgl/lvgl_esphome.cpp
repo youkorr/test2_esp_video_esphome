@@ -9,6 +9,10 @@
 
 #include <numeric>
 
+#ifdef USE_ESP32
+#include "esp_heap_caps.h"
+#endif
+
 namespace esphome::lvgl {
 static const char *const TAG = "lvgl";
 
@@ -591,6 +595,17 @@ void LvglComponent::setup() {
   ESP_LOGI(TAG, "Allocating LVGL buffer: %zu bytes (%dx%d, %d%% of screen)",
            buf_bytes, width, height, (int)(100 / frac));
 
+#ifdef USE_ESP_IDF
+  // Log PSRAM status before allocation
+  multi_heap_info_t heap_info;
+  heap_caps_get_info(&heap_info, MALLOC_CAP_SPIRAM);
+  ESP_LOGI(TAG, "PSRAM before allocation:");
+  ESP_LOGI(TAG, "  Total: %u bytes", heap_info.total_free_bytes + heap_info.total_allocated_bytes);
+  ESP_LOGI(TAG, "  Free: %u bytes", heap_info.total_free_bytes);
+  ESP_LOGI(TAG, "  Allocated: %u bytes", heap_info.total_allocated_bytes);
+  ESP_LOGI(TAG, "  Largest free block: %u bytes", heap_info.largest_free_block);
+#endif
+
   // Feed watchdog before potentially long PSRAM allocation
   App.feed_wdt();
 
@@ -600,8 +615,14 @@ void LvglComponent::setup() {
 
   auto alloc_time = millis() - alloc_start;
   ESP_LOGI(TAG, "malloc() took %u ms, result: %s", (unsigned)alloc_time, buffer ? "SUCCESS" : "NULL");
-  if (buffer == nullptr)
+
+  if (buffer == nullptr) {
+    ESP_LOGW(TAG, "malloc() failed, trying lv_malloc_core()...");
+    alloc_start = millis();
     buffer = lv_malloc_core(buf_bytes);  // NOLINT
+    alloc_time = millis() - alloc_start;
+    ESP_LOGI(TAG, "lv_malloc_core() took %u ms, result: %s", (unsigned)alloc_time, buffer ? "SUCCESS" : "NULL");
+  }
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
