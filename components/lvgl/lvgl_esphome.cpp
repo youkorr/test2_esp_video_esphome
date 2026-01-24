@@ -8,6 +8,10 @@
 
 #include <numeric>
 
+#ifdef USE_ESP32
+#include "esp_heap_caps.h"
+#endif
+
 namespace esphome::lvgl {
 static const char *const TAG = "lvgl";
 
@@ -545,8 +549,15 @@ void LvglComponent::setup() {
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
-  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
+  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2) {
+#ifdef USE_ESP32
+    // ESP32: Use aligned allocation for 64-byte alignment (required for ESP32-P4 PSRAM/cache)
+    buffer = heap_caps_aligned_alloc(64, buf_bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_LOGD(TAG, "Allocated LVGL buffer: %zu bytes, 64-byte aligned at %p", buf_bytes, buffer);
+#else
     buffer = malloc(buf_bytes);  // NOLINT
+#endif
+  }
   if (buffer == nullptr)
     buffer = lv_malloc_core(buf_bytes);  // NOLINT
   // if specific buffer size not set and can't get 100%, try for a smaller one
