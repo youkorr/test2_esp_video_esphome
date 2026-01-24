@@ -1,0 +1,31 @@
+# Fix Watchdog Timeout pour LVGL 9.4 sur ESP32-P4
+# À ajouter dans votre p4mini.yaml
+
+esp32:
+  board: esp32-p4-evboard
+  variant: esp32p4
+  framework:
+    type: esp-idf
+    version: 5.5.2
+    platform_version: https://github.com/pioarduino/platform-espressif32/releases/download/55.03.35/platform-espressif32.zip
+    # CRITICAL: Augmenter le watchdog timeout pour LVGL 9.4
+    sdkconfig_options:
+      # Watchdog timeout par défaut: 5 secondes → 30 secondes
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+      # Watchdog pour la tâche IDLE (évite le timeout pendant setup long)
+      CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: "n"
+      CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1: "n"
+
+      # Optionnel: Désactiver complètement le watchdog (debug seulement)
+      # CONFIG_ESP_TASK_WDT_EN: "n"
+
+# Explications:
+# - CONFIG_ESP_TASK_WDT_TIMEOUT_S: 30 secondes au lieu de 5
+#   → Donne le temps aux composants de faire leur setup
+# - CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0/1: désactivé
+#   → Ne surveille pas les tâches IDLE (évite faux positifs)
+# - CONFIG_ESP_TASK_WDT_EN: si tout le reste échoue, désactiver totalement
+#   (à utiliser seulement pour debug, pas en production)
+
+# Alternative: Si le problème persiste, regarder quel composant se bloque
+# en ajoutant des logs debug dans les composants qui viennent après display

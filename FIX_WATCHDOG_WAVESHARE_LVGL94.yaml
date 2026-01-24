@@ -1,0 +1,35 @@
+# Fix Watchdog Timeout pour waveshare.yaml avec LVGL 9.4
+# Remplacer la section esp32 existante par celle-ci
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    version: 5.5.1
+    # CRITICAL: Augmenter le watchdog timeout pour LVGL 9.4
+    sdkconfig_options:
+      # Watchdog timeout: 5 secondes → 30 secondes
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+
+      # Ne pas surveiller les tâches IDLE (évite faux positifs pendant setup)
+      CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: "n"
+      CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1: "n"
+
+# Problème actuel:
+# [02:16:34][C][display.mipi_dsi:154]: MIPI DSI setup complete
+# [02:16:39]E (9081) task_wdt: Task watchdog got triggered
+# → 5 secondes de blocage après le display setup
+
+# Cause:
+# Un composant après le display (probablement WiFi ou media_player)
+# prend plus de 5 secondes à s'initialiser avec LVGL 9.4
+
+# Solution:
+# Augmenter le timeout à 30 secondes pour donner le temps à tous
+# les composants de terminer leur setup()
+
+# Si le problème persiste après ce fix, utiliser cette option:
+# (À décommenter seulement pour debug)
+# CONFIG_ESP_TASK_WDT_EN: "n"  # Désactive complètement le watchdog
