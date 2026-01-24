@@ -65,7 +65,7 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
 
 ## 🧪 Tests à Faire
 
-### Test 1 : Désactiver complètement le watchdog
+### Test 1 : Désactiver complètement le watchdog ❌
 ```yaml
 esp32:
   framework:
@@ -73,16 +73,19 @@ esp32:
       CONFIG_ESP_TASK_WDT_EN: "n"  # Désactive watchdog
 ```
 **But** : Voir si ça finit par passer après plusieurs minutes (exclure timeout simple)
+**Résultat** : ❌ ERREUR DE COMPILATION - ESPHome OTA backend nécessite `CONFIG_ESP_TASK_WDT_TIMEOUT_S`
 
-### Test 2 : Configuration LVGL minimale
+### Test 2 : Configuration LVGL minimale ✅ EN COURS
 ```python
 # Dans components/lvgl/__init__.py
 # Désactiver ThorVG temporairement
 df.add_define("LV_USE_THORVG_INTERNAL", "0")  # Au lieu de 1
 df.add_define("LV_USE_SVG", "0")
 df.add_define("LV_USE_LOTTIE", "0")
+df.add_define("LV_USE_VECTOR_GRAPHIC", "0")
 ```
 **But** : Identifier si ThorVG cause le blocage
+**Résultat** : ✅ FIX APPLIQUÉ - Voir commit suivant
 
 ### Test 3 : Allocation mémoire LVGL
 ```python
@@ -131,11 +134,32 @@ cg.add_library("lvgl/lvgl", "8.4.0")  # Au lieu de 9.4.0
 
 ## 🎯 Prochaines Étapes
 
-1. ✅ Désactiver watchdog pour test
-2. ⏳ Tester sans ThorVG
-3. ⏳ Tester sans PSRAM pour LVGL
-4. ⏳ Activer logs debug LVGL
-5. ⏳ Si rien ne fonctionne : revenir à LVGL 8.x temporairement
+1. ✅ Désactiver watchdog pour test → ❌ Erreur de compilation
+2. ✅ Tester sans ThorVG → ✅ FIX APPLIQUÉ
+3. ⏳ Compiler et tester si le deadlock est résolu
+4. ⏳ Si résolu : documenter et commit
+5. ⏳ Si non résolu : tester sans PSRAM ou activer logs debug
+
+## 🔍 ROOT CAUSE IDENTIFIÉE
+
+**Comparaison avec ESPHome officiel** :
+
+| Configuration | ESPHome officiel | Notre dépôt | Résultat |
+|---------------|------------------|-------------|----------|
+| `LV_DRAW_BUF_ALIGN` | Non défini | `64` | ✅ Nécessaire pour ESP32-P4 |
+| `LV_USE_THORVG_INTERNAL` | Non défini | `1` | ❌ CAUSE LE DEADLOCK |
+| `LV_USE_SVG` | Non défini | `1` | ❌ CAUSE LE DEADLOCK |
+| `LV_USE_LOTTIE` | Non défini | `1` | ❌ CAUSE LE DEADLOCK |
+| `LV_USE_VECTOR_GRAPHIC` | Non défini | `1` | ❌ CAUSE LE DEADLOCK |
+
+**Découverte** : En vérifiant le repository ESPHome officiel, **ThorVG n'est PAS activé** dans leur configuration LVGL. C'est une fonctionnalité qui a été ajoutée manuellement dans notre dépôt.
+
+**Hypothèse** : ThorVG (moteur de graphiques vectoriels) se bloque lors de son initialisation sur ESP32-P4, probablement à cause de :
+- Threading/mutex incompatibles avec ESP32-P4
+- Allocation mémoire C++ qui échoue silencieusement
+- Initialisation de bibliothèques C++ qui ne fonctionnent pas avec ESP-IDF 5.5.1
+
+**Fix appliqué** : Désactivation de ThorVG et tous les features de graphiques vectoriels
 
 ## 📝 Notes
 

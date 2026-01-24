@@ -223,18 +223,22 @@ async def to_code(configs):
     # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
+    # CRITICAL: ThorVG causes DEADLOCK on ESP32-P4 during initialization
+    # Disabling until upstream fix is available
+    # See: LVGL94_DEADLOCK_PROBLEM.md for details
+
     # Enable floating point support (required by matrix)
     df.add_define("LV_USE_FLOAT", "1")
     # Enable matrix support (required by vector graphics)
     df.add_define("LV_USE_MATRIX", "1")
-    # Enable vector graphics support (required for SVG/Lottie)
-    df.add_define("LV_USE_VECTOR_GRAPHIC", "1")
-    # Enable ThorVG vector graphics engine (built-in to LVGL v9)
-    df.add_define("LV_USE_THORVG_INTERNAL", "1")
-    # Enable SVG support (requires ThorVG)
-    df.add_define("LV_USE_SVG", "1")
-    # Enable Lottie animation support (requires ThorVG)
-    df.add_define("LV_USE_LOTTIE", "1")
+    # DISABLED: Vector graphics support (causes deadlock on ESP32-P4)
+    df.add_define("LV_USE_VECTOR_GRAPHIC", "0")
+    # DISABLED: ThorVG vector graphics engine (causes deadlock on ESP32-P4)
+    df.add_define("LV_USE_THORVG_INTERNAL", "0")
+    # DISABLED: SVG support (requires ThorVG)
+    df.add_define("LV_USE_SVG", "0")
+    # DISABLED: Lottie animation support (requires ThorVG)
+    df.add_define("LV_USE_LOTTIE", "0")
     # Enable advanced image decoders
     df.add_define("LV_USE_LIBPNG", "0")  # PNG support via pngdec (not libpng)
     df.add_define("LV_USE_BMP", "1")      # BMP support
