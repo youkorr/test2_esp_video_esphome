@@ -614,7 +614,21 @@ void LvglComponent::setup() {
   for (auto *disp : this->displays_)
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
 
-  // Feed watchdog before showing first page (which may trigger initial render)
+#ifdef USE_ESP_IDF
+  // CRITICAL: Increase watchdog timeout BEFORE first page render
+  // show_page() below will trigger LVGL rendering which can take 30+ seconds
+  // with complex UIs loaded from SD card (images, fonts, widgets)
+  ESP_LOGI(TAG, "Increasing watchdog timeout to 60 seconds for initial LVGL render");
+  esp_task_wdt_config_t wdt_config = {
+      .timeout_ms = 60000,  // 60 seconds for initial render in setup()
+      .idle_core_mask = 0,
+      .trigger_panic = true,
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
+  esp_task_wdt_reset();
+#endif
+
+  // Feed watchdog before showing first page (which triggers initial render)
 #ifdef USE_ESP_IDF
   esp_task_wdt_reset();
 #endif
@@ -628,6 +642,14 @@ void LvglComponent::setup() {
   esp_task_wdt_reset();
 #endif
   App.feed_wdt();
+
+#ifdef USE_ESP_IDF
+  // Restore normal watchdog timeout after initial render
+  ESP_LOGI(TAG, "Initial LVGL render complete - restoring watchdog timeout to 5 seconds");
+  wdt_config.timeout_ms = 5000;
+  esp_task_wdt_reconfigure(&wdt_config);
+  esp_task_wdt_reset();
+#endif
 }
 
 void LvglComponent::update() {
@@ -646,39 +668,9 @@ void LvglComponent::loop() {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
   } else {
-#ifdef USE_ESP_IDF
-    // On first loop, increase watchdog timeout for initial LVGL 9.4 render
-    // Complex UIs with many images/fonts/widgets can take 20+ seconds to render
-    if (this->first_loop_) {
-      ESP_LOGI(TAG, "First LVGL render - increasing watchdog timeout to 30 seconds");
-      esp_task_wdt_config_t wdt_config = {
-          .timeout_ms = 30000,  // 30 seconds for very complex UIs
-          .idle_core_mask = 0,
-          .trigger_panic = true,
-      };
-      esp_task_wdt_reconfigure(&wdt_config);
-      esp_task_wdt_reset();
-    }
-#endif
-
-    // Execute LVGL timer handler (may block on first render)
+    // Execute LVGL timer handler
+    // Note: Initial render happens in setup(), not here
     lv_timer_handler();
-
-#ifdef USE_ESP_IDF
-    // After first render, restore normal watchdog timeout
-    if (this->first_loop_) {
-      this->first_loop_ = false;
-      ESP_LOGI(TAG, "First LVGL render complete - restoring watchdog timeout to 5 seconds");
-      ESP_LOGI(TAG, "LVGL initialization successful");
-      esp_task_wdt_config_t wdt_config = {
-          .timeout_ms = 5000,  // Back to 5 seconds
-          .idle_core_mask = 0,
-          .trigger_panic = true,
-      };
-      esp_task_wdt_reconfigure(&wdt_config);
-      esp_task_wdt_reset();
-    }
-#endif
   }
 }
 
