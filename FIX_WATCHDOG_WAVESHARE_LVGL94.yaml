@@ -10,26 +10,34 @@ esp32:
     version: 5.5.1
     # CRITICAL: Augmenter le watchdog timeout pour LVGL 9.4
     sdkconfig_options:
-      # Watchdog timeout: 5 secondes → 30 secondes
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "30"
+      # Watchdog timeout: 5 secondes → 300 secondes (5 minutes)
+      # Si même après 5 minutes ça timeout, c'est un deadlock LVGL 9.4
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "300"
 
       # Ne pas surveiller les tâches IDLE (évite faux positifs pendant setup)
       CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0: "n"
       CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1: "n"
 
+# IMPORTANT: Ne PAS désactiver complètement le watchdog avec:
+# CONFIG_ESP_TASK_WDT_EN: "n"
+# Car cela cause une erreur de compilation dans ota_backend_esp_idf.cpp:
+# error: 'CONFIG_ESP_TASK_WDT_TIMEOUT_S' was not declared in this scope
+
 # Problème actuel:
-# [02:16:34][C][display.mipi_dsi:154]: MIPI DSI setup complete
-# [02:16:39]E (9081) task_wdt: Task watchdog got triggered
-# → 5 secondes de blocage après le display setup
+# [02:28:46][C][display.mipi_dsi:154]: MIPI DSI setup complete
+# [02:29:16]E (34084) task_wdt: Task watchdog got triggered
+# → 30 secondes de blocage après le display setup
 
 # Cause:
-# Un composant après le display (probablement WiFi ou media_player)
-# prend plus de 5 secondes à s'initialiser avec LVGL 9.4
+# LVGL 9.4 se bloque complètement pendant son initialisation
+# Ce n'est pas un timeout simple mais un DEADLOCK
 
-# Solution:
-# Augmenter le timeout à 30 secondes pour donner le temps à tous
-# les composants de terminer leur setup()
+# Test:
+# Avec 300 secondes (5 minutes) de timeout:
+# - Si ça passe : c'était juste très lent (peu probable)
+# - Si timeout après 5 min : c'est un deadlock confirmé dans LVGL 9.4
 
-# Si le problème persiste après ce fix, utiliser cette option:
-# (À décommenter seulement pour debug)
-# CONFIG_ESP_TASK_WDT_EN: "n"  # Désactive complètement le watchdog
+# Si c'est un deadlock, solutions:
+# 1. Revenir à LVGL 8.x temporairement
+# 2. Désactiver ThorVG dans LVGL 9.4
+# 3. Forcer LVGL à utiliser SRAM au lieu de PSRAM
