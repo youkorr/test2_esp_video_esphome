@@ -648,11 +648,11 @@ void LvglComponent::loop() {
   } else {
 #ifdef USE_ESP_IDF
     // On first loop, increase watchdog timeout for initial LVGL 9.4 render
-    // Complex UIs with many images/fonts can take 10+ seconds to render
+    // Complex UIs with many images/fonts/widgets can take 20+ seconds to render
     if (this->first_loop_) {
-      ESP_LOGI(TAG, "First LVGL render - increasing watchdog timeout to 15 seconds");
+      ESP_LOGI(TAG, "First LVGL render - increasing watchdog timeout to 30 seconds");
       esp_task_wdt_config_t wdt_config = {
-          .timeout_ms = 15000,  // 15 seconds for first render
+          .timeout_ms = 30000,  // 30 seconds for very complex UIs
           .idle_core_mask = 0,
           .trigger_panic = true,
       };
@@ -669,6 +669,7 @@ void LvglComponent::loop() {
     if (this->first_loop_) {
       this->first_loop_ = false;
       ESP_LOGI(TAG, "First LVGL render complete - restoring watchdog timeout to 5 seconds");
+      ESP_LOGI(TAG, "LVGL initialization successful");
       esp_task_wdt_config_t wdt_config = {
           .timeout_ms = 5000,  // Back to 5 seconds
           .idle_core_mask = 0,
