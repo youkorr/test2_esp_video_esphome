@@ -111,15 +111,23 @@ esphome:
       - delay: 5s
       - logger.log: "Délai écoulé - Allumage du rétroéclairage"
       - light.turn_on: backlight
-      - delay: 2s  # Délai supplémentaire pour stabilisation LVGL
+
+# Canvas configuration using interval (executes in loop, not setup)
+interval:
+  - interval: 1s
+    then:
       - lambda: |-
-          ESP_LOGI("main", "Configuring camera canvas after LVGL stabilization...");
-          auto canvas = id(camera_canvas);
-          if (canvas != nullptr) {
-            id(camera_display).configure_canvas(canvas);
-            ESP_LOGI("main", "Camera canvas configured successfully");
-          } else {
-            ESP_LOGE("main", "Canvas is null - cannot configure");
+          static bool canvas_configured = false;
+          if (!canvas_configured) {
+            ESP_LOGI("main", "Configuring camera canvas (via interval in loop)...");
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              id(camera_display).configure_canvas(canvas);
+              canvas_configured = true;
+              ESP_LOGI("main", "Camera canvas configured successfully");
+            } else {
+              ESP_LOGW("main", "Canvas not yet available, will retry in 1s");
+            }
           }
 
 esp32:
@@ -1012,7 +1020,7 @@ sensor:
     device_class: data_size
     state_class: measurement
     accuracy_decimals: 1
-    update_interval: 10s
+    update_interval: 1s
     lambda: |-
       // Total SRAM size for ESP32-S3 = 512KB
       const size_t total_sram = 512 * 1024;
@@ -1048,7 +1056,7 @@ sensor:
     device_class: data_size
     state_class: measurement
     accuracy_decimals: 1
-    update_interval: 10s
+    update_interval: 1s
     lambda: |-
       // Total PSRAM size for ESP32-P4 = 32MB
       const size_t total_psram = 32 * 1024 * 1024;
@@ -6061,7 +6069,7 @@ interval:
           #}
 
   #- tab5_camera.take_picture: /camera/test.jpg
-  #- interval: 10s
+  #- interval: 1s
     #then:
       #- online_image.set_url:
           #id: cctv_img
