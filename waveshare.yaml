@@ -514,7 +514,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: claude/fix-lvgl-esphome-boot-gbLwE #claude/fix-sc202cs-bayer-format-jJtiS #claude/fix-esp32-detection-issues-4AJoe #claude/ov02c10-ipa-check-OHTeT #claude/remove-camera-warnings-7bhNh #claude/optimize-video-player-buffer-8BkwL
+      ref: claude/fix-lvgl-watchdog-crash-AGRWh  # LVGL 9.4 fixes: deadlock + 64-byte alignment + init order
     components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera, lvgl, font, image]
     refresh: always
 
