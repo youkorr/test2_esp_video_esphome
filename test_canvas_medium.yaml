@@ -1,0 +1,75 @@
+# Test 2: Canvas taille moyenne (320x240)
+# Si ce test fonctionne mais pas le 640x480, c'est un problème de taille buffer
+
+substitutions:
+  device_name: "test-canvas-medium"
+
+esphome:
+  name: ${device_name}
+  friendly_name: "Test Canvas Medium"
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: 5.3.1
+    platform_version: 6.8.1
+    sdkconfig_options:
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "300"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+      ref: claude/fix-lvgl-watchdog-crash-AGRWh
+    components: [lvgl]
+    refresh: always
+
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: custom
+    data_rate: 40MHz
+    cs_pin: 45
+    dc_pin: 0
+    dimensions:
+      width: 1024
+      height: 600
+
+touchscreen:
+  - platform: cst226
+    id: my_touchscreen
+    interrupt_pin: 4
+    reset_pin: 5
+
+lvgl:
+  log_level: DEBUG
+  displays:
+    - display_id: my_display
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+
+  pages:
+    - id: main_page
+      widgets:
+        # Canvas taille MOYENNE - 320x240
+        - canvas:
+            id: test_canvas_medium
+            width: 320   # Moyen
+            height: 240  # Moyen
+            x: 50
+            y: 50
+            bg_color: 0x00FF00
+
+        - label:
+            text: "Test Canvas 320x240"
+            x: 400
+            y: 150
