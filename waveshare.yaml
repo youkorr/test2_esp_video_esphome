@@ -112,24 +112,6 @@ esphome:
       - logger.log: "Délai écoulé - Allumage du rétroéclairage"
       - light.turn_on: backlight
 
-# Canvas configuration using interval (executes in loop, not setup)
-interval:
-  - interval: 1s
-    then:
-      - lambda: |-
-          static bool canvas_configured = false;
-          if (!canvas_configured) {
-            ESP_LOGI("main", "Configuring camera canvas (via interval in loop)...");
-            auto canvas = id(camera_canvas);
-            if (canvas != nullptr) {
-              id(camera_display).configure_canvas(canvas);
-              canvas_configured = true;
-              ESP_LOGI("main", "Camera canvas configured successfully");
-            } else {
-              ESP_LOGW("main", "Canvas not yet available, will retry in 1s");
-            }
-          }
-
 esp32:
   variant: esp32p4
   flash_size: 32MB
@@ -2468,6 +2450,23 @@ lvgl:
     - touch
 
   on_idle:
+    # Canvas auto-configuration - executes in LVGL loop() after system is ready
+    - timeout: 100ms  # Short timeout, executes once LVGL loop is running
+      then:
+        - lambda: |-
+            static bool canvas_configured = false;
+            if (!canvas_configured) {
+              ESP_LOGI("lvgl", "Auto-configuring camera canvas (via LVGL on_idle)");
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+                canvas_configured = true;
+                ESP_LOGI("lvgl", "✓ Camera canvas auto-configured!");
+              } else {
+                ESP_LOGW("lvgl", "Canvas not available yet");
+              }
+            }
+
     - timeout: !lambda |-
         int timeout = id(auto_off).state;
         return (timeout == -1) ? 86400000 : (timeout * 1000);
