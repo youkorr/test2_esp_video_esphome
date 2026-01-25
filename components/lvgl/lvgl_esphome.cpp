@@ -577,11 +577,11 @@ void LvglComponent::setup() {
   lv_display_set_user_data(this->disp_, this);
   lv_display_set_flush_cb(this->disp_, static_flush_cb);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
-  // Set buffers LAST - this may trigger immediate rendering
-  ESP_LOGI(TAG, "About to call lv_display_set_buffers...");
-  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
-                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
-  ESP_LOGI(TAG, "lv_display_set_buffers completed");
+  // CRITICAL FIX: Do NOT call lv_display_set_buffers() here!
+  // It can trigger immediate rendering which deadlocks because loop() hasn't started yet.
+  // Store buf_bytes for delayed configuration in loop()
+  this->buf_bytes_ = buf_bytes;
+  ESP_LOGI(TAG, "Skipping lv_display_set_buffers in setup() - will configure in loop()");
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
@@ -628,6 +628,15 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
+  // CRITICAL FIX: Configure buffers on first loop() call to avoid setup() deadlock
+  if (!this->buffers_configured_) {
+    ESP_LOGI(TAG, "First loop() - configuring display buffers now...");
+    lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, this->buf_bytes_,
+                           this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
+    this->buffers_configured_ = true;
+    ESP_LOGI(TAG, "Display buffers configured successfully in loop()");
+  }
+
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();

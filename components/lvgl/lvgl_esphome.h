@@ -245,6 +245,8 @@ class LvglComponent : public PollingComponent {
   Trigger<> *draw_start_callback_{};
   Trigger<> *draw_end_callback_{};
   void *rotate_buf_{};
+  bool buffers_configured_{false};  // Track if lv_display_set_buffers() has been called
+  size_t buf_bytes_{0};              // Store buffer size for delayed configuration
 };
 
 class IdleTrigger : public Trigger<> {
