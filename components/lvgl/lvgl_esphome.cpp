@@ -603,6 +603,12 @@ void LvglComponent::setup() {
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
+
+  // CRITICAL: Configure buffers at the VERY END of setup()
+  // This avoids deadlock while ensuring buffers are ready before any callbacks execute
+  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, this->buf_bytes_,
+                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
+  this->buffers_configured_ = true;
 }
 
 void LvglComponent::update() {
@@ -614,13 +620,6 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
-  // CRITICAL FIX: Configure buffers on first loop() call to avoid setup() deadlock
-  if (!this->buffers_configured_) {
-    lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, this->buf_bytes_,
-                           this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
-    this->buffers_configured_ = true;
-  }
-
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
