@@ -564,9 +564,11 @@ void LvglComponent::setup() {
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
   lv_display_set_resolution(this->disp_, this->width_, this->height_);
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-  lv_display_set_flush_cb(this->disp_, static_flush_cb);
+  // CRITICAL: Set user_data BEFORE flush_cb, as flush_cb uses user_data
   lv_display_set_user_data(this->disp_, this);
+  lv_display_set_flush_cb(this->disp_, static_flush_cb);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
+  // Set buffers LAST - this may trigger immediate rendering
   lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
                          this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
   this->rotation = display->get_rotation();
