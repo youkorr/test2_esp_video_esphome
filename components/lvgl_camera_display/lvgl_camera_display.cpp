@@ -193,7 +193,24 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_COLOR_FORMAT_RGB565);
+  // LVGL 9.4 FIX: Instead of replacing the canvas buffer (which causes crashes),
+  // COPY the camera data into the canvas's existing buffer.
+  // The canvas has its own buffer allocated during creation.
+
+  // Get the canvas's draw buffer
+  lv_draw_buf_t *canvas_buf = lv_canvas_get_draw_buf(this->canvas_obj_);
+  if (canvas_buf == nullptr || canvas_buf->data == nullptr) {
+    ESP_LOGE(TAG, "Canvas buffer is null!");
+    return;
+  }
+
+  // Calculate buffer size
+  uint32_t buf_size = width * height * 2;  // RGB565 = 2 bytes per pixel
+
+  // Copy camera data to canvas buffer (this is safe and doesn't crash)
+  memcpy(canvas_buf->data, img_data, buf_size);
+
+  // Invalidate to trigger redraw
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update
