@@ -106,10 +106,25 @@ esphome:
 
   on_boot:
     priority: 850
-    then: 
+    then:
       - logger.log: "Démarrage - Attente du montage de la carte SD..."
       - delay: 5s
       - logger.log: "Délai écoulé - Allumage du rétroéclairage"
+
+  # Canvas configuration after everything is stable
+  - on_boot:
+      priority: -200  # Very late, after LVGL is fully initialized
+      then:
+        - delay: 2s  # Additional delay for LVGL stabilization
+        - lambda: |-
+            ESP_LOGI("main", "Configuring camera canvas after LVGL stabilization...");
+            auto canvas = id(camera_canvas);
+            if (canvas != nullptr) {
+              id(camera_display).configure_canvas(canvas);
+              ESP_LOGI("main", "Camera canvas configured successfully");
+            } else {
+              ESP_LOGE("main", "Canvas is null - cannot configure");
+            }
       - light.turn_on: backlight
 
 esp32:
@@ -2453,23 +2468,6 @@ lvgl:
     - timeout: !lambda |-
         int timeout = id(auto_off).state;
         return (timeout == -1) ? 86400000 : (timeout * 1000);
-      then:
-        - lambda: |-
-            static bool canvas_configured = false;
-            if (!canvas_configured) {
-              // CRITICAL: Wait for LVGL loop to start before configuring canvas
-              // This prevents Guru Meditation crashes from race conditions
-              if (!id(lcd_lvgl).is_loop_started()) {
-                ESP_LOGD("lvgl", "Waiting for LVGL loop to start before canvas config");
-                return;
-              }
-              auto canvas = id(camera_canvas);
-              if (canvas != nullptr) {
-                id(camera_display).configure_canvas(canvas);
-                canvas_configured = true;
-                ESP_LOGI("lvgl", "Canvas configuré pour caméra 640x480");
-              }
-            }
 
     # Auto-Lock (indépendant de Screen Off)
     - timeout: !lambda |-
