@@ -33,11 +33,9 @@ logger:
 
 external_components:
   - source:
-      type: git
-      url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: claude/fix-lvgl-watchdog-crash-AGRWh
+      type: local
+      path: components
     components: [lvgl, image, font]
-    refresh: always
 
 display:
   - platform: ili9xxx
