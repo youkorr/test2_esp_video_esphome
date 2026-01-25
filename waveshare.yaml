@@ -105,27 +105,22 @@ esphome:
   friendly_name: waveshare
 
   on_boot:
-    # First boot handler: SD card mount and backlight
-    - priority: 850
-      then:
-        - logger.log: "Démarrage - Attente du montage de la carte SD..."
-        - delay: 5s
-        - logger.log: "Délai écoulé - Allumage du rétroéclairage"
-        - light.turn_on: backlight
-
-    # Canvas configuration after everything is stable
-    - priority: -200  # Very late, after LVGL is fully initialized
-      then:
-        - delay: 2s  # Additional delay for LVGL stabilization
-        - lambda: |-
-            ESP_LOGI("main", "Configuring camera canvas after LVGL stabilization...");
-            auto canvas = id(camera_canvas);
-            if (canvas != nullptr) {
-              id(camera_display).configure_canvas(canvas);
-              ESP_LOGI("main", "Camera canvas configured successfully");
-            } else {
-              ESP_LOGE("main", "Canvas is null - cannot configure");
-            }
+    priority: 850
+    then:
+      - logger.log: "Démarrage - Attente du montage de la carte SD..."
+      - delay: 5s
+      - logger.log: "Délai écoulé - Allumage du rétroéclairage"
+      - light.turn_on: backlight
+      - delay: 2s  # Délai supplémentaire pour stabilisation LVGL
+      - lambda: |-
+          ESP_LOGI("main", "Configuring camera canvas after LVGL stabilization...");
+          auto canvas = id(camera_canvas);
+          if (canvas != nullptr) {
+            id(camera_display).configure_canvas(canvas);
+            ESP_LOGI("main", "Camera canvas configured successfully");
+          } else {
+            ESP_LOGE("main", "Canvas is null - cannot configure");
+          }
 
 esp32:
   variant: esp32p4
