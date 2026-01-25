@@ -30,7 +30,7 @@ external_components:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
       ref: claude/fix-lvgl-watchdog-crash-AGRWh
-    components: [lvgl]
+    components: [lvgl, image, font]
     refresh: always
 
 display:
