@@ -552,11 +552,9 @@ void LvglComponent::setup() {
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   ESP_LOGI(TAG, "Allocating buffer: %zu bytes (frac=%.2f)", buf_bytes, this->buffer_frac_);
   void *buffer = nullptr;
-  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
-    buffer = malloc(buf_bytes);  // NOLINT
-  ESP_LOGI(TAG, "malloc returned: %p", buffer);
-  if (buffer == nullptr)
-    buffer = lv_malloc_core(buf_bytes);  // NOLINT
+  // CRITICAL: Always use lv_malloc_core() which guarantees 64-byte alignment
+  // Don't use malloc() as it may not be aligned correctly for LVGL 9.4
+  buffer = lv_malloc_core(buf_bytes);  // NOLINT
   ESP_LOGI(TAG, "lv_malloc_core returned: %p", buffer);
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
@@ -743,16 +741,19 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 
 void *lv_malloc_core(size_t size) {
   void *ptr;
-  ptr = heap_caps_malloc(size, cap_bits);
+  // CRITICAL: LVGL 9.4 requires 64-byte alignment for draw buffers
+  // Use heap_caps_aligned_alloc instead of heap_caps_malloc
+  constexpr size_t LVGL_ALIGNMENT = 64;
+  ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, cap_bits);
   if (ptr == nullptr) {
     cap_bits = MALLOC_CAP_8BIT;
-    ptr = heap_caps_malloc(size, cap_bits);
+    ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, cap_bits);
   }
   if (ptr == nullptr) {
-    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes", size);
+    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes (64-byte aligned)", size);
     return nullptr;
   }
-  ESP_LOGV(esphome::lvgl::TAG, "allocate %zu - > %p", size, ptr);
+  ESP_LOGV(esphome::lvgl::TAG, "allocate %zu bytes (64-byte aligned) -> %p", size, ptr);
   return ptr;
 }
 
