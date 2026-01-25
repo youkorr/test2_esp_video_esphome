@@ -735,16 +735,31 @@ void *lv_malloc_core(size_t size) {
   // CRITICAL: LVGL 9.4 requires 64-byte alignment for draw buffers
   // Use heap_caps_aligned_alloc instead of heap_caps_malloc
   constexpr size_t LVGL_ALIGNMENT = 64;
-  ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, cap_bits);
+
+  // BUGFIX: Don't modify global cap_bits - use local variable
+  unsigned caps = cap_bits;
+
+  // Try PSRAM first
+  ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
   if (ptr == nullptr) {
-    cap_bits = MALLOC_CAP_8BIT;
-    ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, cap_bits);
+    // Fallback to internal RAM if PSRAM allocation fails
+    caps = MALLOC_CAP_8BIT;
+    ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
   }
+
   if (ptr == nullptr) {
     ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes (64-byte aligned)", size);
     return nullptr;
   }
-  ESP_LOGV(esphome::lvgl::TAG, "allocate %zu bytes (64-byte aligned) -> %p", size, ptr);
+
+  // Enhanced logging for large buffers (canvas buffers)
+  if (size > 100000) {
+    ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p (caps=0x%x)", size, ptr, caps);
+    ESP_LOGI(esphome::lvgl::TAG, "  Alignment check: address %% 64 = %lu", ((uintptr_t)ptr) % 64);
+  } else {
+    ESP_LOGV(esphome::lvgl::TAG, "allocate %zu bytes (64-byte aligned) -> %p", size, ptr);
+  }
+
   return ptr;
 }
 

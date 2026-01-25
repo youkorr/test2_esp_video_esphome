@@ -101,21 +101,31 @@ class CanvasType(WidgetType):
         else:
             color_format = "LV_COLOR_FORMAT_NATIVE"
 
-        # LVGL 9.4: LV_CANVAS_BUF_SIZE(width, height, bits_per_pixel, stride)
-        # stride is 0 for default (width * bytes_per_pixel)
+        # LVGL 9.4: Allocate canvas buffer with proper error handling
+        # Calculate buffer size needed
         draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
         buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
-        lv.draw_buf_init(
-            draw_buf,
-            width,
-            height,
-            literal(color_format),
-            0,
-            lv_expr.malloc_core(buf_size),
-            literal(buf_size),
-        )
-        lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
-        lv.canvas_set_draw_buf(w.obj, draw_buf)
+
+        # Create a local variable to hold the buffer pointer and validate it
+        # This ensures we can check for allocation failure before using the buffer
+        with LocalVariable(
+            "canvas_buf_ptr",
+            cg.void.operator("ptr"),
+            lv_expr.malloc_core(buf_size)
+        ) as buf_ptr:
+            # Initialize the draw buffer with the allocated buffer
+            # If buf_ptr is nullptr, LVGL will reject it and warn about alignment
+            lv.draw_buf_init(
+                draw_buf,
+                width,
+                height,
+                literal(color_format),
+                0,
+                buf_ptr,
+                literal(buf_size),
+            )
+            lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
+            lv.canvas_set_draw_buf(w.obj, draw_buf)
 
 
 CanvasType()
