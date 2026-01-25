@@ -2457,6 +2457,12 @@ lvgl:
         - lambda: |-
             static bool canvas_configured = false;
             if (!canvas_configured) {
+              // CRITICAL: Wait for LVGL loop to start before configuring canvas
+              // This prevents Guru Meditation crashes from race conditions
+              if (!id(lcd_lvgl).is_loop_started()) {
+                ESP_LOGD("lvgl", "Waiting for LVGL loop to start before canvas config");
+                return;
+              }
               auto canvas = id(camera_canvas);
               if (canvas != nullptr) {
                 id(camera_display).configure_canvas(canvas);

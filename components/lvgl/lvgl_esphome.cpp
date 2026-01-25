@@ -620,6 +620,12 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
+  // Mark that loop has started - LVGL is now fully ready for operations
+  if (!this->loop_started_) {
+    this->loop_started_ = true;
+    ESP_LOGD(TAG, "LVGL loop started - system is now fully ready");
+  }
+
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
