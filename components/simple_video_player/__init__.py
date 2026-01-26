@@ -115,10 +115,17 @@ async def to_code(config):
         audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
         if os.path.exists(audio_codec_inc):
             cg.add_platformio_option("build_flags", [f"-I{audio_codec_inc}"])
-            # Also add decoder subdirectory for esp_audio_dec_reg.h
-            audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
-            if os.path.exists(audio_codec_dec_inc):
-                cg.add_platformio_option("build_flags", [f"-I{audio_codec_dec_inc}"])
+
+            # Add all subdirectories (decoder, encoder, simple_dec) and their impl subdirectories
+            for subdir in ["decoder", "encoder", "simple_dec"]:
+                subdir_path = os.path.join(audio_codec_inc, subdir)
+                if os.path.exists(subdir_path):
+                    cg.add_platformio_option("build_flags", [f"-I{subdir_path}"])
+
+                    # Also add impl subdirectory (e.g., decoder/impl)
+                    impl_path = os.path.join(subdir_path, "impl")
+                    if os.path.exists(impl_path):
+                        cg.add_platformio_option("build_flags", [f"-I{impl_path}"])
 
     # esp_image_effects (esp_imgfx) - only used for hardware rotation
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")

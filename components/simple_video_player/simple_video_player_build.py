@@ -266,24 +266,41 @@ if esp_audio_codec_dir:
 
     # Add esp_audio_codec include paths
     audio_codec_inc = os.path.join(esp_audio_codec_dir, "include")
+    audio_codec_inc_paths = []
     if os.path.exists(audio_codec_inc):
+        audio_codec_inc_paths.append(audio_codec_inc)
         env.Append(CPPPATH=[audio_codec_inc])
         print(f"[Simple Video Player] Added esp_audio_codec include path: {audio_codec_inc}")
-        # Also add decoder subdirectory for esp_audio_dec_reg.h
-        audio_codec_dec_inc = os.path.join(audio_codec_inc, "decoder")
-        if os.path.exists(audio_codec_dec_inc):
-            env.Append(CPPPATH=[audio_codec_dec_inc])
-            print(f"[Simple Video Player] Added esp_audio_codec decoder include path: {audio_codec_dec_inc}")
 
-    # Compile C source files (codec registration)
+        # Add all subdirectories for codec registration files (including impl subdirectories)
+        for subdir in ["decoder", "encoder", "simple_dec"]:
+            subdir_path = os.path.join(audio_codec_inc, subdir)
+            if os.path.exists(subdir_path):
+                audio_codec_inc_paths.append(subdir_path)
+                env.Append(CPPPATH=[subdir_path])
+                print(f"[Simple Video Player] Added esp_audio_codec {subdir} include path: {subdir_path}")
+
+                # Also add impl subdirectory (e.g., decoder/impl, encoder/impl, simple_dec/impl)
+                impl_path = os.path.join(subdir_path, "impl")
+                if os.path.exists(impl_path):
+                    audio_codec_inc_paths.append(impl_path)
+                    env.Append(CPPPATH=[impl_path])
+                    print(f"[Simple Video Player] Added esp_audio_codec {subdir}/impl include path: {impl_path}")
+
+    # Compile C source files (codec registration) with custom environment
     audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")
     audio_codec_objects = []
     if os.path.exists(audio_codec_src_dir):
+        # Create custom environment with all include paths
+        codec_env = env.Clone()
+        for inc_path in audio_codec_inc_paths:
+            codec_env.Prepend(CPPPATH=[inc_path])
+
         src_files = ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]
         for src_file in src_files:
             src_path = os.path.join(audio_codec_src_dir, src_file)
             if os.path.exists(src_path):
-                obj = env.Object(src_path)
+                obj = codec_env.Object(src_path)
                 audio_obj = obj[0] if isinstance(obj, list) else obj
                 audio_codec_objects.append(audio_obj)
                 print(f"[Simple Video Player] Compiling {src_file}")
