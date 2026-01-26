@@ -38,13 +38,16 @@ lv_lottie_t = LvType("lv_lottie_t")
 def lottie_src(value):
     """
     Validate lottie source: can be either:
-    - A file path string (e.g., "S:/animations/loading.json")
+    - A file path string (e.g., "/sdcard/animations/loading.json")
     - A lottie_file ID (e.g., my_lottie_animation)
+
+    Note: LVGL Lottie uses direct fopen(), not VFS driver, so use full paths like:
+    "/sdcard/..." instead of "S:/..."
     """
     if isinstance(value, cv.use_id_type):
         # It's an ID reference to a lottie_file component
         return cv.use_id(cg.esphome_ns.namespace("lottie_file").class_("LottieFile"))(value)
-    # It's a file path string
+    # It's a file path string - accept full paths like "/sdcard/..."
     return lv_text(value)
 
 
@@ -103,7 +106,8 @@ class LottieType(WidgetType):
                 RawExpression(f"{lottie_file}->get_size()")
             )
         else:
-            # File path (S:/...) - use lv_lottie_set_src_file()
+            # File path (/sdcard/...) - use lv_lottie_set_src_file()
+            # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
             src_path = await lv_text.process(src)
             lv.lottie_set_src_file(w.obj, src_path)
 

@@ -13,7 +13,12 @@ namespace lvgl {
  * Provides LVGL access to SD card files via the 'S:' drive letter.
  * Maps S:/ to /sdcard/ mount point.
  *
- * Required for loading Lottie animations and SVG images from SD card.
+ * NOTE: Some LVGL widgets (Lottie, Image with SVG) use direct fopen()
+ * instead of the LVGL VFS driver. For these widgets, use full paths:
+ *   - Use: "/sdcard/animations/loading.json"
+ *   - Not: "S:/animations/loading.json"
+ *
+ * This driver is provided for widgets that DO use LVGL VFS.
  */
 class LvglFsDriver {
  public:

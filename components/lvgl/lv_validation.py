@@ -377,10 +377,13 @@ def image_validator(value):
     # Accept three types:
     # 1. Image ID (embedded image from image: component)
     # 2. SvgFile ID (embedded SVG from svg_file: component)
-    # 3. String path (S:/path/to/file for SD card)
+    # 3. String path (/sdcard/path/to/file for SD card)
+    #
+    # Note: LVGL image widget uses direct fopen() for file paths,
+    # so use full paths like "/sdcard/icons/wifi.svg" not "S:/..."
 
     if isinstance(value, str):
-        # It's a file path (e.g., "S:/icons/wifi.svg")
+        # It's a file path (e.g., "/sdcard/icons/wifi.svg")
         add_lv_use("img", "label")
         return value
 
