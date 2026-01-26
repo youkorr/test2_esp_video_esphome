@@ -13,7 +13,7 @@ import esphome.codegen as cg
 from esphome.const import CONF_ID
 from esphome.core import CORE
 
-from esphome.cpp_generator import RawExpression
+from esphome.cpp_generator import RawExpression, RawStatement
 
 from ..defines import (
     CONF_MAIN,
@@ -101,10 +101,22 @@ class LottieType(WidgetType):
             # File path (/sdcard/...) - use lv_lottie_set_src_file()
             # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
             src_path = await lv_text.process(src)
+
+            # Debug: Log file loading
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading Lottie from: %s", {src_path})'))
+
+            # Load the Lottie animation from file
             lv.lottie_set_src_file(w.obj, src_path)
+
+            # Debug: Check if loaded successfully
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Lottie widget size: %dx%d", lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}))'))
         else:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
+
+            # Debug: Log embedded loading
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading embedded Lottie: %u bytes", {lottie_file}->get_size())'))
+
             # Load from embedded Flash ROM data
             lv.lottie_set_src_data(
                 w.obj,
