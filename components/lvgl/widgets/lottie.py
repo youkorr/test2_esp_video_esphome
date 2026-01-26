@@ -85,23 +85,19 @@ class LottieType(WidgetType):
         loop = config.get(CONF_LOOP, True)
 
         # Get the animation object to control playback
-        # lv_anim_t ** anim = lv_lottie_get_anim(obj)
-        # Note: LVGL 9.4 returns lv_anim_t** (array of animation pointers)
+        # lv_anim_t * anim = lv_lottie_get_anim(obj)
         if not autoplay or not loop:
-            # Create local variable for animation object array
-            with LocalVariable("lottie_anim", "lv_anim_t **",
-                             lv.lottie_get_anim(w.obj)) as anim_array:
-                # Access first animation in the array
-                first_anim = RawExpression(f"{anim_array}[0]")
-
+            # Create local variable for animation object
+            with LocalVariable("lottie_anim", "lv_anim_t *",
+                             lv.lottie_get_anim(w.obj)) as anim_obj:
                 if not autoplay:
                     # Pause the animation (will need manual start)
-                    lv.anim_del(first_anim, literal("NULL"))
+                    lv.anim_del(anim_obj, literal("NULL"))
                 elif not loop:
                     # Set animation to play once (not infinite loop)
                     # By default LVGL animations repeat infinitely
                     # Setting repeat count to 1 means play once
-                    lv.anim_set_repeat_count(first_anim, 1)
+                    lv.anim_set_repeat_count(anim_obj, 1)
 
     def get_uses(self):
         """Lottie widget requires ThorVG for rendering"""
