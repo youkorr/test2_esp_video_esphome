@@ -3,6 +3,7 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "lvgl_esphome.h"
+#include "lv_fs_driver.h"
 
 #include "core/lv_obj_class_private.h"
 
@@ -131,6 +132,9 @@ void LvglComponent::esphome_lvgl_init() {
   lv_tick_set_cb([] { return millis(); });
   lv_update_event = static_cast<lv_event_code_t>(lv_event_register_id());
   lv_api_event = static_cast<lv_event_code_t>(lv_event_register_id());
+
+  // Initialize LVGL filesystem driver for SD card access (S:/ = /sdcard/)
+  LvglFsDriver::init();
 }
 
 void LvglComponent::add_event_cb(lv_obj_t *obj, event_callback_t callback, lv_event_code_t event) {
@@ -545,10 +549,9 @@ void LvglComponent::setup() {
     frac = 1;
   auto buf_bytes = width * height / frac * LV_COLOR_DEPTH / 8;
   void *buffer = nullptr;
-  if (this->buffer_frac_ >= MIN_BUFFER_FRAC / 2)
-    buffer = malloc(buf_bytes);  // NOLINT
-  if (buffer == nullptr)
-    buffer = lv_malloc_core(buf_bytes);  // NOLINT
+  // CRITICAL: Always use lv_malloc_core() which guarantees 64-byte alignment
+  // Don't use malloc() as it may not be aligned correctly for LVGL 9.4
+  buffer = lv_malloc_core(buf_bytes);  // NOLINT
   // if specific buffer size not set and can't get 100%, try for a smaller one
   if (buffer == nullptr && this->buffer_frac_ == 0) {
     frac = MIN_BUFFER_FRAC;
@@ -564,11 +567,14 @@ void LvglComponent::setup() {
   this->draw_buf_ = static_cast<uint8_t *>(buffer);
   lv_display_set_resolution(this->disp_, this->width_, this->height_);
   lv_display_set_color_format(this->disp_, LV_COLOR_FORMAT_RGB565);
-  lv_display_set_flush_cb(this->disp_, static_flush_cb);
+  // CRITICAL: Set user_data BEFORE flush_cb, as flush_cb uses user_data
   lv_display_set_user_data(this->disp_, this);
+  lv_display_set_flush_cb(this->disp_, static_flush_cb);
   lv_display_add_event_cb(this->disp_, rounder_cb, LV_EVENT_INVALIDATE_AREA, this);
-  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, buf_bytes,
-                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
+  // CRITICAL FIX: Do NOT call lv_display_set_buffers() here!
+  // It can trigger immediate rendering which deadlocks because loop() hasn't started yet.
+  // Store buf_bytes for delayed configuration in loop()
+  this->buf_bytes_ = buf_bytes;
   this->rotation = display->get_rotation();
   if (this->rotation != display::DISPLAY_ROTATION_0_DEGREES) {
     this->rotate_buf_ = static_cast<lv_color_t *>(lv_malloc_core(buf_bytes));  // NOLINT
@@ -601,6 +607,12 @@ void LvglComponent::setup() {
     disp->set_rotation(display::DISPLAY_ROTATION_0_DEGREES);
   this->show_page(0, LV_SCR_LOAD_ANIM_NONE, 0);
   lv_disp_trig_activity(this->disp_);
+
+  // CRITICAL: Configure buffers at the VERY END of setup()
+  // This avoids deadlock while ensuring buffers are ready before any callbacks execute
+  lv_display_set_buffers(this->disp_, this->draw_buf_, nullptr, this->buf_bytes_,
+                         this->full_refresh_ ? LV_DISPLAY_RENDER_MODE_FULL : LV_DISPLAY_RENDER_MODE_PARTIAL);
+  this->buffers_configured_ = true;
 }
 
 void LvglComponent::update() {
@@ -612,6 +624,12 @@ void LvglComponent::update() {
 }
 
 void LvglComponent::loop() {
+  // Mark that loop has started - LVGL is now fully ready for operations
+  if (!this->loop_started_) {
+    this->loop_started_ = true;
+    ESP_LOGD(TAG, "LVGL loop started - system is now fully ready");
+  }
+
   if (this->is_paused()) {
     if (this->paused_ && this->show_snow_)
       this->write_random_();
@@ -718,16 +736,30 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 
 void *lv_malloc_core(size_t size) {
   void *ptr;
-  ptr = heap_caps_malloc(size, cap_bits);
+  // CRITICAL: LVGL 9.4 requires 64-byte alignment for draw buffers
+  constexpr size_t LVGL_ALIGNMENT = 64;
+
+  // BUGFIX: Don't modify global cap_bits - use local variable
+  unsigned caps = cap_bits;
+
+  // Try PSRAM first
+  ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
   if (ptr == nullptr) {
-    cap_bits = MALLOC_CAP_8BIT;
-    ptr = heap_caps_malloc(size, cap_bits);
+    // Fallback to internal RAM if PSRAM allocation fails
+    caps = MALLOC_CAP_8BIT;
+    ptr = heap_caps_aligned_alloc(LVGL_ALIGNMENT, size, caps);
   }
+
   if (ptr == nullptr) {
-    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes", size);
+    ESP_LOGE(esphome::lvgl::TAG, "Failed to allocate %zu bytes (64-byte aligned)", size);
     return nullptr;
   }
-  ESP_LOGV(esphome::lvgl::TAG, "allocate %zu - > %p", size, ptr);
+
+  // Log only very large buffers (>1MB) for debugging
+  if (size > 1000000) {
+    ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p", size, ptr);
+  }
+
   return ptr;
 }
 

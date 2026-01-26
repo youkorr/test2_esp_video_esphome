@@ -106,7 +106,7 @@ esphome:
 
   on_boot:
     priority: 850
-    then: 
+    then:
       - logger.log: "Démarrage - Attente du montage de la carte SD..."
       - delay: 5s
       - logger.log: "Délai écoulé - Allumage du rétroéclairage"
@@ -514,7 +514,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: claude/fix-lvgl-esphome-boot-gbLwE #claude/fix-sc202cs-bayer-format-jJtiS #claude/fix-esp32-detection-issues-4AJoe #claude/ov02c10-ipa-check-OHTeT #claude/remove-camera-warnings-7bhNh #claude/optimize-video-player-buffer-8BkwL
+      ref: claude/fix-lvgl-watchdog-crash-AGRWh  # LVGL 9.4 fixes: deadlock + 64-byte alignment + init order
     components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera, lvgl, font, image]
     refresh: always
 
@@ -1002,7 +1002,7 @@ sensor:
     device_class: data_size
     state_class: measurement
     accuracy_decimals: 1
-    update_interval: 10s
+    update_interval: 1s
     lambda: |-
       // Total SRAM size for ESP32-S3 = 512KB
       const size_t total_sram = 512 * 1024;
@@ -1038,7 +1038,7 @@ sensor:
     device_class: data_size
     state_class: measurement
     accuracy_decimals: 1
-    update_interval: 10s
+    update_interval: 1s
     lambda: |-
       // Total PSRAM size for ESP32-P4 = 32MB
       const size_t total_psram = 32 * 1024 * 1024;
@@ -1345,13 +1345,20 @@ switch:
     optimistic: true
     turn_on_action:
       - lambda: |-
-          auto *lvgl_disp = id(camera_display);  
+          // Configure canvas FIRST (when LVGL is ready and user activates switch)
+          auto canvas = id(camera_canvas);
+          auto *lvgl_disp = id(camera_display);
+          if (canvas != nullptr && lvgl_disp != nullptr) {
+            lvgl_disp->configure_canvas(canvas);
+            ESP_LOGI("switch", "Canvas configured for camera display");
+          }
+          // THEN enable the camera display timer
           if (lvgl_disp != nullptr) {
             lvgl_disp->set_enabled(true);
           }
     turn_off_action:
       - lambda: |-
-          auto *lvgl_disp = id(camera_display);  
+          auto *lvgl_disp = id(camera_display);
           if (lvgl_disp != nullptr) {
             lvgl_disp->set_enabled(false);
           }
@@ -2453,17 +2460,6 @@ lvgl:
     - timeout: !lambda |-
         int timeout = id(auto_off).state;
         return (timeout == -1) ? 86400000 : (timeout * 1000);
-      then:
-        - lambda: |-
-            static bool canvas_configured = false;
-            if (!canvas_configured) {
-              auto canvas = id(camera_canvas);
-              if (canvas != nullptr) {
-                id(camera_display).configure_canvas(canvas);
-                canvas_configured = true;
-                ESP_LOGI("lvgl", "Canvas configuré pour caméra 640x480");
-              }
-            }
 
     # Auto-Lock (indépendant de Screen Off)
     - timeout: !lambda |-
@@ -6062,7 +6058,7 @@ interval:
           #}
 
   #- tab5_camera.take_picture: /camera/test.jpg
-  #- interval: 10s
+  #- interval: 1s
     #then:
       #- online_image.set_url:
           #id: cctv_img

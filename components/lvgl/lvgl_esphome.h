@@ -210,6 +210,8 @@ class LvglComponent : public PollingComponent {
   void set_resume_trigger(Trigger<> *trigger) { this->resume_callback_ = trigger; }
   void set_draw_start_trigger(Trigger<> *trigger) { this->draw_start_callback_ = trigger; }
   void set_draw_end_trigger(Trigger<> *trigger) { this->draw_end_callback_ = trigger; }
+  // Check if loop() has started - safe to perform LVGL operations
+  bool is_loop_started() const { return this->loop_started_; }
 
  protected:
   void draw_end_();
@@ -245,6 +247,9 @@ class LvglComponent : public PollingComponent {
   Trigger<> *draw_start_callback_{};
   Trigger<> *draw_end_callback_{};
   void *rotate_buf_{};
+  bool buffers_configured_{false};  // Track if lv_display_set_buffers() has been called
+  size_t buf_bytes_{0};              // Store buffer size for delayed configuration
+  bool loop_started_{false};         // Track if loop() has been called - safe for LVGL ops
 };
 
 class IdleTrigger : public Trigger<> {

@@ -1,0 +1,81 @@
+# Test 3: Canvas LARGE (640x480) - la taille qui crash
+# Si ce test crash, le problème est l'allocation du buffer 640x480
+
+substitutions:
+  device_name: "test-canvas-large"
+
+esphome:
+  name: ${device_name}
+  friendly_name: "Test Canvas Large 640x480"
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: 5.3.1
+    platform_version: 6.8.1
+    sdkconfig_options:
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "300"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      # Force PSRAM malloc for large allocations
+      CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "0"
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+
+logger:
+  level: DEBUG
+  logs:
+    lvgl: DEBUG
+    lvgl.component: VERBOSE
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [lvgl, image, font]
+
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: custom
+    data_rate: 40MHz
+    cs_pin: 45
+    dc_pin: 0
+    dimensions:
+      width: 1024
+      height: 600
+
+touchscreen:
+  - platform: cst226
+    id: my_touchscreen
+    interrupt_pin: 4
+    reset_pin: 5
+
+lvgl:
+  log_level: DEBUG
+  displays:
+    - display_id: my_display
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+
+  pages:
+    - id: main_page
+      widgets:
+        # Canvas EXACT SAME SIZE as camera - 640x480
+        # Buffer size: 640 * 480 * 2 bytes (RGB565) = 614,400 bytes (~600KB)
+        - canvas:
+            id: test_canvas_large
+            width: 640
+            height: 480
+            x: 192
+            y: 60
+            bg_color: 0x0000FF  # Bleu pour test
+
+        - label:
+            text: "Test Canvas 640x480 (600KB buffer)"
+            x: 50
+            y: 20
+            text_color: 0xFFFFFF

@@ -101,21 +101,32 @@ class CanvasType(WidgetType):
         else:
             color_format = "LV_COLOR_FORMAT_NATIVE"
 
-        # LVGL 9.4: LV_CANVAS_BUF_SIZE(width, height, bits_per_pixel, stride)
-        # stride is 0 for default (width * bytes_per_pixel)
+        # LVGL 9.4: Canvas buffer allocation
+        # The issue: lv_expr.malloc_core() generates an expression that is never evaluated
+        # Solution: Use lv.malloc_core() which executes immediately
+
         draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
         buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
+
+        # Allocate buffer using lv.malloc_core (executes immediately)
+        canvas_buffer = lv.malloc_core(buf_size)
+
+        # Initialize draw buffer with allocated buffer
         lv.draw_buf_init(
             draw_buf,
             width,
             height,
             literal(color_format),
             0,
-            lv_expr.malloc_core(buf_size),
+            canvas_buffer,
             literal(buf_size),
         )
         lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
         lv.canvas_set_draw_buf(w.obj, draw_buf)
+
+        # Set canvas size explicitly
+        from ..lvcode import lv_obj
+        lv_obj.set_size(w.obj, width, height)
 
 
 CanvasType()

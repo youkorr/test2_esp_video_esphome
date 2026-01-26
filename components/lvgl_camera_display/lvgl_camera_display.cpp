@@ -1,6 +1,7 @@
 #include "lvgl_camera_display.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include <cstring>
 // Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -193,7 +194,47 @@ void LVGLCameraDisplay::update_canvas_() {
     this->first_update_ = false;
   }
 
-  lv_canvas_set_buffer(this->canvas_obj_, img_data, width, height, LV_COLOR_FORMAT_RGB565);
+  // LVGL 9.4 FIX: Instead of replacing the canvas buffer (which causes crashes),
+  // COPY the camera data into the canvas's existing buffer.
+  // The canvas has its own buffer allocated during creation.
+
+  // Get the canvas's draw buffer
+  lv_draw_buf_t *canvas_buf = lv_canvas_get_draw_buf(this->canvas_obj_);
+  if (canvas_buf == nullptr) {
+    ESP_LOGE(TAG, "Canvas draw_buf is null!");
+    return;
+  }
+  if (canvas_buf->data == nullptr) {
+    ESP_LOGE(TAG, "Canvas buffer data is null!");
+    ESP_LOGE(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
+    ESP_LOGE(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
+    return;
+  }
+
+  // Log canvas buffer info on first update
+  if (this->first_update_) {
+    ESP_LOGI(TAG, "Canvas buffer info:");
+    ESP_LOGI(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
+    ESP_LOGI(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
+    ESP_LOGI(TAG, "   Canvas data ptr: %p", canvas_buf->data);
+    ESP_LOGI(TAG, "   Camera dimensions: %u x %u", width, height);
+  }
+
+  // Verify dimensions match
+  if (canvas_buf->header.w != width || canvas_buf->header.h != height) {
+    ESP_LOGW(TAG, "Canvas size (%ux%u) != camera size (%ux%u)!",
+             canvas_buf->header.w, canvas_buf->header.h, width, height);
+  }
+
+  // Calculate buffer size
+  uint32_t buf_size = width * height * 2;  // RGB565 = 2 bytes per pixel
+
+  // Copy camera buffer to canvas buffer
+  // Both buffers are 64-byte aligned (canvas via lv_malloc_core, camera via
+  // heap_caps_aligned_alloc) for optimal ESP32-P4 cache performance
+  memcpy(canvas_buf->data, img_data, buf_size);
+
+  // Invalidate to trigger redraw
   lv_obj_invalidate(this->canvas_obj_);
 
   // Tracker ce buffer pour le liberer au prochain update

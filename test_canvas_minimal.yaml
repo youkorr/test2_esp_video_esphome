@@ -1,0 +1,92 @@
+# Test minimal LVGL Canvas - pour debugger le crash 0xf003e007
+#
+# Ce test crée juste un canvas LVGL sans caméra pour isoler le problème
+
+substitutions:
+  device_name: "test-canvas-minimal"
+
+esphome:
+  name: ${device_name}
+  friendly_name: "Test Canvas Minimal"
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: 5.3.1
+    platform_version: 6.8.1
+    sdkconfig_options:
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "300"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+
+logger:
+  level: DEBUG
+  logs:
+    lvgl: DEBUG
+    lvgl.component: DEBUG
+
+# Composants externes - juste LVGL
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [lvgl, image, font]
+
+# Display minimal (stub pour LVGL)
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: custom
+    data_rate: 40MHz
+    cs_pin: 45
+    dc_pin: 0
+    dimensions:
+      width: 1024
+      height: 600
+    transform:
+      swap_xy: false
+      mirror_x: false
+      mirror_y: false
+
+# LVGL avec canvas simple
+lvgl:
+  log_level: DEBUG
+  displays:
+    - display_id: my_display
+
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+
+  pages:
+    - id: main_page
+      skip: false
+      widgets:
+        # Canvas simple sans caméra
+        - canvas:
+            id: test_canvas
+            width: 320
+            height: 240
+            x: 50
+            y: 50
+            bg_color: 0xFF0000  # Rouge pour test
+
+        # Label pour debug
+        - label:
+            id: status_label
+            text: "Canvas Test"
+            x: 400
+            y: 50
+
+  # Test 1: Pas de configuration du canvas du tout
+  # (le canvas existe mais n'est jamais "configuré")
+
+# Touchscreen stub
+touchscreen:
+  - platform: cst226
+    id: my_touchscreen
+    interrupt_pin: 4
+    reset_pin: 5

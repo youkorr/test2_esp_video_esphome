@@ -1,0 +1,73 @@
+# Test 1: Canvas TRÈS petit (devrait fonctionner)
+# Si ce test fonctionne, le problème est la TAILLE du buffer du canvas
+
+substitutions:
+  device_name: "test-canvas-small"
+
+esphome:
+  name: ${device_name}
+  friendly_name: "Test Canvas Small"
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  framework:
+    type: esp-idf
+    version: 5.3.1
+    platform_version: 6.8.1
+    sdkconfig_options:
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "300"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+
+logger:
+  level: DEBUG
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [lvgl, image, font]
+
+display:
+  - platform: ili9xxx
+    id: my_display
+    model: custom
+    data_rate: 40MHz
+    cs_pin: 45
+    dc_pin: 0
+    dimensions:
+      width: 1024
+      height: 600
+
+touchscreen:
+  - platform: cst226
+    id: my_touchscreen
+    interrupt_pin: 4
+    reset_pin: 5
+
+lvgl:
+  log_level: DEBUG
+  displays:
+    - display_id: my_display
+  touchscreens:
+    - touchscreen_id: my_touchscreen
+
+  pages:
+    - id: main_page
+      widgets:
+        # Canvas TRÈS PETIT - test allocation mémoire
+        - canvas:
+            id: test_canvas_small
+            width: 100   # Petit!
+            height: 100  # Petit!
+            x: 50
+            y: 50
+            bg_color: 0xFF0000
+
+        - label:
+            text: "Test Canvas 100x100"
+            x: 200
+            y: 75
