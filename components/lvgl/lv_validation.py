@@ -374,10 +374,11 @@ lv_images_used = set()
 
 
 def image_validator(value):
-    # Accept three types:
-    # 1. Image ID (embedded image from image: component)
-    # 2. SvgFile ID (embedded SVG from svg_file: component)
-    # 3. String path (/sdcard/path/to/file for SD card)
+    # Accept multiple types:
+    # 1. String path - file on SD card (e.g., "/sdcard/icons/wifi.svg")
+    # 2. SvgFile ID - embedded SVG from svg_file: component
+    # 3. SdImageComponent ID - image from storage/sd_image component
+    # 4. Image ID - embedded image from image: component
     #
     # Note: LVGL image widget uses direct fopen() for file paths,
     # so use full paths like "/sdcard/icons/wifi.svg" not "S:/..."
@@ -387,7 +388,7 @@ def image_validator(value):
         add_lv_use("img", "label")
         return value
 
-    # Try svg_file ID first
+    # Try svg_file ID
     try:
         svg_file_class = cg.esphome_ns.namespace("svg_file").class_("SvgFile")
         result = cv.use_id(svg_file_class)(value)
@@ -396,7 +397,16 @@ def image_validator(value):
     except cv.Invalid:
         pass
 
-    # Fall back to regular image ID
+    # Try sd_image ID (from storage component)
+    try:
+        sd_image_class = cg.esphome_ns.namespace("storage").class_("SdImageComponent")
+        result = cv.use_id(sd_image_class)(value)
+        add_lv_use("img", "label")
+        return result
+    except cv.Invalid:
+        pass
+
+    # Fall back to regular embedded image ID
     value = requires_component("image")(value)
     value = cv.use_id(Image_)(value)
     lv_images_used.add(value)

@@ -55,7 +55,7 @@ def lottie_src(value):
 # Lottie schema
 LOTTIE_SCHEMA = cv.Schema(
     {
-        cv.Required(CONF_SRC): lottie_src,  # Path to .json file OR lottie_file ID
+        cv.Optional(CONF_SRC): lottie_src,  # Path to .json file OR lottie_file ID (can be set later via on_load)
         cv.Optional(CONF_AUTOPLAY, default=True): cv.boolean,
         cv.Optional(CONF_LOOP, default=True): cv.boolean,
         cv.Optional(CONF_BUFFER_WIDTH): lv_int,  # Buffer width (default: widget width)
@@ -93,11 +93,11 @@ class LottieType(WidgetType):
         """
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Get animation source (file path or embedded ID)
-        src = config[CONF_SRC]
+        # Get animation source (file path or embedded ID) - may be None if set via on_load
+        src = config.get(CONF_SRC)
 
-        # Check if it's a file path string or an embedded lottie_file ID
-        if isinstance(src, str):
+        # Only load source if provided (can be set later via on_load/widget.update)
+        if src is not None and isinstance(src, str):
             # File path (/sdcard/...) - use lv_lottie_set_src_file()
             # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
             src_path = await lv_text.process(src)
@@ -108,7 +108,7 @@ class LottieType(WidgetType):
             # Load the Lottie animation from file
             # LVGL will handle file errors gracefully
             lv.lottie_set_src_file(w.obj, src_path)
-        else:
+        elif src is not None:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
 
@@ -120,6 +120,7 @@ class LottieType(WidgetType):
                 RawExpression(f"(const char*){lottie_file}->get_data()"),
                 RawExpression(f"{lottie_file}->get_size()")
             )
+        # else: src is None - will be set later via on_load or widget.update
 
         # Control playback via LVGL animation object
         autoplay = config.get(CONF_AUTOPLAY, True)
