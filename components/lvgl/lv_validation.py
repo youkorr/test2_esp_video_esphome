@@ -374,6 +374,26 @@ lv_images_used = set()
 
 
 def image_validator(value):
+    # Accept three types:
+    # 1. Image ID (embedded image from image: component)
+    # 2. SvgFile ID (embedded SVG from svg_file: component)
+    # 3. String path (S:/path/to/file for SD card)
+
+    if isinstance(value, str):
+        # It's a file path (e.g., "S:/icons/wifi.svg")
+        add_lv_use("img", "label")
+        return value
+
+    # Try svg_file ID first
+    try:
+        svg_file_class = cg.esphome_ns.namespace("svg_file").class_("SvgFile")
+        result = cv.use_id(svg_file_class)(value)
+        add_lv_use("img", "label")
+        return result
+    except cv.Invalid:
+        pass
+
+    # Fall back to regular image ID
     value = requires_component("image")(value)
     value = cv.use_id(Image_)(value)
     lv_images_used.add(value)
