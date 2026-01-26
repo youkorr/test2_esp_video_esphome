@@ -127,27 +127,27 @@ class LottieType(WidgetType):
                 ))
         else:
             # Use widget dimensions - need to check they're valid
-            with LocalVariable("lottie_w", "int32_t",
-                             RawExpression(f"lv_obj_get_content_width({w.obj})")) as w_var:
-                with LocalVariable("lottie_h", "int32_t",
-                                 RawExpression(f"lv_obj_get_content_height({w.obj})")) as h_var:
-                    # Only allocate if dimensions are valid
-                    cg.add(RawStatement(
-                        f'if ({w_var} > 0 && {h_var} > 0) {{\n'
-                        f'  lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create({w_var}, {h_var}, '
-                        f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);\n'
-                        f'  if (lottie_draw_buf == nullptr) {{\n'
-                        f'    ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {w_var}, {h_var});\n'
-                        f'  }} else {{\n'
-                        f'    ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
-                        f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
-                        f'    lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
-                        f'  }}\n'
-                        f'}} else {{\n'
-                        f'  ESP_LOGW("lvgl.lottie", "Widget has invalid dimensions: %dx%d. Set width/height or buffer_width/buffer_height.", '
-                        f'{w_var}, {h_var});\n'
-                        f'}}'
-                    ))
+            # Generate inline code without LocalVariable to avoid pointer issues
+            cg.add(RawStatement(
+                f'{{\n'
+                f'  int32_t lottie_w = lv_obj_get_content_width({w.obj});\n'
+                f'  int32_t lottie_h = lv_obj_get_content_height({w.obj});\n'
+                f'  if (lottie_w > 0 && lottie_h > 0) {{\n'
+                f'    lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create(lottie_w, lottie_h, '
+                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);\n'
+                f'    if (lottie_draw_buf == nullptr) {{\n'
+                f'      ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", lottie_w, lottie_h);\n'
+                f'    }} else {{\n'
+                f'      ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
+                f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
+                f'      lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
+                f'    }}\n'
+                f'  }} else {{\n'
+                f'    ESP_LOGW("lvgl.lottie", "Widget has invalid dimensions: %dx%d. Set width/height or buffer_width/buffer_height.", '
+                f'lottie_w, lottie_h);\n'
+                f'  }}\n'
+                f'}}'
+            ))
 
         # Get animation source (file path or embedded ID) - may be None if set via on_load
         src = config.get(CONF_SRC)
