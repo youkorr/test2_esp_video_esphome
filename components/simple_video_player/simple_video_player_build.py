@@ -275,8 +275,13 @@ if esp_audio_codec_dir:
             print(f"[Simple Video Player]   Codecs: AAC-LC, AAC-HE, AAC-HEv2")
             print(f"[Simple Video Player] ========================================")
 
-            env.Append(LINKFLAGS=[aac_lib])
-            print(f"[Simple Video Player] Linked esp_audio_codec library")
+            # Force linker to include all symbols from the library
+            env.Prepend(LINKFLAGS=[
+                "-Wl,--whole-archive",
+                aac_lib,
+                "-Wl,--no-whole-archive"
+            ])
+            print(f"[Simple Video Player] Linked esp_audio_codec library (--whole-archive)")
         else:
             print(f"[Simple Video Player]  WARNING: libesp_audio_codec.a not found in {audio_codec_lib_dir}")
     else:
