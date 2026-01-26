@@ -8,6 +8,7 @@
 #include "core/lv_obj_class_private.h"
 
 #include <numeric>
+#include <cstring>  // for memcpy in lv_realloc_core
 
 namespace esphome::lvgl {
 static const char *const TAG = "lvgl";
@@ -772,6 +773,38 @@ void lv_free_core(void *ptr) {
 
 void *lv_realloc_core(void *ptr, size_t size) {
   ESP_LOGV(esphome::lvgl::TAG, "realloc %p: %zu", ptr, size);
-  return heap_caps_realloc(ptr, size, cap_bits);
+
+  // CRITICAL: heap_caps_realloc() does NOT preserve 64-byte alignment!
+  // We must manually reallocate with correct alignment for ESP32-P4
+  constexpr size_t LVGL_ALIGNMENT = 64;
+
+  if (ptr == nullptr) {
+    // NULL pointer - behave like malloc
+    return lv_malloc_core(size);
+  }
+
+  if (size == 0) {
+    // Size 0 - behave like free
+    lv_free_core(ptr);
+    return nullptr;
+  }
+
+  // Get old buffer size
+  size_t old_size = heap_caps_get_allocated_size(ptr);
+
+  // Allocate new aligned buffer
+  void *new_ptr = lv_malloc_core(size);
+  if (new_ptr == nullptr) {
+    return nullptr;
+  }
+
+  // Copy old data to new buffer (minimum of old and new size)
+  size_t copy_size = (old_size < size) ? old_size : size;
+  memcpy(new_ptr, ptr, copy_size);
+
+  // Free old buffer
+  lv_free_core(ptr);
+
+  return new_ptr;
 }
 #endif
