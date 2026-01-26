@@ -2546,40 +2546,14 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
 
   ESP_LOGI(TAG, "Initializing AAC decoder...");
 
-  // Open AAC decoder
-  this->aac_decoder_ = esp_aac_dec_open(NULL);
-  if (!this->aac_decoder_) {
-    ESP_LOGE(TAG, "Failed to open AAC decoder");
+  // Open AAC decoder with correct API: esp_aac_dec_open(cfg, cfg_sz, dec_handle)
+  esp_audio_err_t ret = esp_aac_dec_open(NULL, 0, &this->aac_decoder_);
+  if (ret != ESP_AUDIO_ERR_OK || !this->aac_decoder_) {
+    ESP_LOGE(TAG, "Failed to open AAC decoder: %d", ret);
     return false;
   }
 
-  // Send AAC config (from esds box) if available
-  if (!this->audio_config_.empty()) {
-    esp_audio_dec_in_raw_t config_raw = {
-        .buffer = this->audio_config_.data(),
-        .len = this->audio_config_.size(),
-        .pts = 0
-    };
-
-    esp_audio_dec_out_raw_t dummy_out = {
-        .buffer = nullptr,
-        .len = 0
-    };
-
-    int ret = esp_audio_dec_decode(this->aac_decoder_, &config_raw, &dummy_out);
-    if (ret != 0) {
-      ESP_LOGW(TAG, "Failed to send AAC config (ret=%d, may work anyway)", ret);
-    }
-  }
-
-  // Get decoder info
-  esp_audio_dec_info_t info;
-  if (esp_audio_dec_get_info(this->aac_decoder_, &info) == 0) {
-    this->audio_sample_rate_ = info.sample_rate;
-    this->audio_channels_ = info.channel;
-    ESP_LOGI(TAG, "AAC decoder info: %u Hz, %u channels, %u bits",
-             info.sample_rate, info.channel, info.bits_per_sample);
-  }
+  ESP_LOGI(TAG, "AAC decoder opened successfully");
 
   // Allocate buffers (SPIRAM)
   this->audio_input_size_ = 8192;  // Max AAC frame size
@@ -2600,8 +2574,7 @@ bool SimpleVideoPlayer::init_aac_decoder_() {
   }
 
   this->aac_decoder_ready_ = true;
-  ESP_LOGI(TAG, "AAC decoder ready: %u Hz, %u channels",
-           this->audio_sample_rate_, this->audio_channels_);
+  ESP_LOGI(TAG, "AAC decoder ready (audio info will be detected from stream)");
   return true;
 }
 
@@ -2633,28 +2606,39 @@ bool SimpleVideoPlayer::decode_audio_frame_() {
     return false;
   }
 
-  // Decode AAC → PCM
+  // Decode AAC → PCM using correct API
   esp_audio_dec_in_raw_t in_raw = {
       .buffer = this->audio_input_buffer_,
-      .len = (int)bytes_read,
-      .pts = (int64_t)sample.timestamp_ms
+      .len = (uint32_t)bytes_read,
+      .consumed = 0,
+      .frame_recover = ESP_AUDIO_DEC_RECOVERY_NONE
   };
 
-  esp_audio_dec_out_raw_t out_raw = {
+  esp_audio_dec_out_frame_t out_frame = {
       .buffer = this->audio_output_buffer_,
-      .len = (int)this->audio_output_size_
+      .len = (uint32_t)this->audio_output_size_,
+      .needed_size = 0,
+      .decoded_size = 0
   };
 
-  int ret = esp_audio_dec_decode(this->aac_decoder_, &in_raw, &out_raw);
-  if (ret != 0) {
+  esp_audio_dec_info_t dec_info = {};
+
+  esp_audio_err_t ret = esp_aac_dec_decode(this->aac_decoder_, &in_raw, &out_frame, &dec_info);
+  if (ret != ESP_AUDIO_ERR_OK) {
     ESP_LOGW(TAG, "AAC decode failed: ret=%d", ret);
     this->current_audio_sample_++;
     return false;
   }
 
+  // Update audio info from first successful decode
+  if (dec_info.sample_rate > 0) {
+    this->audio_sample_rate_ = dec_info.sample_rate;
+    this->audio_channels_ = dec_info.channel;
+  }
+
   // Play PCM audio via speaker
-  if (this->speaker_ && this->speaker_->is_ready() && out_raw.len > 0) {
-    this->speaker_->play(this->audio_output_buffer_, out_raw.len);
+  if (this->speaker_ && out_frame.decoded_size > 0) {
+    this->speaker_->play(this->audio_output_buffer_, out_frame.decoded_size);
   }
 
   this->current_audio_sample_++;
@@ -4609,7 +4593,7 @@ void SimpleVideoPlayer::stop() {
 
   // Close AAC decoder
   if (this->aac_decoder_ != nullptr) {
-    esp_audio_dec_close(this->aac_decoder_);
+    esp_aac_dec_close(this->aac_decoder_);
     this->aac_decoder_ = nullptr;
     this->aac_decoder_ready_ = false;
     ESP_LOGD(TAG, "  Closed AAC decoder");
