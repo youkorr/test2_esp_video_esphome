@@ -73,10 +73,22 @@ if os.path.exists(esp_h264_dir):
         os.path.join(esp_h264_dir, "hw", "hal", "esp32p4", "h264_hal.c"),
         os.path.join(esp_h264_dir, "hw", "hal", "esp32p4", "h264_dma_hal.c"),
     ]
+    hal_objects = []
     for hal_src in h264_hal_sources:
         if os.path.exists(hal_src):
-            env.StaticObject(hal_src)
+            obj = env.Object(hal_src)
+            hal_obj = obj[0] if isinstance(obj, list) else obj
+            hal_objects.append(hal_obj)
             print(f"[Simple Video Player] Compiling {os.path.basename(hal_src)} (HAL for HW encoder)")
+
+    # Create library containing HAL objects and link it first to resolve symbols
+    if hal_objects:
+        h264_hal_lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libh264_hal_esp32p4"),
+            hal_objects
+        )
+        env.Prepend(LIBS=[h264_hal_lib])
+        print(f"[Simple Video Player] Created libh264_hal_esp32p4.a with {len(hal_objects)} HAL objects")
 
     # NOTE: esp_h264_dec_sw.c is now compiled in esp_video_build.py with DUAL_TASK flags
     # This follows Espressif's official approach (CMakeLists.txt)
@@ -265,13 +277,25 @@ if esp_audio_codec_dir:
 
     # Compile C source files (codec registration)
     audio_codec_src_dir = os.path.join(esp_audio_codec_dir, "src")
+    audio_codec_objects = []
     if os.path.exists(audio_codec_src_dir):
         src_files = ["audio_decoder_reg.c", "audio_encoder_reg.c", "simple_decoder_reg.c"]
         for src_file in src_files:
             src_path = os.path.join(audio_codec_src_dir, src_file)
             if os.path.exists(src_path):
-                env.StaticObject(src_path)
+                obj = env.Object(src_path)
+                audio_obj = obj[0] if isinstance(obj, list) else obj
+                audio_codec_objects.append(audio_obj)
                 print(f"[Simple Video Player] Compiling {src_file}")
+
+    # Create library containing audio codec registration objects
+    if audio_codec_objects:
+        audio_codec_reg_lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libaudio_codec_reg"),
+            audio_codec_objects
+        )
+        env.Prepend(LIBS=[audio_codec_reg_lib])
+        print(f"[Simple Video Player] Created libaudio_codec_reg.a with {len(audio_codec_objects)} registration objects")
 
     # Link esp_audio_codec library for ESP32-P4
     audio_codec_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
