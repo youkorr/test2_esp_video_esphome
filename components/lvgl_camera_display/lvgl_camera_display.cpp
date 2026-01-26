@@ -199,9 +199,30 @@ void LVGLCameraDisplay::update_canvas_() {
 
   // Get the canvas's draw buffer
   lv_draw_buf_t *canvas_buf = lv_canvas_get_draw_buf(this->canvas_obj_);
-  if (canvas_buf == nullptr || canvas_buf->data == nullptr) {
-    ESP_LOGE(TAG, "Canvas buffer is null!");
+  if (canvas_buf == nullptr) {
+    ESP_LOGE(TAG, "Canvas draw_buf is null!");
     return;
+  }
+  if (canvas_buf->data == nullptr) {
+    ESP_LOGE(TAG, "Canvas buffer data is null!");
+    ESP_LOGE(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
+    ESP_LOGE(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
+    return;
+  }
+
+  // Log canvas buffer info on first update
+  if (this->first_update_) {
+    ESP_LOGI(TAG, "Canvas buffer info:");
+    ESP_LOGI(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
+    ESP_LOGI(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
+    ESP_LOGI(TAG, "   Canvas data ptr: %p", canvas_buf->data);
+    ESP_LOGI(TAG, "   Camera dimensions: %u x %u", width, height);
+  }
+
+  // Verify dimensions match
+  if (canvas_buf->header.w != width || canvas_buf->header.h != height) {
+    ESP_LOGW(TAG, "Canvas size (%ux%u) != camera size (%ux%u)!",
+             canvas_buf->header.w, canvas_buf->header.h, width, height);
   }
 
   // Calculate buffer size
