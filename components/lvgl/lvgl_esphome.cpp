@@ -731,6 +731,9 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 }
 
 void *lv_malloc_core(size_t size) {
+  // Log EVERY allocation to see if this function is even called
+  ESP_LOGD(esphome::lvgl::TAG, "lv_malloc_core called: %zu bytes", size);
+
   void *ptr;
   // CRITICAL: LVGL 9.4 requires 64-byte alignment for draw buffers
   // Use heap_caps_aligned_alloc instead of heap_caps_malloc
