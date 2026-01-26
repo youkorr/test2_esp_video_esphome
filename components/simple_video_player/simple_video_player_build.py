@@ -59,10 +59,24 @@ if os.path.exists(esp_h264_dir):
         os.path.join(esp_h264_dir, "sw", "include"),
         os.path.join(esp_h264_dir, "sw", "src"),
         os.path.join(esp_h264_dir, "hw", "include"),
+        os.path.join(esp_h264_dir, "hw", "hal", "esp32p4"),  # HAL headers
+        os.path.join(esp_h264_dir, "hw", "soc", "esp32p4"),  # SOC structures
+        os.path.join(esp_h264_dir, "hw", "src"),             # HW sources
     ]
     for inc_path in esp_h264_includes:
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
+
+    # Compile HAL sources needed by hardware encoder (included in libesp_video_full.a)
+    # These must be compiled here because libesp_video_full.a references them
+    h264_hal_sources = [
+        os.path.join(esp_h264_dir, "hw", "hal", "esp32p4", "h264_hal.c"),
+        os.path.join(esp_h264_dir, "hw", "hal", "esp32p4", "h264_dma_hal.c"),
+    ]
+    for hal_src in h264_hal_sources:
+        if os.path.exists(hal_src):
+            env.StaticObject(hal_src)
+            print(f"[Simple Video Player] Compiling {os.path.basename(hal_src)} (HAL for HW encoder)")
 
     # NOTE: esp_h264_dec_sw.c is now compiled in esp_video_build.py with DUAL_TASK flags
     # This follows Espressif's official approach (CMakeLists.txt)
