@@ -21,6 +21,22 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
   if (gd == nullptr) {
     return nullptr;
   }
+
+  // ESP32-P4 RISC-V FIX: The glyph data in Flash ROM may not be properly aligned.
+  // RISC-V has strict alignment requirements, and accessing unaligned Flash data
+  // can cause crashes. Instead of returning the Flash pointer directly, we MUST
+  // copy the data into the provided draw_buf which is properly aligned.
+  if (draw_buf != nullptr && draw_buf->data != nullptr) {
+    // Calculate the size of glyph data in bytes
+    uint8_t bpp = fe->get_bpp();
+    size_t data_size = (gd->width * gd->height * bpp + 7) / 8;
+
+    // Copy glyph data from Flash to aligned buffer
+    memcpy(draw_buf->data, gd->data, data_size);
+    return draw_buf->data;
+  }
+
+  // Fallback: return direct pointer (may crash on ESP32-P4!)
   return gd->data;
 }
 
