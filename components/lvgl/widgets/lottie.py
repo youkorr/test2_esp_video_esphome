@@ -93,8 +93,8 @@ class LottieType(WidgetType):
         """
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Include helper functions for debugging
-        cg.add_global(RawStatement('#include "components/lvgl/lv_lottie_helpers.h"'))
+        # Add include for file stat checking
+        cg.add_global(RawStatement('#include <sys/stat.h>'))
 
         # Get animation source (file path or embedded ID)
         src = config[CONF_SRC]
@@ -106,8 +106,16 @@ class LottieType(WidgetType):
             src_path = await lv_text.process(src)
 
             # Debug: Check if file exists before loading
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Attempting to load: %s", {src_path})'))
-            cg.add(RawStatement(f'esphome::lvgl::lottie_file_exists({src_path})'))
+            cg.add(RawStatement(f'''
+  // Debug: Check Lottie file
+  ESP_LOGI("lvgl.lottie", "Attempting to load: %s", {src_path});
+  struct stat st;
+  if (stat({src_path}, &st) == 0) {{
+    ESP_LOGI("lvgl.lottie", "File found: %s (size: %ld bytes)", {src_path}, st.st_size);
+  }} else {{
+    ESP_LOGE("lvgl.lottie", "File NOT found: %s", {src_path});
+  }}
+'''))
 
             # Load the Lottie animation from file
             lv.lottie_set_src_file(w.obj, src_path)
