@@ -257,7 +257,7 @@ void LVGLCameraDisplay::update_canvas_() {
     // Use DMA async memcpy for maximum performance
     // Simple callback to track completion
     volatile bool dma_done = false;
-    auto dma_callback = [](async_memcpy_event_t *event, void *user_data) -> bool {
+    auto dma_callback = [](async_memcpy_context_t *ctx, async_memcpy_event_t *event, void *user_data) -> bool {
       volatile bool *done_flag = (volatile bool *)user_data;
       *done_flag = true;
       return false;  // No higher priority task woken
