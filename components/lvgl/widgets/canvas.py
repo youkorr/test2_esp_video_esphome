@@ -101,20 +101,31 @@ class CanvasType(WidgetType):
         else:
             color_format = "LV_COLOR_FORMAT_NATIVE"
 
-        # LVGL 9.4: Allocate and initialize canvas buffer
-        # We MUST use lv_canvas_set_buffer() instead of manually creating draw_buf
-        # because LVGL 9.4 changed how canvas buffers work
+        # LVGL 9.4: Allocate canvas buffer
+        # CRITICAL FIX: We must allocate the buffer in a C++ variable FIRST
+        # because passing lv_malloc_core() inline doesn't work (expression not evaluated)
 
+        draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
         buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
 
-        # Use lv_canvas_set_buffer which handles everything internally
-        lv.canvas_set_buffer(
-            w.obj,
-            lv_expr.malloc_core(buf_size),
+        # Import lv_add to add code in LVGL context
+        from ..lvcode import lv_add
+
+        # Declare and allocate canvas buffer variable in C++
+        lv_add(cg.RawStatement(f"void *canvas_buf_ptr_{w.obj} = lv_malloc_core({buf_size});"))
+
+        # Initialize the draw buffer with the allocated pointer
+        lv.draw_buf_init(
+            draw_buf,
             width,
             height,
             literal(color_format),
+            0,
+            cg.RawExpression(f"canvas_buf_ptr_{w.obj}"),
+            literal(buf_size),
         )
+        lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
+        lv.canvas_set_draw_buf(w.obj, draw_buf)
 
 
 CanvasType()
