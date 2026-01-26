@@ -93,6 +93,9 @@ class LottieType(WidgetType):
         """
         lvgl_components_required.add(CONF_LOTTIE)
 
+        # Include helper functions for debugging
+        cg.add_global(RawStatement('#include "components/lvgl/lv_lottie_helpers.h"'))
+
         # Get animation source (file path or embedded ID)
         src = config[CONF_SRC]
 
@@ -102,14 +105,15 @@ class LottieType(WidgetType):
             # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
             src_path = await lv_text.process(src)
 
-            # Debug: Log file loading
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading Lottie from: %s", {src_path})'))
+            # Debug: Check if file exists before loading
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Attempting to load: %s", {src_path})'))
+            cg.add(RawStatement(f'esphome::lvgl::lottie_file_exists({src_path})'))
 
             # Load the Lottie animation from file
             lv.lottie_set_src_file(w.obj, src_path)
 
-            # Debug: Check if loaded successfully
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Lottie widget size: %dx%d", lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}))'))
+            # Debug: Check widget properties after loading
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Widget %p: size=%dx%d, visible=%d", {w.obj}, lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}), !lv_obj_has_flag({w.obj}, LV_OBJ_FLAG_HIDDEN))'))
         else:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
