@@ -111,8 +111,12 @@ class CanvasType(WidgetType):
         # Import lv_add to add code in LVGL context
         from ..lvcode import lv_add
 
+        # Use draw_buf ID to create unique variable name
+        buf_id = str(config[CONF_DRAW_BUF_ID]).replace(".", "_")
+        var_name = f"canvas_buf_ptr_{buf_id}"
+
         # Declare and allocate canvas buffer variable in C++
-        lv_add(cg.RawStatement(f"void *canvas_buf_ptr_{w.obj} = lv_malloc_core({buf_size});"))
+        lv_add(cg.RawStatement(f"void *{var_name} = lv_malloc_core({buf_size});"))
 
         # Initialize the draw buffer with the allocated pointer
         lv.draw_buf_init(
@@ -121,11 +125,16 @@ class CanvasType(WidgetType):
             height,
             literal(color_format),
             0,
-            cg.RawExpression(f"canvas_buf_ptr_{w.obj}"),
+            cg.RawExpression(var_name),
             literal(buf_size),
         )
         lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
         lv.canvas_set_draw_buf(w.obj, draw_buf)
+
+        # CRITICAL: Set canvas size explicitly after buffer configuration
+        # Without this, canvas size remains 0x0 even though buffer is allocated
+        from ..lvcode import lv_obj
+        lv_obj.set_size(w.obj, width, height)
 
 
 CanvasType()
