@@ -65,7 +65,7 @@ class LottieType(WidgetType):
         LVGL 9.4 Lottie API:
         - lv_lottie_set_src_file(obj, path) - Load animation from file
         - lv_lottie_set_buffer(obj, w, h, buf) - Set render buffer
-        - lv_lottie_get_animation(obj) - Get LVGL animation object for control
+        - lv_lottie_get_anim(obj) - Get LVGL animation object for control
 
         By default, Lottie animations run infinitely at 60FPS.
         Use lv_lottie_get_animation() to customize playback.
@@ -83,11 +83,11 @@ class LottieType(WidgetType):
         loop = config.get(CONF_LOOP, True)
 
         # Get the animation object to control playback
-        # lv_anim_t * anim = lv_lottie_get_animation(obj)
+        # lv_anim_t * anim = lv_lottie_get_anim(obj)
         if not autoplay or not loop:
             # Create local variable for animation object
             with LocalVariable("lottie_anim", "lv_anim_t *",
-                             lv.lottie_get_animation(w.obj)) as anim_obj:
+                             lv.lottie_get_anim(w.obj)) as anim_obj:
                 if not autoplay:
                     # Pause the animation (will need manual start)
                     lv.anim_del(anim_obj, literal("NULL"))

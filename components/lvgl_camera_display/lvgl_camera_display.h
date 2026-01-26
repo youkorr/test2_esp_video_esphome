@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
+#include <esp_async_memcpy.h>
 
 // Forward declarations
 namespace esphome {
@@ -75,6 +76,9 @@ class LVGLCameraDisplay : public Component {
 
   // Buffer pool tracking (pour release apres affichage)
   esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};
+
+  // DMA async memcpy handle for high-performance buffer copy
+  async_memcpy_t dma_handle_{nullptr};
 
   void update_camera_frame_();
   void update_canvas_();
