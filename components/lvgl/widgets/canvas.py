@@ -101,38 +101,30 @@ class CanvasType(WidgetType):
         else:
             color_format = "LV_COLOR_FORMAT_NATIVE"
 
-        # LVGL 9.4: Allocate canvas buffer
-        # CRITICAL FIX: We must allocate the buffer in a C++ variable FIRST
-        # because passing lv_malloc_core() inline doesn't work (expression not evaluated)
+        # LVGL 9.4: Canvas buffer allocation
+        # The issue: lv_expr.malloc_core() generates an expression that is never evaluated
+        # Solution: Use lv.malloc_core() which executes immediately
 
         draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
         buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
 
-        # Import lv_add to add code in LVGL context
-        from ..lvcode import lv_add
+        # Allocate buffer using lv.malloc_core (executes immediately)
+        canvas_buffer = lv.malloc_core(buf_size)
 
-        # Use draw_buf ID to create unique variable name
-        buf_id = str(config[CONF_DRAW_BUF_ID]).replace(".", "_")
-        var_name = f"canvas_buf_ptr_{buf_id}"
-
-        # Declare and allocate canvas buffer variable in C++
-        lv_add(cg.RawStatement(f"void *{var_name} = lv_malloc_core({buf_size});"))
-
-        # Initialize the draw buffer with the allocated pointer
+        # Initialize draw buffer with allocated buffer
         lv.draw_buf_init(
             draw_buf,
             width,
             height,
             literal(color_format),
             0,
-            cg.RawExpression(var_name),
+            canvas_buffer,
             literal(buf_size),
         )
         lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
         lv.canvas_set_draw_buf(w.obj, draw_buf)
 
-        # CRITICAL: Set canvas size explicitly after buffer configuration
-        # Without this, canvas size remains 0x0 even though buffer is allocated
+        # Set canvas size explicitly
         from ..lvcode import lv_obj
         lv_obj.set_size(w.obj, width, height)
 
