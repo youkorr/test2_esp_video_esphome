@@ -121,14 +121,13 @@ class LottieType(WidgetType):
             lv.lottie_set_src_file(w.obj, src_path)
 
             # Debug: Check widget properties after loading
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Widget %p: size=%dx%d, visible=%d", {w.obj}, lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}), !lv_obj_has_flag({w.obj}, LV_OBJ_FLAG_HIDDEN))'))
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Widget %p: size=%dx%d, visible=%d", {w.obj}, lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}), !lv_obj_has_flag({w.obj}, LV_OBJ_FLAG_HIDDEN));'))
         else:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
 
             # Debug: Log embedded loading
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading embedded Lottie: %u bytes", {lottie_file}->get_size())'))
-
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading embedded Lottie: %u bytes", {lottie_file}->get_size());'))
             # Load from embedded Flash ROM data
             lv.lottie_set_src_data(
                 w.obj,
