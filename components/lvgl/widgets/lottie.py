@@ -90,8 +90,64 @@ class LottieType(WidgetType):
         - lv_lottie_get_anim(obj) - Get LVGL animation object for control
 
         By default, Lottie animations run infinitely at 60FPS.
+
+        CRITICAL: Lottie widgets require a buffer allocated with proper 64-byte alignment.
+        We use lv_draw_buf_create() which ensures alignment for ESP32-P4 PSRAM/cache.
         """
         lvgl_components_required.add(CONF_LOTTIE)
+
+        # Get buffer dimensions (default to widget size if not specified)
+        buffer_width = config.get(CONF_BUFFER_WIDTH)
+        buffer_height = config.get(CONF_BUFFER_HEIGHT)
+
+        # Generate buffer allocation code
+        # CRITICAL: Use lv_draw_buf_create() to ensure 64-byte alignment for ESP32-P4
+        # ThorVG requires ARGB8888_PREMULTIPLIED format
+        # NOTE: Buffer must be allocated AFTER widget is created and sized
+        if buffer_width and buffer_height:
+            # User specified buffer size - use it directly
+            buf_w = await lv_int.process(buffer_width)
+            buf_h = await lv_int.process(buffer_height)
+
+            with LocalVariable("lottie_draw_buf", "lv_draw_buf_t *") as draw_buf_var:
+                cg.add(RawStatement(
+                    f"{draw_buf_var} = lv_draw_buf_create({buf_w}, {buf_h}, "
+                    f"LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);"
+                ))
+
+                # Check allocation success
+                cg.add(RawStatement(
+                    f'if ({draw_buf_var} == nullptr) {{\n'
+                    f'  ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {buf_w}, {buf_h});\n'
+                    f'}} else {{\n'
+                    f'  ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
+                    f'{draw_buf_var}->header.w, {draw_buf_var}->header.h);\n'
+                    f'  lv_lottie_set_draw_buf({w.obj}, {draw_buf_var});\n'
+                    f'}}'
+                ))
+        else:
+            # Use widget dimensions - need to check they're valid
+            with LocalVariable("lottie_w", "int32_t",
+                             RawExpression(f"lv_obj_get_content_width({w.obj})")) as w_var:
+                with LocalVariable("lottie_h", "int32_t",
+                                 RawExpression(f"lv_obj_get_content_height({w.obj})")) as h_var:
+                    # Only allocate if dimensions are valid
+                    cg.add(RawStatement(
+                        f'if ({w_var} > 0 && {h_var} > 0) {{\n'
+                        f'  lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create({w_var}, {h_var}, '
+                        f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);\n'
+                        f'  if (lottie_draw_buf == nullptr) {{\n'
+                        f'    ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {w_var}, {h_var});\n'
+                        f'  }} else {{\n'
+                        f'    ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
+                        f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
+                        f'    lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
+                        f'  }}\n'
+                        f'}} else {{\n'
+                        f'  ESP_LOGW("lvgl.lottie", "Widget has invalid dimensions: %dx%d. Set width/height or buffer_width/buffer_height.", '
+                        f'{w_var}, {h_var});\n'
+                        f'}}'
+                    ))
 
         # Get animation source (file path or embedded ID) - may be None if set via on_load
         src = config.get(CONF_SRC)
