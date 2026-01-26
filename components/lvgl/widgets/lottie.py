@@ -44,11 +44,12 @@ def lottie_src(value):
     Note: LVGL Lottie uses direct fopen(), not VFS driver, so use full paths like:
     "/sdcard/..." instead of "S:/..."
     """
-    if isinstance(value, cv.use_id_type):
-        # It's an ID reference to a lottie_file component
-        return cv.use_id(cg.esphome_ns.namespace("lottie_file").class_("LottieFile"))(value)
-    # It's a file path string - accept full paths like "/sdcard/..."
-    return lv_text(value)
+    # If it's a string, treat it as a file path
+    if isinstance(value, str):
+        return lv_text(value)
+
+    # Otherwise, treat it as a lottie_file ID
+    return cv.use_id(cg.esphome_ns.namespace("lottie_file").class_("LottieFile"))(value)
 
 
 # Lottie schema
@@ -95,8 +96,13 @@ class LottieType(WidgetType):
         # Get animation source (file path or embedded ID)
         src = config[CONF_SRC]
 
-        # Check if it's an embedded lottie_file ID or a file path
-        if isinstance(src, cv.use_id_type) or isinstance(src, cg.ID):
+        # Check if it's a file path string or an embedded lottie_file ID
+        if isinstance(src, str):
+            # File path (/sdcard/...) - use lv_lottie_set_src_file()
+            # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
+            src_path = await lv_text.process(src)
+            lv.lottie_set_src_file(w.obj, src_path)
+        else:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
             # Load from embedded Flash ROM data
@@ -105,11 +111,6 @@ class LottieType(WidgetType):
                 RawExpression(f"(const char*){lottie_file}->get_data()"),
                 RawExpression(f"{lottie_file}->get_size()")
             )
-        else:
-            # File path (/sdcard/...) - use lv_lottie_set_src_file()
-            # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
-            src_path = await lv_text.process(src)
-            lv.lottie_set_src_file(w.obj, src_path)
 
         # Control playback via LVGL animation object
         autoplay = config.get(CONF_AUTOPLAY, True)
