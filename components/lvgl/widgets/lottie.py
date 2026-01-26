@@ -9,7 +9,9 @@ https://docs.lvgl.io/master/details/widgets/lottie.html
 """
 
 import esphome.config_validation as cv
+import esphome.codegen as cg
 from esphome.const import CONF_ID
+from esphome.core import CORE
 
 from esphome.cpp_generator import RawExpression
 
@@ -32,10 +34,24 @@ CONF_BUFFER_HEIGHT = "buffer_height"
 
 lv_lottie_t = LvType("lv_lottie_t")
 
+
+def lottie_src(value):
+    """
+    Validate lottie source: can be either:
+    - A file path string (e.g., "S:/animations/loading.json")
+    - A lottie_file ID (e.g., my_lottie_animation)
+    """
+    if isinstance(value, cv.use_id_type):
+        # It's an ID reference to a lottie_file component
+        return cv.use_id(cg.esphome_ns.namespace("lottie_file").class_("LottieFile"))(value)
+    # It's a file path string
+    return lv_text(value)
+
+
 # Lottie schema
 LOTTIE_SCHEMA = cv.Schema(
     {
-        cv.Required(CONF_SRC): lv_text,  # Path to .json Lottie animation file
+        cv.Required(CONF_SRC): lottie_src,  # Path to .json file OR lottie_file ID
         cv.Optional(CONF_AUTOPLAY, default=True): cv.boolean,
         cv.Optional(CONF_LOOP, default=True): cv.boolean,
         cv.Optional(CONF_BUFFER_WIDTH): lv_int,  # Buffer width (default: widget width)
@@ -65,20 +81,31 @@ class LottieType(WidgetType):
         Generate C++ code for lottie widget configuration
 
         LVGL 9.4 Lottie API:
-        - lv_lottie_set_src_file(obj, path) - Load animation from file
-        - lv_lottie_set_buffer(obj, w, h, buf) - Set render buffer
+        - lv_lottie_set_src_file(obj, path) - Load from file (SD card)
+        - lv_lottie_set_src_data(obj, data, size) - Load from memory (embedded)
         - lv_lottie_get_anim(obj) - Get LVGL animation object for control
 
         By default, Lottie animations run infinitely at 60FPS.
-        Use lv_lottie_get_animation() to customize playback.
         """
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Get animation source path
-        src = await lv_text.process(config[CONF_SRC])
+        # Get animation source (file path or embedded ID)
+        src = config[CONF_SRC]
 
-        # LVGL 9.4: Load Lottie animation from file
-        lv.lottie_set_src_file(w.obj, src)
+        # Check if it's an embedded lottie_file ID or a file path
+        if isinstance(src, cv.use_id_type) or isinstance(src, cg.ID):
+            # Embedded lottie_file - use lv_lottie_set_src_data()
+            lottie_file = await cg.get_variable(src)
+            # Load from embedded Flash ROM data
+            lv.lottie_set_src_data(
+                w.obj,
+                RawExpression(f"(const char*){lottie_file}->get_data()"),
+                RawExpression(f"{lottie_file}->get_size()")
+            )
+        else:
+            # File path (S:/...) - use lv_lottie_set_src_file()
+            src_path = await lv_text.process(src)
+            lv.lottie_set_src_file(w.obj, src_path)
 
         # Control playback via LVGL animation object
         autoplay = config.get(CONF_AUTOPLAY, True)
