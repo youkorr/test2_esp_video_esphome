@@ -756,6 +756,12 @@ void *lv_malloc_core(size_t size) {
     return nullptr;
   }
 
+  // CRITICAL DEBUG: Check if alignment is actually preserved
+  uintptr_t addr = (uintptr_t)ptr;
+  if (addr % 64 != 0) {
+    ESP_LOGE(esphome::lvgl::TAG, "ALIGNMENT BUG: malloc returned misaligned %p (offset=%lu) size=%zu", ptr, addr % 64, size);
+  }
+
   // Log only very large buffers (>1MB) for debugging
   if (size > 1000000) {
     ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p", size, ptr);
