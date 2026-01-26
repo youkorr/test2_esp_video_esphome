@@ -103,17 +103,24 @@ class CanvasType(WidgetType):
 
         # LVGL 9.4: LV_CANVAS_BUF_SIZE(width, height, bits_per_pixel, stride)
         # stride is 0 for default (width * bytes_per_pixel)
-        # Note: lv_malloc_core() now includes enhanced logging for large buffers (>100KB)
-        # to help diagnose allocation and alignment issues
+        # CRITICAL FIX: We MUST allocate the buffer in a separate statement BEFORE
+        # calling lv_draw_buf_init(), otherwise the inline expression may not be
+        # evaluated correctly and the pointer could be lost/corrupted.
         draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
         buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
+
+        # Allocate canvas buffer in a variable first (not inline)
+        # Use RawStatement to declare the variable and assign the malloc result
+        cg.add(cg.RawStatement(f"void *canvas_buf_ptr = lv_malloc_core({buf_size});"))
+
+        # Now initialize the draw buffer with the allocated pointer
         lv.draw_buf_init(
             draw_buf,
             width,
             height,
             literal(color_format),
             0,
-            lv_expr.malloc_core(buf_size),
+            cg.RawExpression("canvas_buf_ptr"),
             literal(buf_size),
         )
         lv.draw_buf_set_flag(draw_buf, literal("LV_IMAGE_FLAGS_MODIFIABLE"))
