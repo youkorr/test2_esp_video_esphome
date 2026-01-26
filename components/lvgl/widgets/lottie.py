@@ -93,9 +93,6 @@ class LottieType(WidgetType):
         """
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Add include for file stat checking
-        cg.add_global(RawStatement('#include <sys/stat.h>'))
-
         # Get animation source (file path or embedded ID)
         src = config[CONF_SRC]
 
@@ -105,23 +102,12 @@ class LottieType(WidgetType):
             # Note: Lottie uses direct fopen(), so use full paths like "/sdcard/..."
             src_path = await lv_text.process(src)
 
-            # Debug: Check if file exists before loading
-            cg.add(RawStatement(f'''
-  // Debug: Check Lottie file
-  ESP_LOGI("lvgl.lottie", "Attempting to load: %s", {src_path});
-  struct stat st;
-  if (stat({src_path}, &st) == 0) {{
-    ESP_LOGI("lvgl.lottie", "File found: %s (size: %ld bytes)", {src_path}, st.st_size);
-  }} else {{
-    ESP_LOGE("lvgl.lottie", "File NOT found: %s", {src_path});
-  }}
-'''))
+            # Debug: Log file path being loaded
+            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Loading Lottie: %s", {src_path});'))
 
             # Load the Lottie animation from file
+            # LVGL will handle file errors gracefully
             lv.lottie_set_src_file(w.obj, src_path)
-
-            # Debug: Check widget properties after loading
-            cg.add(RawStatement(f'ESP_LOGI("lvgl.lottie", "Widget %p: size=%dx%d, visible=%d", {w.obj}, lv_obj_get_width({w.obj}), lv_obj_get_height({w.obj}), !lv_obj_has_flag({w.obj}, LV_OBJ_FLAG_HIDDEN));'))
         else:
             # Embedded lottie_file - use lv_lottie_set_src_data()
             lottie_file = await cg.get_variable(src)
