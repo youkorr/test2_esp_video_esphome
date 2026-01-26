@@ -731,12 +731,8 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 }
 
 void *lv_malloc_core(size_t size) {
-  // Log EVERY allocation to see if this function is even called
-  ESP_LOGD(esphome::lvgl::TAG, "lv_malloc_core called: %zu bytes", size);
-
   void *ptr;
   // CRITICAL: LVGL 9.4 requires 64-byte alignment for draw buffers
-  // Use heap_caps_aligned_alloc instead of heap_caps_malloc
   constexpr size_t LVGL_ALIGNMENT = 64;
 
   // BUGFIX: Don't modify global cap_bits - use local variable
@@ -755,12 +751,9 @@ void *lv_malloc_core(size_t size) {
     return nullptr;
   }
 
-  // Enhanced logging for large buffers (canvas buffers)
-  if (size > 100000) {
-    ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p (caps=0x%x)", size, ptr, caps);
-    ESP_LOGI(esphome::lvgl::TAG, "  Alignment check: address %% 64 = %lu", ((uintptr_t)ptr) % 64);
-  } else {
-    ESP_LOGV(esphome::lvgl::TAG, "allocate %zu bytes (64-byte aligned) -> %p", size, ptr);
+  // Log only very large buffers (>1MB) for debugging
+  if (size > 1000000) {
+    ESP_LOGI(esphome::lvgl::TAG, "Large buffer allocated: %zu bytes at %p", size, ptr);
   }
 
   return ptr;
