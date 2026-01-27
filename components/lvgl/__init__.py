@@ -232,15 +232,17 @@ async def to_code(configs):
 
     # Importer les modules ThorVG
     from .thorvg_download import ensure_thorvg_present
-    from .thorvg_patch import patch_thorvg_for_lvgl
+    from .thorvg_patch import patch_thorvg_for_lvgl, patch_thorvg_identity_conflict
 
     # Télécharger ThorVG v0.15.16 depuis GitHub
     try:
         if ensure_thorvg_present(parent_components_dir):
-            # Appliquer le patch de compatibilité LVGL 9.4.0
-            # Ajoute TVG_BLEND_METHOD_SRCOVER manquant dans l'API ThorVG officielle
+            # Appliquer les patches de compatibilité
             thorvg_dir = os.path.join(parent_components_dir, "thorvg")
+            # Patch 1: Ajoute TVG_BLEND_METHOD_SRCOVER pour LVGL 9.4.0
             patch_thorvg_for_lvgl(thorvg_dir)
+            # Patch 2: Résout conflit identity() avec std::identity (C++20/GCC 14.2.0)
+            patch_thorvg_identity_conflict(thorvg_dir)
     except Exception as e:
         _LOGGER.warning(
             f"[LVGL] ThorVG auto-download/patch failed: {e}\n"

@@ -117,8 +117,10 @@ else:
     for src_dir in src_dirs:
         if os.path.exists(src_dir):
             for root, dirs, files in os.walk(src_dir):
-                # Skip WebGPU and OpenGL engine directories
-                if 'wg_engine' in root or 'gl_engine' in root:
+                # Skip WebGPU, OpenGL, and external image loaders
+                skip_dirs = ['wg_engine', 'gl_engine', 'external_jpg', 'external_png',
+                            'external_webp', 'ttf']
+                if any(skip_dir in root for skip_dir in skip_dirs):
                     continue
 
                 for file in files:
