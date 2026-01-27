@@ -6,12 +6,6 @@ Inspiré de esp_video_build.py
 Import("env")
 import os
 
-print("=" * 80)
-print("[ThorVG Build] ========================================")
-print("[ThorVG Build] Script START - lvgl_thorvg_build.py")
-print("[ThorVG Build] ========================================")
-print("=" * 80)
-
 def create_thorvg_config_h(thorvg_src_dir):
     """
     Create config.h for ThorVG with minimal configuration for LVGL
@@ -25,10 +19,8 @@ def create_thorvg_config_h(thorvg_src_dir):
             existing_content = f.read()
             # Check if it has the #undef fix (sign of correct version)
             if '#undef THORVG_GL_RASTER_SUPPORT' in existing_content:
-                print(f"[ThorVG Build] config.h already exists (correct version), skipping")
                 return
             else:
-                print(f"[ThorVG Build] config.h exists but outdated, regenerating...")
                 os.remove(config_h_path)
 
     config_h_content = """/* Auto-generated config.h for ThorVG (LVGL external mode) */
@@ -67,7 +59,6 @@ def create_thorvg_config_h(thorvg_src_dir):
     try:
         with open(config_h_path, 'w') as f:
             f.write(config_h_content)
-        print(f"[ThorVG Build] Created config.h at: {config_h_path}")
     except Exception as e:
         print(f"[ThorVG Build] ERROR: Failed to create config.h: {e}")
 
@@ -77,22 +68,12 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-print(f"[ThorVG Build] Script directory: {script_dir}")
-print(f"[ThorVG Build] Component directory: {component_dir}")
-print(f"[ThorVG Build] Parent components directory: {parent_components_dir}")
-
 # ThorVG est dans components/thorvg/
 thorvg_dir = os.path.join(parent_components_dir, "thorvg")
-print(f"[ThorVG Build] Looking for ThorVG at: {thorvg_dir}")
-print(f"[ThorVG Build] ThorVG exists: {os.path.exists(thorvg_dir)}")
 
 if not os.path.exists(thorvg_dir):
-    print(f"[ThorVG Build] ERROR: ThorVG directory not found!")
-    print(f"[ThorVG Build] Expected at: {thorvg_dir}")
-    print(f"[ThorVG Build] Please ensure ThorVG was downloaded during code generation")
+    print(f"[ThorVG Build] ERROR: ThorVG directory not found at {thorvg_dir}")
 else:
-    print(f"[ThorVG Build] ThorVG directory found!")
-    print(f"[ThorVG Build] Adding ThorVG sources from {thorvg_dir}")
 
     # Create config.h if it doesn't exist
     thorvg_src_dir = os.path.join(thorvg_dir, "src")
@@ -144,7 +125,6 @@ else:
                     if file.endswith(".cpp") or file.endswith(".c"):
                         # Skip excluded files
                         if file in exclude_files:
-                            print(f"[ThorVG Build] Skipping {file} (feature disabled)")
                             continue
 
                         thorvg_sources.append(os.path.join(root, file))
@@ -164,8 +144,6 @@ else:
     ])
 
     if thorvg_sources:
-        print(f"[ThorVG Build] Found {len(thorvg_sources)} source files")
-
         # Compiler chaque fichier source en objet (comme esp_video_build.py)
         objects = []
         for src_file in thorvg_sources:
@@ -181,7 +159,6 @@ else:
         # Ajouter la bibliothèque au linkage (PREPEND = avant les autres libs)
         env.Prepend(LIBS=[lib])
 
-        print(f"[ThorVG Build] Compiled {len(thorvg_sources)} files into libthorvg.a")
-        print("[ThorVG Build] ThorVG library added to linking")
+        print(f"[ThorVG Build] {len(thorvg_sources)} source files compiled")
     else:
         print("[ThorVG Build] Warning: No ThorVG source files found")
