@@ -6,18 +6,33 @@ Inspiré de esp_video_build.py
 Import("env")
 import os
 
+print("=" * 80)
+print("[ThorVG Build] ========================================")
+print("[ThorVG Build] Script START - lvgl_thorvg_build.py")
+print("[ThorVG Build] ========================================")
+print("=" * 80)
+
 # Obtenir le répertoire du composant (ce script est dans components/lvgl/)
 # Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
+print(f"[ThorVG Build] Script directory: {script_dir}")
+print(f"[ThorVG Build] Component directory: {component_dir}")
+print(f"[ThorVG Build] Parent components directory: {parent_components_dir}")
+
 # ThorVG est dans components/thorvg/
 thorvg_dir = os.path.join(parent_components_dir, "thorvg")
+print(f"[ThorVG Build] Looking for ThorVG at: {thorvg_dir}")
+print(f"[ThorVG Build] ThorVG exists: {os.path.exists(thorvg_dir)}")
 
 if not os.path.exists(thorvg_dir):
-    print(f"[ThorVG Build] Warning: ThorVG directory not found at {thorvg_dir}")
+    print(f"[ThorVG Build] ❌ ERROR: ThorVG directory not found!")
+    print(f"[ThorVG Build] Expected at: {thorvg_dir}")
+    print(f"[ThorVG Build] Please ensure ThorVG was downloaded during code generation")
 else:
+    print(f"[ThorVG Build] ✅ ThorVG directory found!")
     print(f"[ThorVG Build] Adding ThorVG sources from {thorvg_dir}")
 
     # Ajouter les includes ThorVG
