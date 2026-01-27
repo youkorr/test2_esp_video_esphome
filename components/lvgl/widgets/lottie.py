@@ -110,25 +110,23 @@ class LottieType(WidgetType):
             buf_w = await lv_int.process(buffer_width)
             buf_h = await lv_int.process(buffer_height)
 
-            with LocalVariable("lottie_draw_buf", "lv_draw_buf_t *") as draw_buf_var:
-                # Calculate aligned stride for ESP32-P4 (64-byte alignment)
-                # ARGB8888 = 4 bytes per pixel, align to 64 bytes
-                cg.add(RawStatement(
-                    f'uint32_t stride_{buf_w} = ({buf_w} * 4 + 63) & ~63;  // Align to 64 bytes\n'
-                    f'{draw_buf_var} = lv_draw_buf_create({buf_w}, {buf_h}, '
-                    f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, stride_{buf_w});'
-                ))
-
-                # Check allocation success
-                cg.add(RawStatement(
-                    f'if ({draw_buf_var} == nullptr) {{\n'
-                    f'  ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {buf_w}, {buf_h});\n'
-                    f'}} else {{\n'
-                    f'  ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
-                    f'{draw_buf_var}->header.w, {draw_buf_var}->header.h);\n'
-                    f'  lv_lottie_set_draw_buf({w.obj}, {draw_buf_var});\n'
-                    f'}}'
-                ))
+            # Use RawStatement directly instead of LocalVariable to avoid pointer issues
+            cg.add(RawStatement(
+                f'{{\n'
+                f'  // Calculate aligned stride for ESP32-P4 (64-byte alignment)\n'
+                f'  // ARGB8888 = 4 bytes per pixel, align to 64 bytes\n'
+                f'  uint32_t stride = ({buf_w} * 4 + 63) & ~63;\n'
+                f'  lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create({buf_w}, {buf_h}, '
+                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, stride);\n'
+                f'  if (lottie_draw_buf == nullptr) {{\n'
+                f'    ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {buf_w}, {buf_h});\n'
+                f'  }} else {{\n'
+                f'    ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
+                f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
+                f'    lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
+                f'  }}\n'
+                f'}}'
+            ))
         else:
             # No dimensions specified - error
             cg.add(RawStatement(
