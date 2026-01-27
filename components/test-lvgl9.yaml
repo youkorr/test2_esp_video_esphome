@@ -1,0 +1,1981 @@
+substitutions:
+  name: waveshare_test
+  friendly_name: waveshare_test
+
+  allowed_characters: " !#%'()+,-./0123456789:;<>?@ABCDEFGHIJKLMNOPQRSTUVWYZ[]_abcdefghijklmnopqrstuvwxyz{|}°²³µ¿ÁÂÄÅÉÖÚßàáâãäåæçèéêëìíîðñòóôõöøùúûüýþāăąćčďĐđēėęěğĮįıļľŁłńňőřśšťũūůűųźŻżŽžơưșțΆΈΌΐΑΒΓΔΕΖΗΘΚΜΝΠΡΣΤΥΦάέήίαβγδεζηθικλμνξοπρςστυφχψωϊόύώАБВГДЕЖЗИКЛМНОПРСТУХЦЧШЪЭЮЯабвгдежзийклмнопрстуфхцчшщъыьэюяёђєіїјљњћאבגדהוזחטיכלםמןנסעפץצקרשת،ءآأإئابةتجحخدذرزسشصضطظعغفقكلمنهوىيٹپچڈکگںھہیےংকচতধনফবযরলশষস়ািু্చయలిెొ్ംഅആഇഈഉഎഓകഗങചജഞടഡണതദധനപഫബഭമയരറലളവശസഹാിീുൂെേൈ്ൺൻർൽൾაბგდევზთილმნოპრსტუფქყშჩცძჭხạảấầẩậắặẹẽếềểệỉịọỏốồổỗộớờởợụủứừửữựỳ—、一上不个中为主乾了些亮人任低佔何作供依侧係個側偵充光入全关冇冷几切到制前動區卧厅厨及口另右吊后吗启吸呀咗哪唔問啟嗎嘅嘛器圍在场執場外多大始安定客室家密寵对將小少左已帘常幫幾库度庫廊廚廳开式後恆感態成我戲戶户房所扇手打执把拔换掉控插摄整斯新明是景暗更最會有未本模機檯櫃欄次正氏水沒没洗活派温測源溫漏潮激濕灯為無煙照熱燈燥物狀玄现現瓦用發的盞目着睡私空窗立笛管節簾籬紅線红罐置聚聲脚腦腳臥色节著行衣解設調請謝警设调走路車车运連遊運過道邊部都量鎖锁門閂閉開關门闭除隱離電震霧面音頂題顏颜風风食餅餵가간감갔강개거게겨결경고공과관그금급기길깥꺼껐꼽나난내네놀누는능니다닫담대더데도동됐되된됨둡드든등디때떤뜨라래러렇렌려로료른를리림링마많명몇모무문물뭐바밝방배변보부불블빨뽑사산상색서설성세센션소쇼수스습시신실싱아안않알았애야어얼업없었에여연열옆오온완외왼요운움워원위으은을음의이인일임입있작잠장재전절정제져조족종주줄중줘지직진짐쪽차창천최추출충치침커컴켜켰쿠크키탁탄태탬터텔통트튼티파팬퍼폰표퓨플핑한함해했행혀현화활후휴힘，？"
+  
+  font_glyphsets: "GF_Latin_Core"
+  # for Greek use "Noto Sans" for other languages use a compatible font family
+  font_family: Figtree  
+
+  frigate: "http://192.168.1.38:8123/local/snapshots/last_snapshot.jpg"
+
+esphome:
+  name: test-lvgl9
+  friendly_name: test_lvgl9
+
+esp32:
+  variant: esp32p4
+  flash_size: 32MB
+  cpu_frequency: 360MHz
+  framework:
+    type: esp-idf
+    version: 5.5.2
+    platform_version: 55.03.35
+    advanced:
+      enable_idf_experimental_features: yes  
+      disable_vfs_support_dir: false
+    sdkconfig_options:
+      CONFIG_ESP_H264_DUAL_TASK: "y"
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_ESP32_SPIRAM_SUPPORT: "y"
+      CONFIG_SPIRAM_USE_MALLOC: "y"
+      CONFIG_FATFS_LFN_STACK: "y"
+      #CONFIG_LWIP_SO_RCVBUF: "y"
+      CONFIG_LWIP_MAX_SOCKETS: "16"
+      CONFIG_VFS_SUPPORT_IO: "y"
+      CONFIG_VFS_MAX_COUNT: "16" 
+      CONFIG_ESP_MAIN_TASK_STACK_SIZE: "16384"
+      CONFIG_ESP_TIMER_TASK_STACK_SIZE: "4096"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
+      CONFIG_ESP_TASK_LOOP_STACK_SIZE: "16384"
+      CONFIG_FATFS_LFN_HEAP: "y"
+      DCONFIG_USE_AUDIO_AAC_SUPPORT: "y"
+      DCONFIG_ESP_JPG_DECODE_ENABLE: "y"
+      DCONFIG_ESPHOME_ENABLE_PNGLE: "1"
+      CONFIG_SPIRAM_SPEED_200M: "y"  # ← NOUVEAU: 200 MHz au lieu de défaut
+      CONFIG_SPIRAM_SPEED: "200"
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "l6FMxNIikEoNz2wtj0kCiuDCNFtyJFAJ1LP8o1wJB4Y="
+
+ota:
+  - platform: esphome
+    password: "e79a5b8fd99f68adc3e97eed88596789"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "Test-Lvgl9 Fallback Hotspot"
+    password: "7N34Qk1l0x7f"
+
+captive_portal:
+
+time:
+  - platform: sntp
+    id: sntp_time
+    servers:
+      - ntp0.ntp-servers.net
+      - ntp1.ntp-servers.net
+      - ntp2.ntp-servers.net
+
+http_request:
+  
+  
+
+online_image:
+  - url: "${frigate}"
+    format: JPG
+    id: cctv_img
+    byte_order: little_endian    
+    type: RGB565
+    resize: 1000x600 #450x300 #1000x700
+
+esp32_hosted:
+  variant: ESP32C6
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+  active_high: true
+  slot: 1
+
+i2c:
+  - id: bsp_bus
+    sda: GPIO07
+    scl: GPIO08
+    frequency: 400kHz 
+
+image:
+
+  defaults:
+    byte_order: little_endian
+    transparency: alpha_channel
+    type: rgb565
+
+
+external_components:
+  - source: github://pr#11886
+    components: [mipi_dsi]
+    refresh: always
+ 
+
+
+  - source:
+      type: git
+      url: https://github.com/youkorr/test2_esp_video_esphome
+      ref: claude/fix-lvgl-watchdog-crash-AGRWh #claude/fix-esp-video-errors-Ln67h  #claude/fix-lvgl-watchdog-crash-AGRWh
+    components: [lvgl, image, font, esp_video, esp_cam_sensor, sd_mmc_card, webdavbox3, storage, lvgl_camera_display, simple_video_player]
+    refresh: always   
+
+psram:
+  mode: hex
+  speed: 200MHz
+
+
+esp_ldo:
+  - voltage: 2.5V
+    channel: 3
+  - voltage: 2.5V
+    channel: 4   
+
+
+esp_video:
+  i2c_id: bsp_bus
+  xclk_pin: GPIO36
+  xclk_freq: 24000000
+  enable_h264: true
+  enable_jpeg: true
+  enable_isp: true
+  use_heap_allocator: true
+
+esp_cam_sensor:
+  id: tab5_cam
+  i2c_id: bsp_bus
+  sensor_type: ov5647        #"sensor_type" au lieu de "sensor"
+  resolution: "640x480"          # 800x640 , 1024x600 ,vga
+  pixel_format: "RGB565"      # Zero-copy 
+  framerate: 30
+  jpeg_quality: 15
+  mirror_x: false    # Flip horizontal (hardware)
+  mirror_y: false      # Flip vertical
+  rotation: 0          # 0/90/180/270°
+  crop_offset_x: 0     # Crop pixels from left
+
+
+lvgl_camera_display:
+  id: camera_display
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  update_interval: 33ms
+  #face_detection_id: face_detect
+
+
+        
+
+# ============================================================================
+# webdavbox3
+# ============================================================================    
+webdavbox3:
+  id: sd_cards
+  root_path: "/sdcard"
+  url_prefix: "/"
+  port: 81
+  username: "youkorr"
+  password: "youkorr"
+
+
+
+# ============================================================================
+# sd_mmc_card
+# ===========================================================================
+sd_mmc_card:
+  id: sd_card
+  clk_pin: GPIO43
+  cmd_pin: GPIO44
+  data0_pin: GPIO39
+  data1_pin: GPIO40
+  data2_pin: GPIO41
+  data3_pin: GPIO42
+  mode_1bit: false
+  slot: 0  
+
+storage:
+    platform: sd_direct
+    id: my_storage
+    sd_component: sd_card
+    root_path: "/sdcard" 
+    sd_images:
+
+      - id: peaceful
+        file_path: "/peaceful.jpg"
+        format: rgb565
+        byte_order: little_endian
+        auto_load: true  
+
+      #- id: thunderstorms
+        #file_path: "/svg/extreme_day_haze.svg"
+
+
+simple_video_player:
+  id: my_video_player
+  file_path:  "/sdcard/mjpeg/video_02_optimized.avi" #"/sdcard/The.Superdeep.BDRip.XviD.avi" #"/sdcard/tv_movies/Doctor.Who_output.avi"  #video_02_optimized.avi #"/sdcard/MP4/Rise-of-Skywalker_fixed.mp4" # "/sdcard/MP4/desert_480x272.mp4" # "/sdcard/MP4/slywalker640x480.avi"
+  #width: 800
+  #height: 480
+  parent_id: video_page
+  fps: 15       # ← LVGL parent screen
+  #buffer_size: 524288             # 512 KB
+  #cache_buffer_size: 131072       # 128 KB
+  show_controls: true             # ← Afficher contrôles
+  #show_slider: true               # ← Afficher slider
+  auto_play: false                # ← Auto-démarrage
+  loop: false
+  rotation: 0
+  preload_to_memory: false
+
+##########################################################################################################
+
+i2s_audio:
+  - id: audio_bus
+    i2s_mclk_pin: GPIO13
+    i2s_lrclk_pin: GPIO10
+    i2s_bclk_pin: GPIO12
+
+
+audio_dac:
+  - platform: es8311
+    id: es8311_dac
+    i2c_id: bsp_bus
+    address: 0x18
+
+audio_adc:
+  - platform: es7210
+    id: es7210_adc
+    i2c_id: bsp_bus
+    address: 0x40
+
+microphone:
+  - platform: i2s_audio
+    id: esp32_microphone
+    i2s_audio_id: audio_bus
+    i2s_din_pin: GPIO11
+    sample_rate: 16000
+    bits_per_sample: 16bit
+    adc_type: external
+
+speaker:
+  - platform: i2s_audio
+    id: esp32_speaker
+    i2s_audio_id: audio_bus
+    i2s_dout_pin: GPIO9
+    audio_dac: es8311_dac
+    dac_type: external
+    channel: stereo
+    buffer_duration: 100ms
+    bits_per_sample: 16bit
+    sample_rate: 48000
+
+  - platform: mixer
+    id: mixing_speaker
+    output_speaker: esp32_speaker
+    source_speakers:
+      - id: announcement_mixing_input
+        timeout: never
+      - id: media_mixing_input
+        timeout: never
+
+  - platform: resampler
+    id: announcement_resampling_speaker
+    output_speaker: announcement_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+
+  - platform: resampler
+    id: media_resampling_speaker
+    output_speaker: media_mixing_input
+    sample_rate: 48000
+    bits_per_sample: 16
+
+media_player:
+  - platform: speaker
+    name: "ESP32 P4 Media Player"
+    id: speaker_media_player
+    codec_support_enabled: true
+    volume_min: 0.5
+    volume_max: 0.75
+    volume_increment: 0.05
+    announcement_pipeline:
+      speaker: announcement_resampling_speaker
+      format: FLAC
+      sample_rate: 48000
+      num_channels: 1
+    media_pipeline:
+      speaker: media_resampling_speaker
+      format: FLAC
+      num_channels: 1
+      sample_rate: 48000
+    on_announcement:
+      - if:
+          condition:
+            - microphone.is_capturing:
+          then:
+            - micro_wake_word.stop
+            - voice_assistant.stop
+      - mixer_speaker.apply_ducking:
+          id: media_mixing_input
+          decibel_reduction: 20
+          duration: 0.0s
+      - switch.turn_on: audio_amplifier
+      - delay: 100ms
+    on_state:
+      if:
+        condition:
+          and:
+            - not:
+                voice_assistant.is_running:
+            - not:
+                media_player.is_announcing:
+        then:
+          - mixer_speaker.apply_ducking:
+              id: media_mixing_input
+              decibel_reduction: 0
+              duration: 1.0s
+    on_play:
+      - logger.log: "Media player started playing, disabling microphone"
+      - switch.turn_on: audio_amplifier
+      - delay: 100ms
+      - micro_wake_word.stop
+      - voice_assistant.stop
+    on_idle:
+      - delay: 100ms
+      - switch.turn_off: audio_amplifier
+      - if:
+          condition:
+            not:
+              voice_assistant.is_running:
+          then:
+            - micro_wake_word.start
+
+
+
+micro_wake_word:
+  id: my_wake_word
+  models:
+        
+        
+    - model: https://github.com/chrisdunnname/esphome-p4-86-panel-eth-2ro-lvgl/raw/main/microwakeword/okay_hal.json
+      id: okay_hal
+  on_wake_word_detected:
+    then:
+      - logger.log: "Wake word detected"
+      - voice_assistant.start:
+          wake_word: !lambda return wake_word;
+                                                                                     
+voice_assistant:
+  microphone: esp32_microphone
+  media_player: speaker_media_player
+  micro_wake_word: my_wake_word
+  noise_suppression_level: 2
+  auto_gain: 31dBFS
+  volume_multiplier: 2.0
+  conversation_timeout: 300s
+  on_end:
+    - wait_until:
+        condition:
+          - media_player.is_announcing:
+        timeout: 0.5s
+    - wait_until:
+        - and:
+            - not:
+                media_player.is_announcing:
+            - not:
+                media_player.is_playing:
+    - micro_wake_word.start:
+  on_client_connected:
+    - micro_wake_word.start:
+  on_client_disconnected:
+    - micro_wake_word.stop:
+
+
+
+switch:
+
+  - platform: gpio
+    pin: GPIO53 
+    name: "Audio Amplifier"
+    id: audio_amplifier
+    restore_mode: ALWAYS_OFF 
+
+  #- platform: network_camera
+    #name: "Camera 1"
+    #camera_id: security_cam_1
+    #id: camera_1_switch 
+
+  - platform: template
+    name: "LVGL Camera Display"
+    id: lvgl_display_enable_switch
+    restore_mode: RESTORE_DEFAULT_OFF
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);  
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(true);
+          }
+    turn_off_action:
+      - lambda: |-
+          auto *lvgl_disp = id(camera_display);  
+          if (lvgl_disp != nullptr) {
+            lvgl_disp->set_enabled(false);
+          }      
+
+######################################################################################################################
+
+
+sensor:
+  #- platform: template
+    #name: "Enrolled Faces"
+    #icon: "mdi:face-man"
+    #lambda: return id(face_detect).get_enrolled_count();  # Changer ici
+    #update_interval: 5s
+
+
+
+text_sensor:
+
+  - platform: template
+    name: 'Last Restart'
+    id: device_last_restart
+    icon: mdi:clock
+    entity_category: diagnostic
+   
+
+  - platform: template
+    name: "Camera Status Info"
+    id: camera_status_info
+    internal: true
+    update_interval: never  # Désactivé par défaut
+    lambda: |-
+      static char buf[100];
+      snprintf(buf, sizeof(buf), "%dx%d | %s | Buffer: %d KB",
+        id(tab5_cam).get_image_width(),
+        id(tab5_cam).get_image_height(),
+        id(tab5_cam).is_streaming() ? "STREAMING" : "IDLE",
+        id(tab5_cam).get_image_size() / 1024);
+      return {buf};
+
+
+
+globals:
+
+  - id: cam1_state
+    type: bool
+    initial_value: 'false'
+
+  - id: sleep_display_start
+    type: uint32_t
+    initial_value: '0'  
+  # Etat de verrouillage de l'ecran
+  - id: display_lock
+    type: bool
+    initial_value: 'false'
+
+  # Timestamp de debut du timeout sur face_unlock_page
+  - id: unlock_timeout_start
+    type: uint32_t
+    initial_value: '0'
+
+  # Duree du timeout sur face_unlock_page (en secondes)
+  - id: face_unlock_timeout_sec
+    type: int
+    initial_value: '145'
+
+  - id: is_minimized
+    type: bool
+    restore_value: no
+    initial_value: 'true'
+
+  - id: current_image_index
+    type: int
+    initial_value: '1'
+
+  - id: max_images
+    type: int
+    initial_value: '8'
+  - id: slideshow_active
+    type: bool
+    initial_value: 'false'  # Démarre en pause
+
+  - id: slideshow_delay
+    type: int
+    initial_value: '5000'   # en ms (5s)
+
+  - id: alarm_panel_pending_action
+    type: std::string
+    restore_value: no
+    initial_value: ""
+
+
+  - id: current_radio_station
+    type: int
+    restore_value: true
+    initial_value: '0'  # Commence avec Fun Radio (0=Fun, 1=Skyrock, 2=Sud, 3=RTL2)  
+
+  - id: display_timeout
+    type: int
+    restore_value: true
+    initial_value: "2"
+
+  - id: global_is_assisting
+    type: bool
+    restore_value: false  
+
+  - id: timer_running
+    type: bool
+    restore_value: no
+    initial_value: 'false' # Indique si le timer est en cours d'exécution    
+
+  - id: timer_started
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  
+  - id: is_alarm_active
+    type: bool
+    initial_value: 'false'
+
+  - id: is_timer_finished
+    type: bool
+    initial_value: 'false'
+
+  - id: timer_active
+    type: bool
+    initial_value: 'false'
+
+  - id: wifi_connection
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: api_connection
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  - id: ota_active
+    type: bool
+    initial_value: 'false'
+
+  - id: mic_muted
+    type: bool
+    restore_value: no
+    initial_value: 'false'
+
+  - id: init_in_progress
+    type: bool
+    restore_value: false
+    initial_value: "true"
+
+  - id: auto_off_timer_active
+    type: bool
+    initial_value: 'false'
+    
+
+  - id: countdown_time
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: total_timer_time
+    type: int
+    restore_value: no
+    initial_value: '0'    
+
+  - id: current_pin
+    type: std::string
+    initial_value: ""   
+
+  - id: current_track_id
+    type: int
+    initial_value: '0'
+  - id: is_playing
+    type: bool
+    initial_value: 'false'
+  - id: volume_level
+    type: int
+    initial_value: '50'
+  - id: track_count
+    type: int
+    initial_value: '0'  
+
+  - id: show_playlist
+    type: bool
+    initial_value: 'false'
+  - id: current_time
+    type: int
+    initial_value: '0'
+  - id: total_time
+    type: int
+    initial_value: '180'  
+
+  - id: current_radio_track_id
+    type: int
+    initial_value: '-1'
+    
+  - id: current_music_track_id
+    type: int
+    initial_value: '-1' 
+
+  - id: current_volume
+    type: float  
+    initial_value: '0.5'
+  - id: is_muted
+    type: bool
+    initial_value: 'false'
+  - id: volume_before_mute
+    type: float
+    initial_value: '0.5'
+  # Nouveau global pour empêcher le sleep pendant les interactions
+  - id: touch_active
+    type: bool
+    initial_value: 'false'
+
+  - id: idle_delay_seconds
+    type: int
+    initial_value: '300' 
+
+  - id: s_saver_visible
+    type: bool
+    restore_value: no
+    initial_value: "false"   
+
+  - id: camera_streaming_active
+    type: bool
+    restore_value: no
+    initial_value: 'false' 
+
+color:
+
+  - id: color_sky_blue
+    hex: 3FA7F3
+  - id: color_slate_blue_gray
+    hex: 343645
+  - id: color_steel_blue
+    hex: 606682
+  - id: color_misty_blue
+    hex: 9BA2BC
+  - id: color_black
+    hex: 0d0d0d
+  - id: color_dark_gray
+    hex: 333333
+  - id: color_gray
+    hex: 666666
+  - id: color_light_gray
+    hex: 999999
+  - id: color_white
+    hex: f2f0eb
+  - id: color_red
+    hex: ff0000
+  - id: color_crimson
+    hex: f5075c
+  - id: color_light_blue
+    hex: 2fc0ff
+  - id: color_blue
+    hex: 4C9FFF
+  - id: color_yellow
+    hex: e7c12c
+  - id: color_light_yellow
+    hex: f0d45c
+  - id: color_amber
+    hex: f4a900
+  - id: color_mint
+    hex: 39d19c
+  - id: color_light_mint
+    hex: 66dcb3
+  - id: color_light_green
+    hex: 00ff00
+  - id: color_green
+    hex: 5CA848
+  - id: color_orange
+    hex: f07c40
+  - id: color_deep_orange
+    hex: ff6600
+  - id: color_violet
+    hex: 926BC7
+  - id: color_dark_blue
+    hex: 4867aa
+  - id: color_deep_purple
+    hex: 543D72  
+
+
+
+  - id: color_nova
+    hex: 93A4EC
+
+  - id: color_navy
+    hex: aad6ec
+
+  - id: color_cyan
+    hex: 00FFFF  
+  - id: color_magenta
+    hex: FF00FF  
+
+  - id: color_aqua
+    hex: "00ffff"          
+
+  # Nova Colors
+  - id: nova_color # pink
+    hex: "e38de3"
+  - id: pri_color # light (mantle)
+    hex: "24273a"
+  - id: sec_color # dark (crust)
+    hex: "181926"
+  - id: text_color
+    hex: "cad3f5"
+  - id: off_color
+    hex: "5b6078"
+
+
+  - id: blue_color
+    hex: "6b93e3"
+  - id: green_color
+    hex: "a6da95"
+  - id: yellow_color
+    hex: "ffd17a"
+  - id: orange_color
+    hex: "e0752b"
+  - id: red_color
+    hex: "de455c"  
+
+  - id: lcars_space_white
+    hex: "f5f6fa"
+  - id: lcars_violet_creme
+    hex: "ddbbff"
+  - id: lcars_green
+    hex: "33cc99"
+  - id: lcars_magenta
+    hex: "cc4499"
+  - id: lcars_blue
+    hex: "4455ff"
+  - id: lcars_yellow
+    hex: "ffcc33"
+  - id: lcars_violet
+    hex: "9944ff"
+  - id: lcars_orange
+    hex: "ff7700"
+  - id: lcars_african_violet
+    hex: "cc88ff"
+  - id: lcars_text_purple
+    hex: "cc77ff"
+  - id: lcars_red
+    hex: "dd4444"
+  - id: lcars_emerald
+    hex: "00bb00"
+  - id: lcars_crimson
+    hex: "cc0000"
+  - id: lcars_navy_gray
+    hex: "2C374B"
+  - id: lcars_slate_gray
+    hex: "6E748C"
+  - id: lcars_teal
+    hex: "2A7092"
+  - id: lcars_coral
+    hex: "FA6851"
+  - id: lcars_charcoal
+    hex: "51596C"
+
+  - id: color_primary
+    hex: '4A90E2'
+  - id: color_secondary
+    hex: '2ECC71'
+  - id: color_text
+    hex: 'FFFFFF'
+  - id: color_background
+    hex: '1A1A1A'
+  - id: color_inactive
+    hex: '666666'  
+
+
+
+
+font:
+
+
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+      italic: true
+    id: font_request
+    size: 15
+    glyphsets:
+      - ${font_glyphsets}
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: font_response
+    size: 15
+    glyphsets:
+      - ${font_glyphsets}
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_16
+    size: 16
+    glyphsets:
+      - ${font_glyphsets}
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_18
+    size: 18
+    glyphsets:
+      - ${font_glyphsets}   
+
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_20
+    size: 20
+    glyphsets:
+      - ${font_glyphsets} 
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_23
+    size: 23
+    glyphsets:
+      - ${font_glyphsets}  
+
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_26
+    size: 26
+    glyphsets:
+      - ${font_glyphsets}   
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_28
+    size: 28
+    glyphsets:
+      - ${font_glyphsets}  
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_32
+    size: 32
+    glyphsets:
+      - ${font_glyphsets}                      
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_24
+    size: 24
+    glyphsets:
+      - ${font_glyphsets}           
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_36
+    size: 36
+    glyphsets:
+      - ${font_glyphsets} 
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_42
+    size: 42
+    glyphsets:
+      - ${font_glyphsets}                   
+
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: nunito_60
+    size: 60
+    glyphsets:
+      - ${font_glyphsets}      
+  - file:
+      type: gfonts
+      family: ${font_family}
+      weight: 300
+    id: font_timer
+    size: 30
+    glyphsets:
+      - ${font_glyphsets} 
+
+  - file: "https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/fonts/materialdesignicons-webfont.ttf"
+    id: mdi46
+    size: 46
+    bpp: 4
+    glyphs: [
+      "\U000F0BC4",#alarm away
+      "\U000F0384",#music
+      "\U000F07C5",#sound
+      "\U000F1322",#tools
+      "\U000F07AE",#cctv
+      "\U000F0493",#settings cog
+      "\U000F05CB",#voice
+      "\U000F0502",#screen settings
+      "\U000F1C6F",#info
+      "\U000F0521",#scr 
+      "\U000F04B2",#sleep
+      "\U000F1110",#s_saver
+      "\U000F0D90",#screen off
+      "\U000F009E",#bell
+      "\U000F04DB",#stop
+      "\U000F18DD",#light_mut
+      "\U000F062C",#source
+      "\U000F10FE",#kubernetes
+      "\U000F02A4",#github
+      "\U000F06B2",#angular
+      "\U000F0439",#radio
+      "\U000F0BB1",#next
+      "\U000F036B",#videocall
+      "\U000F1A13",#heure
+      "\U000F0F30",#meteo
+      "\U000F1923",#timer
+      "\U000F056E",#dashboard
+      "\U000F07DC",#micro-sd
+      "\U000F0CB8",#music_play
+      "\U000F08D6",#settings
+      "\U000F0565",#arming
+      "\U000F050F",#temp sensor
+      "\U000F0150",#clock
+      "\U000F081A",#door
+      "\U000F06D9",#garage
+      "\U000F1A8B",#shutter
+      "\U000F02E9",#Gallery
+      "\U000F0C7B",#recognition
+      "\U000F057C",#vlc
+      "\U000F05C3",#youtube
+      "\U000F18DE",#light
+      "\U000F0675",#application
+      
+      ]
+
+  - file: "https://github.com/BigBobbas/ESP32-S3-Box3-Custom-ESPHome/raw/main/fonts/materialdesignicons-webfont.ttf"
+    id: mdi36
+    size: 36
+    bpp: 4
+    glyphs: [
+      "\U000F0BC4",#alarm away
+      "\U000F0384",#music
+      "\U000F07C5",#sound
+      "\U000F1322",#tools
+      "\U000F07AE",#cctv
+      "\U000F0493",#settings cog
+      "\U000F05CB",#voice
+      "\U000F0502",#screen settings
+      "\U000F1C6F",#info
+      "\U000F0521",#scr 
+      "\U000F04B2",#sleep
+      "\U000F1110",#s_saver
+      "\U000F0D90",#screen off
+      "\U000F009E",#bell
+      "\U000F04DB",#stop
+      "\U000F18DD",#light_mut
+      "\U000F062C",#source
+      "\U000F10FE",#kubernetes
+      "\U000F02A4",#github
+      "\U000F06B2",#angular
+      "\U000F0439",#radio
+      "\U000F0BB1",#next
+      "\U000F036B",#videocall
+      "\U000F1A13",#heure
+      "\U000F0F30",#meteo
+      "\U000F1923",#timer
+      "\U000F056E",#dashboard
+      "\U000F07DC",#micro-sd
+      "\U000F0CB8",#music_play
+      "\U000F08D6",#settings
+      "\U000F0565",#arming
+      "\U000F050F",#temp sensor
+      "\U000F0150",#clock
+      "\U000F081A",#door
+      "\U000F06D9",#garage
+      "\U000F1A8B",#shutter
+      "\U000F02E9",#Gallery
+      "\U000F0C7B",#recognition
+      "\U000F057C",#vlc
+      "\U000F05C3",#youtube
+      "\U000F18DE",#light
+      "\U000F0675",#application
+      "\U000F00DF"
+
+      
+      ]      
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_24
+    size: 24
+    bpp: 4
+    glyphs: [
+      "\U000F068A", # shield home
+      "\U000F1828", # shield moon
+      "\U000F099D", # shield lock
+      "\U000F06BB", # shield plane
+      "\U000F099E", # shield off
+      "\U000F0498", # shield
+    ]
+
+  - file: "fonts/Icons.ttf"
+    id: icons_32
+    size: 32
+    bpp: 4
+    glyphs: [
+      "\U0000e900",
+      "\U0000e901",
+      "\U0000e902",
+      "\U0000e903",
+      "\U0000e904",
+      "\U0000e905",
+      "\U0000e906",
+      "\U0000e907",
+      "\U0000e908",
+      "\U0000e909",
+      "\U0000e90a",
+      "\U0000e90b",
+      "\U0000e90c",
+      "\U0000e90d",
+      "\U0000e90e",
+      "\U0000e90f",
+      "\U0000e910",
+      "\U0000e911",
+      "\U0000e912",
+      "\U0000e913",
+      "\U0000e914",
+      "\U0000e915",
+      "\U0000e916",
+      "\U0000e917",
+      "\U0000e918",
+      "\U0000e919",
+
+    ]
+  - file: "fonts/Icons.ttf"
+    id: icons_36
+    size: 36
+    bpp: 4
+    glyphs: [
+      "\U0000e900",
+      "\U0000e901",
+      "\U0000e902",
+      "\U0000e903",
+      "\U0000e904",
+      "\U0000e905",
+      "\U0000e906",
+      "\U0000e907",
+      "\U0000e908",
+      "\U0000e909",
+      "\U0000e90a",
+      "\U0000e90b",
+      "\U0000e90c",
+      "\U0000e90d",
+      "\U0000e90e",
+      "\U0000e90f",
+      "\U0000e910",
+      "\U0000e911",
+      "\U0000e912",
+      "\U0000e913",
+      "\U0000e914",
+      "\U0000e915",
+      "\U0000e916",
+      "\U0000e917",
+      "\U0000e918",
+      "\U0000e919",
+
+      ]
+
+  - file: "fonts/Icons.ttf"
+    id: icons_29
+    size: 29
+    bpp: 4
+    glyphs: [
+      "\U0000e900",
+      "\U0000e901",
+      "\U0000e902",
+      "\U0000e903",
+      "\U0000e904",
+      "\U0000e905",
+      "\U0000e906",
+      "\U0000e907",
+      "\U0000e908",
+      "\U0000e909",
+      "\U0000e90a",
+      "\U0000e90b",
+      "\U0000e90c",
+      "\U0000e90d",
+      "\U0000e90e",
+      "\U0000e90f",
+      "\U0000e910",
+      "\U0000e911",
+      "\U0000e912",
+      "\U0000e913",
+      "\U0000e914",
+      "\U0000e915",
+      "\U0000e916",
+      "\U0000e917",
+      "\U0000e918",
+      "\U0000e919",
+
+      ]      
+
+
+  - file: "fonts/icons_v2.ttf"
+    id: icons_38
+    size: 38
+    bpp: 4
+    glyphs: [
+      "\U0000e909", # power
+      "\U0000e90c", # back step
+      "\U0000e90d", # forward step
+      "\U0000e912", # repeat_all
+      "\U0000e913", # repeat_off
+      "\U0000e914", # repeat_one
+      "\U0000e90a", # play
+      "\U0000e90b", # pause
+      "\U0000e91c", # stop
+      "\U0000e923", # locate
+      "\U0000e924", # docked
+      "\U0000e915",#spotlight_group_icon
+    ]
+
+  - file: "fonts/icons_v2.ttf"
+    id: icons_48
+    size: 48
+    bpp: 4
+    glyphs: [
+      "\U0000e90a", # play
+      "\U0000e90b", # pause
+      "\U0000e91f", # arrow_up
+      "\U0000e920", # arrow_down
+      "\U0000e91c", # stop
+      "\U0000e923", # locate
+      "\U0000e924", # docked
+      "\U0000e93b", # air_conditioner 
+      "\U0000e936", # heating
+
+    ]
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_media
+    size: 60 #50
+    bpp: 8
+    glyphs: [
+      "\U000F040A", # mdi-media_play
+      "\U000F03E4", # mdi-media_pause
+      "\U000F04AE", # mdi-media_previous_track
+      "\U000F04AD", # mdi-media_next_track 
+      "\U000F040E", # mdi-media_play_pause
+      "\U000F0662", # skip-next-circle-outline
+      "\U000F0664", # skip-previous-circle-outline
+      "\U000F0453", # refresh
+      "\U000F03E3", # pause
+      "\U000F050F",#temp sensor
+      "\U000F024A",#garden/flower
+      "\U000F0EBA",#stats
+      "\U000F1C6F",#info
+      "\U000F075A",#music
+      "\U000F036F",#voice settings
+      "\U000F0502",#screen settings
+      "\U000F08D6",#settings
+      "\U000F068A",#alarm home
+      "\U000F0BC4",#alarm away
+      "\U000F1828",#armed night
+      "\U000F099E",#disarmed
+      "\U000F0565",#arming
+      "\U000F1A12",#home 
+      "\U000F058E",#humidity         
+      "\U000F0590",#weather
+      "\U000F07AE",#cctv
+      "\U000F1322",#tools
+      "\U000F0493",#settings cog
+      "\U000F0521",#toggle on
+      "\U000F0439",#radio_active
+      "\U000F0CB8",#music_play
+      "\U000F1A13",#heure
+      "\U000F0F30",#meteo
+      "\U000F1923",#timer
+      "\U000F02A4",#github
+      "\U000F062C",#source
+      "\U000F18DD",#light_mut
+      "\U000F056E",#dashboard
+      "\U000F07DC",#micro-sd
+      "\U000F0150",#clock
+      "\U000F0384",#music-box
+      "\U000F035C",#menu
+      "\U000F075D",#volume-plus
+      "\U000F075E",#volume-minus
+      "\U000F0581",#volume-off
+      "\U000F1AE1",#timer_play
+      "\U000F02E9",#Gallery
+      "\U000F07D1",#home-automation
+      "\U000F18DE",#ceiling-light-multiple-outline
+      "\U000F0450",# Icône rafraîchir
+      "\U000F061A", # illumination (lux)
+
+                      
+
+      ]    
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_40
+    size: 40
+    bpp: 4
+    glyphs: [
+      "\U000F068A", # shield home
+      "\U000F1828", # shield moon
+      "\U000F099D", # shield lock
+      "\U000F06BB", # shield plane
+      "\U000F099E", # shield off
+      "\U000F0498", # shield
+    ]
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_32
+    size: 32
+    bpp: 4
+    glyphs: [
+      "\U000F068A", # shield home
+      "\U000F1828", # shield moon
+      "\U000F099D", # shield lock
+      "\U000F06BB", # shield plane
+      "\U000F099E", # shield off
+      "\U000F0498", # shield
+      "\U000F09A0", # code pin
+      "\U000F0644", # Reconnaissance Facial
+    ]
+    
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_52
+    size: 52
+    bpp: 4
+    glyphs: [
+      "\U000F068A", # shield home
+      "\U000F1828", # shield moon
+      "\U000F099D", # shield lock
+      "\U000F06BB", # shield plane
+      "\U000F099E", # shield off
+      "\U000F0498", # shield
+      "\U000F0826", # home
+      "\U000F1A46", # away
+    ]
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_icons_68
+    size: 68
+    bpp: 4
+    glyphs: [
+      "\U000F068A", # shield home
+      "\U000F1828", # shield moon
+      "\U000F099D", # shield lock
+      "\U000F06BB", # shield plane
+      "\U000F099E", # shield off
+      "\U000F0498", # shield
+    ]             
+
+  - file: "fonts/materialdesignicons-webfont.ttf"
+    id: mdi_35
+    size: 35 #50
+    bpp: 8
+    glyphs: [
+      "\U000F061A", # chip
+
+      ] 
+  - file: "fonts/icons_v2.ttf"
+    id: icons_28
+    size: 28
+    bpp: 4
+    glyphs: [
+      "\U0000e902", # exit
+      "\U0000e926", # fan
+      "\U0000e927", # room_plan
+      "\U0000e938", # humidity 
+      "\U0000e937", # co2
+      "\U0000e93a", # air quality (tvoc)
+      "\U0000e939", # temperature 
+      "\U0000e92f", # illumination (lux)
+
+    ]
+
+
+
+  - file: "gfonts://Roboto"
+    id: roboto_32
+    size: 32
+
+  - file: "gfonts://Roboto"
+    id: roboto_36
+    size: 36    
+  - file: "gfonts://Roboto"
+    id: roboto_42
+    size: 42      
+  - file: "gfonts://Roboto"
+    id: roboto_48
+    size: 48       
+
+  - file: "gfonts://Roboto"
+    id: roboto_60
+    size: 60        
+
+  - file: "gfonts://Roboto"
+    id: roboto_30
+    size: 30
+
+  - file: "gfonts://Roboto"
+    id: roboto_26
+    size: 26
+
+  - file: "gfonts://Roboto"
+    id: roboto_24
+    size: 24    
+
+  - file: "gfonts://Roboto"
+    id: roboto_20
+    size: 20
+
+  - file: "gfonts://Roboto"
+    id: roboto_18
+    size: 18    
+  
+  - file: "gfonts://Roboto"
+    id: roboto_16
+    size: 16
+    
+  - file: "gfonts://Roboto"
+    id: roboto_14
+    size: 14
+  - file: "gfonts://Roboto"
+    id: roboto_12
+    size: 12
+  - file: "gfonts://Roboto"
+    id: roboto_10
+    size: 10 
+
+
+output:
+  - platform: ledc
+    pin: GPIO32
+    id: backlight_pwm
+    frequency: 1000Hz
+    inverted: true
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: "Display Backlight"
+    id: backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 250ms
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: bsp_bus
+    reset_pin: GPIO23
+    update_interval: 50ms   # polling (pas d'interruption)
+    on_touch:
+      - lambda: |-
+          ESP_LOGD("touchscreen", "Touch detected at (%d, %d)", touch.x, touch.y);
+      - light.turn_on: backlight           
+    transform:
+      swap_xy: false
+      mirror_x: false
+      mirror_y: false
+
+  
+display:
+  - platform: mipi_dsi
+    id: main_display
+    model: WAVESHARE-ESP32-P4-WIFI6-TOUCH-LCD-7B
+    reset_pin:
+      number: 33
+    rotation: 180
+    update_interval: never
+    auto_clear_enabled: false
+    dimensions:
+      width: 1024
+      height: 600
+
+
+number:
+  - platform: template
+    name: "Screen Off"
+    id: auto_off
+    optimistic: true
+    restore_value: true
+    min_value: -1
+    max_value: 300
+    step: 1
+    unit_of_measurement: s
+    icon: 'mdi:television-off'
+    disabled_by_default: true
+    initial_value: 0
+
+  - platform: template
+    id: brightness_slider
+    name: "Luminosité Écran"
+    icon: "mdi:brightness-6"
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: 'return x > 0;'
+            then:
+              - light.turn_on:
+                  id: backlight
+                  brightness: !lambda 'return x / 100.0;'
+            else:
+              - light.turn_off:
+                  id: backlight
+
+lvgl:
+  buffer_size: 100%
+  byte_order: little_endian
+  displays:
+    - main_display
+  touchscreens:
+    - touch
+
+  on_idle:
+    - timeout: !lambda |-
+        int timeout = id(auto_off).state;
+        return (timeout == -1) ? 86400000 : (timeout * 1000);
+      then:
+        - lambda: |-
+            static bool canvas_configured = false;
+            if (!canvas_configured) {
+              auto canvas = id(camera_canvas);
+              if (canvas != nullptr) {
+                id(camera_display).configure_canvas(canvas);
+                canvas_configured = true;
+                ESP_LOGI("lvgl", "Canvas configuré pour caméra 640x480");
+              }
+            }
+
+  style_definitions:
+    - id: page_content
+      bg_color: 0x000000
+      width: 100%
+      height: 100%
+      pad_all: 0
+      pad_row: 0
+      pad_column: 0
+
+
+    - id: button_style
+      bg_color: 0x000000 #black
+      bg_grad_color: 0x005782 #blue
+      bg_grad_dir: VER
+      bg_opa: COVER
+      border_color: 0x000000
+      border_width: 1
+      text_color: 0xFFFFFF
+      ############## ADD SHADOW
+      shadow_color: 0xFFFFFF
+      shadow_width: 20
+      shadow_offset_x: 0
+      shadow_offset_y: 0
+      shadow_opa: 50%
+      radius: 40
+      
+    - id: button_pressed_style
+      bg_color: 0x666666 #grey
+      bg_grad_color: 0x00334d #dark blue
+      ############## ADD SHADOW
+      shadow_color: 0xFFFFFF
+      shadow_width: 20
+      shadow_offset_x: 0
+      shadow_offset_y: 0
+      shadow_opa: 50%
+      radius: 40
+      
+    - id: button_checked_style
+      bg_color: 0x000000 #black
+      bg_grad_color: 0x002233 #darker blue
+      bg_grad_dir: VER
+      text_color: yellow
+      ############## ADD SHADOW
+      shadow_color: 0xFFFFFF
+      shadow_width: 20
+      shadow_offset_x: 0
+      shadow_offset_y: 0
+      shadow_opa: 50%
+      radius: 40
+      
+    - id: button_standard_style
+      bg_color: 0x2F8CD8
+      bg_grad_color: 0x005782
+      shadow_width: 0
+
+    - id: round_mask
+      radius: 50%  # Crée un cercle parfait
+      clip_corner: true
+
+
+    - id: menu_button
+      radius: 40      
+      #text_font: nunito_20
+      text_align: CENTER
+      bg_color: 0x2F8CD8
+      bg_grad_color: 0x0460BD
+      bg_grad_dir: VER
+      border_width: 5
+      border_color: 0x1e84eb
+      border_opa: 70%
+      outline_width: 1
+    - id: time_style
+      text_color: 0xD5D5D5
+      bg_opa: TRANSP
+      radius: 5
+      border_color: 0xE9E9E9
+      border_width: 0
+      border_opa: 50%
+      pad_all: 0
+      shadow_width: 0
+      shadow_opa: TRANSP
+    - id: card
+      text_color: 0xD5D5D5
+      bg_color: 0x222222
+      bg_opa: COVER
+      radius: 20
+      outline_width: 0
+      border_width: 0
+      #border_opa:
+      pad_all: 0 
+    - id: weather_style
+      text_color: 0xD5D5D5
+      bg_color: 0
+      bg_opa: TRANSP
+      outline_width: 0
+      border_width: 0
+      #border_opa:
+      radius: 0
+      pad_all: 0
+    - id: meter_style
+      text_color: 0xD5D5D5
+      bg_color: 0x222222
+      bg_opa: COVER
+      radius: 10
+      outline_width: 0
+      border_width: 0
+      #border_opa:
+      pad_all: 0      
+    - id: button_light
+      bg_color: 0xCCCCCC
+      bg_grad_color: 0xFF4400
+      bg_grad_dir: HOR
+      border_width: 8
+      border_color: 0x222222
+      border_opa: 50%
+      outline_width: 1
+    - id: button_menu
+      text_color: 0xD5D5D5
+      bg_color: 0x222222
+      bg_opa: COVER
+      radius: 20
+      pad_all: 5
+    - id: button_checked
+      bg_color: 0xFF4400
+      bg_opa: COVER
+      text_color: 0xD5D5D5
+      radius: 20
+      pad_all: 5 
+    - id: sound_page
+      bg_opa: TRANSP
+      border_opa: TRANSP
+      radius: 0
+      text_color: 0xCCCCCC  # Gris clair pour le texte
+      width: 100%
+      height: 100%
+
+
+    - id: home_page
+      bg_opa: TRANSP
+      border_opa: TRANSP
+      radius: 0
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 100%
+
+    - id: controls_page
+      bg_opa: TRANSP
+      border_opa: TRANSP
+      radius: 0
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 100%  
+
+    - id: main_content
+      bg_opa: TRANSP
+      border_opa: TRANSP
+      radius: 0
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 100%
+
+    - id: f1_page
+      bg_opa: TRANSP
+      border_opa: TRANSP
+      radius: 0
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 100%
+
+    - id: style_line
+      line_color: 0x0000FF
+      line_width: 8
+      line_rounded: true
+    - id: date_style
+      #text_font: nunito_24
+      align: center
+      text_color: 0x333333
+      bg_opa: cover
+      radius: 4
+      pad_all: 2
+
+        ####Header_Footer##########
+    - id: header_footer
+      bg_color: 0x2F8CD8
+      bg_grad_color: 0x005782
+      bg_grad_dir: VER
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      pad_row: 0
+      pad_column: 0
+      border_color: 0x0077b3
+      text_color: 0xFFFFFF
+      width: 100%
+      height: 30
+
+    - id: music_style
+      text_font: montserrat_16
+      text_color: 0x504d6d
+      bg_opa: TRANSP
+    
+    - id: title_style
+      text_font: montserrat_14
+      text_color: 0x101010
+      bg_opa: TRANSP
+    
+    - id: btn_round_style
+      radius: 10
+      bg_opa: COVER
+    
+    - id: spectrum_style
+      bg_opa: TRANSP
+      border_width: 0     
+
+    - id: style_bg_dark
+      bg_color: 0x1a1a1a
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      
+    - id: style_card
+      bg_color: 0x2d2d2d
+      bg_opa: COVER
+      border_width: 0
+      radius: 15
+      pad_all: 20
+      
+    - id: style_header
+      bg_color: 0x000000
+      bg_opa: COVER
+      border_width: 0
+      radius: 0
+      pad_all: 0
+      
+    - id: style_button
+      bg_color: 0x444444
+      bg_opa: COVER
+      border_width: 0
+      radius: 25
+      pad_all: 0
+
+    - id: my_calendar_style
+      bg_color: 0xFFFFFF
+      text_font: roboto_16
+      pad_all: 5
+
+  pages:
+      - id: page_home
+        bg_color: color_black
+        on_load:
+          then:
+            # ✅ Image (fonctionne maintenant!)
+            - lvgl.image.update:
+                id: update_wallpaper
+                src: peaceful  # sd_image ID
+            
+            # ✅ Lottie - utiliser lambda
+            #- lambda: |-
+                #lv_lottie_set_src_file(id(thunderstorms), "/sdcard/lottie/thunderstorms_day_extreme_rain.json");
+                #ESP_LOGI("page_home", "Lottie chargé depuis SD card");
+            # ✅ SVG (chemin direct, pas sd_image)
+            - lambda: |-
+                lv_lottie_set_src_file(id(my_svg), "/sdcard/lottie/emoji.json"); 
+                ESP_LOGI("page_home", "Lottie chargé depuis SD card");      
+        widgets:
+          # Fond d'écran
+          - obj:
+              id: background
+              width: 1024
+              height: 600
+              x: 0
+              y: 0
+              border_width: 0
+              radius: 0
+
+          # Image - PAS de src ici, chargé dans on_load
+          - image:
+              id: update_wallpaper
+              src: peaceful
+              width: 1024
+              height: 600
+
+          - lottie:
+              id: my_svg
+              x: 200
+              y: 200
+              width: 64
+              height: 64
+              loop: true
+              autoplay: true
+
+          # Lottie - PAS de src ici, chargé dans on_load
+          #- lottie:
+              #id: thunderstorms
+              #x: 100
+              #y: 100
+              #width: 200
+              #height: 200
+              #loop: true
+              #autoplay: true
+
+
+          #- lottie:
+              #id: success_anim
+              #align: CENTER
+              #y: 100
+              #width: 120
+              #height: 120
+              #src: "/sdcard/lotties/thunderstorms-day-extreme-rain.json" 
+              #autoplay: true
+              #loop: true
+
+
+          - button:
+              id: btn_player
+              width: 150
+              height: 100
+              x: 10
+              y: 345
+              bg_color: color_steel_blue
+              bg_opa: COVER
+              radius: 15
+              widgets:
+                - label:
+                    text: "MEDIA"
+                    x: 30
+                    y: 55
+                    text_color: 0xFFFFFF
+                    text_font: montserrat_18
+                    text_align: left
+                - label:
+                    text: "\U000F057C"
+                    x: 40
+                    y: 8
+                    text_color: color_red
+                    #text_font: mdi36   
+
+              on_press:      
+                then:
+                    - lvgl.page.show: video_page
+                    - lambda: |-
+                        ESP_LOGI("PERF", "=== PAGE SWITCH START: %u ms ===", millis());
+                        ESP_LOGI("PERF", "Free heap: %u bytes", esp_get_free_heap_size()); 
+                    - lambda: |-
+                        ESP_LOGI("PERF", "=== PAGE SWITCH END: %u ms ===", millis());
+                        ESP_LOGI("PERF", "Free heap after: %u bytes", esp_get_free_heap_size());                                     
+
+          #- button:
+              #id: btn_test4
+              #width: 150
+              #height: 100
+              #x: 200
+              #y: 345
+              #bg_color: color_deep_purple
+              #on_click:
+                #then:
+                  #- lvgl.page.show: camera_page
+
+
+          - button:
+              id: btn_camera
+              width: 150
+              height: 100
+              x: 200
+              y: 345
+              bg_color: color_deep_purple
+              bg_opa: COVER
+              radius: 15
+              on_click:      
+                then:
+                  - lvgl.page.show: camera_page 
+              widgets:
+                - label:
+                    text: "CAMERA"
+                    x: 30
+                    y: 55
+                    text_color: 0xFFFFFF
+                    text_font: montserrat_18
+                    text_align: left
+                - label:
+                    text: "\U000F0C7B"
+                    x: 45
+                    y: 8
+                    #text_align: TOP_MID
+                    text_color: color_yellow
+                    #text_font: mdi36
+
+
+
+
+      - id: camera_page
+        bg_color: color_slate_blue_gray
+        on_load:
+          - lambda: |-
+              ESP_LOGI("camera", "📷 Page caméra chargée");
+              auto canvas = id(camera_canvas);
+              if (canvas == nullptr) {
+                ESP_LOGE("camera", "Canvas introuvable!");
+                return;
+              }
+              lv_obj_set_size(canvas, 640, 480);
+              lv_obj_set_pos(canvas, 192, 60);  
+              ESP_LOGI("camera", "Canvas: 640x480 @ (192,60)");
+
+        widgets:
+          # ===== CANVAS CAMERA =====
+          - canvas:
+              id: camera_canvas
+              width: 640
+              height: 480
+              x: 192
+              y: 60
+              bg_color: 0x4682B4
+              border_width: 0
+              radius: 0
+              pad_all: 0       
+
+          # ===== BOUTONS DROITE (Camera Control) =====
+          
+          # Bouton START (vert)
+          - button:
+              id: btn_start_streaming
+              width: 80
+              height: 60
+              x: 930
+              y: 150
+              bg_color: 0x00CC44
+              bg_opa: COVER
+              radius: 10
+              on_click:
+                then:
+                  - lambda: |-
+                      ESP_LOGI("camera", "▶ Démarrage streaming");
+                      if (id(tab5_cam).start_streaming()) {
+                        ESP_LOGI("camera", "✓ Streaming démarré");
+                        lv_obj_set_style_bg_color(id(camera_canvas), lv_color_hex(0x000000), 0);
+                      } else {
+                        ESP_LOGE("camera", "✗ Échec streaming");
+                      }
+              widgets:
+                - label:
+                    text: "START"
+                    text_color: 0xFFFFFF
+                    #text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER
+
+
+          # Bouton STOP (rouge)
+          - button:
+              id: btn_stop_streaming
+              width: 80
+              height: 60
+              x: 930
+              y: 230
+              bg_color: 0xFF4444
+              bg_opa: COVER
+              radius: 10
+              on_click:
+                then:
+                  - lambda: |-
+                      ESP_LOGI("camera", "■ Arrêt streaming");
+                      id(tab5_cam).stop_streaming();
+                      lv_obj_set_style_bg_color(id(camera_canvas), lv_color_hex(0x4682B4), 0);
+              widgets:
+                - label:
+                    text: "STOP"
+                    text_color: 0xFFFFFF
+                    #text_font: nunito_24
+                    text_align: CENTER
+                    align: CENTER                                    
+
+
+        on_swipe_up:
+          - lambda: 'lv_indev_wait_release(lv_indev_get_act());'
+          - lvgl.page.show: page_home
+          - light.turn_on: 
+              id: backlight
+              flash_length: 50ms               
+
+
+      - id: video_page
+        bg_color: color_slate_blue_gray
+
+
+        on_swipe_up:
+          - lambda: 'lv_indev_wait_release(lv_indev_get_act());'
+          - lvgl.page.show: page_home
+          - light.turn_on: 
+              id: backlight
+              flash_length: 50ms                      
