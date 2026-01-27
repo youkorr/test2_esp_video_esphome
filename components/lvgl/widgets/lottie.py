@@ -94,36 +94,9 @@ class LottieType(WidgetType):
 
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Get dimensions - priority: buffer_width/height > widget width/height
-        buffer_width = config.get(CONF_BUFFER_WIDTH) or config.get(CONF_WIDTH)
-        buffer_height = config.get(CONF_BUFFER_HEIGHT) or config.get(CONF_HEIGHT)
-
-        if buffer_width and buffer_height:
-            # Simple buffer allocation - LVGL handles everything
-            buf_w = await lv_int.process(buffer_width)
-            buf_h = await lv_int.process(buffer_height)
-
-            # Allocate buffer once (static) - avoids stack usage
-            cg.add(RawStatement(
-                f'{{\n'
-                f'  static uint8_t *lottie_buf_{w.var.base} = nullptr;\n'
-                f'  if (lottie_buf_{w.var.base} == nullptr) {{\n'
-                f'    size_t buf_size = {buf_w} * {buf_h} * 4;  // ARGB8888 = 4 bytes/pixel\n'
-                f'    lottie_buf_{w.var.base} = (uint8_t*)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);\n'
-                f'    if (lottie_buf_{w.var.base} != nullptr) {{\n'
-                f'      ESP_LOGI("lvgl.lottie", "Allocated Lottie buffer: %dx%d (%zu bytes)", {buf_w}, {buf_h}, buf_size);\n'
-                f'      lv_lottie_set_buffer({w.obj}, {buf_w}, {buf_h}, lottie_buf_{w.var.base});\n'
-                f'    }} else {{\n'
-                f'      ESP_LOGE("lvgl.lottie", "Failed to allocate %zu bytes for Lottie buffer", buf_size);\n'
-                f'    }}\n'
-                f'  }}\n'
-                f'}}'
-            ))
-        else:
-            # No dimensions - log error
-            cg.add(RawStatement(
-                f'ESP_LOGE("lvgl.lottie", "Lottie requires width/height or buffer_width/buffer_height");'
-            ))
+        # NOTE: Buffer allocation removed to avoid stack overflow
+        # LVGL will allocate buffer automatically when needed
+        # If rendering issues occur, users can set buffer via on_load lambda
 
         # Get animation source (file path or embedded ID) - may be None if set via on_load
         src = config.get(CONF_SRC)
