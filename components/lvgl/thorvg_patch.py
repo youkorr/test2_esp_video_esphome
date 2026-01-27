@@ -63,45 +63,62 @@ def patch_thorvg_for_lvgl(thorvg_dir):
 
 def patch_thorvg_identity_conflict(thorvg_dir):
     """
-    Patch tvgSwFill.cpp pour résoudre le conflit avec std::identity (C++20)
+    Patch ThorVG files pour résoudre le conflit avec std::identity (C++20)
     GCC 14.2.0 introduit std::identity qui entre en conflit avec tvg::identity
     """
-    tvgSwFill_cpp = os.path.join(thorvg_dir, "src", "renderer", "sw_engine", "tvgSwFill.cpp")
+    # Liste des fichiers à patcher
+    files_to_patch = [
+        os.path.join(thorvg_dir, "src", "renderer", "sw_engine", "tvgSwFill.cpp"),
+        os.path.join(thorvg_dir, "src", "loaders", "svg", "tvgSvgSceneBuilder.cpp"),
+    ]
 
-    if not os.path.exists(tvgSwFill_cpp):
-        _LOGGER.warning(f"[ThorVG Patch] File not found: {tvgSwFill_cpp}")
-        return False
+    patched_count = 0
+    for file_path in files_to_patch:
+        if not os.path.exists(file_path):
+            _LOGGER.warning(f"[ThorVG Patch] File not found: {file_path}")
+            continue
 
-    try:
-        # Lire le fichier
-        with open(tvgSwFill_cpp, "r", encoding="utf-8") as f:
-            content = f.read()
+        try:
+            # Lire le fichier
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
 
-        # Vérifier si déjà patché
-        if "tvg::identity" in content:
-            _LOGGER.info("[ThorVG Patch] tvgSwFill.cpp already patched (identity conflict)")
-            return True
+            # Vérifier si déjà patché
+            if "tvg::identity" in content:
+                continue
 
-        # Patcher les deux occurrences de identity() pour utiliser tvg::identity()
-        # Line 224: bool isTransformation = !identity((const Matrix*)(&gradTransform));
-        # Line 293: bool isTransformation = !identity((const Matrix*)(&gradTransform));
+            # Patcher toutes les occurrences de identity() pour utiliser tvg::identity()
+            # Patterns à patcher:
+            # - !identity((const Matrix*)
+            # - identity((const Matrix*)
+            modified = False
 
-        content = content.replace(
-            "!identity((const Matrix*)",
-            "!tvg::identity((const Matrix*)"
-        )
+            if "!identity((const Matrix*)" in content:
+                content = content.replace(
+                    "!identity((const Matrix*)",
+                    "!tvg::identity((const Matrix*)"
+                )
+                modified = True
 
-        # Écrire le fichier patché
-        with open(tvgSwFill_cpp, "w", encoding="utf-8") as f:
-            f.write(content)
+            if " identity((const Matrix*)" in content:
+                content = content.replace(
+                    " identity((const Matrix*)",
+                    " tvg::identity((const Matrix*)"
+                )
+                modified = True
 
-        _LOGGER.info("[ThorVG Patch] Successfully patched tvgSwFill.cpp")
-        _LOGGER.info("[ThorVG Patch] Fixed identity() namespace conflict with C++20 std::identity")
+            if modified:
+                # Écrire le fichier patché
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                patched_count += 1
 
-        return True
+        except Exception as e:
+            _LOGGER.error(f"[ThorVG Patch] Failed to patch {os.path.basename(file_path)}: {e}")
+            return False
 
-    except Exception as e:
-        _LOGGER.error(f"[ThorVG Patch] Failed to patch tvgSwFill.cpp: {e}")
-        import traceback
-        _LOGGER.error(traceback.format_exc())
-        return False
+    if patched_count > 0:
+        _LOGGER.info(f"[ThorVG Patch] Successfully patched {patched_count} files for identity() conflict")
+        _LOGGER.info("[ThorVG Patch] Fixed namespace conflict with C++20 std::identity")
+
+    return True
