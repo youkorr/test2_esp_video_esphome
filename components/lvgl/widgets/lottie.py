@@ -94,18 +94,19 @@ class LottieType(WidgetType):
         CRITICAL: Lottie widgets require a buffer allocated with proper 64-byte alignment.
         We use lv_draw_buf_create() which ensures alignment for ESP32-P4 PSRAM/cache.
         """
+        from ..defines import CONF_WIDTH, CONF_HEIGHT
+
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Get buffer dimensions (default to widget size if not specified)
-        buffer_width = config.get(CONF_BUFFER_WIDTH)
-        buffer_height = config.get(CONF_BUFFER_HEIGHT)
+        # Get buffer dimensions - priority: buffer_width/height > widget width/height
+        buffer_width = config.get(CONF_BUFFER_WIDTH) or config.get(CONF_WIDTH)
+        buffer_height = config.get(CONF_BUFFER_HEIGHT) or config.get(CONF_HEIGHT)
 
         # Generate buffer allocation code
         # CRITICAL: Use lv_draw_buf_create() to ensure 64-byte alignment for ESP32-P4
         # ThorVG requires ARGB8888_PREMULTIPLIED format
-        # NOTE: Buffer must be allocated AFTER widget is created and sized
         if buffer_width and buffer_height:
-            # User specified buffer size - use it directly
+            # User specified buffer size OR widget size - use it directly
             buf_w = await lv_int.process(buffer_width)
             buf_h = await lv_int.process(buffer_height)
 
@@ -129,30 +130,9 @@ class LottieType(WidgetType):
                     f'}}'
                 ))
         else:
-            # Use widget dimensions - need to check they're valid
-            # Generate inline code without LocalVariable to avoid pointer issues
+            # No dimensions specified - error
             cg.add(RawStatement(
-                f'{{\n'
-                f'  int32_t lottie_w = lv_obj_get_content_width({w.obj});\n'
-                f'  int32_t lottie_h = lv_obj_get_content_height({w.obj});\n'
-                f'  if (lottie_w > 0 && lottie_h > 0) {{\n'
-                f'    // Calculate aligned stride for ESP32-P4 (64-byte alignment)\n'
-                f'    // ARGB8888 = 4 bytes per pixel, align to 64 bytes\n'
-                f'    uint32_t lottie_stride = (lottie_w * 4 + 63) & ~63;\n'
-                f'    lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create(lottie_w, lottie_h, '
-                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, lottie_stride);\n'
-                f'    if (lottie_draw_buf == nullptr) {{\n'
-                f'      ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", lottie_w, lottie_h);\n'
-                f'    }} else {{\n'
-                f'      ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
-                f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
-                f'      lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
-                f'    }}\n'
-                f'  }} else {{\n'
-                f'    ESP_LOGW("lvgl.lottie", "Widget has invalid dimensions: %dx%d. Set width/height or buffer_width/buffer_height.", '
-                f'lottie_w, lottie_h);\n'
-                f'  }}\n'
-                f'}}'
+                f'ESP_LOGE("lvgl.lottie", "Lottie widget requires width/height or buffer_width/buffer_height");'
             ))
 
         # Get animation source (file path or embedded ID) - may be None if set via on_load
