@@ -94,7 +94,7 @@ class LottieType(WidgetType):
         CRITICAL: Lottie widgets require a buffer allocated with proper 64-byte alignment.
         We use lv_draw_buf_create() which ensures alignment for ESP32-P4 PSRAM/cache.
         """
-        from ..defines import CONF_WIDTH, CONF_HEIGHT
+        from esphome.const import CONF_WIDTH, CONF_HEIGHT
 
         lvgl_components_required.add(CONF_LOTTIE)
 
