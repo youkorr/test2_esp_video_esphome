@@ -264,6 +264,17 @@ async def to_code(configs):
             if os.path.exists(thorvg_bindings):
                 cg.add_build_flag(f"-I{thorvg_bindings}")
 
+    # ============================================================================
+    # REGISTER PLATFORMIO BUILD SCRIPT FOR COMPILING THORVG SOURCES
+    # ============================================================================
+    # This tells PlatformIO to compile ThorVG .cpp files (like esp_video_build.py)
+    build_script_path = os.path.join(component_dir, "lvgl_thorvg_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+        _LOGGER.info(f"[LVGL] Registered ThorVG build script: {build_script_path}")
+    else:
+        _LOGGER.error(f"[LVGL] Build script not found: {build_script_path}")
+
     # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
