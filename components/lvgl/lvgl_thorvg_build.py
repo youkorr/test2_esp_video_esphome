@@ -6,10 +6,14 @@ Inspiré de esp_video_build.py
 Import("env")
 import os
 
-# Trouver le répertoire ThorVG
-project_dir = env.subst("$PROJECT_DIR")
-components_dir = os.path.join(project_dir, "components")
-thorvg_dir = os.path.join(components_dir, "thorvg")
+# Obtenir le répertoire du composant (ce script est dans components/lvgl/)
+# Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
+script_dir = Dir('.').srcnode().abspath
+component_dir = script_dir
+parent_components_dir = os.path.dirname(component_dir)
+
+# ThorVG est dans components/thorvg/
+thorvg_dir = os.path.join(parent_components_dir, "thorvg")
 
 if not os.path.exists(thorvg_dir):
     print(f"[ThorVG Build] Warning: ThorVG directory not found at {thorvg_dir}")
