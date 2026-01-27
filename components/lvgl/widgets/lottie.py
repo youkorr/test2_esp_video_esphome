@@ -110,9 +110,12 @@ class LottieType(WidgetType):
             buf_h = await lv_int.process(buffer_height)
 
             with LocalVariable("lottie_draw_buf", "lv_draw_buf_t *") as draw_buf_var:
+                # Calculate aligned stride for ESP32-P4 (64-byte alignment)
+                # ARGB8888 = 4 bytes per pixel, align to 64 bytes
                 cg.add(RawStatement(
-                    f"{draw_buf_var} = lv_draw_buf_create({buf_w}, {buf_h}, "
-                    f"LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);"
+                    f'uint32_t stride_{buf_w} = ({buf_w} * 4 + 63) & ~63;  // Align to 64 bytes\n'
+                    f'{draw_buf_var} = lv_draw_buf_create({buf_w}, {buf_h}, '
+                    f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, stride_{buf_w});'
                 ))
 
                 # Check allocation success
@@ -133,8 +136,11 @@ class LottieType(WidgetType):
                 f'  int32_t lottie_w = lv_obj_get_content_width({w.obj});\n'
                 f'  int32_t lottie_h = lv_obj_get_content_height({w.obj});\n'
                 f'  if (lottie_w > 0 && lottie_h > 0) {{\n'
+                f'    // Calculate aligned stride for ESP32-P4 (64-byte alignment)\n'
+                f'    // ARGB8888 = 4 bytes per pixel, align to 64 bytes\n'
+                f'    uint32_t lottie_stride = (lottie_w * 4 + 63) & ~63;\n'
                 f'    lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create(lottie_w, lottie_h, '
-                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, 0);\n'
+                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, lottie_stride);\n'
                 f'    if (lottie_draw_buf == nullptr) {{\n'
                 f'      ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", lottie_w, lottie_h);\n'
                 f'    }} else {{\n'
