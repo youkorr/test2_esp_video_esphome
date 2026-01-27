@@ -107,26 +107,38 @@ else:
     # Collecter tous les fichiers .cpp ThorVG
     thorvg_sources = []
 
-    # Sources principales ThorVG
+    # Sources principales ThorVG (SEULEMENT software rasterizer, pas GL/WG)
     src_dirs = [
         os.path.join(thorvg_dir, "src", "common"),
         os.path.join(thorvg_dir, "src", "renderer"),
-        os.path.join(thorvg_dir, "src", "renderer", "sw_engine"),
+        os.path.join(thorvg_dir, "src", "renderer", "sw_engine"),  # Software engine only
         os.path.join(thorvg_dir, "src", "loaders"),
         os.path.join(thorvg_dir, "src", "loaders", "svg"),
         os.path.join(thorvg_dir, "src", "loaders", "lottie"),
         os.path.join(thorvg_dir, "src", "loaders", "raw"),
-        os.path.join(thorvg_dir, "src", "loaders", "png"),
-        os.path.join(thorvg_dir, "src", "loaders", "jpg"),
-        os.path.join(thorvg_dir, "src", "loaders", "webp"),
         os.path.join(thorvg_dir, "src", "bindings", "capi"),
+    ]
+
+    # Files to exclude (WebGPU, OpenGL, unused loaders)
+    exclude_files = [
+        "tvgWgCanvas.cpp",      # WebGPU canvas (disabled)
+        "tvgGlCanvas.cpp",      # OpenGL canvas (disabled)
     ]
 
     for src_dir in src_dirs:
         if os.path.exists(src_dir):
             for root, dirs, files in os.walk(src_dir):
+                # Skip WebGPU and OpenGL engine directories
+                if 'wg_engine' in root or 'gl_engine' in root:
+                    continue
+
                 for file in files:
                     if file.endswith(".cpp") or file.endswith(".c"):
+                        # Skip excluded files
+                        if file in exclude_files:
+                            print(f"[ThorVG Build] Skipping {file} (feature disabled)")
+                            continue
+
                         thorvg_sources.append(os.path.join(root, file))
 
     # Flags de compilation pour ThorVG
