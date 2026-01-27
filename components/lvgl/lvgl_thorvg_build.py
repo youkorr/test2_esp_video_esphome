@@ -91,6 +91,11 @@ else:
         os.path.join(thorvg_dir, "src", "loaders", "lottie"),
         os.path.join(thorvg_dir, "src", "loaders", "raw"),
         os.path.join(thorvg_dir, "src", "bindings", "capi"),
+        # JerryScript includes (for Lottie loader)
+        os.path.join(thorvg_dir, "src", "loaders", "lottie", "jerryscript"),
+        os.path.join(thorvg_dir, "src", "loaders", "lottie", "jerryscript", "jerry-core"),
+        os.path.join(thorvg_dir, "src", "loaders", "lottie", "jerryscript", "jerry-core", "include"),
+        os.path.join(thorvg_dir, "src", "loaders", "lottie", "jerryscript", "jerry-port", "default", "include"),
     ])
 
     # Collecter tous les fichiers .cpp ThorVG

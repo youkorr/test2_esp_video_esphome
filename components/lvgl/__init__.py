@@ -224,59 +224,6 @@ async def to_code(configs):
     df.add_define("LV_DRAW_BUF_ALIGN", "64")  # ESP32-P4 requires 64-byte alignment for PSRAM/cache
     df.add_define("LV_USE_STDLIB_MALLOC", "LV_STDLIB_CUSTOM")
 
-    # ============================================================================
-    # AUTO-DOWNLOAD THORVG + PATCH (comme esp_video avec esp_video_download.py)
-    # ============================================================================
-    component_dir = os.path.dirname(__file__)
-    parent_components_dir = os.path.dirname(component_dir)
-
-    # Importer les modules ThorVG
-    from .thorvg_download import ensure_thorvg_present
-    from .thorvg_patch import patch_thorvg_for_lvgl, patch_thorvg_identity_conflict
-
-    # Télécharger ThorVG v0.15.16 depuis GitHub
-    try:
-        if ensure_thorvg_present(parent_components_dir):
-            # Appliquer les patches de compatibilité
-            thorvg_dir = os.path.join(parent_components_dir, "thorvg")
-            # Patch 1: Ajoute TVG_BLEND_METHOD_SRCOVER pour LVGL 9.4.0
-            patch_thorvg_for_lvgl(thorvg_dir)
-            # Patch 2: Résout conflit identity() avec std::identity (C++20/GCC 14.2.0)
-            patch_thorvg_identity_conflict(thorvg_dir)
-    except Exception as e:
-        _LOGGER.warning(
-            f"[LVGL] ThorVG auto-download/patch failed: {e}\n"
-            f"If ThorVG is already present and patched, this is OK."
-        )
-
-    # Ajouter les includes ThorVG
-    thorvg_dir = os.path.join(parent_components_dir, "thorvg")
-    if os.path.exists(thorvg_dir):
-        # Headers ThorVG principaux
-        thorvg_inc = os.path.join(thorvg_dir, "inc")
-        if os.path.exists(thorvg_inc):
-            cg.add_build_flag(f"-I{thorvg_inc}")
-
-        # Headers ThorVG sources (pour thorvg_capi.h)
-        thorvg_src = os.path.join(thorvg_dir, "src")
-        if os.path.exists(thorvg_src):
-            cg.add_build_flag(f"-I{thorvg_src}")
-            # Bindings C API
-            thorvg_bindings = os.path.join(thorvg_src, "bindings", "capi")
-            if os.path.exists(thorvg_bindings):
-                cg.add_build_flag(f"-I{thorvg_bindings}")
-
-    # ============================================================================
-    # REGISTER PLATFORMIO BUILD SCRIPT FOR COMPILING THORVG SOURCES
-    # ============================================================================
-    # This tells PlatformIO to compile ThorVG .cpp files (like esp_video_build.py)
-    build_script_path = os.path.join(component_dir, "lvgl_thorvg_build.py")
-    if os.path.exists(build_script_path):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
-        _LOGGER.info(f"[LVGL] Registered ThorVG build script: {build_script_path}")
-    else:
-        _LOGGER.error(f"[LVGL] Build script not found: {build_script_path}")
-
     # ============================================
     # THORVG + SVG/LOTTIE SUPPORT (LVGL v9.4+)
     # ============================================
@@ -286,11 +233,9 @@ async def to_code(configs):
     df.add_define("LV_USE_MATRIX", "1")
     # Enable vector graphics support (required for SVG/Lottie)
     df.add_define("LV_USE_VECTOR_GRAPHIC", "1")
-    # Use EXTERNAL ThorVG downloaded from GitHub (v0.15.16 + LVGL 9.4.0 patch)
-    # Auto-downloaded to components/thorvg/ via thorvg_download.py (like esp_video)
-    # Patched via thorvg_patch.py to add TVG_BLEND_METHOD_SRCOVER (LVGL requirement)
-    df.add_define("LV_USE_THORVG_EXTERNAL", "1")
-    df.add_define("LV_USE_THORVG_INTERNAL", "0")
+    # Use INTERNAL ThorVG (bundled in LVGL 9.4.0 - optimized and pre-configured)
+    df.add_define("LV_USE_THORVG_EXTERNAL", "0")
+    df.add_define("LV_USE_THORVG_INTERNAL", "1")
     # Enable SVG support (requires ThorVG)
     df.add_define("LV_USE_SVG", "1")
     # Enable Lottie animation support (requires ThorVG)

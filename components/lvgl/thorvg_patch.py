@@ -70,6 +70,7 @@ def patch_thorvg_identity_conflict(thorvg_dir):
     files_to_patch = [
         os.path.join(thorvg_dir, "src", "renderer", "sw_engine", "tvgSwFill.cpp"),
         os.path.join(thorvg_dir, "src", "loaders", "svg", "tvgSvgSceneBuilder.cpp"),
+        os.path.join(thorvg_dir, "src", "loaders", "lottie", "tvgLottieBuilder.cpp"),
     ]
 
     patched_count = 0
@@ -89,8 +90,9 @@ def patch_thorvg_identity_conflict(thorvg_dir):
 
             # Patcher toutes les occurrences de identity() pour utiliser tvg::identity()
             # Patterns à patcher:
-            # - !identity((const Matrix*)
-            # - identity((const Matrix*)
+            # - !identity((const Matrix*)   (conditional checks)
+            # - identity((const Matrix*)    (function calls with cast)
+            # - identity(&matrix)           (direct variable calls)
             modified = False
 
             if "!identity((const Matrix*)" in content:
@@ -104,6 +106,13 @@ def patch_thorvg_identity_conflict(thorvg_dir):
                 content = content.replace(
                     " identity((const Matrix*)",
                     " tvg::identity((const Matrix*)"
+                )
+                modified = True
+
+            if "identity(&" in content:
+                content = content.replace(
+                    "identity(&",
+                    "tvg::identity(&"
                 )
                 modified = True
 
