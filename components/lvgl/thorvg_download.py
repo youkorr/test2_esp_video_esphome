@@ -90,14 +90,31 @@ def ensure_thorvg_present(components_dir):
     """
     thorvg_dir = os.path.join(components_dir, "thorvg")
 
+    _LOGGER.info(f"[ThorVG] Checking for ThorVG at: {thorvg_dir}")
+
     # Vérifier si ThorVG existe
     if os.path.exists(thorvg_dir) and os.path.isdir(thorvg_dir):
         # Vérifier qu'il contient des fichiers sources
         thorvg_files = os.listdir(thorvg_dir)
-        if len(thorvg_files) > 5:
-            _LOGGER.info("[ThorVG] Found existing installation")
-            return True
+        _LOGGER.info(f"[ThorVG] Directory exists with {len(thorvg_files)} items")
 
-    # ThorVG n'existe pas, le télécharger
+        # Vérifier les répertoires critiques
+        inc_dir = os.path.join(thorvg_dir, "inc")
+        src_dir = os.path.join(thorvg_dir, "src")
+        has_inc = os.path.exists(inc_dir)
+        has_src = os.path.exists(src_dir)
+
+        _LOGGER.info(f"[ThorVG] Has inc/: {has_inc}, Has src/: {has_src}")
+
+        if len(thorvg_files) > 5 and has_inc and has_src:
+            _LOGGER.info("[ThorVG] ✅ Found existing installation (complete)")
+            return True
+        else:
+            _LOGGER.warning("[ThorVG] ⚠️ Directory exists but incomplete, re-downloading...")
+            # Supprimer le répertoire incomplet
+            import shutil
+            shutil.rmtree(thorvg_dir, ignore_errors=True)
+
+    # ThorVG n'existe pas ou incomplet, le télécharger
     _LOGGER.info("[ThorVG] Not found, downloading...")
     return download_thorvg(components_dir)
