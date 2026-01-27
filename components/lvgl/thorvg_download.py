@@ -14,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 def download_thorvg(components_dir):
     """
     Télécharge ThorVG depuis GitHub vers components/thorvg/
-    Utilise git sparse-checkout pour n'avoir que les sources nécessaires
+    Méthode simple: git clone --depth=1 (comme esp_video_download.py)
     """
     thorvg_dir = os.path.join(components_dir, "thorvg")
 
@@ -27,74 +27,41 @@ def download_thorvg(components_dir):
 
     _LOGGER.info("[ThorVG] Downloading from GitHub...")
     _LOGGER.info("[ThorVG] Repository: https://github.com/thorvg/thorvg.git")
+    _LOGGER.info("[ThorVG] Version: v0.15.16")
     _LOGGER.info("[ThorVG] Target: components/thorvg/")
 
     try:
-        # Créer le dossier temporaire
-        os.makedirs(thorvg_dir, exist_ok=True)
-
-        # Initialiser un repo git
+        # Clone shallow du tag v0.15.16 (comme esp_video avec --depth=1)
+        # Note: --branch avec un tag fonctionne pour checkout direct
         subprocess.run(
-            ["git", "init"],
-            cwd=thorvg_dir,
+            ["git", "clone", "--depth=1", "--branch", "v0.15.16",
+             "https://github.com/thorvg/thorvg.git", thorvg_dir],
             check=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Ajouter le remote
-        subprocess.run(
-            ["git", "remote", "add", "origin", "https://github.com/thorvg/thorvg.git"],
-            cwd=thorvg_dir,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Activer sparse-checkout
-        subprocess.run(
-            ["git", "config", "core.sparseCheckout", "true"],
-            cwd=thorvg_dir,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Configurer les paths à télécharger (tout le repo)
-        sparse_file = os.path.join(thorvg_dir, ".git", "info", "sparse-checkout")
-        os.makedirs(os.path.dirname(sparse_file), exist_ok=True)
-        with open(sparse_file, "w") as f:
-            f.write("/*\n")  # Tout télécharger
-
-        _LOGGER.info("[ThorVG] Fetching v0.15.16...")
-
-        # Fetch la version spécifique (v0.15.16)
-        subprocess.run(
-            ["git", "fetch", "--depth=1", "origin", "v0.15.16"],
-            cwd=thorvg_dir,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-
-        # Checkout la version
-        subprocess.run(
-            ["git", "checkout", "v0.15.16"],
-            cwd=thorvg_dir,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            stderr=subprocess.PIPE,
+            timeout=300  # 5 minutes max
         )
 
         _LOGGER.info("[ThorVG] ✅ Download complete!")
         _LOGGER.info(f"[ThorVG] Installed at: {thorvg_dir}")
 
+        # Vérifier que les fichiers importants existent
+        inc_dir = os.path.join(thorvg_dir, "inc")
+        src_dir = os.path.join(thorvg_dir, "src")
+
+        if not os.path.exists(inc_dir):
+            _LOGGER.warning(f"[ThorVG] Warning: inc/ directory not found")
+        if not os.path.exists(src_dir):
+            _LOGGER.warning(f"[ThorVG] Warning: src/ directory not found")
+
         return True
 
     except subprocess.CalledProcessError as e:
         _LOGGER.error(f"[ThorVG] ❌ Download failed: {e}")
-        _LOGGER.error(f"[ThorVG] stdout: {e.stdout}")
-        _LOGGER.error(f"[ThorVG] stderr: {e.stderr}")
+        if e.stdout:
+            _LOGGER.error(f"[ThorVG] stdout: {e.stdout.decode('utf-8', errors='ignore')}")
+        if e.stderr:
+            _LOGGER.error(f"[ThorVG] stderr: {e.stderr.decode('utf-8', errors='ignore')}")
 
         # Nettoyer en cas d'échec
         if os.path.exists(thorvg_dir):
@@ -103,8 +70,17 @@ def download_thorvg(components_dir):
 
         return False
 
+    except subprocess.TimeoutExpired:
+        _LOGGER.error("[ThorVG] ❌ Download timeout (>5 minutes)")
+        if os.path.exists(thorvg_dir):
+            import shutil
+            shutil.rmtree(thorvg_dir, ignore_errors=True)
+        return False
+
     except Exception as e:
         _LOGGER.error(f"[ThorVG] ❌ Unexpected error: {e}")
+        import traceback
+        _LOGGER.error(traceback.format_exc())
         return False
 
 
