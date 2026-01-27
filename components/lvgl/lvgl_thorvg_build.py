@@ -48,22 +48,39 @@ else:
                     if file.endswith(".cpp") or file.endswith(".c"):
                         thorvg_sources.append(os.path.join(root, file))
 
+    # Flags de compilation pour ThorVG
+    env.Append(CPPDEFINES=[
+        "THORVG_SW_RASTER_SUPPORT",  # Software rasterizer
+        "THORVG_SVG_LOADER_SUPPORT",  # SVG loader
+        "THORVG_LOTTIE_LOADER_SUPPORT",  # Lottie loader
+    ])
+
+    # Supprimer les warnings ThorVG
+    env.Append(CXXFLAGS=[
+        "-Wno-unused-variable",
+        "-Wno-unused-function",
+        "-Wno-missing-field-initializers",
+    ])
+
     if thorvg_sources:
         print(f"[ThorVG Build] Found {len(thorvg_sources)} source files")
-        env.Append(SRC_FILTER=["+<" + src + ">" for src in thorvg_sources])
 
-        # Flags de compilation pour ThorVG
-        env.Append(CPPDEFINES=[
-            "THORVG_SW_RASTER_SUPPORT",  # Software rasterizer
-            "THORVG_SVG_LOADER_SUPPORT",  # SVG loader
-            "THORVG_LOTTIE_LOADER_SUPPORT",  # Lottie loader
-        ])
+        # Compiler chaque fichier source en objet (comme esp_video_build.py)
+        objects = []
+        for src_file in thorvg_sources:
+            obj = env.Object(src_file)
+            objects.extend(obj)
 
-        # Supprimer les warnings ThorVG
-        env.Append(CXXFLAGS=[
-            "-Wno-unused-variable",
-            "-Wno-unused-function",
-            "-Wno-missing-field-initializers",
-        ])
+        # Créer une bibliothèque statique avec les objets compilés
+        lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libthorvg"),
+            objects
+        )
+
+        # Ajouter la bibliothèque au linkage (PREPEND = avant les autres libs)
+        env.Prepend(LIBS=[lib])
+
+        print(f"[ThorVG Build] Compiled {len(thorvg_sources)} files into libthorvg.a")
+        print("[ThorVG Build] ThorVG library added to linking")
     else:
         print("[ThorVG Build] Warning: No ThorVG source files found")
