@@ -229,9 +229,10 @@ async def to_code(configs):
     df.add_define("LV_USE_MATRIX", "1")
     # Enable vector graphics support (required for SVG/Lottie)
     df.add_define("LV_USE_VECTOR_GRAPHIC", "1")
-    # Use external ThorVG from ESP-IDF component registry (espressif/thorvg)
-    df.add_define("LV_USE_THORVG_EXTERNAL", "1")
-    df.add_define("LV_USE_THORVG_INTERNAL", "0")
+    # Use internal ThorVG (built into LVGL 9.4 sources)
+    # Note: External ThorVG (idf_component.yml) only works with pure ESP-IDF, not PlatformIO/ESPHome
+    df.add_define("LV_USE_THORVG_INTERNAL", "1")
+    df.add_define("LV_USE_THORVG_EXTERNAL", "0")
     # Enable SVG support (requires ThorVG)
     df.add_define("LV_USE_SVG", "1")
     # Enable Lottie animation support (requires ThorVG)
