@@ -12,6 +12,57 @@ print("[ThorVG Build] Script START - lvgl_thorvg_build.py")
 print("[ThorVG Build] ========================================")
 print("=" * 80)
 
+def create_thorvg_config_h(thorvg_src_dir):
+    """
+    Create config.h for ThorVG with minimal configuration for LVGL
+    ThorVG normally generates this with meson, but we create it manually
+    """
+    config_h_path = os.path.join(thorvg_src_dir, "config.h")
+
+    # Don't recreate if it already exists
+    if os.path.exists(config_h_path):
+        print(f"[ThorVG Build] config.h already exists, skipping")
+        return
+
+    config_h_content = """/* Auto-generated config.h for ThorVG (LVGL external mode) */
+#ifndef _TVG_CONFIG_H_
+#define _TVG_CONFIG_H_
+
+/* ThorVG version */
+#define THORVG_VERSION_STRING "0.15.16"
+
+/* Enabled features for LVGL */
+#define THORVG_SW_RASTER_SUPPORT 1
+#define THORVG_SVG_LOADER_SUPPORT 1
+#define THORVG_LOTTIE_LOADER_SUPPORT 1
+#define THORVG_RAW_LOADER_SUPPORT 1
+
+/* Disabled features (not needed for LVGL) */
+#define THORVG_GL_RASTER_SUPPORT 0
+#define THORVG_WG_RASTER_SUPPORT 0
+#define THORVG_PNG_LOADER_SUPPORT 0
+#define THORVG_JPG_LOADER_SUPPORT 0
+#define THORVG_WEBP_LOADER_SUPPORT 0
+#define THORVG_TTF_LOADER_SUPPORT 0
+#define THORVG_LOTTIE_EXPRESSIONS_SUPPORT 0
+
+/* Log configuration */
+#define THORVG_LOG_ENABLED 0
+
+/* SIMD support - disabled for compatibility */
+#define THORVG_AVX_VECTOR_SUPPORT 0
+#define THORVG_NEON_VECTOR_SUPPORT 0
+
+#endif /* _TVG_CONFIG_H_ */
+"""
+
+    try:
+        with open(config_h_path, 'w') as f:
+            f.write(config_h_content)
+        print(f"[ThorVG Build] Created config.h at: {config_h_path}")
+    except Exception as e:
+        print(f"[ThorVG Build] ERROR: Failed to create config.h: {e}")
+
 # Obtenir le répertoire du composant (ce script est dans components/lvgl/)
 # Dans SCons, __file__ n'existe pas, on utilise Dir('.').srcnode().abspath
 script_dir = Dir('.').srcnode().abspath
@@ -28,12 +79,16 @@ print(f"[ThorVG Build] Looking for ThorVG at: {thorvg_dir}")
 print(f"[ThorVG Build] ThorVG exists: {os.path.exists(thorvg_dir)}")
 
 if not os.path.exists(thorvg_dir):
-    print(f"[ThorVG Build] ❌ ERROR: ThorVG directory not found!")
+    print(f"[ThorVG Build] ERROR: ThorVG directory not found!")
     print(f"[ThorVG Build] Expected at: {thorvg_dir}")
     print(f"[ThorVG Build] Please ensure ThorVG was downloaded during code generation")
 else:
-    print(f"[ThorVG Build] ✅ ThorVG directory found!")
+    print(f"[ThorVG Build] ThorVG directory found!")
     print(f"[ThorVG Build] Adding ThorVG sources from {thorvg_dir}")
+
+    # Create config.h if it doesn't exist
+    thorvg_src_dir = os.path.join(thorvg_dir, "src")
+    create_thorvg_config_h(thorvg_src_dir)
 
     # Ajouter les includes ThorVG
     env.Append(CPPPATH=[

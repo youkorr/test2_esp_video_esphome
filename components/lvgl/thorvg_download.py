@@ -42,7 +42,7 @@ def download_thorvg(components_dir):
             timeout=300  # 5 minutes max
         )
 
-        _LOGGER.info("[ThorVG] ✅ Download complete!")
+        _LOGGER.info("[ThorVG] Download complete!")
         _LOGGER.info(f"[ThorVG] Installed at: {thorvg_dir}")
 
         # Vérifier que les fichiers importants existent
@@ -57,7 +57,7 @@ def download_thorvg(components_dir):
         return True
 
     except subprocess.CalledProcessError as e:
-        _LOGGER.error(f"[ThorVG] ❌ Download failed: {e}")
+        _LOGGER.error(f"[ThorVG] Download failed: {e}")
         if e.stdout:
             _LOGGER.error(f"[ThorVG] stdout: {e.stdout.decode('utf-8', errors='ignore')}")
         if e.stderr:
@@ -71,14 +71,14 @@ def download_thorvg(components_dir):
         return False
 
     except subprocess.TimeoutExpired:
-        _LOGGER.error("[ThorVG] ❌ Download timeout (>5 minutes)")
+        _LOGGER.error("[ThorVG] Download timeout (>5 minutes)")
         if os.path.exists(thorvg_dir):
             import shutil
             shutil.rmtree(thorvg_dir, ignore_errors=True)
         return False
 
     except Exception as e:
-        _LOGGER.error(f"[ThorVG] ❌ Unexpected error: {e}")
+        _LOGGER.error(f"[ThorVG] Unexpected error: {e}")
         import traceback
         _LOGGER.error(traceback.format_exc())
         return False
@@ -107,10 +107,10 @@ def ensure_thorvg_present(components_dir):
         _LOGGER.info(f"[ThorVG] Has inc/: {has_inc}, Has src/: {has_src}")
 
         if len(thorvg_files) > 5 and has_inc and has_src:
-            _LOGGER.info("[ThorVG] ✅ Found existing installation (complete)")
+            _LOGGER.info("[ThorVG] Found existing installation (complete)")
             return True
         else:
-            _LOGGER.warning("[ThorVG] ⚠️ Directory exists but incomplete, re-downloading...")
+            _LOGGER.warning("[ThorVG] WARNING: Directory exists but incomplete, re-downloading...")
             # Supprimer le répertoire incomplet
             import shutil
             shutil.rmtree(thorvg_dir, ignore_errors=True)
