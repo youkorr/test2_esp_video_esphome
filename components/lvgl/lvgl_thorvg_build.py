@@ -90,10 +90,17 @@ else:
     thorvg_src_dir = os.path.join(thorvg_dir, "src")
     create_thorvg_config_h(thorvg_src_dir)
 
-    # Ajouter les includes ThorVG
+    # Ajouter les includes ThorVG (tous les sous-répertoires nécessaires)
     env.Append(CPPPATH=[
         os.path.join(thorvg_dir, "inc"),
         os.path.join(thorvg_dir, "src"),
+        os.path.join(thorvg_dir, "src", "common"),
+        os.path.join(thorvg_dir, "src", "renderer"),
+        os.path.join(thorvg_dir, "src", "renderer", "sw_engine"),
+        os.path.join(thorvg_dir, "src", "loaders"),
+        os.path.join(thorvg_dir, "src", "loaders", "svg"),
+        os.path.join(thorvg_dir, "src", "loaders", "lottie"),
+        os.path.join(thorvg_dir, "src", "loaders", "raw"),
         os.path.join(thorvg_dir, "src", "bindings", "capi"),
     ])
 
