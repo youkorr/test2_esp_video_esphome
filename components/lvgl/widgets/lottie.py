@@ -84,53 +84,45 @@ class LottieType(WidgetType):
         """
         Generate C++ code for lottie widget configuration
 
-        LVGL 9.4 Lottie API:
-        - lv_lottie_set_src_file(obj, path) - Load from file (SD card)
-        - lv_lottie_set_src_data(obj, data, size) - Load from memory (embedded)
-        - lv_lottie_get_anim(obj) - Get LVGL animation object for control
+        LVGL 9.4 Lottie API uses SIMPLE buffer approach:
+        - lv_lottie_set_buffer(obj, w, h, buf) - Recommended simple approach
+        - Buffer size: width x height x 4 bytes (ARGB8888 format)
 
-        By default, Lottie animations run infinitely at 60FPS.
-
-        CRITICAL: Lottie widgets require a buffer allocated with proper 64-byte alignment.
-        We use lv_draw_buf_create() which ensures alignment for ESP32-P4 PSRAM/cache.
+        This avoids stack overflow and complex alignment issues.
         """
         from esphome.const import CONF_WIDTH, CONF_HEIGHT
 
         lvgl_components_required.add(CONF_LOTTIE)
 
-        # Get buffer dimensions - priority: buffer_width/height > widget width/height
+        # Get dimensions - priority: buffer_width/height > widget width/height
         buffer_width = config.get(CONF_BUFFER_WIDTH) or config.get(CONF_WIDTH)
         buffer_height = config.get(CONF_BUFFER_HEIGHT) or config.get(CONF_HEIGHT)
 
-        # Generate buffer allocation code
-        # CRITICAL: Use lv_draw_buf_create() to ensure 64-byte alignment for ESP32-P4
-        # ThorVG requires ARGB8888_PREMULTIPLIED format
         if buffer_width and buffer_height:
-            # User specified buffer size OR widget size - use it directly
+            # Simple buffer allocation - LVGL handles everything
             buf_w = await lv_int.process(buffer_width)
             buf_h = await lv_int.process(buffer_height)
 
-            # Use RawStatement directly instead of LocalVariable to avoid pointer issues
+            # Allocate buffer once (static) - avoids stack usage
             cg.add(RawStatement(
                 f'{{\n'
-                f'  // Calculate aligned stride for ESP32-P4 (64-byte alignment)\n'
-                f'  // ARGB8888 = 4 bytes per pixel, align to 64 bytes\n'
-                f'  uint32_t stride = ({buf_w} * 4 + 63) & ~63;\n'
-                f'  lv_draw_buf_t *lottie_draw_buf = lv_draw_buf_create({buf_w}, {buf_h}, '
-                f'LV_COLOR_FORMAT_ARGB8888_PREMULTIPLIED, stride);\n'
-                f'  if (lottie_draw_buf == nullptr) {{\n'
-                f'    ESP_LOGE("lvgl.lottie", "Failed to allocate draw buffer: %dx%d", {buf_w}, {buf_h});\n'
-                f'  }} else {{\n'
-                f'    ESP_LOGI("lvgl.lottie", "Allocated draw buffer: %dx%d (64-byte aligned)", '
-                f'lottie_draw_buf->header.w, lottie_draw_buf->header.h);\n'
-                f'    lv_lottie_set_draw_buf({w.obj}, lottie_draw_buf);\n'
+                f'  static uint8_t *lottie_buf_{w.var.base} = nullptr;\n'
+                f'  if (lottie_buf_{w.var.base} == nullptr) {{\n'
+                f'    size_t buf_size = {buf_w} * {buf_h} * 4;  // ARGB8888 = 4 bytes/pixel\n'
+                f'    lottie_buf_{w.var.base} = (uint8_t*)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);\n'
+                f'    if (lottie_buf_{w.var.base} != nullptr) {{\n'
+                f'      ESP_LOGI("lvgl.lottie", "Allocated Lottie buffer: %dx%d (%zu bytes)", {buf_w}, {buf_h}, buf_size);\n'
+                f'      lv_lottie_set_buffer({w.obj}, {buf_w}, {buf_h}, lottie_buf_{w.var.base});\n'
+                f'    }} else {{\n'
+                f'      ESP_LOGE("lvgl.lottie", "Failed to allocate %zu bytes for Lottie buffer", buf_size);\n'
+                f'    }}\n'
                 f'  }}\n'
                 f'}}'
             ))
         else:
-            # No dimensions specified - error
+            # No dimensions - log error
             cg.add(RawStatement(
-                f'ESP_LOGE("lvgl.lottie", "Lottie widget requires width/height or buffer_width/buffer_height");'
+                f'ESP_LOGE("lvgl.lottie", "Lottie requires width/height or buffer_width/buffer_height");'
             ))
 
         # Get animation source (file path or embedded ID) - may be None if set via on_load

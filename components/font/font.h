@@ -96,6 +96,10 @@ class Font
   const Glyph *get_glyph_data_(uint32_t unicode_letter);
   uint32_t last_letter_{};
   const Glyph *last_data_{};
+  // ESP32-P4 fix: per-font buffer for aligned glyph data
+  uint8_t *glyph_buffer_{nullptr};
+  void *glyph_buffer_raw_{nullptr};
+  size_t glyph_buffer_size_{0};
 #endif
 };
 

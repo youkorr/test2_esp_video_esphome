@@ -48,39 +48,37 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     return draw_buf->data;
   }
 
-  // Fallback: LVGL didn't provide draw_buf - allocate our own aligned buffer
+  // Fallback: LVGL didn't provide draw_buf - use per-font aligned buffer
   // This prevents ESP32-P4 crashes from unaligned Flash access
-  static uint8_t *glyph_buffer = nullptr;
-  static void *glyph_buffer_raw = nullptr;
-  static size_t glyph_buffer_size = 0;
+  // Each Font object has its own buffer (avoids reentrancy issues)
 
   // Reallocate if needed (with 64-byte alignment for ESP32-P4)
-  if (data_size > glyph_buffer_size) {
-    if (glyph_buffer_raw != nullptr) {
-      free(glyph_buffer_raw);
-      glyph_buffer_raw = nullptr;
-      glyph_buffer = nullptr;
+  if (data_size > fe->glyph_buffer_size_) {
+    if (fe->glyph_buffer_raw_ != nullptr) {
+      free(fe->glyph_buffer_raw_);
+      fe->glyph_buffer_raw_ = nullptr;
+      fe->glyph_buffer_ = nullptr;
     }
     // Allocate with extra space for 64-byte alignment
     size_t alloc_size = data_size + 64;
-    glyph_buffer_raw = malloc(alloc_size);
-    if (glyph_buffer_raw == nullptr) {
+    fe->glyph_buffer_raw_ = heap_caps_malloc(alloc_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (fe->glyph_buffer_raw_ == nullptr) {
       ESP_LOGE(TAG, "Failed to allocate %zu bytes for glyph buffer", alloc_size);
-      glyph_buffer_size = 0;
+      fe->glyph_buffer_size_ = 0;
       return nullptr;
     }
     // Align to 64 bytes
-    glyph_buffer = (uint8_t *)(((uintptr_t)glyph_buffer_raw + 63) & ~63);
-    glyph_buffer_size = data_size;
+    fe->glyph_buffer_ = (uint8_t *)(((uintptr_t)fe->glyph_buffer_raw_ + 63) & ~63);
+    fe->glyph_buffer_size_ = data_size;
   }
 
   // Copy glyph data from Flash ROM to aligned RAM buffer
   const uint8_t *src = gd->data;
   for (size_t i = 0; i < data_size; i++) {
-    glyph_buffer[i] = progmem_read_byte(src + i);
+    fe->glyph_buffer_[i] = progmem_read_byte(src + i);
   }
 
-  return glyph_buffer;
+  return fe->glyph_buffer_;
 }
 
 bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uint32_t unicode_letter, uint32_t next) {
