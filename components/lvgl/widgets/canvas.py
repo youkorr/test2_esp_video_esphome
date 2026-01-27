@@ -106,18 +106,28 @@ class CanvasType(WidgetType):
         # Solution: Use lv.malloc_core() which executes immediately
 
         draw_buf = cg.new_Pvariable(config[CONF_DRAW_BUF_ID])
-        buf_size = literal(f"LV_DRAW_BUF_SIZE({width}, {height}, {color_format})")
+
+        # Calculate 64-byte aligned stride for ESP32-P4
+        # ARGB8888 = 4 bytes per pixel, RGB565 = 2 bytes per pixel
+        if config[CONF_TRANSPARENT]:
+            bytes_per_pixel = 4  # ARGB8888
+        else:
+            bytes_per_pixel = 2  # RGB565
+
+        # Aligned stride: (width * bytes_per_pixel + 63) & ~63
+        aligned_stride = literal(f"(({width} * {bytes_per_pixel} + 63) & ~63)")
+        buf_size = literal(f"{aligned_stride} * {height}")
 
         # Allocate buffer using lv.malloc_core (executes immediately)
         canvas_buffer = lv.malloc_core(buf_size)
 
-        # Initialize draw buffer with allocated buffer
+        # Initialize draw buffer with aligned stride
         lv.draw_buf_init(
             draw_buf,
             width,
             height,
             literal(color_format),
-            0,
+            aligned_stride,
             canvas_buffer,
             literal(buf_size),
         )
