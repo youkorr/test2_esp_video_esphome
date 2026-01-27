@@ -24,12 +24,13 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
 
   // ESP32-P4 RISC-V FIX: The glyph data in Flash ROM may not be properly aligned.
   // RISC-V has strict alignment requirements. We MUST copy from Flash to RAM.
-  // The draw_buf is provided by LVGL and is properly aligned for rendering.
+
+  // Calculate the size of glyph data in bytes
+  uint8_t bpp = fe->get_bpp();
+  size_t data_size = (g_dsc->box_w * g_dsc->box_h * bpp + 7) / 8;
 
   if (draw_buf != nullptr && draw_buf->data != nullptr && draw_buf->data_size > 0) {
-    // Calculate the size of glyph data in bytes
-    uint8_t bpp = fe->get_bpp();
-    size_t data_size = (g_dsc->box_w * g_dsc->box_h * bpp + 7) / 8;
+    // Use LVGL-provided buffer (preferred)
 
     // Safety check: don't overflow draw_buf
     if (data_size > draw_buf->data_size) {
@@ -38,7 +39,6 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     }
 
     // Copy glyph data from Flash ROM to aligned RAM buffer
-    // Use progmem_read_byte for safe Flash access on all platforms
     const uint8_t *src = gd->data;
     uint8_t *dst = (uint8_t *)draw_buf->data;
     for (size_t i = 0; i < data_size; i++) {
@@ -48,9 +48,39 @@ const void *Font::get_glyph_bitmap(lv_font_glyph_dsc_t *g_dsc, lv_draw_buf_t *dr
     return draw_buf->data;
   }
 
-  // Fallback: return direct Flash pointer (may crash on ESP32-P4!)
-  ESP_LOGW(TAG, "draw_buf not provided, returning Flash pointer (may crash!)");
-  return gd->data;
+  // Fallback: LVGL didn't provide draw_buf - allocate our own aligned buffer
+  // This prevents ESP32-P4 crashes from unaligned Flash access
+  static uint8_t *glyph_buffer = nullptr;
+  static void *glyph_buffer_raw = nullptr;
+  static size_t glyph_buffer_size = 0;
+
+  // Reallocate if needed (with 64-byte alignment for ESP32-P4)
+  if (data_size > glyph_buffer_size) {
+    if (glyph_buffer_raw != nullptr) {
+      free(glyph_buffer_raw);
+      glyph_buffer_raw = nullptr;
+      glyph_buffer = nullptr;
+    }
+    // Allocate with extra space for 64-byte alignment
+    size_t alloc_size = data_size + 64;
+    glyph_buffer_raw = malloc(alloc_size);
+    if (glyph_buffer_raw == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate %zu bytes for glyph buffer", alloc_size);
+      glyph_buffer_size = 0;
+      return nullptr;
+    }
+    // Align to 64 bytes
+    glyph_buffer = (uint8_t *)(((uintptr_t)glyph_buffer_raw + 63) & ~63);
+    glyph_buffer_size = data_size;
+  }
+
+  // Copy glyph data from Flash ROM to aligned RAM buffer
+  const uint8_t *src = gd->data;
+  for (size_t i = 0; i < data_size; i++) {
+    glyph_buffer[i] = progmem_read_byte(src + i);
+  }
+
+  return glyph_buffer;
 }
 
 bool Font::get_glyph_dsc_cb(const lv_font_t *font, lv_font_glyph_dsc_t *dsc, uint32_t unicode_letter, uint32_t next) {
