@@ -19,10 +19,17 @@ def create_thorvg_config_h(thorvg_src_dir):
     """
     config_h_path = os.path.join(thorvg_src_dir, "config.h")
 
-    # Don't recreate if it already exists
+    # Check if config.h exists and has correct content
     if os.path.exists(config_h_path):
-        print(f"[ThorVG Build] config.h already exists, skipping")
-        return
+        with open(config_h_path, 'r') as f:
+            existing_content = f.read()
+            # Check if it has the #undef fix (sign of correct version)
+            if '#undef THORVG_GL_RASTER_SUPPORT' in existing_content:
+                print(f"[ThorVG Build] config.h already exists (correct version), skipping")
+                return
+            else:
+                print(f"[ThorVG Build] config.h exists but outdated, regenerating...")
+                os.remove(config_h_path)
 
     config_h_content = """/* Auto-generated config.h for ThorVG (LVGL external mode) */
 #ifndef _TVG_CONFIG_H_
@@ -37,21 +44,22 @@ def create_thorvg_config_h(thorvg_src_dir):
 #define THORVG_LOTTIE_LOADER_SUPPORT 1
 #define THORVG_RAW_LOADER_SUPPORT 1
 
-/* Disabled features (not needed for LVGL) */
-#define THORVG_GL_RASTER_SUPPORT 0
-#define THORVG_WG_RASTER_SUPPORT 0
-#define THORVG_PNG_LOADER_SUPPORT 0
-#define THORVG_JPG_LOADER_SUPPORT 0
-#define THORVG_WEBP_LOADER_SUPPORT 0
-#define THORVG_TTF_LOADER_SUPPORT 0
-#define THORVG_LOTTIE_EXPRESSIONS_SUPPORT 0
+/* Disabled features - UNDEF them so #ifdef fails (ThorVG uses #ifdef not #if) */
+/* DO NOT define GL/WG to 0, leave them undefined! */
+#undef THORVG_GL_RASTER_SUPPORT
+#undef THORVG_WG_RASTER_SUPPORT
+#undef THORVG_PNG_LOADER_SUPPORT
+#undef THORVG_JPG_LOADER_SUPPORT
+#undef THORVG_WEBP_LOADER_SUPPORT
+#undef THORVG_TTF_LOADER_SUPPORT
+#undef THORVG_LOTTIE_EXPRESSIONS_SUPPORT
 
 /* Log configuration */
 #define THORVG_LOG_ENABLED 0
 
 /* SIMD support - disabled for compatibility */
-#define THORVG_AVX_VECTOR_SUPPORT 0
-#define THORVG_NEON_VECTOR_SUPPORT 0
+#undef THORVG_AVX_VECTOR_SUPPORT
+#undef THORVG_NEON_VECTOR_SUPPORT
 
 #endif /* _TVG_CONFIG_H_ */
 """
