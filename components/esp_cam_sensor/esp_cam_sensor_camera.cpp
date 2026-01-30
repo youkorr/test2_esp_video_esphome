@@ -10,7 +10,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#include "ff.h"
+//#include "ff.h"
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
