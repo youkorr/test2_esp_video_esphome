@@ -40,7 +40,7 @@ BASE_IMG_SCHEMA = cv.Schema(
 
 IMG_SCHEMA = BASE_IMG_SCHEMA.extend(
     {
-        cv.Optional(CONF_SRC): lv_image,  # Made optional for dynamic sources (e.g., camera)
+        cv.Required(CONF_SRC): lv_image,
     }
 )
 
