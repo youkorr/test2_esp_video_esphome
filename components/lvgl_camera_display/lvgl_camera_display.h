@@ -76,6 +76,11 @@ class LVGLCameraDisplay : public Component {
   // Buffer pool tracking (pour release apres affichage)
   esp_cam_sensor::SimpleBufferElement *displayed_buffer_{nullptr};
 
+  // LVGL 9.4 Zero-copy: draw buffer that points directly to camera buffer
+  lv_draw_buf_t camera_draw_buf_{};
+  bool draw_buf_initialized_{false};
+  bool is_canvas_{false};  // true if widget is canvas (uses memcpy), false if image (uses zero-copy)
+
   void update_camera_frame_();
   void update_canvas_();
 };

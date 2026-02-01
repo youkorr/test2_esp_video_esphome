@@ -141,7 +141,7 @@ void LVGLCameraDisplay::update_canvas_() {
 
   if (this->canvas_obj_ == nullptr) {
     if (!this->canvas_warning_shown_) {
-      ESP_LOGW(TAG, "Canvas null - pas encore configure?");
+      ESP_LOGW(TAG, "Canvas/Image null - pas encore configure?");
       this->canvas_warning_shown_ = true;
     }
     return;
@@ -185,57 +185,70 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 #endif
 
+  // Detect widget type on first update
   if (this->first_update_) {
-    ESP_LOGI(TAG, "Premier update canvas (buffer pool):");
+    // Check if this is a canvas (has lv_canvas class) or a plain image
+    this->is_canvas_ = lv_obj_check_type(this->canvas_obj_, &lv_canvas_class);
+
+    ESP_LOGI(TAG, "Premier update - Widget type: %s", this->is_canvas_ ? "CANVAS" : "IMAGE");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
     ESP_LOGI(TAG, "   Premiers pixels (RGB565): %02X%02X %02X%02X %02X%02X",
              img_data[0], img_data[1], img_data[2], img_data[3], img_data[4], img_data[5]);
-    this->first_update_ = false;
+
+    if (this->is_canvas_) {
+      ESP_LOGW(TAG, "Canvas mode: using memcpy (slower). Use lv_image for zero-copy performance!");
+    } else {
+      ESP_LOGI(TAG, "Image mode: zero-copy enabled (fastest)");
+    }
   }
 
-  // LVGL 9.4 FIX: Instead of replacing the canvas buffer (which causes crashes),
-  // COPY the camera data into the canvas's existing buffer.
-  // The canvas has its own buffer allocated during creation.
+  if (this->is_canvas_) {
+    // CANVAS MODE: memcpy into canvas buffer (slower but compatible)
+    lv_draw_buf_t *canvas_buf = lv_canvas_get_draw_buf(this->canvas_obj_);
+    if (canvas_buf == nullptr || canvas_buf->data == nullptr) {
+      if (this->first_update_) {
+        ESP_LOGE(TAG, "Canvas draw_buf is null!");
+      }
+      this->first_update_ = false;
+      return;
+    }
 
-  // Get the canvas's draw buffer
-  lv_draw_buf_t *canvas_buf = lv_canvas_get_draw_buf(this->canvas_obj_);
-  if (canvas_buf == nullptr) {
-    ESP_LOGE(TAG, "Canvas draw_buf is null!");
-    return;
+    uint32_t buf_size = width * height * 2;
+    memcpy(canvas_buf->data, img_data, buf_size);
+    lv_obj_invalidate(this->canvas_obj_);
+  } else {
+    // IMAGE MODE: Zero-copy - point directly to camera buffer (fastest)
+    // This eliminates the ~20ms memcpy overhead for 640x480 RGB565
+
+    if (!this->draw_buf_initialized_) {
+      // Camera buffer stride = width * 2 (RGB565, no padding between rows)
+      uint32_t stride = width * 2;
+      uint32_t buf_size = width * height * 2;
+
+      // Initialize the draw buffer structure to point to camera data
+      lv_draw_buf_init(&this->camera_draw_buf_, width, height,
+                       LV_COLOR_FORMAT_RGB565, stride, img_data, buf_size);
+
+      // Mark as modifiable so LVGL knows we'll update the data pointer
+      lv_draw_buf_set_flag(&this->camera_draw_buf_, LV_IMAGE_FLAGS_MODIFIABLE);
+
+      this->draw_buf_initialized_ = true;
+
+      ESP_LOGI(TAG, "Zero-copy draw_buf initialized:");
+      ESP_LOGI(TAG, "   Dimensions: %ux%u, stride: %u bytes", width, height, stride);
+      ESP_LOGI(TAG, "   Buffer size: %u bytes, data: %p", buf_size, img_data);
+    } else {
+      // Just update the data pointer - no memcpy needed!
+      this->camera_draw_buf_.data = img_data;
+    }
+
+    // Set the image source to our draw buffer
+    // lv_image_set_src is very fast - it just updates the pointer
+    lv_image_set_src(this->canvas_obj_, &this->camera_draw_buf_);
   }
-  if (canvas_buf->data == nullptr) {
-    ESP_LOGE(TAG, "Canvas buffer data is null!");
-    ESP_LOGE(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
-    ESP_LOGE(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
-    return;
-  }
 
-  // Log canvas buffer info on first update
-  if (this->first_update_) {
-    ESP_LOGI(TAG, "Canvas buffer info:");
-    ESP_LOGI(TAG, "   Canvas dimensions: %u x %u", canvas_buf->header.w, canvas_buf->header.h);
-    ESP_LOGI(TAG, "   Canvas format: %d, stride: %u", canvas_buf->header.cf, canvas_buf->header.stride);
-    ESP_LOGI(TAG, "   Canvas data ptr: %p", canvas_buf->data);
-    ESP_LOGI(TAG, "   Camera dimensions: %u x %u", width, height);
-  }
-
-  // Verify dimensions match
-  if (canvas_buf->header.w != width || canvas_buf->header.h != height) {
-    ESP_LOGW(TAG, "Canvas size (%ux%u) != camera size (%ux%u)!",
-             canvas_buf->header.w, canvas_buf->header.h, width, height);
-  }
-
-  // Calculate buffer size
-  uint32_t buf_size = width * height * 2;  // RGB565 = 2 bytes per pixel
-
-  // Copy camera buffer to canvas buffer
-  // Both buffers are 64-byte aligned (canvas via lv_malloc_core, camera via
-  // heap_caps_aligned_alloc) for optimal ESP32-P4 cache performance
-  memcpy(canvas_buf->data, img_data, buf_size);
-
-  // Invalidate to trigger redraw
-  lv_obj_invalidate(this->canvas_obj_);
+  this->first_update_ = false;
 
   // Tracker ce buffer pour le liberer au prochain update
   this->displayed_buffer_ = buffer;
