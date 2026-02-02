@@ -10,6 +10,10 @@
 
 #include "dl_image.hpp"
 
+// Cache management for PSRAM coherency
+#include "esp_cache.h"
+#include "esp_heap_caps.h"
+
 // File I/O for name persistence
 #include <fstream>
 #include <sstream>
@@ -192,6 +196,17 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
   // Debug: track detection attempts
   static uint32_t detect_count = 0;
   detect_count++;
+
+  // Flush cache to ensure ESP-DL sees the latest data from PSRAM
+  // This might be needed when using zero-copy mode with LVGL 9.4
+  size_t img_size = width * height * 2;
+  if (esp_ptr_external_ram(img_data)) {
+    // Data is in PSRAM - flush cache to ensure coherency
+    esp_cache_msync(img_data, img_size, ESP_CACHE_MSYNC_FLAG_DIR_M2C);
+    if (detect_count % 50 == 1) {
+      ESP_LOGI(TAG, "  Cache flushed for PSRAM buffer (%u bytes)", img_size);
+    }
+  }
 
   // Create image structure for ESP-DL
   dl::image::img_t img = {
