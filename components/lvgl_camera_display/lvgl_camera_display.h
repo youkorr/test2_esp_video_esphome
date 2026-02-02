@@ -41,6 +41,12 @@ class LVGLCameraDisplay : public Component {
 #endif
 
   void configure_canvas(lv_obj_t *canvas);
+  void set_stats_label(lv_obj_t *label);
+
+  // Getters for stats (for external display)
+  float get_fps() const { return this->stats_fps_; }
+  float get_cpu_percent() const { return this->stats_cpu_percent_; }
+  float get_frame_time() const { return this->stats_frame_time_; }
 
   float get_setup_priority() const override { return setup_priority::LATE; }
 
@@ -81,8 +87,16 @@ class LVGLCameraDisplay : public Component {
   bool draw_buf_initialized_{false};
   bool is_canvas_{false};  // true if widget is canvas (uses memcpy), false if image (uses zero-copy)
 
+  // Benchmark stats for UI display
+  lv_obj_t *stats_label_{nullptr};
+  float stats_fps_{0.0f};
+  float stats_cpu_percent_{0.0f};
+  float stats_frame_time_{0.0f};
+  float stats_lvgl_overhead_{0.0f};
+
   void update_camera_frame_();
   void update_canvas_();
+  void update_stats_label_();
 };
 
 }  // namespace lvgl_camera_display

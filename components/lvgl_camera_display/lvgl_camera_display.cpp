@@ -80,6 +80,17 @@ void LVGLCameraDisplay::update_camera_frame_() {
     return;
   }
 
+  // Temps de debut de cette frame
+  uint32_t frame_start = millis();
+
+  // Mesurer l'intervalle entre frames (temps total depuis la derniere frame)
+  static uint32_t last_frame_start = 0;
+  uint32_t frame_interval = 0;
+  if (last_frame_start > 0) {
+    frame_interval = frame_start - last_frame_start;
+  }
+  last_frame_start = frame_start;
+
   // Statistiques de frames manquees
   static uint32_t attempts = 0;
   static uint32_t skipped = 0;
@@ -98,32 +109,88 @@ void LVGLCameraDisplay::update_camera_frame_() {
   uint32_t t3 = millis();
   this->frame_count_++;
 
+  // Temps de fin - mesure le temps CPU utilise pour cette frame
+  uint32_t frame_end = millis();
+  uint32_t frame_cpu_time = frame_end - frame_start;
+
   // Accumuler les temps pour statistiques
-  static uint32_t last_time = 0;
+  static uint32_t last_stats_time = 0;
   static uint32_t total_capture_ms = 0;
   static uint32_t total_canvas_ms = 0;
+  static uint32_t total_cpu_time_ms = 0;
+  static uint32_t total_frame_interval_ms = 0;
+  static uint32_t frame_interval_count = 0;
 
   total_capture_ms += (t2 - t1);
   total_canvas_ms += (t3 - t2);
+  total_cpu_time_ms += frame_cpu_time;
+  if (frame_interval > 0) {
+    total_frame_interval_ms += frame_interval;
+    frame_interval_count++;
+  }
 
   // Logger performance toutes les 100 frames
   if (this->frame_count_ % 100 == 0) {
     uint32_t now_time = millis();
 
-    if (last_time > 0) {
-      float elapsed = (now_time - last_time) / 1000.0f;  // secondes
+    if (last_stats_time > 0 && frame_interval_count > 0) {
+      float elapsed = (now_time - last_stats_time) / 1000.0f;  // secondes
       float fps = 100.0f / elapsed;
       float avg_capture = total_capture_ms / 100.0f;
       float avg_canvas = total_canvas_ms / 100.0f;
+      float avg_cpu_time = total_cpu_time_ms / 100.0f;
+      float avg_frame_interval = total_frame_interval_ms / (float)frame_interval_count;
       float skip_rate = (skipped * 100.0f) / attempts;
-      ESP_LOGI(TAG, "%u frames - FPS: %.2f | capture: %.1fms | canvas: %.1fms | skip: %.1f%%",
-               this->frame_count_, fps, avg_capture, avg_canvas, skip_rate);
+
+      // CPU % = temps CPU utilise / temps total disponible * 100
+      float cpu_percent = (avg_cpu_time / avg_frame_interval) * 100.0f;
+
+      // Temps "perdu" = intervalle - temps CPU (temps ou LVGL fait autre chose)
+      float lvgl_overhead = avg_frame_interval - avg_cpu_time;
+
+      ESP_LOGI(TAG, "=== BENCHMARK (100 frames) ===");
+      ESP_LOGI(TAG, "  FPS: %.1f | CPU: %.1f%%", fps, cpu_percent);
+      ESP_LOGI(TAG, "  Frame interval: %.1fms (target: %ums)", avg_frame_interval, this->update_interval_);
+      ESP_LOGI(TAG, "  CPU time: %.1fms (capture: %.1fms + canvas: %.1fms)", avg_cpu_time, avg_capture, avg_canvas);
+      ESP_LOGI(TAG, "  LVGL overhead: %.1fms | Skip: %.1f%%", lvgl_overhead, skip_rate);
+
+      // Mettre a jour les stats pour l'affichage UI
+      this->stats_fps_ = fps;
+      this->stats_cpu_percent_ = cpu_percent;
+      this->stats_frame_time_ = avg_cpu_time;
+      this->stats_lvgl_overhead_ = lvgl_overhead;
+
+      // Mettre a jour le label de stats si configure
+      this->update_stats_label_();
     }
-    last_time = now_time;
+    last_stats_time = now_time;
     total_capture_ms = 0;
     total_canvas_ms = 0;
+    total_cpu_time_ms = 0;
+    total_frame_interval_ms = 0;
+    frame_interval_count = 0;
     attempts = 0;
     skipped = 0;
+  }
+}
+
+void LVGLCameraDisplay::update_stats_label_() {
+  if (this->stats_label_ == nullptr) {
+    return;
+  }
+
+  // Format: "FPS: 12.5 | CPU: 8.5%"
+  char buf[64];
+  snprintf(buf, sizeof(buf), "FPS: %.1f | CPU: %.1f%%",
+           this->stats_fps_, this->stats_cpu_percent_);
+  lv_label_set_text(this->stats_label_, buf);
+}
+
+void LVGLCameraDisplay::set_stats_label(lv_obj_t *label) {
+  this->stats_label_ = label;
+  if (label != nullptr) {
+    lv_label_set_text(label, "FPS: -- | CPU: --%");
+    ESP_LOGI(TAG, "Stats label configured: %p", label);
   }
 }
 
