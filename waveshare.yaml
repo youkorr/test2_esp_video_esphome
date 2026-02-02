@@ -488,33 +488,27 @@ esp_ldo:
     channel: 4    
 
 external_components:
-  - source: github://pr#11886
+  - source: github://pr#13608
     components: [mipi_dsi]
     refresh: always
 
 
-  #- source: github://pr#12127
-    #components: [esp32]
-    #refresh: 1h
-  #- source:
-      #type: git
-      #url: https://github.com/youkorr/waveshare_ek79007
-      #ref: main
-    #components: [waveshare_ek79007]
-    #refresh
+  - source: github://pr#12312
+    components: [font]
+    refresh: 1h   
 
-  #- source:
-      #type: git
-      #url: https://github.com/youkorr/lvgl_9.4
-      #ref: main
-    #components: [lvgl, font, image]
-    #refresh: always
+  - source:
+      type: git
+      url: https://github.com/youkorr/lvgl_9.4
+      ref: main
+    components: [lvgl, image]
+    refresh: always
 
 
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: claude/fix-lvgl-watchdog-crash-AGRWh  # LVGL 9.4 fixes: deadlock + 64-byte alignment + init order
+      ref: main
     components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera, lvgl, font, image]
     refresh: always
 
