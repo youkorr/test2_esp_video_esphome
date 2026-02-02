@@ -294,6 +294,10 @@ void LVGLCameraDisplay::update_canvas_() {
   // This is much faster than memcpy + invalidate (~0-1ms vs ~20ms)
   lv_image_set_src(this->canvas_obj_, &this->camera_draw_buf_);
 
+    // Force immediate refresh - bypasses LV_DEF_REFR_PERIOD timer
+  // This eliminates the ~80ms overhead between frame updates
+  lv_refr_now(lv_display_get_default());
+
   this->first_update_ = false;
 
   // Tracker ce buffer pour le liberer au prochain update
