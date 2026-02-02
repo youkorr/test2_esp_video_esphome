@@ -296,7 +296,7 @@ void LVGLCameraDisplay::update_canvas_() {
 
     // Force immediate refresh - bypasses LV_DEF_REFR_PERIOD timer
   // This eliminates the ~80ms overhead between frame updates
-  lv_refr_now(lv_display_get_default());
+  //lv_refr_now(lv_display_get_default());
 
   this->first_update_ = false;
 
