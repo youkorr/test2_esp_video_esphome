@@ -199,8 +199,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     for (int i = 0; i < 100 && i < width * height * 2; i++) {
       checksum += img_data[i];
     }
+    // Show first 8 bytes in hex to verify RGB565 format
     ESP_LOGI(TAG, "detect_faces_: img=%p %ux%u, checksum=%u (attempt #%u)",
              img_data, width, height, checksum, detect_count);
+    ESP_LOGI(TAG, "  First 8 bytes: %02X %02X %02X %02X %02X %02X %02X %02X",
+             img_data[0], img_data[1], img_data[2], img_data[3],
+             img_data[4], img_data[5], img_data[6], img_data[7]);
   }
 
   // Run face detection
