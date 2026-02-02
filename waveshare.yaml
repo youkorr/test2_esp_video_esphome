@@ -509,7 +509,7 @@ external_components:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
       ref: main
-    components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera, lvgl, font, image]
+    components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera]
     refresh: always
 
 
