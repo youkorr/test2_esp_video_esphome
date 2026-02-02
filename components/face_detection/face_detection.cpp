@@ -147,6 +147,12 @@ void FaceDetectionComponent::process_frame_() {
   if (++process_count % 50 == 1) {
     ESP_LOGI(TAG, "process_frame_: buffer=%p, data=%p, %ux%u (frame #%u)",
              buffer, img_data, width, height, process_count);
+    // Show first 4 pixels (8 bytes) to check RGB565 format
+    if (img_data != nullptr) {
+      ESP_LOGI(TAG, "  First 8 bytes: %02X %02X %02X %02X %02X %02X %02X %02X",
+               img_data[0], img_data[1], img_data[2], img_data[3],
+               img_data[4], img_data[5], img_data[6], img_data[7]);
+    }
   }
 
   if (img_data != nullptr) {
