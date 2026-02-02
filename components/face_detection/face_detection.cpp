@@ -147,9 +147,19 @@ void FaceDetectionComponent::process_frame_() {
 }
 
 void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
-  if (this->draw_enabled_ && img_data != nullptr) {
-    this->draw_results_(img_data, width, height);
+  if (!this->draw_enabled_) {
+    static bool logged_disabled = false;
+    if (!logged_disabled) {
+      ESP_LOGW(TAG, "draw_on_frame: draw_enabled_ is FALSE");
+      logged_disabled = true;
+    }
+    return;
   }
+  if (img_data == nullptr) {
+    ESP_LOGW(TAG, "draw_on_frame: img_data is NULL");
+    return;
+  }
+  this->draw_results_(img_data, width, height);
 }
 
 void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -259,6 +269,12 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
   };
 
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    // Debug: log face count periodically
+    static uint32_t draw_count = 0;
+    if (++draw_count % 100 == 0) {
+      ESP_LOGI(TAG, "draw_results_: %d faces cached (draw #%u)",
+               this->cached_face_results_.size(), draw_count);
+    }
     // RGB565 colors (little-endian)
     std::vector<uint8_t> green = {0xE0, 0x07};   // Green - unknown face
     std::vector<uint8_t> blue = {0x1F, 0x00};    // Blue - recognized face
@@ -310,6 +326,13 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
     }
 
     xSemaphoreGive(this->face_results_mutex_);
+  }
+#else
+  // ESP_DL_MODEL_FACE_RECOGNITION not defined - can't draw
+  static bool logged_no_model = false;
+  if (!logged_no_model) {
+    ESP_LOGW(TAG, "draw_results_: ESP_DL_MODEL_FACE_RECOGNITION not defined!");
+    logged_no_model = true;
   }
 #endif
 }
