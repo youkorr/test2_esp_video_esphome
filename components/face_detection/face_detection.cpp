@@ -64,10 +64,13 @@ void FaceDetectionComponent::setup() {
 #endif
 
   if (this->face_detector_ != nullptr) {
-    this->face_detector_->set_score_thr(this->score_threshold_);
+    // TEST: Try very low thresholds to see if detection works at all
+    float test_score_thr = 0.1f;  // Very low threshold for testing
+    this->face_detector_->set_score_thr(test_score_thr);
     this->face_detector_->set_nms_thr(this->nms_threshold_);
-    ESP_LOGI(TAG, "Face detector initialized (score_thr=%.2f, nms_thr=%.2f)",
-             this->score_threshold_, this->nms_threshold_);
+    ESP_LOGW(TAG, "Face detector initialized with TEST LOW threshold (score_thr=%.2f, nms_thr=%.2f)",
+             test_score_thr, this->nms_threshold_);
+    ESP_LOGW(TAG, "  (Original score_thr was %.2f)", this->score_threshold_);
   } else {
     ESP_LOGE(TAG, "Failed to initialize face detector");
     this->mark_failed();
