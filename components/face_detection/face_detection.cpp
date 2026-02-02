@@ -130,12 +130,24 @@ void FaceDetectionComponent::process_frame_() {
   // Acquire buffer from camera
   esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
+    // Debug: log buffer acquisition failure periodically
+    static uint32_t no_buffer_count = 0;
+    if (++no_buffer_count % 50 == 1) {
+      ESP_LOGW(TAG, "process_frame_: No buffer available (count=%u)", no_buffer_count);
+    }
     return;
   }
 
   uint8_t *img_data = this->camera_->get_buffer_data(buffer);
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
+
+  // Debug: log buffer info periodically
+  static uint32_t process_count = 0;
+  if (++process_count % 50 == 1) {
+    ESP_LOGI(TAG, "process_frame_: buffer=%p, data=%p, %ux%u (frame #%u)",
+             buffer, img_data, width, height, process_count);
+  }
 
   if (img_data != nullptr) {
     this->detect_faces_(img_data, width, height);
@@ -168,6 +180,10 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     return;
   }
 
+  // Debug: track detection attempts
+  static uint32_t detect_count = 0;
+  detect_count++;
+
   // Create image structure for ESP-DL
   dl::image::img_t img = {
     .data = img_data,
@@ -176,8 +192,24 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
+  // Debug: log image info periodically
+  if (detect_count % 50 == 1) {
+    // Check first few bytes of image data to verify it's valid
+    uint32_t checksum = 0;
+    for (int i = 0; i < 100 && i < width * height * 2; i++) {
+      checksum += img_data[i];
+    }
+    ESP_LOGI(TAG, "detect_faces_: img=%p %ux%u, checksum=%u (attempt #%u)",
+             img_data, width, height, checksum, detect_count);
+  }
+
   // Run face detection
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+
+  // Debug: log detection results periodically
+  if (detect_count % 50 == 1 || face_results.size() > 0) {
+    ESP_LOGI(TAG, "detect_faces_: found %d faces (attempt #%u)", face_results.size(), detect_count);
+  }
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
