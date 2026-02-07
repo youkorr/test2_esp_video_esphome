@@ -111,6 +111,16 @@ void FaceDetectionComponent::setup() {
 void FaceDetectionComponent::loop() {
   // Check if camera is streaming
   if (this->camera_ == nullptr || !this->camera_->is_streaming()) {
+    // Periodic diagnostic: log why we're not running
+    static uint32_t last_not_streaming_log = 0;
+    if (millis() - last_not_streaming_log > 5000) {
+      last_not_streaming_log = millis();
+      if (this->camera_ == nullptr) {
+        ESP_LOGW(TAG, "DIAG: camera_ is null - cannot detect");
+      } else {
+        ESP_LOGD(TAG, "DIAG: camera not streaming - waiting for start_streaming()");
+      }
+    }
     return;
   }
 
@@ -130,6 +140,15 @@ void FaceDetectionComponent::process_frame_() {
   // Acquire buffer from camera
   esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
+    // Periodic diagnostic: log buffer acquisition failure
+    static uint32_t acquire_fail_count = 0;
+    static uint32_t last_acquire_fail_log = 0;
+    acquire_fail_count++;
+    if (millis() - last_acquire_fail_log > 3000) {
+      last_acquire_fail_log = millis();
+      ESP_LOGW(TAG, "DIAG: acquire_buffer failed %u times (buffer pool exhausted?)", acquire_fail_count);
+      acquire_fail_count = 0;
+    }
     return;
   }
 
@@ -155,8 +174,19 @@ void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, ui
 void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, uint16_t height) {
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
   if (this->face_detector_ == nullptr) {
+    static bool logged_null = false;
+    if (!logged_null) {
+      ESP_LOGE(TAG, "DIAG: face_detector_ is null - detection disabled");
+      logged_null = true;
+    }
     return;
   }
+
+  // Periodic diagnostic logging
+  static uint32_t detect_calls = 0;
+  static uint32_t detect_found = 0;
+  static uint32_t last_detect_log = 0;
+  detect_calls++;
 
   // Create image structure for ESP-DL
   dl::image::img_t img = {
@@ -168,6 +198,21 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
 
   // Run face detection
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+
+  if (face_results.size() > 0) {
+    detect_found++;
+    ESP_LOGI(TAG, "DETECTED %d face(s)! (run #%u, img=%ux%u, data=%p)",
+             (int)face_results.size(), detect_calls, width, height, img_data);
+  }
+
+  // Periodic stats every 10 seconds
+  if (millis() - last_detect_log > 10000) {
+    last_detect_log = millis();
+    ESP_LOGI(TAG, "DIAG: %u detection runs, %u found faces, img=%ux%u, data=%p",
+             detect_calls, detect_found, width, height, img_data);
+    detect_calls = 0;
+    detect_found = 0;
+  }
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
