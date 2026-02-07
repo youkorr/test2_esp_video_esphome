@@ -720,11 +720,10 @@ bool MipiDSICamComponent::start_streaming() {
       custom_format = &ov5647_format_800x600_raw8_50fps;
       ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
     } else if (width == 800 && height == 640) {
-      // 800x640 causes stride/alignment issues - redirect to 800x600 (SVGA)
-      custom_format = &ov5647_format_800x600_raw8_50fps;
-      width = 800;
-      height = 600;
-      ESP_LOGW(TAG, "800x640 redirected to 800x600 (SVGA) - stride fix");
+      // Use fixed 800x640: centered crop (X=234) + offset=0 to fix stride artifacts
+      // Native driver uses X=500/offset=8 which causes stride issues
+      custom_format = &ov5647_format_800x640_raw8_50fps;
+      ESP_LOGI(TAG, "Using CUSTOM format: 800x640 RAW8 @ 50fps (stride-fixed, centered crop)");
     } else if (width == 1024 && height == 600) {
       custom_format = &ov5647_format_1024x600_raw8_30fps;
       ESP_LOGI(TAG, "Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
