@@ -94,32 +94,33 @@ if os.path.exists(esp_h264_dir):
         print(f"[Simple Video Player] Created libh264_decoder_svp.a with decoder sources")
 
     # ========================================================================
-    # Link H.264 library (OpenH264 preferred, tinyh264 fallback)
+    # Link H.264 libraries: openh264 (encoder/decoder) + tinyh264 (h264bsd decoder)
+    # esp_h264_dec_sw.c calls h264bsd* functions from tinyh264
     # ========================================================================
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
+    openh264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    tinyh264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
 
-    # Use OpenH264 for FULL H.264 profile support (Baseline, Main, High)
-    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
-    h264_lib_name = "openh264"
-
-    if not os.path.exists(h264_lib):
-        # Fallback to tinyh264 if openh264 not available
-        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
-        h264_lib_name = "tinyh264"
-        print("[Simple Video Player]  WARNING: Using tinyh264 (ONLY Constrained Baseline)")
-
-    if os.path.exists(h264_lib):
-        lib_size_mb = os.path.getsize(h264_lib) / (1024 * 1024)
-        print(f"[Simple Video Player] Using {h264_lib_name} decoder ({lib_size_mb:.1f} MB)")
-
+    if os.path.exists(h264_lib_dir):
         env.Append(LIBPATH=[h264_lib_dir])
+
+    if os.path.exists(openh264_lib):
         env.Append(LINKFLAGS=[
             "-Wl,--allow-multiple-definition",
-            h264_lib,
+            "-Wl,--whole-archive",
+            openh264_lib,
+            "-Wl,--no-whole-archive",
         ])
-        print(f"[Simple Video Player] Linked {h264_lib_name} decoder library")
+        print(f"[Simple Video Player] Linked openh264 (Baseline/Main/High profiles)")
     else:
-        print(f"[Simple Video Player]  H.264 decoder library not found in {h264_lib_dir}")
+        print(f"[Simple Video Player]  openh264 not found")
+
+    # tinyh264 provides h264bsd* symbols needed by esp_h264_dec_sw.c
+    if os.path.exists(tinyh264_lib):
+        env.Append(LIBS=["tinyh264"])
+        print(f"[Simple Video Player] Linked tinyh264 (h264bsd decoder symbols)")
+    else:
+        print(f"[Simple Video Player]  tinyh264 not found")
 else:
     print(f"[Simple Video Player]  esp_h264 component not found")
 

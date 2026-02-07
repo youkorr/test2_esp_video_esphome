@@ -64,13 +64,16 @@ if os.path.exists(esp_h264_dir):
         print(f"[Network Camera] Created libh264_decoder_nc.a with decoder sources")
 
     # ========================================================================
-    # Link openh264 library
+    # Link H.264 libraries: openh264 (encoder/decoder) + tinyh264 (h264bsd decoder)
     # ========================================================================
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
     openh264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    tinyh264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
+
+    if os.path.exists(h264_lib_dir):
+        env.Append(LIBPATH=[h264_lib_dir])
 
     if os.path.exists(openh264_lib):
-        env.Append(LIBPATH=[h264_lib_dir])
         env.Append(LINKFLAGS=[
             "-Wl,--allow-multiple-definition",
             "-Wl,--whole-archive",
@@ -80,6 +83,13 @@ if os.path.exists(esp_h264_dir):
         print(f"[Network Camera] Linked openh264 (Baseline/Main/High profiles)")
     else:
         print(f"[Network Camera]  openh264 not found at {openh264_lib}")
+
+    # tinyh264 provides h264bsd* symbols needed by esp_h264_dec_sw.c
+    if os.path.exists(tinyh264_lib):
+        env.Append(LIBS=["tinyh264"])
+        print(f"[Network Camera] Linked tinyh264 (h264bsd decoder symbols)")
+    else:
+        print(f"[Network Camera]  tinyh264 not found at {tinyh264_lib}")
 else:
     print(f"[Network Camera]  esp_h264 component not found")
 
