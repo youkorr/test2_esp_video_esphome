@@ -101,11 +101,12 @@ lvgl:
             ESP_LOGI("lock", "🔓 Page déverrouillage chargée");
             // Démarrer la caméra
             id(tab5_cam).start_streaming();
-            // Configurer le canvas
+            // Configurer le canvas et activer l'affichage
             auto canvas = id(face_unlock_canvas);
             if (canvas != nullptr) {
               id(camera_display).configure_canvas(canvas);
-              ESP_LOGI("lock", "Canvas configuré pour reconnaissance faciale");
+              id(camera_display).set_enabled(true);
+              ESP_LOGI("lock", "Canvas configuré et affichage activé pour reconnaissance faciale");
             }
             // Reset timeout
             id(unlock_timeout_start) = millis();
@@ -407,6 +408,7 @@ key_collector:
                 id(display_lock) = false;
             - delay: 500ms
             - lambda: |-
+                id(camera_display).set_enabled(false);
                 id(tab5_cam).stop_streaming();
                 // Reconfigurer le canvas pour la page caméra normale
                 auto canvas = id(camera_canvas);
@@ -470,6 +472,7 @@ interval:
             ESP_LOGI("lock", "⏱️ Timeout - retour veille");
             lv_label_set_text(id(face_status_label), "Timeout - Retour veille...");
             lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0xf85149), 0);
+            id(camera_display).set_enabled(false);
             id(tab5_cam).stop_streaming();
             // Reconfigurer canvas pour page caméra normale
             auto canvas = id(camera_canvas);
@@ -479,7 +482,7 @@ interval:
           }
 
           // === VÉRIFIER RECONNAISSANCE FACIALE ===
-          auto result = id(camera_display).get_last_recognition();
+          auto result = id(face_detect).get_last_recognition();
           if (result.recognized && result.similarity >= 0.70f) {
             ESP_LOGI("lock", "🔓 VISAGE RECONNU! ID=%d sim=%.2f", result.id, result.similarity);
             id(display_lock) = false;
@@ -504,6 +507,7 @@ interval:
           then:
             - delay: 800ms
             - lambda: |-
+                id(camera_display).set_enabled(false);
                 id(tab5_cam).stop_streaming();
                 // Reconfigurer canvas
                 auto canvas = id(camera_canvas);

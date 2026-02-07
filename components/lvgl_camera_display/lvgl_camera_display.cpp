@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include <cstring>
+#include "esp_cache.h"
 // Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -252,6 +253,12 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 #endif
 
+  // ESP32-P4: Flush CPU cache to PSRAM after detection drawing.
+  // Without this, PPA/DMA reads stale data from PSRAM (see LVGL PR #9162).
+  uint32_t buf_size_bytes = width * height * 2;
+  esp_cache_msync(img_data, buf_size_bytes,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
   // First update logging
   if (this->first_update_) {
     // Check if this is a canvas (has lv_canvas class) or a plain image
@@ -294,9 +301,9 @@ void LVGLCameraDisplay::update_canvas_() {
   // This is much faster than memcpy + invalidate (~0-1ms vs ~20ms)
   lv_image_set_src(this->canvas_obj_, &this->camera_draw_buf_);
 
-    // Force immediate refresh - bypasses LV_DEF_REFR_PERIOD timer
-  // This eliminates the ~80ms overhead between frame updates
-  //lv_refr_now(lv_display_get_default());
+  // LVGL 9.4: Force invalidation since we reuse the same draw_buf pointer.
+  // Without this, LVGL detects the same source pointer and skips redrawing.
+  lv_obj_invalidate(this->canvas_obj_);
 
   this->first_update_ = false;
 
