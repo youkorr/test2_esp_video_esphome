@@ -94,10 +94,13 @@ async def to_code(config):
     # Enable optimized H.264 decoder if esp_h264 component is available
     esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
     if os.path.exists(esp_h264_dir):
-        # Dual-task flags are defined in esp_h264/__init__.py to avoid redefinition warnings
-
-        # Add H.264 include paths for decoder headers
+        # Add all esp_h264 include paths for decoder headers
         h264_inc_paths = [
+            os.path.join(esp_h264_dir, "interface", "include"),
+            os.path.join(esp_h264_dir, "port", "include"),
+            os.path.join(esp_h264_dir, "port", "inc"),
+            os.path.join(esp_h264_dir, "sw", "include"),
+            os.path.join(esp_h264_dir, "hw", "include"),
             os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),
             os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc"),
         ]

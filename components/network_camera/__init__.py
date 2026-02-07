@@ -39,7 +39,26 @@ async def to_code(config):
     cg.add_build_flag("-DCONFIG_JPEG_ENABLE_DEBUG_LOG=0")
     cg.add_build_flag("-DCONFIG_ESP_H264_DECODER=1")
 
-    # Add PlatformIO build script for H.264 library linking
+    # Add esp_h264 include paths for H.264 decoder headers
+    component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+    esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
+    if os.path.exists(esp_h264_dir):
+        h264_includes = [
+            "interface/include",
+            "port/include",
+            "port/inc",
+            "sw/include",
+            "hw/include",
+            "sw/libs/openh264_inc",
+            "sw/libs/tinyh264_inc",
+        ]
+        for inc in h264_includes:
+            inc_path = os.path.join(esp_h264_dir, inc)
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+
+    # Add PlatformIO build script for H.264 library linking and source compilation
     build_script = os.path.join(os.path.dirname(__file__), "network_camera_build.py")
     cg.add_platformio_option("extra_scripts", ["post:" + build_script])
 
