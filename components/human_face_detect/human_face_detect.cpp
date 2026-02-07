@@ -18,9 +18,11 @@ MSR::MSR(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-    // ESP32-P4: Try without BIG_ENDIAN - camera may output little-endian RGB565
+    // ESP32-P4: Camera ISP outputs standard RGB565 (R high, B low).
+    // Do NOT use RGB_SWAP - it would give BGR to the model.
+    // Try without any flags first (standard RGB565 little-endian).
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
+        m_model, {0, 0, 0}, {1, 1, 1}, 0);
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
@@ -40,9 +42,9 @@ MNP::MNP(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-    // ESP32-P4: Try without BIG_ENDIAN - camera may output little-endian RGB565
+    // ESP32-P4: Same as MSR - standard RGB565, no swap
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
+        m_model, {0, 0, 0}, {1, 1, 1}, 0);
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
