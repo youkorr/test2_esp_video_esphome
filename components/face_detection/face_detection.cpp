@@ -174,7 +174,35 @@ void FaceDetectionComponent::process_frame_() {
 }
 
 void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
-  if (this->draw_enabled_ && img_data != nullptr) {
+  if (img_data == nullptr) return;
+
+  // DIAG: Always draw a bright green test rectangle at top-left corner
+  // This verifies the entire drawing pipeline works (face_detection → display)
+  // Remove this block once face detection is confirmed working
+  {
+    dl::image::img_t test_img = {
+      .data = img_data,
+      .width = width,
+      .height = height,
+      .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+    };
+    std::vector<uint8_t> green = {0xE0, 0x07};  // Bright green RGB565
+    dl::image::draw_hollow_rectangle(test_img, 10, 10, 100, 100, green, 4);
+
+    // Also draw cached face count as indicator
+    int face_count = 0;
+    if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(2)) == pdTRUE) {
+      face_count = this->cached_face_results_.size();
+      xSemaphoreGive(this->face_results_mutex_);
+    }
+    // Draw red rectangle if no faces detected, blue if faces detected
+    std::vector<uint8_t> indicator = face_count > 0 ?
+      std::vector<uint8_t>{0x1F, 0x00} :   // Blue = faces found
+      std::vector<uint8_t>{0x00, 0xF8};     // Red = no faces
+    dl::image::draw_hollow_rectangle(test_img, 10, 110, 100, 150, indicator, 4);
+  }
+
+  if (this->draw_enabled_) {
     this->draw_results_(img_data, width, height);
   }
 }
@@ -195,6 +223,23 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
   static uint32_t detect_found = 0;
   static uint32_t last_detect_log = 0;
   detect_calls++;
+
+  // DIAG: Log pixel values to verify buffer content is valid camera data
+  if (detect_calls <= 3 || (millis() - last_detect_log > 10000)) {
+    uint16_t *pixels = (uint16_t *)img_data;
+    uint32_t mid = (height / 2) * width + (width / 2);  // center pixel
+    ESP_LOGI(TAG, "DIAG pixels: [0]=%04x [1]=%04x [100]=%04x [center]=%04x [last]=%04x",
+             pixels[0], pixels[1], pixels[100], pixels[mid], pixels[width * height - 1]);
+
+    // Check if buffer is all zeros (invalid)
+    bool all_zero = true;
+    for (int i = 0; i < 1000 && i < width * height; i += 37) {
+      if (pixels[i] != 0) { all_zero = false; break; }
+    }
+    if (all_zero) {
+      ESP_LOGE(TAG, "DIAG: Buffer appears to be ALL ZEROS - camera data not received!");
+    }
+  }
 
   // Create image structure for ESP-DL
   dl::image::img_t img = {
