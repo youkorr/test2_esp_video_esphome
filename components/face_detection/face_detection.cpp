@@ -1,6 +1,7 @@
 #include "face_detection.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esp_cache.h"
 
 // ESP-DL detection components (only for face_recognition model)
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -157,6 +158,13 @@ void FaceDetectionComponent::process_frame_() {
   uint16_t height = this->camera_->get_image_height();
 
   if (img_data != nullptr) {
+    // ESP32-P4: Invalidate CPU cache before reading PSRAM buffer.
+    // Camera DMA writes directly to PSRAM, but CPU cache may hold stale data.
+    // Without this, ESP-DL reads garbage and never detects faces.
+    uint32_t buf_size = width * height * 2;  // RGB565
+    esp_cache_msync(img_data, buf_size,
+                    ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
     this->detect_faces_(img_data, width, height);
     // NOTE: Don't draw here to avoid flickering!
     // Drawing is done by lvgl_camera_display via draw_on_frame()

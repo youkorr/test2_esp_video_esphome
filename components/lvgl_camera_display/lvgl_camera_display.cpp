@@ -236,6 +236,12 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
+  // ESP32-P4: Invalidate CPU cache before reading PSRAM buffer filled by DMA.
+  // Camera DMA writes to PSRAM but CPU cache may hold stale data for this address.
+  uint32_t frame_size = width * height * 2;  // RGB565
+  esp_cache_msync(img_data, frame_size,
+                  ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
   // Optional: draw detection results if configured
 #ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
