@@ -81,7 +81,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_FREQUENCY): cv.int_,
         cv.Optional(CONF_SENSOR_ADDR, default=0x36): cv.hex_int,
         cv.Optional(CONF_RESOLUTION, default="720P"): cv.string,
-        cv.Optional(CONF_PIXEL_FORMAT, default="JPEG"): cv.string,
+        cv.Optional(CONF_PIXEL_FORMAT, default="MJPEG"): cv.string,
         cv.Optional(CONF_FRAMERATE, default=30): cv.int_range(min=1, max=60),
         cv.Optional(CONF_JPEG_QUALITY, default=10): cv.int_range(min=1, max=63),
         # Options obsolètes (acceptées mais ignorées)
@@ -159,7 +159,7 @@ async def to_code(config):
     cg.add_build_flag("-DUSE_ESP32_VARIANT_ESP32P4")
     cg.add_build_flag("-DCONFIG_CAMERA_CORE0=1")
 
-    # Dual-task H.264 flags are defined in esp_h264/__init__.py to avoid redefinition warnings
+    # H.264 is disabled by default, MJPEG is the preferred encoder
 
     # Build flags spécifiques au sensor OV5647
     if config[CONF_SENSOR_TYPE].lower() == "ov5647":

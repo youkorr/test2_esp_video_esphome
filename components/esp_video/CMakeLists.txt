@@ -9,7 +9,7 @@ set(srcs "src/esp_video_buffer.c"
 set(include_dirs "include")
 set(priv_include_dirs "private_include")
 set(priv_requires "vfs" "spi_flash" "esp_hw_support")
-set(requires "esp_driver_cam" "esp_driver_isp" "esp_cam_sensor" "esp_h264" "esp_driver_jpeg" "esp_sccb_intf")
+set(requires "esp_driver_cam" "esp_driver_isp" "esp_cam_sensor" "esp_driver_jpeg" "esp_sccb_intf")
 
 if(CONFIG_ESP_VIDEO_ENABLE_MIPI_CSI_VIDEO_DEVICE)
     list(APPEND srcs "src/device/esp_video_csi_device.c")
@@ -21,6 +21,8 @@ endif()
 
 if(CONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE)
     list(APPEND srcs "src/device/esp_video_h264_device.c")
+    # esp_h264 is only required when H264 device is explicitly enabled
+    list(APPEND requires "esp_h264")
 endif()
 
 if(CONFIG_ESP_VIDEO_ENABLE_JPEG_VIDEO_DEVICE)

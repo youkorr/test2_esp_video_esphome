@@ -218,8 +218,7 @@ class MipiDSICamComponent : public Component {
 
   // État du streaming vidéo continu
   bool streaming_active_{false};
-  int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames
-  int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
+  int video_fd_{-1};       // /dev/video0 (CSI) pour capture frames et contrôles V4L2
 
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
   static constexpr int NUM_BUFFERS = 2;  // Double buffering (was 3 for triple)

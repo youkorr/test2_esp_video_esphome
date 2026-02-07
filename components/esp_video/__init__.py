@@ -1,6 +1,6 @@
 """
-Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Support complet H264 + JPEG avec dépendances ESP-IDF
+Composant ESPHome pour ESP-Video d'Espressif (v1.4.0)
+MJPEG encoder par défaut, H264 optionnel (désactivé par défaut)
 
 Ce composant initialise ESP-Video en utilisant le bus I2C d'ESPHome.
 """
@@ -55,9 +55,9 @@ def parse_gpio_pin(value):
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
-    # Au moins un encodeur doit être activé
-    if not config[CONF_ENABLE_H264] and not config[CONF_ENABLE_JPEG]:
-        raise cv.Invalid("Au moins un encodeur (H264 ou JPEG) doit être activé")
+    # MJPEG est l'encodeur par défaut, H264 est optionnel
+    if not config[CONF_ENABLE_JPEG]:
+        raise cv.Invalid("L'encodeur MJPEG (enable_jpeg) doit être activé")
 
     return config
 
@@ -66,7 +66,7 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(ESPVideoComponent),
         cv.Required(CONF_I2C_ID): cv.use_id(i2c.I2CBus),
-        cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
+        cv.Optional(CONF_ENABLE_H264, default=False): cv.boolean,
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
