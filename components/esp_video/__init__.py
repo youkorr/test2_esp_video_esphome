@@ -1,6 +1,6 @@
 """
-Composant ESPHome pour ESP-Video d'Espressif (v1.3.1)
-Support complet H264 + JPEG avec dépendances ESP-IDF
+Composant ESPHome pour ESP-Video d'Espressif (v1.4.0)
+Support JPEG avec dépendances ESP-IDF
 
 Ce composant initialise ESP-Video en utilisant le bus I2C d'ESPHome.
 """
@@ -21,7 +21,6 @@ esp_video_ns = cg.esphome_ns.namespace("esp_video")
 ESPVideoComponent = esp_video_ns.class_("ESPVideoComponent", cg.Component)
 
 # Configuration
-CONF_ENABLE_H264 = "enable_h264"
 CONF_ENABLE_JPEG = "enable_jpeg"
 CONF_ENABLE_ISP = "enable_isp"
 CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
@@ -55,10 +54,6 @@ def parse_gpio_pin(value):
 
 def validate_esp_video_config(config):
     """Valide la configuration ESP-Video"""
-    # Au moins un encodeur doit être activé
-    if not config[CONF_ENABLE_H264] and not config[CONF_ENABLE_JPEG]:
-        raise cv.Invalid("Au moins un encodeur (H264 ou JPEG) doit être activé")
-
     return config
 
 
@@ -66,7 +61,6 @@ CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(ESPVideoComponent),
         cv.Required(CONF_I2C_ID): cv.use_id(i2c.I2CBus),
-        cv.Optional(CONF_ENABLE_H264, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_JPEG, default=True): cv.boolean,
         cv.Optional(CONF_ENABLE_ISP, default=True): cv.boolean,
         cv.Optional(CONF_USE_HEAP_ALLOCATOR, default=True): cv.boolean,
@@ -171,15 +165,6 @@ async def to_code(config):
                 cg.add_build_flag(f"-I{inc_path}")
                 includes_found = True
 
-    # esp_h264
-    esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
-    if os.path.exists(esp_h264_dir):
-        for inc in ["interface/include", "port/include", "port/inc", "sw/include", "hw/include", "sw/libs/openh264_inc", "sw/libs/tinyh264_inc"]:
-            inc_path = os.path.join(esp_h264_dir, inc)
-            if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
-                includes_found = True
-
     # esp_ipa
     esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
     if os.path.exists(esp_ipa_dir):
@@ -267,14 +252,6 @@ async def to_code(config):
     # Allocateur mémoire
     if config[CONF_USE_HEAP_ALLOCATOR]:
         flags.append("-DCONFIG_ESP_VIDEO_USE_HEAP_ALLOCATOR=1")
-
-    # Encodeur H.264
-    if config[CONF_ENABLE_H264]:
-        flags.extend([
-            "-DCONFIG_ESP_VIDEO_ENABLE_H264_VIDEO_DEVICE=1",
-            "-DCONFIG_ESP_VIDEO_ENABLE_HW_H264_VIDEO_DEVICE=1",  # Hardware H.264 encoder/decoder for ESP32-P4
-            "-DESP_VIDEO_H264_ENABLED=1",  # Pour esp_video_component.cpp
-        ])
 
     # Encodeur JPEG
     if config[CONF_ENABLE_JPEG]:

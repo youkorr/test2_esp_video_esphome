@@ -1,6 +1,6 @@
 """
 Auto-download des dépendances ESP-Video (comme LVGL 9.4)
-Télécharge automatiquement esp_h264, esp_cam_sensor, esp_ipa, etc. depuis GitHub
+Télécharge automatiquement esp_cam_sensor, esp_ipa, etc. depuis GitHub
 Avec barre de progression visuelle comme PlatformIO
 """
 
@@ -53,14 +53,6 @@ class ProgressBar:
 # Pour l'instant, on vérifie juste qu'ils existent localement.
 
 ESP_VIDEO_DEPENDENCIES = [
-    {
-        "name": "esp_h264",
-        "repo": "https://github.com/espressif/esp-adf-libs.git",
-        "tag": "master",  # Utiliser master pour la dernière version
-        "sparse_paths": ["esp_h264"],
-        "description": "Encodeur/décodeur H.264 (OpenH264 + TinyH264)",
-        "required": True
-    },
     {
         "name": "esp_cam_sensor",
         "repo": None,  # Composant ESP-IDF - doit être présent localement
