@@ -2,6 +2,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 #include <cstring>
+#include "esp_cache.h"
 // Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -235,6 +236,12 @@ void LVGLCameraDisplay::update_canvas_() {
     return;
   }
 
+  // ESP32-P4: Invalidate CPU cache before reading PSRAM buffer filled by DMA.
+  // Camera DMA writes to PSRAM but CPU cache may hold stale data for this address.
+  uint32_t frame_size = width * height * 2;  // RGB565
+  esp_cache_msync(img_data, frame_size,
+                  ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
   // Optional: draw detection results if configured
 #ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
@@ -252,26 +259,26 @@ void LVGLCameraDisplay::update_canvas_() {
   }
 #endif
 
-  // First update logging
-  if (this->first_update_) {
-    // Check if this is a canvas (has lv_canvas class) or a plain image
-    bool is_canvas = lv_obj_check_type(this->canvas_obj_, &lv_canvas_class);
+  // ESP32-P4: Flush CPU cache to PSRAM after detection drawing.
+  // Without this, PPA/DMA reads stale data from PSRAM (see LVGL PR #9162).
+  uint32_t buf_size_bytes = width * height * 2;
+  esp_cache_msync(img_data, buf_size_bytes,
+                  ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-    ESP_LOGI(TAG, "Premier update - Widget type: %s", is_canvas ? "CANVAS" : "IMAGE");
+  // Detect widget type on first update
+  if (this->first_update_) {
+    this->is_canvas_ = lv_obj_check_type(this->canvas_obj_, &lv_canvas_class);
+    ESP_LOGI(TAG, "Premier update - Widget type: %s", this->is_canvas_ ? "CANVAS" : "IMAGE");
     ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
-    ESP_LOGI(TAG, "   Mode: ZERO-COPY (lv_image_set_src on %s)", is_canvas ? "canvas" : "image");
   }
 
-  // LVGL 9.4 ZERO-COPY MODE for both canvas and image
-  // In LVGL 9.x, canvas inherits from image, so lv_image_set_src() works on both
-  // This eliminates the ~20ms memcpy overhead for 640x480 RGB565
+  // LVGL 9.4 ZERO-COPY MODE
+  // Camera buffer stride = width * 2 (RGB565, no padding between rows)
+  uint32_t stride = width * 2;
+  uint32_t buf_size = width * height * 2;
 
   if (!this->draw_buf_initialized_) {
-    // Camera buffer stride = width * 2 (RGB565, no padding between rows)
-    uint32_t stride = width * 2;
-    uint32_t buf_size = width * height * 2;
-
     // Initialize the draw buffer structure to point to camera data
     lv_draw_buf_init(&this->camera_draw_buf_, width, height,
                      LV_COLOR_FORMAT_RGB565, stride, img_data, buf_size);
@@ -281,22 +288,25 @@ void LVGLCameraDisplay::update_canvas_() {
 
     this->draw_buf_initialized_ = true;
 
-    ESP_LOGI(TAG, "Zero-copy draw_buf initialized:");
-    ESP_LOGI(TAG, "   Dimensions: %ux%u, stride: %u bytes", width, height, stride);
-    ESP_LOGI(TAG, "   Buffer size: %u bytes, data: %p", buf_size, img_data);
+    ESP_LOGI(TAG, "Zero-copy draw_buf initialized: %ux%u, stride=%u, size=%u, data=%p",
+             width, height, stride, buf_size, img_data);
   } else {
     // Just update the data pointer - no memcpy needed!
     this->camera_draw_buf_.data = img_data;
   }
 
-  // Set the image source to our draw buffer
-  // lv_image_set_src works on both image and canvas (canvas inherits from image in LVGL 9.x)
-  // This is much faster than memcpy + invalidate (~0-1ms vs ~20ms)
-  lv_image_set_src(this->canvas_obj_, &this->camera_draw_buf_);
+  // LVGL 9.4: Use the correct API depending on widget type
+  if (this->is_canvas_) {
+    // For canvas widgets: lv_canvas_set_draw_buf() properly updates
+    // the canvas's internal draw_buf field AND calls lv_image_set_src()
+    lv_canvas_set_draw_buf(this->canvas_obj_, &this->camera_draw_buf_);
+  } else {
+    // For image widgets: lv_image_set_src() is sufficient
+    lv_image_set_src(this->canvas_obj_, &this->camera_draw_buf_);
+  }
 
-    // Force immediate refresh - bypasses LV_DEF_REFR_PERIOD timer
-  // This eliminates the ~80ms overhead between frame updates
-  //lv_refr_now(lv_display_get_default());
+  // Force invalidation - LVGL 9.4 may skip redraw when same pointer is reused
+  lv_obj_invalidate(this->canvas_obj_);
 
   this->first_update_ = false;
 

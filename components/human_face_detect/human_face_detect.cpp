@@ -17,15 +17,9 @@ MSR::MSR(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
-#if CONFIG_IDF_TARGET_ESP32P4
-    // ESP32-P4: Try without BIG_ENDIAN - camera may output little-endian RGB565
-    m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
-#else
+
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
-#endif
-    // Very low score threshold (0.2) for maximum detection sensitivity
-    // Anchor sizes for various face sizes at 800x600 resolution
+
     m_postprocessor = new dl::detect::MSRPostprocessor(
         m_model, m_image_preprocessor, 0.2, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
@@ -39,14 +33,8 @@ MNP::MNP(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION));
 #endif
-#if CONFIG_IDF_TARGET_ESP32P4
-    // ESP32-P4: Try without BIG_ENDIAN - camera may output little-endian RGB565
-    m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
-#else
+
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
-#endif
-    // Very low score threshold (0.2) for second stage refinement
     m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.2, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
 }
 
@@ -99,6 +87,7 @@ std::list<dl::detect::result_t> &MNP::run(const dl::image::img_t &img, std::list
         latency[1].print("detect", "forward");
         latency[2].print("detect", "postprocess");
     }
+
     return result;
 }
 
@@ -148,19 +137,12 @@ dl::Model *MSRMNP::get_raw_model(int idx)
 
 HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t model_type)
 {
-    ESP_LOGI("human_face_detect", "Constructor called: model_type=%d", (int)model_type);
     switch (model_type) {
     case model_type_t::MSRMNP_S8_V1: {
 #if CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1
 #if !CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
-        ESP_LOGI("human_face_detect", "Loading MSRMNP models from flash rodata...");
         m_model =
             new human_face_detect::MSRMNP("human_face_detect_msr_s8_v1.espdl", "human_face_detect_mnp_s8_v1.espdl");
-        if (m_model) {
-            ESP_LOGI("human_face_detect", "✅ MSRMNP model loaded successfully!");
-        } else {
-            ESP_LOGE("human_face_detect", "❌ Failed to create MSRMNP model!");
-        }
 #else
         if (sdcard_model_dir) {
             char msr_dir[128];
@@ -173,7 +155,7 @@ HumanFaceDetect::HumanFaceDetect(const char *sdcard_model_dir, model_type_t mode
         }
 #endif
 #else
-        ESP_LOGE("human_face_detect", "human_face_detect_msrmnp_s8_v1 is not selected in menuconfig.");
+        // human_face_detect_msrmnp_s8_v1 is not selected in menuconfig
 #endif
         break;
     }

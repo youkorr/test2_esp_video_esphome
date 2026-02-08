@@ -1,6 +1,8 @@
 #include "face_detection.h"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
+#include "esp_cache.h"
+#include "esp_heap_caps.h"
 
 // ESP-DL detection components (only for face_recognition model)
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -45,7 +47,10 @@ void FaceDetectionComponent::setup() {
   }
 
   // Initialize face detector
-  ESP_LOGI(TAG, "Initializing face detector...");
+  uint32_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  uint32_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Heap before model load: PSRAM=%u KB free, internal=%u KB free",
+           psram_before / 1024, internal_before / 1024);
 
 #if CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ != nullptr) {
@@ -59,9 +64,16 @@ void FaceDetectionComponent::setup() {
     this->face_detector_ = new HumanFaceDetect("/sdcard");
   }
 #else
-  ESP_LOGI(TAG, "Loading face detection model from flash rodata");
   this->face_detector_ = new HumanFaceDetect();
 #endif
+
+  uint32_t psram_after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  uint32_t internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+  ESP_LOGI(TAG, "Heap after model load: PSRAM=%u KB free (used %u KB), internal=%u KB free (used %u KB)",
+           psram_after / 1024, (psram_before - psram_after) / 1024,
+           internal_after / 1024, (internal_before - internal_after) / 1024);
+  ESP_LOGI(TAG, "Largest free PSRAM block: %u KB",
+           heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024);
 
   if (this->face_detector_ != nullptr) {
     this->face_detector_->set_score_thr(this->score_threshold_);
@@ -109,7 +121,6 @@ void FaceDetectionComponent::setup() {
 }
 
 void FaceDetectionComponent::loop() {
-  // Check if camera is streaming
   if (this->camera_ == nullptr || !this->camera_->is_streaming()) {
     return;
   }
@@ -127,7 +138,6 @@ void FaceDetectionComponent::process_frame_() {
 
   this->frame_counter_ = 0;
 
-  // Acquire buffer from camera
   esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
     return;
@@ -138,6 +148,13 @@ void FaceDetectionComponent::process_frame_() {
   uint16_t height = this->camera_->get_image_height();
 
   if (img_data != nullptr) {
+    // ESP32-P4: Invalidate CPU cache before reading PSRAM buffer.
+    // Camera DMA writes directly to PSRAM, but CPU cache may hold stale data.
+    // Without this, ESP-DL reads garbage and never detects faces.
+    uint32_t buf_size = width * height * 2;  // RGB565
+    esp_cache_msync(img_data, buf_size,
+                    ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
     this->detect_faces_(img_data, width, height);
     // NOTE: Don't draw here to avoid flickering!
     // Drawing is done by lvgl_camera_display via draw_on_frame()
@@ -147,7 +164,9 @@ void FaceDetectionComponent::process_frame_() {
 }
 
 void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
-  if (this->draw_enabled_ && img_data != nullptr) {
+  if (img_data == nullptr) return;
+
+  if (this->draw_enabled_) {
     this->draw_results_(img_data, width, height);
   }
 }
@@ -158,7 +177,6 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     return;
   }
 
-  // Create image structure for ESP-DL
   dl::image::img_t img = {
     .data = img_data,
     .width = width,
@@ -166,8 +184,20 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Run face detection
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+
+  // Monitor stack usage to detect overflow during inference
+  static uint32_t min_stack_free = UINT32_MAX;
+  UBaseType_t stack_free = uxTaskGetStackHighWaterMark(nullptr);
+  if (stack_free < min_stack_free) {
+    min_stack_free = stack_free;
+    ESP_LOGW(TAG, "Stack high water mark: %u words (%u bytes) remaining",
+             (unsigned)stack_free, (unsigned)(stack_free * 4));
+  }
+
+  if (face_results.size() > 0) {
+    ESP_LOGI(TAG, "Detected %d face(s)", (int)face_results.size());
+  }
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {

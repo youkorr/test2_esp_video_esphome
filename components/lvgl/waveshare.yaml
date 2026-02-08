@@ -3772,6 +3772,7 @@ lvgl:
               auto canvas = id(face_unlock_canvas);
               if (canvas != nullptr) {
                 id(camera_display).configure_canvas(canvas);
+                id(camera_display).set_enabled(true);
               }
               id(unlock_timeout_start) = millis();
 
@@ -6006,6 +6007,7 @@ interval:
             }
             lv_obj_set_style_text_color(id(face_status_label), lv_color_hex(0x3fb950), 0);
 
+            id(camera_display).set_enabled(false);
             id(tab5_cam).stop_streaming();
             auto canvas = id(camera_canvas);
             if (canvas) id(camera_display).configure_canvas(canvas);
@@ -6014,6 +6016,7 @@ interval:
           // Timeout expiré
           if (remaining <= 0) {
             ESP_LOGI("lock", "Timeout - retour veille");
+            id(camera_display).set_enabled(false);
             id(tab5_cam).stop_streaming();
             auto canvas = id(camera_canvas);
             if (canvas) id(camera_display).configure_canvas(canvas);

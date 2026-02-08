@@ -48,8 +48,9 @@ existing_defines = [define[0] if isinstance(define, tuple) else define for defin
 
 if "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA" not in existing_defines:
     env.Append(CPPDEFINES=[
-        ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1"),
-        ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MSRMNP_S8_V1", "1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MSR_S8_V1", "1"),
+        ("CONFIG_HUMAN_FACE_DETECT_MNP_S8_V1", "1"),
         ("CONFIG_HUMAN_FACE_DETECT_MODEL_TYPE", "0"),
         ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA", "1"),
         ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0"),

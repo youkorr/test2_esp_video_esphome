@@ -130,12 +130,6 @@ void ESPVideoComponent::setup() {
   // Afficher les fonctionnalités activées
   // ESP_LOGI(TAG, "Fonctionnalités activées:");
 
-#ifdef ESP_VIDEO_H264_ENABLED
-  // ESP_LOGI(TAG, "  Encodeur H.264 matériel");
-#else
-  // ESP_LOGI(TAG, "  Encodeur H.264 désactivé");
-#endif
-
 #ifdef ESP_VIDEO_JPEG_ENABLED
   // ESP_LOGI(TAG, "  Encodeur JPEG matériel");
 #else
@@ -322,12 +316,6 @@ void ESPVideoComponent::setup() {
     close(fd);
   }
 
-  fd = open("/dev/video11", O_RDWR);
-  if (fd >= 0) {
-    ESP_LOGW(TAG, "   /dev/video11 existe (H.264 encoder)");
-    close(fd);
-  }
-
   fd = open("/dev/video20", O_RDWR);
   if (fd >= 0) {
     ESP_LOGW(TAG, "   /dev/video20 existe (ISP device)");
@@ -382,9 +370,6 @@ void ESPVideoComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  I2C: Bus ESPHome partagé (%p)", this->i2c_bus_);
 
   ESP_LOGCONFIG(TAG, "  Encodeurs:");
-#ifdef ESP_VIDEO_H264_ENABLED
-  ESP_LOGCONFIG(TAG, "    - H.264 (matériel)");
-#endif
 #ifdef ESP_VIDEO_JPEG_ENABLED
   ESP_LOGCONFIG(TAG, "    - JPEG (matériel)");
 #endif

@@ -1,6 +1,6 @@
 """
 Build script for simple_video_player component
-Links optimized H264 decoder and audio codec libraries
+Compiles esp_h264 decoder sources and links H264 decoder library
 """
 
 import os
@@ -31,16 +31,11 @@ if os.path.exists(yuv_lut_src):
     env.StaticObject(yuv_lut_src)
 
 # ========================================================================
-# Link optimized H.264 decoder library (tinyh264)
+# H.264 decoder: compile sources + link library
 # ========================================================================
 esp_h264_dir = os.path.join(parent_components_dir, "esp_h264")
 if os.path.exists(esp_h264_dir):
-    # Dual-task H.264 flags are defined in esp_h264/__init__.py to avoid redefinition warnings
-    print("[Simple Video Player] Using H.264 dual-task config from esp_h264 component")
-
     # ESP32-P4 specific optimizations for video decoding performance
-    # Use -Os (optimize for size) instead of -O3 to reduce flash usage
-    # Still enable critical performance flags for video decoding
     env.Append(CCFLAGS=[
         "-ffast-math",                  # Fast floating-point math (safe for video)
         "-ftree-vectorize",             # Enable auto-vectorization (use SIMD)
@@ -51,7 +46,7 @@ if os.path.exists(esp_h264_dir):
     ])
     print("[Simple Video Player] Enabled ESP32-P4 performance optimizations (vectorization, fast-math)")
 
-    # Add esp_h264 include paths for compiling wrapper code
+    # Add esp_h264 include paths
     esp_h264_includes = [
         os.path.join(esp_h264_dir, "interface", "include"),
         os.path.join(esp_h264_dir, "port", "include"),
@@ -59,142 +54,73 @@ if os.path.exists(esp_h264_dir):
         os.path.join(esp_h264_dir, "sw", "include"),
         os.path.join(esp_h264_dir, "sw", "src"),
         os.path.join(esp_h264_dir, "hw", "include"),
+        os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc"),
+        os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc"),
+        os.path.join(esp_h264_dir, "hw", "src"),
+        os.path.join(esp_h264_dir, "hw", "hal", "esp32p4"),
+        os.path.join(esp_h264_dir, "hw", "soc", "esp32p4"),
     ]
     for inc_path in esp_h264_includes:
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
 
-    # NOTE: esp_h264_dec_sw.c is now compiled in esp_video_build.py with DUAL_TASK flags
-    # This follows Espressif's official approach (CMakeLists.txt)
-    # No need to compile a separate wrapper here!
-    print("[Simple Video Player]  esp_h264_dec_sw.c compiled by esp_video_build.py with DUAL_TASK")
+    # ========================================================================
+    # Compile esp_h264 decoder sources directly
+    # ========================================================================
+    esp_h264_decoder_sources = [
+        "port/src/esp_h264_alloc.c",
+        "port/src/esp_h264_cache.c",
+        "sw/src/esp_h264_dec_sw.c",
+        "sw/src/h264_color_convert.c",
+        "interface/include/src/esp_h264_dec.c",
+        "interface/include/src/esp_h264_dec_param.c",
+        "interface/include/src/esp_h264_version.c",
+    ]
 
-    # DEPRECATED: Old wrapper approach (now handled by esp_video_build.py)
-    # esp_h264_dec_sw_c = os.path.join(esp_h264_dir, "sw", "src", "esp_h264_dec_sw.c")
-    h264_wrapper_sources = []
+    h264_objects = []
+    for src in esp_h264_decoder_sources:
+        src_path = os.path.join(esp_h264_dir, src)
+        if os.path.exists(src_path):
+            obj = env.Object(src_path)
+            h264_objects.extend(obj)
+            print(f"[Simple Video Player] + esp_h264/{src}")
 
-    if False:  # Disabled: wrapper compilation now in esp_video_build.py
-        pass
-        # print(f"[Simple Video Player] Compiling esp_h264_dec_sw.c with DUAL_TASK flags...")
-
-    # Create static library from wrapper sources
-    if h264_wrapper_sources:
-        # CRITICAL: Explicitly compile objects with DUAL_TASK flags
-        # Use UNIQUE target name to force recompilation (avoid SCons cache)
-        print("[Simple Video Player]  EXPLICITLY compiling with -DCONFIG_ESP_H264_DUAL_TASK=1")
-        wrapper_objects = []
-        for src in h264_wrapper_sources:
-            # Use existing environment defines (from esp_h264/__init__.py)
-            # No need to redefine flags here - they're inherited from global environment
-            existing_defines = list(env.get('CPPDEFINES', []))
-
-            # Use UNIQUE target name to force recompilation (avoid SCons cached version)
-            src_basename = os.path.basename(src).replace('.c', '_dual_task.o')
-            target_path = os.path.join(env['PROJECT_BUILD_DIR'], src_basename)
-
-            # Compile with inherited flags from global environment
-            obj = env.Object(
-                target=target_path,
-                source=src,
-                CPPDEFINES=existing_defines
-            )
-
-            # Force SCons to ALWAYS rebuild this file (never use cache)
-            env.AlwaysBuild(obj)
-            env.NoCache(obj)
-
-            wrapper_objects.extend(obj)
-            print(f"[Simple Video Player] Compiling {os.path.basename(src)} {src_basename} (CCFLAGS + CPPDEFINES)")
-
-        # Create library from explicitly compiled objects
-        h264_wrapper_lib = env.StaticLibrary(
-            target=os.path.join(env['PROJECT_BUILD_DIR'], "libh264_wrapper_dual"),
-            source=wrapper_objects
+    if h264_objects:
+        h264_dec_lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libh264_decoder_svp"),
+            h264_objects
         )
+        env.Prepend(LIBS=[h264_dec_lib])
+        print(f"[Simple Video Player] Created libh264_decoder_svp.a with decoder sources")
 
-        # CRITICAL: Get the actual file path from the library node
-        wrapper_lib_file = h264_wrapper_lib[0]  # StaticLibrary returns a list with one element
-        wrapper_lib_path = str(wrapper_lib_file.get_abspath())
-
-        # Add library to build dependencies
-        env.Prepend(LIBS=[h264_wrapper_lib])
-        env.Prepend(LIBPATH=[env['PROJECT_BUILD_DIR']])
-
-        # ULTRA AGGRESSIVE: Force linker to use OUR symbols by making them undefined first
-        # Then link our library FIRST so it resolves them
-        env.Prepend(LINKFLAGS=[
-            "-Wl,--undefined=esp_h264_dec_sw_new",  # Force this symbol to be resolved
-            "-Wl,--whole-archive",                   # Include ALL symbols from our lib
-            wrapper_lib_path,
-            "-Wl,--no-whole-archive"
-        ])
-
-        print("[Simple Video Player] ULTRA AGGRESSIVE linking: --undefined + --whole-archive")
-
-        print("[Simple Video Player] Created libh264_wrapper_dual.a with DUAL_TASK enabled")
-        print("[Simple Video Player] AGGRESSIVE linking: --allow-multiple-definition + --whole-archive")
-        print(f"[Simple Video Player]   Library: {wrapper_lib_path}")
-        print("[Simple Video Player]   Our DUAL_TASK symbols MUST override ESP-Video!")
-
-    # Add esp_h264 library path for ESP32-P4
+    # ========================================================================
+    # Link H.264 libraries: openh264 (encoder/decoder) + tinyh264 (h264bsd decoder)
+    # esp_h264_dec_sw.c calls h264bsd* functions from tinyh264
+    # ========================================================================
     h264_lib_dir = os.path.join(esp_h264_dir, "sw", "libs", "esp32p4")
+    openh264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
+    tinyh264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
 
-    # CRITICAL: Use OpenH264 for FULL H.264 profile support (Baseline, Main, High)!
-    # This is REQUIRED for security cameras which often use High Profile.
-    # Trade-off: OpenH264 is ~20-30% slower than tinyh264 but supports ALL profiles.
-    #
-    # TinyH264: Faster (ESP32 dual-task) but ONLY Constrained Baseline
-    # OpenH264: Slower (generic threading) but supports Baseline/Main/High/High10/etc
-    #
-    # Security cameras compatibility > performance optimization
-    h264_lib = os.path.join(h264_lib_dir, "libopenh264.a")
-    h264_lib_name = "openh264"
-
-    if not os.path.exists(h264_lib):
-        # Fallback to tinyh264 if openh264 not available
-        # NOTE: TinyH264 ONLY supports Constrained Baseline (security cameras won't work!)
-        h264_lib = os.path.join(h264_lib_dir, "libtinyh264.a")
-        h264_lib_name = "tinyh264"
-        print("[Simple Video Player]  WARNING: Using tinyh264 (ONLY Constrained Baseline)")
-        print("[Simple Video Player]     OpenH264 not found - High Profile videos will FAIL")
-
-    if os.path.exists(h264_lib):
-        lib_size_mb = os.path.getsize(h264_lib) / (1024 * 1024)
-        print(f"[Simple Video Player] ========================================")
-        print(f"[Simple Video Player] Using {h264_lib_name} decoder library")
-        print(f"[Simple Video Player]   Path: {h264_lib}")
-        print(f"[Simple Video Player]   Size: {lib_size_mb:.1f} MB")
-        if h264_lib_name == "openh264":
-            print(f"[Simple Video Player]   Profiles: Baseline, Main, High, High10, High422, High444")
-            print(f"[Simple Video Player]   Note: ~20-30% slower but supports ALL H.264 profiles")
-        else:
-            print(f"[Simple Video Player]   Profiles: Constrained Baseline ONLY")
-            print(f"[Simple Video Player]   Note: Faster but security cameras may not work")
-        print(f"[Simple Video Player] ========================================")
-
-        # Add library path
+    if os.path.exists(h264_lib_dir):
         env.Append(LIBPATH=[h264_lib_dir])
 
-        # Add include paths for decoder
-        if h264_lib_name == "tinyh264":
-            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "tinyh264_inc")
-        else:  # openh264
-            h264_inc = os.path.join(esp_h264_dir, "sw", "libs", "openh264_inc")
-
-        if os.path.exists(h264_inc):
-            env.Append(CPPPATH=[h264_inc])
-            print(f"[Simple Video Player] Added {h264_lib_name} include path")
-
-        # Link pre-compiled library AFTER our wrapper library (linked with Prepend above)
-        # The linker will use our esp_h264_dec_sw.o (with DUAL_TASK flags)
-        # and skip the version in the pre-compiled library
-        env.Append(LINKFLAGS=[h264_lib])
-
-        print(f"[Simple Video Player] Linked optimized {h264_lib_name} decoder library")
-        print("[Simple Video Player]   Wrapper symbols from libh264_wrapper_dual.a take precedence")
-        print("[Simple Video Player]   This should reduce H.264 decode time from ~60ms to ~20-30ms")
+    if os.path.exists(openh264_lib):
+        env.Append(LINKFLAGS=[
+            "-Wl,--allow-multiple-definition",
+            "-Wl,--whole-archive",
+            openh264_lib,
+            "-Wl,--no-whole-archive",
+        ])
+        print(f"[Simple Video Player] Linked openh264 (Baseline/Main/High profiles)")
     else:
-        print(f"[Simple Video Player]  H.264 decoder library not found in {h264_lib_dir}")
+        print(f"[Simple Video Player]  openh264 not found")
+
+    # tinyh264 provides h264bsd* symbols needed by esp_h264_dec_sw.c
+    if os.path.exists(tinyh264_lib):
+        env.Append(LIBS=["tinyh264"])
+        print(f"[Simple Video Player] Linked tinyh264 (h264bsd decoder symbols)")
+    else:
+        print(f"[Simple Video Player]  tinyh264 not found")
 else:
     print(f"[Simple Video Player]  esp_h264 component not found")
 
@@ -202,13 +128,11 @@ else:
 # esp_image_effects (esp_imgfx) REMOVED - buggy and slower than software LUT
 # ========================================================================
 # NOW USING: PPA hardware (ESP32-P4) + software LUT fallback
-# esp_imgfx was causing 42ms delays instead of expected 3-5ms
 print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx removed)")
 
 # ========================================================================
 # Audio codec library - REMOVED (not working)
 # ========================================================================
-# esp_audio_codec has been removed because it does not work properly
 print("[Simple Video Player] Audio codec disabled (esp_audio_codec removed)")
 
 print("[Simple Video Player] Build script completed")
