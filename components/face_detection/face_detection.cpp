@@ -186,6 +186,15 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
 
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
 
+  // Monitor stack usage to detect overflow during inference
+  static uint32_t min_stack_free = UINT32_MAX;
+  UBaseType_t stack_free = uxTaskGetStackHighWaterMark(nullptr);
+  if (stack_free < min_stack_free) {
+    min_stack_free = stack_free;
+    ESP_LOGW(TAG, "Stack high water mark: %u words (%u bytes) remaining",
+             (unsigned)stack_free, (unsigned)(stack_free * 4));
+  }
+
   if (face_results.size() > 0) {
     ESP_LOGI(TAG, "Detected %d face(s)", (int)face_results.size());
   }
