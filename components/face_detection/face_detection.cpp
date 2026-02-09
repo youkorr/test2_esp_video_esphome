@@ -16,11 +16,29 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <sys/stat.h>
 
 namespace esphome {
 namespace face_detection {
 
 static const char *const TAG = "face_detection";
+
+// Ensure parent directory exists for a file path (creates one level)
+static bool ensure_parent_dir_(const std::string &file_path) {
+  size_t last_slash = file_path.rfind('/');
+  if (last_slash == std::string::npos || last_slash == 0) return true;
+  std::string dir = file_path.substr(0, last_slash);
+  struct stat st;
+  if (stat(dir.c_str(), &st) == 0) {
+    return true;  // Directory already exists
+  }
+  if (mkdir(dir.c_str(), 0755) == 0) {
+    ESP_LOGI(TAG, "Created directory: %s", dir.c_str());
+    return true;
+  }
+  ESP_LOGE(TAG, "Failed to create directory: %s", dir.c_str());
+  return false;
+}
 
 void FaceDetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Face Detection...");
@@ -94,6 +112,12 @@ void FaceDetectionComponent::setup() {
     ESP_LOGI(TAG, "Initializing face recognition...");
     ESP_LOGI(TAG, "  Database path: %s", this->face_db_path_.c_str());
     ESP_LOGI(TAG, "  Recognition threshold: %.2f", this->recognition_threshold_);
+
+    // Ensure the database directory exists on SD card
+    if (!ensure_parent_dir_(this->face_db_path_)) {
+      ESP_LOGE(TAG, "Cannot create database directory - recognition disabled");
+      this->recognition_enabled_ = false;
+    }
 
     this->face_recognizer_ = new HumanFaceRecognizer(
       this->face_db_path_.c_str(),
@@ -251,6 +275,10 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
 
     // Check if enrollment is pending
     if (this->enroll_pending_) {
+      ESP_LOGI(TAG, "Enrolling face (score=%.2f, box=[%d,%d,%d,%d])...",
+               first_face_result.score,
+               first_face_result.box[0], first_face_result.box[1],
+               first_face_result.box[2], first_face_result.box[3]);
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
       if (new_id >= 0) {
         // ESP-DL returns ID from enroll, but recognition returns ID+1
@@ -265,7 +293,8 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
           this->save_names_to_sd_();
         }
       } else {
-        ESP_LOGE(TAG, "Failed to enroll face");
+        ESP_LOGE(TAG, "Failed to enroll face (returned %d)", new_id);
+        ESP_LOGE(TAG, "  Check: DB dir exists? DB file writable? Face clear enough?");
       }
       this->enroll_pending_ = false;
     } else {
@@ -459,12 +488,26 @@ void FaceDetectionComponent::clear_all_faces() {
     return;
   }
 
-  // Clear in-memory features
-  this->face_recognizer_->clear_all_feats();
+  ESP_LOGI(TAG, "Clearing all faces...");
+
+  // Nullify recognizer pointer FIRST to prevent detection loop from using it
+  // during delete/recreate. The detection loop checks this pointer.
+  HumanFaceRecognizer *old_recognizer = this->face_recognizer_;
+  this->face_recognizer_ = nullptr;
+
+  // Clear cached recognition state
+  this->last_recognition_.recognized = false;
+  this->last_recognition_.id = -1;
+  this->last_recognition_.similarity = 0.0f;
+  this->cached_recognized_name_.clear();
+  this->cached_recognized_id_ = -1;
 
   // Clear names
   this->face_names_.clear();
   this->save_names_to_sd_();
+
+  // Delete the old recognizer safely
+  delete old_recognizer;
 
   // Delete the database file from SD card
   if (std::remove(this->face_db_path_.c_str()) == 0) {
@@ -473,8 +516,10 @@ void FaceDetectionComponent::clear_all_faces() {
     ESP_LOGW(TAG, "Could not delete face database (may not exist): %s", this->face_db_path_.c_str());
   }
 
+  // Ensure directory still exists before recreating
+  ensure_parent_dir_(this->face_db_path_);
+
   // Reinitialize the recognizer with empty database
-  delete this->face_recognizer_;
   this->face_recognizer_ = new HumanFaceRecognizer(
     this->face_db_path_.c_str(),
     nullptr,
@@ -482,7 +527,12 @@ void FaceDetectionComponent::clear_all_faces() {
     false
   );
 
-  ESP_LOGI(TAG, "All faces and names cleared, database reset");
+  if (this->face_recognizer_ != nullptr) {
+    ESP_LOGI(TAG, "All faces and names cleared, database reset");
+  } else {
+    ESP_LOGE(TAG, "Failed to reinitialize face recognizer after clear");
+    this->recognition_enabled_ = false;
+  }
 #else
   ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
 #endif
