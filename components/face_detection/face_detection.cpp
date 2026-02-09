@@ -119,6 +119,17 @@ void FaceDetectionComponent::setup() {
       this->recognition_enabled_ = false;
     }
 
+    // Check if a stale/incompatible database file exists.
+    // If the file exists but the recognizer can't read it properly
+    // (e.g., feature length mismatch from a different model version),
+    // delete it so enrollment can work with a fresh database.
+    {
+      struct stat db_stat;
+      if (stat(this->face_db_path_.c_str(), &db_stat) == 0) {
+        ESP_LOGI(TAG, "  Existing database file found (%ld bytes)", (long)db_stat.st_size);
+      }
+    }
+
     this->face_recognizer_ = new HumanFaceRecognizer(
       this->face_db_path_.c_str(),
       nullptr,
@@ -129,6 +140,34 @@ void FaceDetectionComponent::setup() {
     if (this->face_recognizer_ != nullptr) {
       int enrolled = this->face_recognizer_->get_num_feats();
       ESP_LOGI(TAG, "Face recognizer initialized (%d faces enrolled)", enrolled);
+
+      // If 0 faces enrolled but DB file exists, it's likely stale/incompatible.
+      // Delete it and recreate to avoid "Feature len does not match" errors.
+      if (enrolled == 0) {
+        struct stat db_stat;
+        if (stat(this->face_db_path_.c_str(), &db_stat) == 0 && db_stat.st_size > 0) {
+          ESP_LOGW(TAG, "Database file exists but has 0 enrolled faces - likely incompatible");
+          ESP_LOGW(TAG, "Deleting stale database and recreating...");
+          delete this->face_recognizer_;
+          this->face_recognizer_ = nullptr;
+
+          std::remove(this->face_db_path_.c_str());
+
+          this->face_recognizer_ = new HumanFaceRecognizer(
+            this->face_db_path_.c_str(),
+            nullptr,
+            HumanFaceFeat::MFN_S8_V1,
+            false
+          );
+
+          if (this->face_recognizer_ != nullptr) {
+            ESP_LOGI(TAG, "Face recognizer re-created with fresh database");
+          } else {
+            ESP_LOGE(TAG, "Failed to re-create face recognizer");
+            this->recognition_enabled_ = false;
+          }
+        }
+      }
     } else {
       ESP_LOGE(TAG, "Failed to initialize face recognizer");
       this->recognition_enabled_ = false;
@@ -280,6 +319,39 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
                first_face_result.box[0], first_face_result.box[1],
                first_face_result.box[2], first_face_result.box[3]);
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
+
+      // If enrollment failed, likely stale/incompatible DB.
+      // Auto-recover: delete DB, recreate recognizer, retry once.
+      if (new_id < 0) {
+        ESP_LOGW(TAG, "Enrollment failed (returned %d) - attempting DB reset and retry...", new_id);
+
+        // Safely recreate recognizer with fresh database
+        HumanFaceRecognizer *old = this->face_recognizer_;
+        this->face_recognizer_ = nullptr;
+        delete old;
+
+        std::remove(this->face_db_path_.c_str());
+        ensure_parent_dir_(this->face_db_path_);
+
+        this->face_recognizer_ = new HumanFaceRecognizer(
+          this->face_db_path_.c_str(),
+          nullptr,
+          HumanFaceFeat::MFN_S8_V1,
+          false
+        );
+
+        if (this->face_recognizer_ != nullptr) {
+          ESP_LOGI(TAG, "Recognizer recreated with fresh DB, retrying enrollment...");
+          new_id = this->face_recognizer_->enroll(img, first_face_result);
+        } else {
+          ESP_LOGE(TAG, "Failed to recreate recognizer");
+          this->recognition_enabled_ = false;
+          this->enroll_pending_ = false;
+          this->pending_enroll_name_.clear();
+          return;
+        }
+      }
+
       if (new_id >= 0) {
         // ESP-DL returns ID from enroll, but recognition returns ID+1
         // So we save the name with ID+1 to match recognition results
@@ -293,8 +365,8 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
           this->save_names_to_sd_();
         }
       } else {
-        ESP_LOGE(TAG, "Failed to enroll face (returned %d)", new_id);
-        ESP_LOGE(TAG, "  Check: DB dir exists? DB file writable? Face clear enough?");
+        ESP_LOGE(TAG, "Enrollment failed after DB reset (returned %d)", new_id);
+        ESP_LOGE(TAG, "  Face may not be clear enough for feature extraction");
       }
       this->enroll_pending_ = false;
     } else {
