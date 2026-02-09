@@ -3,6 +3,7 @@
 #include "esphome/core/application.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_task_wdt.h"
 
 // ESP-DL detection components (only for face_recognition model)
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -119,14 +120,20 @@ void FaceDetectionComponent::setup() {
       this->recognition_enabled_ = false;
     }
 
-    // Check if a stale/incompatible database file exists.
-    // If the file exists but the recognizer can't read it properly
-    // (e.g., feature length mismatch from a different model version),
-    // delete it so enrollment can work with a fresh database.
+    // Check for existing database file and validate integrity.
+    // A corrupt/stale DB causes enroll() to deadlock (watchdog crash).
+    // Minimum valid DB: header (~64 bytes) + ~2KB per enrolled face.
     {
       struct stat db_stat;
-      if (stat(this->face_db_path_.c_str(), &db_stat) == 0) {
+      bool db_exists = (stat(this->face_db_path_.c_str(), &db_stat) == 0);
+      if (db_exists) {
         ESP_LOGI(TAG, "  Existing database file found (%ld bytes)", (long)db_stat.st_size);
+        // A valid face DB should be at least a few hundred bytes.
+        // Files < 100 bytes are always corrupt (just partial header/metadata).
+        if (db_stat.st_size < 100) {
+          ESP_LOGW(TAG, "  Database file too small (%ld bytes) - deleting corrupt file", (long)db_stat.st_size);
+          std::remove(this->face_db_path_.c_str());
+        }
       }
     }
 
@@ -141,31 +148,39 @@ void FaceDetectionComponent::setup() {
       int enrolled = this->face_recognizer_->get_num_feats();
       ESP_LOGI(TAG, "Face recognizer initialized (%d faces enrolled)", enrolled);
 
-      // If 0 faces enrolled but DB file exists, it's likely stale/incompatible.
-      // Delete it and recreate to avoid "Feature len does not match" errors.
-      if (enrolled == 0) {
-        struct stat db_stat;
-        if (stat(this->face_db_path_.c_str(), &db_stat) == 0 && db_stat.st_size > 0) {
-          ESP_LOGW(TAG, "Database file exists but has 0 enrolled faces - likely incompatible");
-          ESP_LOGW(TAG, "Deleting stale database and recreating...");
-          delete this->face_recognizer_;
-          this->face_recognizer_ = nullptr;
+      // Validate: if enrolled > 0 but DB file is too small, it's corrupt.
+      // Each face needs ~2KB+ of feature data. Also catch enrolled==0 with stale file.
+      bool need_reset = false;
+      struct stat db_stat;
+      bool db_exists = (stat(this->face_db_path_.c_str(), &db_stat) == 0);
 
-          std::remove(this->face_db_path_.c_str());
+      if (enrolled == 0 && db_exists && db_stat.st_size > 0) {
+        ESP_LOGW(TAG, "DB file exists but 0 enrolled faces - stale/incompatible");
+        need_reset = true;
+      } else if (enrolled > 0 && db_exists && db_stat.st_size < (enrolled * 512 + 64)) {
+        ESP_LOGW(TAG, "DB claims %d faces but file is only %ld bytes - corrupt!",
+                 enrolled, (long)db_stat.st_size);
+        need_reset = true;
+      }
 
-          this->face_recognizer_ = new HumanFaceRecognizer(
-            this->face_db_path_.c_str(),
-            nullptr,
-            HumanFaceFeat::MFN_S8_V1,
-            false
-          );
+      if (need_reset) {
+        ESP_LOGW(TAG, "Deleting corrupt/stale database and recreating...");
+        delete this->face_recognizer_;
+        this->face_recognizer_ = nullptr;
+        std::remove(this->face_db_path_.c_str());
 
-          if (this->face_recognizer_ != nullptr) {
-            ESP_LOGI(TAG, "Face recognizer re-created with fresh database");
-          } else {
-            ESP_LOGE(TAG, "Failed to re-create face recognizer");
-            this->recognition_enabled_ = false;
-          }
+        this->face_recognizer_ = new HumanFaceRecognizer(
+          this->face_db_path_.c_str(),
+          nullptr,
+          HumanFaceFeat::MFN_S8_V1,
+          false
+        );
+
+        if (this->face_recognizer_ != nullptr) {
+          ESP_LOGI(TAG, "Face recognizer re-created with fresh database");
+        } else {
+          ESP_LOGE(TAG, "Failed to re-create face recognizer");
+          this->recognition_enabled_ = false;
         }
       }
     } else {
@@ -318,7 +333,16 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
                first_face_result.score,
                first_face_result.box[0], first_face_result.box[1],
                first_face_result.box[2], first_face_result.box[3]);
+
+      // Remove main task from WDT monitoring - enrollment can take several seconds
+      // and would otherwise trigger the 5s task watchdog.
+      esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
+
+      // Re-add task to WDT monitoring
+      esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+      esp_task_wdt_reset();
 
       // If enrollment failed, likely stale/incompatible DB.
       // Auto-recover: delete DB, recreate recognizer, retry once.
@@ -342,7 +366,10 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
 
         if (this->face_recognizer_ != nullptr) {
           ESP_LOGI(TAG, "Recognizer recreated with fresh DB, retrying enrollment...");
+          esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
           new_id = this->face_recognizer_->enroll(img, first_face_result);
+          esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+          esp_task_wdt_reset();
         } else {
           ESP_LOGE(TAG, "Failed to recreate recognizer");
           this->recognition_enabled_ = false;
