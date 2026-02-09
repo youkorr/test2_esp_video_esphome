@@ -114,6 +114,11 @@ class FaceDetectionComponent : public Component {
   RecognitionResult last_recognition_{-1, 0.0f, false};
   bool enroll_pending_{false};
   std::string pending_enroll_name_{};
+  std::string cached_recognized_name_{};  // Cached name to avoid map lookup + allocation per frame
+  int cached_recognized_id_{-1};  // ID for which cached_recognized_name_ is valid
+
+  // Memory diagnostics
+  uint32_t diag_counter_{0};
 
   // Face name mapping (ID -> name)
   std::map<int, std::string> face_names_;
@@ -127,9 +132,9 @@ class FaceDetectionComponent : public Component {
   void detect_faces_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
-                  int x, int y, char c, const std::vector<uint8_t> &color, int scale);
+                  int x, int y, char c, const uint8_t *color, int scale);
   void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
-                  int x, int y, const std::string &text, const std::vector<uint8_t> &color, int scale);
+                  int x, int y, const std::string &text, const uint8_t *color, int scale);
 
   // SD card persistence for names
   std::string get_names_file_path_();

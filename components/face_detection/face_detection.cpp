@@ -46,6 +46,9 @@ void FaceDetectionComponent::setup() {
     return;
   }
 
+  // Pre-reserve capacity for cached results to avoid dynamic reallocation
+  this->cached_face_results_.reserve(8);
+
   // Initialize face detector
   uint32_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   uint32_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
@@ -126,6 +129,16 @@ void FaceDetectionComponent::loop() {
   }
 
   this->process_frame_();
+
+  // Periodic memory diagnostics (every ~500 detection cycles)
+  this->diag_counter_++;
+  if (this->diag_counter_ % (500 * this->detection_interval_) == 0) {
+    uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    uint32_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Memory: PSRAM=%uKB free (largest=%uKB), internal=%uKB free",
+             psram_free / 1024, psram_largest / 1024, internal_free / 1024);
+  }
 }
 
 void FaceDetectionComponent::process_frame_() {
@@ -195,8 +208,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
              (unsigned)stack_free, (unsigned)(stack_free * 4));
   }
 
+  // Rate-limit detection logging to avoid flooding (log every 10th detection)
   if (face_results.size() > 0) {
-    ESP_LOGI(TAG, "Detected %d face(s)", (int)face_results.size());
+    static uint32_t detect_log_counter = 0;
+    if (detect_log_counter++ % 10 == 0) {
+      ESP_LOGI(TAG, "Detected %d face(s) [every 10th logged]", (int)face_results.size());
+    }
   }
 
   // Cache results (mutex protected)
@@ -255,6 +272,11 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       // Try to recognize
       dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
       if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
+        // Invalidate cached name if recognized face changed
+        if (rec_result->id != this->cached_recognized_id_) {
+          this->cached_recognized_name_.clear();
+          this->cached_recognized_id_ = rec_result->id;
+        }
         this->last_recognition_.id = rec_result->id;
         this->last_recognition_.similarity = rec_result->similarity;
         this->last_recognition_.recognized = true;
@@ -268,11 +290,19 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
         }
       } else {
         this->last_recognition_.recognized = false;
+        this->cached_recognized_name_.clear();
+        this->cached_recognized_id_ = -1;
       }
     }
   }
 #endif
 }
+
+// Static RGB565 colors (little-endian) - avoids heap allocation every frame
+static const uint8_t COLOR_GREEN[] = {0xE0, 0x07};   // Green - unknown face
+static const uint8_t COLOR_BLUE[] = {0x1F, 0x00};    // Blue - recognized face
+static const uint8_t COLOR_RED[] = {0x00, 0xF8};     // Red for keypoints
+static const uint8_t COLOR_WHITE[] = {0xFF, 0xFF};   // White for text
 
 void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -289,10 +319,14 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
   };
 
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    // RGB565 colors (little-endian)
-    std::vector<uint8_t> green = {0xE0, 0x07};   // Green - unknown face
-    std::vector<uint8_t> blue = {0x1F, 0x00};    // Blue - recognized face
-    std::vector<uint8_t> red = {0x00, 0xF8};     // Red for keypoints
+    // Use static color vectors for ESP-DL draw API (constructed once)
+    static const std::vector<uint8_t> green_vec(COLOR_GREEN, COLOR_GREEN + 2);
+    static const std::vector<uint8_t> blue_vec(COLOR_BLUE, COLOR_BLUE + 2);
+    static const std::vector<uint8_t> red_vec(COLOR_RED, COLOR_RED + 2);
+
+    bool is_recognized = this->last_recognition_.recognized;
+    const std::vector<uint8_t> &box_color = is_recognized ? blue_vec : green_vec;
+    int line_width = is_recognized ? 4 : 3;
 
     for (auto &box : this->cached_face_results_) {
       // Clamp bounding box coordinates to valid range
@@ -301,24 +335,20 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
       int x2 = std::max(x1 + 1, std::min((int)box.x2, (int)width - 4));
       int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 4));
 
-      // Choose color based on recognition status
-      std::vector<uint8_t> &box_color = this->last_recognition_.recognized ? blue : green;
-
-      // Draw bounding box (thicker for recognized faces)
-      int line_width = this->last_recognition_.recognized ? 4 : 3;
+      // Draw bounding box
       dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, line_width);
 
       // Draw name above the box if recognized
-      if (this->last_recognition_.recognized) {
-        std::string name = this->get_face_name(this->last_recognition_.id);
-        if (name.empty()) {
-          // Show ID if no name set
-          name = "ID " + std::to_string(this->last_recognition_.id);
+      if (is_recognized) {
+        // Use cached name to avoid map lookup + string allocation every frame
+        if (this->cached_recognized_name_.empty()) {
+          this->cached_recognized_name_ = this->get_face_name(this->last_recognition_.id);
+          if (this->cached_recognized_name_.empty()) {
+            this->cached_recognized_name_ = "ID " + std::to_string(this->last_recognition_.id);
+          }
         }
-        // Draw name above the box with white color, scale 2
-        std::vector<uint8_t> white = {0xFF, 0xFF};
         int text_y = std::max(2, y1 - 18);  // 18 pixels above box
-        this->draw_text_(img_data, width, height, x1, text_y, name, white, 2);
+        this->draw_text_(img_data, width, height, x1, text_y, this->cached_recognized_name_, COLOR_WHITE, 2);
       }
 
       // Draw red keypoints (5 facial landmarks) as hollow rectangles
@@ -328,13 +358,12 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
 
         // Check bounds with margin
         if (kp_x >= 12 && kp_y >= 12 && kp_x < (int)width - 12 && kp_y < (int)height - 12) {
-          // Draw hollow rectangle (not filled)
           int size = 10;  // 20x20 pixel rectangle
           int rx1 = kp_x - size;
           int ry1 = kp_y - size;
           int rx2 = kp_x + size;
           int ry2 = kp_y + size;
-          dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red, 2);
+          dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red_vec, 2);
         }
       }
     }
@@ -478,6 +507,8 @@ void FaceDetectionComponent::reset_last_recognition() {
   this->last_recognition_.id = -1;
   this->last_recognition_.similarity = 0.0f;
   this->last_recognition_.recognized = false;
+  this->cached_recognized_name_.clear();
+  this->cached_recognized_id_ = -1;
   ESP_LOGI(TAG, "Recognition result reset");
 }
 
@@ -564,7 +595,7 @@ static const uint8_t FONT_5X7[][7] = {
 };
 
 void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
-                                        int x, int y, char c, const std::vector<uint8_t> &color, int scale) {
+                                        int x, int y, char c, const uint8_t *color, int scale) {
   int font_idx = -1;
 
   if (c >= 'A' && c <= 'Z') {
@@ -579,17 +610,26 @@ void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, u
 
   if (font_idx < 0) return;
 
+  // Pre-compute clipping bounds to avoid per-pixel checks
+  int char_w = 5 * scale;
+  int char_h = 7 * scale;
+  if (x + char_w <= 0 || x >= img_width || y + char_h <= 0 || y >= img_height) return;
+
   for (int row = 0; row < 7; row++) {
     uint8_t row_data = FONT_5X7[font_idx][row];
     for (int col = 0; col < 5; col++) {
       if (row_data & (0x10 >> col)) {
         // Draw scaled pixel
+        int base_px = x + col * scale;
+        int base_py = y + row * scale;
         for (int sy = 0; sy < scale; sy++) {
+          int py = base_py + sy;
+          if (py < 0 || py >= img_height) continue;
+          int row_offset = py * img_width;
           for (int sx = 0; sx < scale; sx++) {
-            int px = x + col * scale + sx;
-            int py = y + row * scale + sy;
-            if (px >= 0 && px < img_width && py >= 0 && py < img_height) {
-              int offset = (py * img_width + px) * 2;  // RGB565 = 2 bytes
+            int px = base_px + sx;
+            if (px >= 0 && px < img_width) {
+              int offset = (row_offset + px) * 2;  // RGB565 = 2 bytes
               img_data[offset] = color[0];
               img_data[offset + 1] = color[1];
             }
@@ -602,7 +642,7 @@ void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, u
 
 void FaceDetectionComponent::draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
                                         int x, int y, const std::string &text,
-                                        const std::vector<uint8_t> &color, int scale) {
+                                        const uint8_t *color, int scale) {
   int char_width = 6 * scale;  // 5 pixels + 1 spacing
   int current_x = x;
 
