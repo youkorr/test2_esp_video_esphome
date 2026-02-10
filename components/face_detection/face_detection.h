@@ -121,9 +121,6 @@ class FaceDetectionComponent : public Component {
   // ESP-DL internal state settle (prevents crash from unstable recognizer state)
   uint8_t post_enroll_cooldown_{0};
 
-  // Recognition throttle: only run recognize() every Nth detection when already recognized
-  uint8_t recognition_skip_counter_{0};
-
   // Memory diagnostics
   uint32_t diag_counter_{0};
 

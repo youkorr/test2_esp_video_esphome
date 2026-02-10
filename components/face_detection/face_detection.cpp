@@ -295,23 +295,6 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
   esp_task_wdt_reset();
 
-  // Monitor stack usage to detect overflow during inference
-  static uint32_t min_stack_free = UINT32_MAX;
-  UBaseType_t stack_free = uxTaskGetStackHighWaterMark(nullptr);
-  if (stack_free < min_stack_free) {
-    min_stack_free = stack_free;
-    ESP_LOGW(TAG, "Stack high water mark: %u words (%u bytes) remaining",
-             (unsigned)stack_free, (unsigned)(stack_free * 4));
-  }
-
-  // Rate-limit detection logging to avoid flooding (log every 10th detection)
-  if (face_results.size() > 0) {
-    static uint32_t detect_log_counter = 0;
-    if (detect_log_counter++ % 10 == 0) {
-      ESP_LOGI(TAG, "Detected %d face(s) [every 10th logged]", (int)face_results.size());
-    }
-  }
-
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_face_results_.clear();
@@ -341,9 +324,21 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     }
   }
 
+  // Reset recognition state when no face is detected (person walked away)
+  if (face_results.empty()) {
+    if (this->last_recognition_.recognized) {
+      this->last_recognition_.recognized = false;
+      this->last_recognition_.id = -1;
+      this->last_recognition_.similarity = 0.0f;
+      this->cached_recognized_name_.clear();
+      this->cached_recognized_id_ = -1;
+    }
+  }
+
   // Face recognition (if enabled and faces detected)
   if (this->recognition_enabled_ && this->face_recognizer_ != nullptr && face_results.size() > 0) {
-    auto &first_face_result = face_results.front();
+    // COPY face result (not reference) - recognize() may invalidate detector internals
+    dl::detect::result_t first_face_result = face_results.front();
 
     // Check if enrollment is pending
     if (this->enroll_pending_) {
@@ -419,58 +414,35 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       }
       this->enroll_pending_ = false;
       // Skip next 5 detection cycles to let ESP-DL state settle after enrollment.
-      // Without this, recognize() can crash on the freshly-mutated internal DB.
       this->post_enroll_cooldown_ = 5;
-      ESP_LOGI(TAG, "Post-enrollment cooldown: skipping next 5 detection cycles");
-    } else {
-      // Throttle recognition: when already recognized, only re-run recognize()
-      // every 3rd detection to save ~200ms per skipped frame (major FPS boost).
-      // Always run on first detection or when not yet recognized.
-      bool should_recognize = true;
-      if (this->last_recognition_.recognized) {
-        this->recognition_skip_counter_++;
-        if (this->recognition_skip_counter_ < 3) {
-          should_recognize = false;
-        } else {
-          this->recognition_skip_counter_ = 0;
-        }
-      } else {
-        this->recognition_skip_counter_ = 0;
-      }
+    } else if (!this->last_recognition_.recognized) {
+      // Only call recognize() when NOT yet recognized.
+      // Once recognized, stop calling recognize() - the callback already fired
+      // and the YAML handles unlock. Re-calling recognize() repeatedly causes
+      // PSRAM corruption and crashes (instruction access fault at invalid address).
+      // Recognition resets automatically when face disappears (see above).
+      esp_task_wdt_reset();
+      dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+      esp_task_wdt_reset();
 
-      if (should_recognize) {
-        // Try to recognize - reset WDT before/after since inference is heavy
-        esp_task_wdt_reset();
-        dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
-        esp_task_wdt_reset();
-        if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
-          // Invalidate cached name if recognized face changed
-          if (rec_result->id != this->cached_recognized_id_) {
-            this->cached_recognized_name_.clear();
-            this->cached_recognized_id_ = rec_result->id;
-          }
-          this->last_recognition_.id = rec_result->id;
-          this->last_recognition_.similarity = rec_result->similarity;
-          this->last_recognition_.recognized = true;
+      if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
+        this->cached_recognized_name_.clear();
+        this->cached_recognized_id_ = rec_result->id;
+        this->last_recognition_.id = rec_result->id;
+        this->last_recognition_.similarity = rec_result->similarity;
+        this->last_recognition_.recognized = true;
 
-          // Rate-limit recognition logging (every 5th recognition)
-          static uint32_t rec_log_counter = 0;
-          if (rec_log_counter++ % 5 == 0) {
-            ESP_LOGI(TAG, "Face RECOGNIZED! ID=%d, similarity=%.2f [every 5th logged]",
-                     rec_result->id, rec_result->similarity);
-          }
+        ESP_LOGI(TAG, "Face RECOGNIZED! ID=%d, similarity=%.2f",
+                 rec_result->id, rec_result->similarity);
 
-          // Trigger callbacks
-          for (auto &callback : this->on_face_recognized_callbacks_) {
-            callback(rec_result->id, rec_result->similarity);
-          }
-        } else {
-          this->last_recognition_.recognized = false;
-          this->cached_recognized_name_.clear();
-          this->cached_recognized_id_ = -1;
+        // Trigger callbacks (once - no repeated calls)
+        for (auto &callback : this->on_face_recognized_callbacks_) {
+          callback(rec_result->id, rec_result->similarity);
         }
       }
     }
+    // If already recognized: skip recognize() entirely, keep cached result.
+    // Detection still runs for bounding boxes, but no heavy recognition inference.
   }
 #endif
 }
