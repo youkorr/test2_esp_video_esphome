@@ -19,12 +19,10 @@
   #define USE_JPEGDEC
 #endif
 
-// Image decoders - JPEG and PNG
+// Image decoders - only JPEG for now
 #ifdef USE_JPEGDEC
 #include <JPEGDEC.h>
 #endif
-
-#include <PNGdec.h>
 
 namespace esphome {
 namespace storage {
@@ -241,10 +239,6 @@ class SdImageComponent : public Component, public image::Image {
   bool jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b);
 #endif
 
-  // PNG decoder callback
-  static void png_decode_callback(PNGDRAW *pDraw);
-  PNG *png_decoder_{nullptr};
-
   // Image processing
   bool allocate_image_buffer();
   void set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255);
@@ -316,6 +310,12 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
+
+
+
+
+
 
 
 
