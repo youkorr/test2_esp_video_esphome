@@ -117,6 +117,13 @@ class FaceDetectionComponent : public Component {
   std::string cached_recognized_name_{};  // Cached name to avoid map lookup + allocation per frame
   int cached_recognized_id_{-1};  // ID for which cached_recognized_name_ is valid
 
+  // Post-enrollment cooldown: skip N detection cycles after enroll to let
+  // ESP-DL internal state settle (prevents crash from unstable recognizer state)
+  uint8_t post_enroll_cooldown_{0};
+
+  // Recognition throttle: only run recognize() every Nth detection when already recognized
+  uint8_t recognition_skip_counter_{0};
+
   // Memory diagnostics
   uint32_t diag_counter_{0};
 

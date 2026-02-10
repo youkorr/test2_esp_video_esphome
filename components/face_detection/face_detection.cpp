@@ -273,6 +273,14 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     return;
   }
 
+  // Post-enrollment cooldown: skip detection to let ESP-DL internal state settle
+  // and give LVGL time to catch up after the long enrollment blocking period.
+  if (this->post_enroll_cooldown_ > 0) {
+    this->post_enroll_cooldown_--;
+    ESP_LOGD(TAG, "Post-enrollment cooldown: %d cycles remaining", this->post_enroll_cooldown_);
+    return;
+  }
+
   dl::image::img_t img = {
     .data = img_data,
     .width = width,
@@ -367,12 +375,16 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
         std::remove(this->face_db_path_.c_str());
         ensure_parent_dir_(this->face_db_path_);
 
+        // WDT protection: constructor loads model weights
+        esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
         this->face_recognizer_ = new HumanFaceRecognizer(
           this->face_db_path_.c_str(),
           nullptr,
           HumanFaceFeat::MFN_S8_V1,
           false
         );
+        esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+        esp_task_wdt_reset();
 
         if (this->face_recognizer_ != nullptr) {
           ESP_LOGI(TAG, "Recognizer recreated with fresh DB, retrying enrollment...");
@@ -406,32 +418,57 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
         ESP_LOGE(TAG, "  Face may not be clear enough for feature extraction");
       }
       this->enroll_pending_ = false;
+      // Skip next 5 detection cycles to let ESP-DL state settle after enrollment.
+      // Without this, recognize() can crash on the freshly-mutated internal DB.
+      this->post_enroll_cooldown_ = 5;
+      ESP_LOGI(TAG, "Post-enrollment cooldown: skipping next 5 detection cycles");
     } else {
-      // Try to recognize - reset WDT before/after since inference is heavy
-      esp_task_wdt_reset();
-      dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
-      esp_task_wdt_reset();
-      if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
-        // Invalidate cached name if recognized face changed
-        if (rec_result->id != this->cached_recognized_id_) {
-          this->cached_recognized_name_.clear();
-          this->cached_recognized_id_ = rec_result->id;
-        }
-        this->last_recognition_.id = rec_result->id;
-        this->last_recognition_.similarity = rec_result->similarity;
-        this->last_recognition_.recognized = true;
-
-        ESP_LOGI(TAG, "Face RECOGNIZED! ID=%d, similarity=%.2f",
-                 rec_result->id, rec_result->similarity);
-
-        // Trigger callbacks
-        for (auto &callback : this->on_face_recognized_callbacks_) {
-          callback(rec_result->id, rec_result->similarity);
+      // Throttle recognition: when already recognized, only re-run recognize()
+      // every 3rd detection to save ~200ms per skipped frame (major FPS boost).
+      // Always run on first detection or when not yet recognized.
+      bool should_recognize = true;
+      if (this->last_recognition_.recognized) {
+        this->recognition_skip_counter_++;
+        if (this->recognition_skip_counter_ < 3) {
+          should_recognize = false;
+        } else {
+          this->recognition_skip_counter_ = 0;
         }
       } else {
-        this->last_recognition_.recognized = false;
-        this->cached_recognized_name_.clear();
-        this->cached_recognized_id_ = -1;
+        this->recognition_skip_counter_ = 0;
+      }
+
+      if (should_recognize) {
+        // Try to recognize - reset WDT before/after since inference is heavy
+        esp_task_wdt_reset();
+        dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+        esp_task_wdt_reset();
+        if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
+          // Invalidate cached name if recognized face changed
+          if (rec_result->id != this->cached_recognized_id_) {
+            this->cached_recognized_name_.clear();
+            this->cached_recognized_id_ = rec_result->id;
+          }
+          this->last_recognition_.id = rec_result->id;
+          this->last_recognition_.similarity = rec_result->similarity;
+          this->last_recognition_.recognized = true;
+
+          // Rate-limit recognition logging (every 5th recognition)
+          static uint32_t rec_log_counter = 0;
+          if (rec_log_counter++ % 5 == 0) {
+            ESP_LOGI(TAG, "Face RECOGNIZED! ID=%d, similarity=%.2f [every 5th logged]",
+                     rec_result->id, rec_result->similarity);
+          }
+
+          // Trigger callbacks
+          for (auto &callback : this->on_face_recognized_callbacks_) {
+            callback(rec_result->id, rec_result->similarity);
+          }
+        } else {
+          this->last_recognition_.recognized = false;
+          this->cached_recognized_name_.clear();
+          this->cached_recognized_id_ = -1;
+        }
       }
     }
   }
