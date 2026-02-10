@@ -280,7 +280,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
+  // WDT protection: face detection inference can take 1-2 seconds.
+  // When combined with LVGL page transitions (auto-lock), total main loop time
+  // can exceed the 5s watchdog. Reset WDT timer before and after inference.
+  esp_task_wdt_reset();
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
+  esp_task_wdt_reset();
 
   // Monitor stack usage to detect overflow during inference
   static uint32_t min_stack_free = UINT32_MAX;
@@ -402,8 +407,10 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
       }
       this->enroll_pending_ = false;
     } else {
-      // Try to recognize
+      // Try to recognize - reset WDT before/after since inference is heavy
+      esp_task_wdt_reset();
       dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+      esp_task_wdt_reset();
       if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
         // Invalidate cached name if recognized face changed
         if (rec_result->id != this->cached_recognized_id_) {
@@ -624,12 +631,18 @@ void FaceDetectionComponent::clear_all_faces() {
   ensure_parent_dir_(this->face_db_path_);
 
   // Reinitialize the recognizer with empty database
+  // WDT protection: constructor loads model weights which can take several seconds
+  esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+
   this->face_recognizer_ = new HumanFaceRecognizer(
     this->face_db_path_.c_str(),
     nullptr,
     HumanFaceFeat::MFN_S8_V1,
     false
   );
+
+  esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+  esp_task_wdt_reset();
 
   if (this->face_recognizer_ != nullptr) {
     ESP_LOGI(TAG, "All faces and names cleared, database reset");
