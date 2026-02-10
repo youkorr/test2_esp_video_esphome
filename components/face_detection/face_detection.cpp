@@ -3,6 +3,7 @@
 #include "esphome/core/application.h"
 #include "esp_cache.h"
 #include "esp_heap_caps.h"
+#include "esp_task_wdt.h"
 
 // ESP-DL detection components (only for face_recognition model)
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -16,11 +17,29 @@
 #include <fstream>
 #include <sstream>
 #include <cstdio>
+#include <sys/stat.h>
 
 namespace esphome {
 namespace face_detection {
 
 static const char *const TAG = "face_detection";
+
+// Ensure parent directory exists for a file path (creates one level)
+static bool ensure_parent_dir_(const std::string &file_path) {
+  size_t last_slash = file_path.rfind('/');
+  if (last_slash == std::string::npos || last_slash == 0) return true;
+  std::string dir = file_path.substr(0, last_slash);
+  struct stat st;
+  if (stat(dir.c_str(), &st) == 0) {
+    return true;  // Directory already exists
+  }
+  if (mkdir(dir.c_str(), 0755) == 0) {
+    ESP_LOGI(TAG, "Created directory: %s", dir.c_str());
+    return true;
+  }
+  ESP_LOGE(TAG, "Failed to create directory: %s", dir.c_str());
+  return false;
+}
 
 void FaceDetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up Face Detection...");
@@ -45,6 +64,9 @@ void FaceDetectionComponent::setup() {
     this->mark_failed();
     return;
   }
+
+  // Pre-reserve capacity for cached results to avoid dynamic reallocation
+  this->cached_face_results_.reserve(8);
 
   // Initialize face detector
   uint32_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
@@ -92,6 +114,35 @@ void FaceDetectionComponent::setup() {
     ESP_LOGI(TAG, "  Database path: %s", this->face_db_path_.c_str());
     ESP_LOGI(TAG, "  Recognition threshold: %.2f", this->recognition_threshold_);
 
+    // Ensure the database directory exists on SD card
+    if (!ensure_parent_dir_(this->face_db_path_)) {
+      ESP_LOGE(TAG, "Cannot create database directory - recognition disabled");
+      this->recognition_enabled_ = false;
+    }
+
+    // Check for existing corrupt database file BEFORE creating recognizer.
+    // A corrupt DB causes enroll()/recognize() to deadlock (watchdog crash).
+    // Delete any suspicious file so the recognizer starts fresh.
+    bool had_existing_db = false;
+    {
+      struct stat db_stat;
+      if (stat(this->face_db_path_.c_str(), &db_stat) == 0) {
+        had_existing_db = true;
+        ESP_LOGI(TAG, "  Existing database file found (%ld bytes)", (long)db_stat.st_size);
+        // A valid face DB with even 0 enrolled faces has a proper header.
+        // Files < 100 bytes are always corrupt (partial header/metadata).
+        if (db_stat.st_size < 100) {
+          ESP_LOGW(TAG, "  Database file too small (%ld bytes) - deleting corrupt file", (long)db_stat.st_size);
+          std::remove(this->face_db_path_.c_str());
+          had_existing_db = false;
+        }
+      }
+    }
+
+    // WDT protection: HumanFaceRecognizer constructor can take several seconds
+    // loading model weights, which would trigger the 5s task watchdog.
+    esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+
     this->face_recognizer_ = new HumanFaceRecognizer(
       this->face_db_path_.c_str(),
       nullptr,
@@ -99,9 +150,44 @@ void FaceDetectionComponent::setup() {
       false
     );
 
+    esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+    esp_task_wdt_reset();
+
     if (this->face_recognizer_ != nullptr) {
       int enrolled = this->face_recognizer_->get_num_feats();
       ESP_LOGI(TAG, "Face recognizer initialized (%d faces enrolled)", enrolled);
+
+      // Only validate if a DB file existed BEFORE we created the recognizer.
+      // After a fresh creation, the constructor may create a new empty DB - that's normal.
+      if (had_existing_db && enrolled > 0) {
+        struct stat db_stat;
+        if (stat(this->face_db_path_.c_str(), &db_stat) == 0 &&
+            db_stat.st_size < (enrolled * 512 + 64)) {
+          ESP_LOGW(TAG, "DB claims %d faces but file is only %ld bytes - corrupt!",
+                   enrolled, (long)db_stat.st_size);
+          ESP_LOGW(TAG, "Deleting corrupt database and recreating...");
+          delete this->face_recognizer_;
+          this->face_recognizer_ = nullptr;
+          std::remove(this->face_db_path_.c_str());
+
+          esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+          this->face_recognizer_ = new HumanFaceRecognizer(
+            this->face_db_path_.c_str(),
+            nullptr,
+            HumanFaceFeat::MFN_S8_V1,
+            false
+          );
+          esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+          esp_task_wdt_reset();
+
+          if (this->face_recognizer_ != nullptr) {
+            ESP_LOGI(TAG, "Face recognizer re-created with fresh database");
+          } else {
+            ESP_LOGE(TAG, "Failed to re-create face recognizer");
+            this->recognition_enabled_ = false;
+          }
+        }
+      }
     } else {
       ESP_LOGE(TAG, "Failed to initialize face recognizer");
       this->recognition_enabled_ = false;
@@ -126,6 +212,16 @@ void FaceDetectionComponent::loop() {
   }
 
   this->process_frame_();
+
+  // Periodic memory diagnostics (every ~500 detection cycles)
+  this->diag_counter_++;
+  if (this->diag_counter_ % (500 * this->detection_interval_) == 0) {
+    uint32_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    uint32_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Memory: PSRAM=%uKB free (largest=%uKB), internal=%uKB free",
+             psram_free / 1024, psram_largest / 1024, internal_free / 1024);
+  }
 }
 
 void FaceDetectionComponent::process_frame_() {
@@ -177,6 +273,14 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     return;
   }
 
+  // Post-enrollment cooldown: skip detection to let ESP-DL internal state settle
+  // and give LVGL time to catch up after the long enrollment blocking period.
+  if (this->post_enroll_cooldown_ > 0) {
+    this->post_enroll_cooldown_--;
+    ESP_LOGD(TAG, "Post-enrollment cooldown: %d cycles remaining", this->post_enroll_cooldown_);
+    return;
+  }
+
   dl::image::img_t img = {
     .data = img_data,
     .width = width,
@@ -184,20 +288,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
+  // WDT protection: face detection inference can take 1-2 seconds.
+  // When combined with LVGL page transitions (auto-lock), total main loop time
+  // can exceed the 5s watchdog. Reset WDT timer before and after inference.
+  esp_task_wdt_reset();
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
-
-  // Monitor stack usage to detect overflow during inference
-  static uint32_t min_stack_free = UINT32_MAX;
-  UBaseType_t stack_free = uxTaskGetStackHighWaterMark(nullptr);
-  if (stack_free < min_stack_free) {
-    min_stack_free = stack_free;
-    ESP_LOGW(TAG, "Stack high water mark: %u words (%u bytes) remaining",
-             (unsigned)stack_free, (unsigned)(stack_free * 4));
-  }
-
-  if (face_results.size() > 0) {
-    ESP_LOGI(TAG, "Detected %d face(s)", (int)face_results.size());
-  }
+  esp_task_wdt_reset();
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
@@ -228,13 +324,78 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     }
   }
 
+  // Reset recognition state when no face is detected (person walked away)
+  if (face_results.empty()) {
+    if (this->last_recognition_.recognized) {
+      this->last_recognition_.recognized = false;
+      this->last_recognition_.id = -1;
+      this->last_recognition_.similarity = 0.0f;
+      this->cached_recognized_name_.clear();
+      this->cached_recognized_id_ = -1;
+    }
+  }
+
   // Face recognition (if enabled and faces detected)
   if (this->recognition_enabled_ && this->face_recognizer_ != nullptr && face_results.size() > 0) {
-    auto &first_face_result = face_results.front();
+    // COPY face result (not reference) - recognize() may invalidate detector internals
+    dl::detect::result_t first_face_result = face_results.front();
 
     // Check if enrollment is pending
     if (this->enroll_pending_) {
+      ESP_LOGI(TAG, "Enrolling face (score=%.2f, box=[%d,%d,%d,%d])...",
+               first_face_result.score,
+               first_face_result.box[0], first_face_result.box[1],
+               first_face_result.box[2], first_face_result.box[3]);
+
+      // Remove main task from WDT monitoring - enrollment can take several seconds
+      // and would otherwise trigger the 5s task watchdog.
+      esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+
       int new_id = this->face_recognizer_->enroll(img, first_face_result);
+
+      // Re-add task to WDT monitoring
+      esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+      esp_task_wdt_reset();
+
+      // If enrollment failed, likely stale/incompatible DB.
+      // Auto-recover: delete DB, recreate recognizer, retry once.
+      if (new_id < 0) {
+        ESP_LOGW(TAG, "Enrollment failed (returned %d) - attempting DB reset and retry...", new_id);
+
+        // Safely recreate recognizer with fresh database
+        HumanFaceRecognizer *old = this->face_recognizer_;
+        this->face_recognizer_ = nullptr;
+        delete old;
+
+        std::remove(this->face_db_path_.c_str());
+        ensure_parent_dir_(this->face_db_path_);
+
+        // WDT protection: constructor loads model weights
+        esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+        this->face_recognizer_ = new HumanFaceRecognizer(
+          this->face_db_path_.c_str(),
+          nullptr,
+          HumanFaceFeat::MFN_S8_V1,
+          false
+        );
+        esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+        esp_task_wdt_reset();
+
+        if (this->face_recognizer_ != nullptr) {
+          ESP_LOGI(TAG, "Recognizer recreated with fresh DB, retrying enrollment...");
+          esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+          new_id = this->face_recognizer_->enroll(img, first_face_result);
+          esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+          esp_task_wdt_reset();
+        } else {
+          ESP_LOGE(TAG, "Failed to recreate recognizer");
+          this->recognition_enabled_ = false;
+          this->enroll_pending_ = false;
+          this->pending_enroll_name_.clear();
+          return;
+        }
+      }
+
       if (new_id >= 0) {
         // ESP-DL returns ID from enroll, but recognition returns ID+1
         // So we save the name with ID+1 to match recognition results
@@ -248,13 +409,25 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
           this->save_names_to_sd_();
         }
       } else {
-        ESP_LOGE(TAG, "Failed to enroll face");
+        ESP_LOGE(TAG, "Enrollment failed after DB reset (returned %d)", new_id);
+        ESP_LOGE(TAG, "  Face may not be clear enough for feature extraction");
       }
       this->enroll_pending_ = false;
-    } else {
-      // Try to recognize
+      // Skip next 5 detection cycles to let ESP-DL state settle after enrollment.
+      this->post_enroll_cooldown_ = 5;
+    } else if (!this->last_recognition_.recognized) {
+      // Only call recognize() when NOT yet recognized.
+      // Once recognized, stop calling recognize() - the callback already fired
+      // and the YAML handles unlock. Re-calling recognize() repeatedly causes
+      // PSRAM corruption and crashes (instruction access fault at invalid address).
+      // Recognition resets automatically when face disappears (see above).
+      esp_task_wdt_reset();
       dl::recognition::result_t *rec_result = this->face_recognizer_->recognize(img, first_face_result);
+      esp_task_wdt_reset();
+
       if (rec_result != nullptr && rec_result->similarity >= this->recognition_threshold_) {
+        this->cached_recognized_name_.clear();
+        this->cached_recognized_id_ = rec_result->id;
         this->last_recognition_.id = rec_result->id;
         this->last_recognition_.similarity = rec_result->similarity;
         this->last_recognition_.recognized = true;
@@ -262,17 +435,23 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
         ESP_LOGI(TAG, "Face RECOGNIZED! ID=%d, similarity=%.2f",
                  rec_result->id, rec_result->similarity);
 
-        // Trigger callbacks
+        // Trigger callbacks (once - no repeated calls)
         for (auto &callback : this->on_face_recognized_callbacks_) {
           callback(rec_result->id, rec_result->similarity);
         }
-      } else {
-        this->last_recognition_.recognized = false;
       }
     }
+    // If already recognized: skip recognize() entirely, keep cached result.
+    // Detection still runs for bounding boxes, but no heavy recognition inference.
   }
 #endif
 }
+
+// Static RGB565 colors (little-endian) - avoids heap allocation every frame
+static const uint8_t COLOR_GREEN[] = {0xE0, 0x07};   // Green - unknown face
+static const uint8_t COLOR_BLUE[] = {0x1F, 0x00};    // Blue - recognized face
+static const uint8_t COLOR_RED[] = {0x00, 0xF8};     // Red for keypoints
+static const uint8_t COLOR_WHITE[] = {0xFF, 0xFF};   // White for text
 
 void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
 #ifdef ESP_DL_MODEL_FACE_RECOGNITION
@@ -289,10 +468,14 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
   };
 
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    // RGB565 colors (little-endian)
-    std::vector<uint8_t> green = {0xE0, 0x07};   // Green - unknown face
-    std::vector<uint8_t> blue = {0x1F, 0x00};    // Blue - recognized face
-    std::vector<uint8_t> red = {0x00, 0xF8};     // Red for keypoints
+    // Use static color vectors for ESP-DL draw API (constructed once)
+    static const std::vector<uint8_t> green_vec(COLOR_GREEN, COLOR_GREEN + 2);
+    static const std::vector<uint8_t> blue_vec(COLOR_BLUE, COLOR_BLUE + 2);
+    static const std::vector<uint8_t> red_vec(COLOR_RED, COLOR_RED + 2);
+
+    bool is_recognized = this->last_recognition_.recognized;
+    const std::vector<uint8_t> &box_color = is_recognized ? blue_vec : green_vec;
+    int line_width = is_recognized ? 4 : 3;
 
     for (auto &box : this->cached_face_results_) {
       // Clamp bounding box coordinates to valid range
@@ -301,24 +484,20 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
       int x2 = std::max(x1 + 1, std::min((int)box.x2, (int)width - 4));
       int y2 = std::max(y1 + 1, std::min((int)box.y2, (int)height - 4));
 
-      // Choose color based on recognition status
-      std::vector<uint8_t> &box_color = this->last_recognition_.recognized ? blue : green;
-
-      // Draw bounding box (thicker for recognized faces)
-      int line_width = this->last_recognition_.recognized ? 4 : 3;
+      // Draw bounding box
       dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, box_color, line_width);
 
       // Draw name above the box if recognized
-      if (this->last_recognition_.recognized) {
-        std::string name = this->get_face_name(this->last_recognition_.id);
-        if (name.empty()) {
-          // Show ID if no name set
-          name = "ID " + std::to_string(this->last_recognition_.id);
+      if (is_recognized) {
+        // Use cached name to avoid map lookup + string allocation every frame
+        if (this->cached_recognized_name_.empty()) {
+          this->cached_recognized_name_ = this->get_face_name(this->last_recognition_.id);
+          if (this->cached_recognized_name_.empty()) {
+            this->cached_recognized_name_ = "ID " + std::to_string(this->last_recognition_.id);
+          }
         }
-        // Draw name above the box with white color, scale 2
-        std::vector<uint8_t> white = {0xFF, 0xFF};
         int text_y = std::max(2, y1 - 18);  // 18 pixels above box
-        this->draw_text_(img_data, width, height, x1, text_y, name, white, 2);
+        this->draw_text_(img_data, width, height, x1, text_y, this->cached_recognized_name_, COLOR_WHITE, 2);
       }
 
       // Draw red keypoints (5 facial landmarks) as hollow rectangles
@@ -328,13 +507,12 @@ void FaceDetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, ui
 
         // Check bounds with margin
         if (kp_x >= 12 && kp_y >= 12 && kp_x < (int)width - 12 && kp_y < (int)height - 12) {
-          // Draw hollow rectangle (not filled)
           int size = 10;  // 20x20 pixel rectangle
           int rx1 = kp_x - size;
           int ry1 = kp_y - size;
           int rx2 = kp_x + size;
           int ry2 = kp_y + size;
-          dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red, 2);
+          dl::image::draw_hollow_rectangle(img, rx1, ry1, rx2, ry2, red_vec, 2);
         }
       }
     }
@@ -430,12 +608,26 @@ void FaceDetectionComponent::clear_all_faces() {
     return;
   }
 
-  // Clear in-memory features
-  this->face_recognizer_->clear_all_feats();
+  ESP_LOGI(TAG, "Clearing all faces...");
+
+  // Nullify recognizer pointer FIRST to prevent detection loop from using it
+  // during delete/recreate. The detection loop checks this pointer.
+  HumanFaceRecognizer *old_recognizer = this->face_recognizer_;
+  this->face_recognizer_ = nullptr;
+
+  // Clear cached recognition state
+  this->last_recognition_.recognized = false;
+  this->last_recognition_.id = -1;
+  this->last_recognition_.similarity = 0.0f;
+  this->cached_recognized_name_.clear();
+  this->cached_recognized_id_ = -1;
 
   // Clear names
   this->face_names_.clear();
   this->save_names_to_sd_();
+
+  // Delete the old recognizer safely
+  delete old_recognizer;
 
   // Delete the database file from SD card
   if (std::remove(this->face_db_path_.c_str()) == 0) {
@@ -444,8 +636,13 @@ void FaceDetectionComponent::clear_all_faces() {
     ESP_LOGW(TAG, "Could not delete face database (may not exist): %s", this->face_db_path_.c_str());
   }
 
+  // Ensure directory still exists before recreating
+  ensure_parent_dir_(this->face_db_path_);
+
   // Reinitialize the recognizer with empty database
-  delete this->face_recognizer_;
+  // WDT protection: constructor loads model weights which can take several seconds
+  esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
+
   this->face_recognizer_ = new HumanFaceRecognizer(
     this->face_db_path_.c_str(),
     nullptr,
@@ -453,7 +650,15 @@ void FaceDetectionComponent::clear_all_faces() {
     false
   );
 
-  ESP_LOGI(TAG, "All faces and names cleared, database reset");
+  esp_task_wdt_add(xTaskGetCurrentTaskHandle());
+  esp_task_wdt_reset();
+
+  if (this->face_recognizer_ != nullptr) {
+    ESP_LOGI(TAG, "All faces and names cleared, database reset");
+  } else {
+    ESP_LOGE(TAG, "Failed to reinitialize face recognizer after clear");
+    this->recognition_enabled_ = false;
+  }
 #else
   ESP_LOGE(TAG, "Face recognition not available (requires model_type: face_recognition)");
 #endif
@@ -478,6 +683,8 @@ void FaceDetectionComponent::reset_last_recognition() {
   this->last_recognition_.id = -1;
   this->last_recognition_.similarity = 0.0f;
   this->last_recognition_.recognized = false;
+  this->cached_recognized_name_.clear();
+  this->cached_recognized_id_ = -1;
   ESP_LOGI(TAG, "Recognition result reset");
 }
 
@@ -564,7 +771,7 @@ static const uint8_t FONT_5X7[][7] = {
 };
 
 void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
-                                        int x, int y, char c, const std::vector<uint8_t> &color, int scale) {
+                                        int x, int y, char c, const uint8_t *color, int scale) {
   int font_idx = -1;
 
   if (c >= 'A' && c <= 'Z') {
@@ -579,17 +786,26 @@ void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, u
 
   if (font_idx < 0) return;
 
+  // Pre-compute clipping bounds to avoid per-pixel checks
+  int char_w = 5 * scale;
+  int char_h = 7 * scale;
+  if (x + char_w <= 0 || x >= img_width || y + char_h <= 0 || y >= img_height) return;
+
   for (int row = 0; row < 7; row++) {
     uint8_t row_data = FONT_5X7[font_idx][row];
     for (int col = 0; col < 5; col++) {
       if (row_data & (0x10 >> col)) {
         // Draw scaled pixel
+        int base_px = x + col * scale;
+        int base_py = y + row * scale;
         for (int sy = 0; sy < scale; sy++) {
+          int py = base_py + sy;
+          if (py < 0 || py >= img_height) continue;
+          int row_offset = py * img_width;
           for (int sx = 0; sx < scale; sx++) {
-            int px = x + col * scale + sx;
-            int py = y + row * scale + sy;
-            if (px >= 0 && px < img_width && py >= 0 && py < img_height) {
-              int offset = (py * img_width + px) * 2;  // RGB565 = 2 bytes
+            int px = base_px + sx;
+            if (px >= 0 && px < img_width) {
+              int offset = (row_offset + px) * 2;  // RGB565 = 2 bytes
               img_data[offset] = color[0];
               img_data[offset + 1] = color[1];
             }
@@ -602,7 +818,7 @@ void FaceDetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width, u
 
 void FaceDetectionComponent::draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
                                         int x, int y, const std::string &text,
-                                        const std::vector<uint8_t> &color, int scale) {
+                                        const uint8_t *color, int scale) {
   int char_width = 6 * scale;  // 5 pixels + 1 spacing
   int current_x = x;
 

@@ -344,16 +344,34 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
         }
       }
 
-      // Get RGB565 pixel from our buffer
-      size_t offset = pixel_idx * 2;
-      if (offset + 1 >= this->image_buffer_.size()) continue;
+      // Get pixel from our buffer (format-aware)
+      size_t pixel_size = this->get_pixel_size();
+      size_t offset = pixel_idx * pixel_size;
+      if (offset + pixel_size > this->image_buffer_.size()) continue;
 
-      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
-
-      // Convert RGB565 to lv_color_t
-      uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
-      uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
-      uint8_t b = (rgb565 & 0x1F) << 3;
+      uint8_t r, g, b;
+      switch (this->format_) {
+        case ImageFormat::RGB565: {
+          uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+          r = ((rgb565 >> 11) & 0x1F) << 3;
+          g = ((rgb565 >> 5) & 0x3F) << 2;
+          b = (rgb565 & 0x1F) << 3;
+          break;
+        }
+        case ImageFormat::RGB888:
+          r = this->image_buffer_[offset];
+          g = this->image_buffer_[offset + 1];
+          b = this->image_buffer_[offset + 2];
+          break;
+        case ImageFormat::RGBA:
+          r = this->image_buffer_[offset];
+          g = this->image_buffer_[offset + 1];
+          b = this->image_buffer_[offset + 2];
+          // Skip alpha (offset + 3) - canvas doesn't support per-pixel alpha
+          break;
+        default:
+          continue;
+      }
 
       lv_color_t color = lv_color_make(r, g, b);
 
@@ -1585,32 +1603,151 @@ bool SdImageComponent::decode_gif_image(const std::vector<uint8_t> &gif_data) {
 }
 
 // =====================================================
-// PNG Decoder Implementation (via LVGL)
+// PNG Decoder Implementation (via pngdec library)
 // =====================================================
 
+void SdImageComponent::png_decode_callback(PNGDRAW *pDraw) {
+  if (!current_image_component || !pDraw || !pDraw->pPixels) {
+    return;
+  }
+
+  SdImageComponent *component = current_image_component;
+  int y = pDraw->y;
+
+  // pngdec outputs RGB888 (3 bytes per pixel) for truecolor PNGs
+  for (int x = 0; x < pDraw->iWidth; x++) {
+    int img_x = x;
+    int img_y = y;
+
+    // Apply resize scaling if needed
+    if (component->resize_width_ > 0 && component->resize_height_ > 0 &&
+        component->png_decoder_ != nullptr) {
+      int orig_width = component->png_decoder_->getWidth();
+      int orig_height = component->png_decoder_->getHeight();
+      if (orig_width > 0 && orig_height > 0) {
+        img_x = (img_x * component->resize_width_) / orig_width;
+        img_y = (img_y * component->resize_height_) / orig_height;
+      }
+    }
+
+    if (img_x >= 0 && img_x < component->image_width_ &&
+        img_y >= 0 && img_y < component->image_height_) {
+      uint8_t r, g, b;
+      if (pDraw->iBpp == 24) {
+        // RGB888: 3 bytes per pixel
+        r = pDraw->pPixels[x * 3];
+        g = pDraw->pPixels[x * 3 + 1];
+        b = pDraw->pPixels[x * 3 + 2];
+      } else if (pDraw->iBpp == 32) {
+        // RGBA8888: 4 bytes per pixel
+        r = pDraw->pPixels[x * 4];
+        g = pDraw->pPixels[x * 4 + 1];
+        b = pDraw->pPixels[x * 4 + 2];
+        // alpha = pDraw->pPixels[x * 4 + 3];
+      } else if (pDraw->iBpp == 16) {
+        // RGB565: 2 bytes per pixel
+        uint16_t rgb565 = ((uint16_t *)pDraw->pPixels)[x];
+        r = ((rgb565 >> 11) & 0x1F) << 3;
+        g = ((rgb565 >> 5) & 0x3F) << 2;
+        b = (rgb565 & 0x1F) << 3;
+      } else {
+        // Grayscale or other - treat as grayscale
+        uint8_t gray = pDraw->pPixels[x];
+        r = g = b = gray;
+      }
+      component->set_pixel(img_x, img_y, r, g, b);
+    }
+  }
+
+  // Feed watchdog periodically
+  if (y % 32 == 0) {
+    App.feed_wdt();
+  }
+}
+
 bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
-#ifdef LV_USE_LIBPNG
-  ESP_LOGD(TAG_IMAGE, "Using LVGL PNG decoder (LV_USE_LIBPNG)");
+  ESP_LOGD(TAG_IMAGE, "Using PNGdec decoder");
 
-  // For PNG, we need to use LVGL's decoder
-  // The strategy is to store raw data and let LVGL decode it when needed
-  // For now, we'll use a simple approach: decode via LVGL decoder manually
+  current_image_component = this;
 
-  // Note: This requires LVGL png decoder to be active
-  // User must have lvgl_advanced_features with libpng: true
+  this->png_decoder_ = new PNG();
+  if (!this->png_decoder_) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate PNG decoder");
+    current_image_component = nullptr;
+    return false;
+  }
 
-  ESP_LOGW(TAG_IMAGE, "PNG decoding via LVGL decoder - requires direct LVGL integration");
-  ESP_LOGW(TAG_IMAGE, "Consider using LVGL's img widget directly with file path");
+  int result = this->png_decoder_->openRAM((uint8_t *)png_data.data(), png_data.size(),
+                                            SdImageComponent::png_decode_callback);
+  if (result != PNG_SUCCESS) {
+    ESP_LOGE(TAG_IMAGE, "Failed to open PNG data: %d", result);
+    delete this->png_decoder_;
+    this->png_decoder_ = nullptr;
+    current_image_component = nullptr;
+    return false;
+  }
 
-  // For compatibility, return error for now - user should use LVGL img widget
-  ESP_LOGE(TAG_IMAGE, "PNG decoding not yet implemented in storage component");
-  ESP_LOGI(TAG_IMAGE, "Workaround: Use LVGL's lv_img widget with file:// path to let LVGL decode PNG");
+  int orig_width = this->png_decoder_->getWidth();
+  int orig_height = this->png_decoder_->getHeight();
+  int bpp = this->png_decoder_->getBpp();
 
-  return false;
-#else
-  ESP_LOGE(TAG_IMAGE, "PNG decoder not available - enable lvgl_advanced_features with libpng: true");
-  return false;
-#endif
+  ESP_LOGI(TAG_IMAGE, "PNG: %dx%d, %d bpp, alpha=%s",
+           orig_width, orig_height, bpp,
+           this->png_decoder_->hasAlpha() ? "yes" : "no");
+
+  if (orig_width <= 0 || orig_height <= 0 ||
+      orig_width > 2048 || orig_height > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", orig_width, orig_height);
+    this->png_decoder_->close();
+    delete this->png_decoder_;
+    this->png_decoder_ = nullptr;
+    current_image_component = nullptr;
+    return false;
+  }
+
+  // Use configured format (RGB565, RGB888, or RGBA) - set_pixel() handles conversion
+  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
+    this->image_width_ = this->resize_width_;
+    this->image_height_ = this->resize_height_;
+    ESP_LOGI(TAG_IMAGE, "Will resize to: %dx%d", this->image_width_, this->image_height_);
+  } else {
+    this->image_width_ = orig_width;
+    this->image_height_ = orig_height;
+  }
+
+  if (!this->allocate_image_buffer()) {
+    this->png_decoder_->close();
+    delete this->png_decoder_;
+    this->png_decoder_ = nullptr;
+    current_image_component = nullptr;
+    return false;
+  }
+
+  std::fill(this->image_buffer_.begin(), this->image_buffer_.end(), 0);
+
+  ESP_LOGI(TAG_IMAGE, "Starting PNG decode to %s...", this->format_to_string().c_str());
+
+  result = this->png_decoder_->decode(nullptr, 0);
+
+  this->png_decoder_->close();
+  delete this->png_decoder_;
+  this->png_decoder_ = nullptr;
+  current_image_component = nullptr;
+
+  if (result != PNG_SUCCESS) {
+    ESP_LOGE(TAG_IMAGE, "Failed to decode PNG: %d", result);
+    return false;
+  }
+
+  if (this->image_buffer_.empty()) {
+    ESP_LOGE(TAG_IMAGE, "Image buffer is empty after decoding");
+    return false;
+  }
+
+  ESP_LOGI(TAG_IMAGE, "PNG decoded successfully to %s format (%zu bytes)",
+           this->format_to_string().c_str(), this->image_buffer_.size());
+
+  return true;
 }
 
 // =====================================================
