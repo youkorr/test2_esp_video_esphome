@@ -576,22 +576,21 @@ static const esp_cam_sensor_format_t ov5647_format_800x600_raw8_50fps = {
 
 static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] = {
     // RAW8 mode configuration
-    {0x3034, OV5647_8BIT_MODE},  // 8-bit RAW8 format
-    {0x3035, 0x41},  // System clock divider
-    {0x3036, ((OV5647_IDI_CLOCK_RATE_800x640_50FPS * 8 * 4) / 25000000)},  // PLL multiplier for 100MHz
-    {0x303c, 0x11},  // PLLS control
+    {0x3034, OV5647_8BIT_MODE}, // set RAW format
+    {0x3035, 0x41}, // system clk div
+    {0x3036, ((OV5647_IDI_CLOCK_RATE_800x640_50FPS * 8 * 4) / 25000000)},
+    {0x303c, 0x11},
     {0x3106, 0xf5},
-    {0x3821, 0x03},  // Horizontal binning + mirror
-    {0x3820, 0x41},  // Vertical binning
+    {0x3821, 0x03},
+    {0x3820, 0x41},
     {0x3827, 0xec},
     {0x370c, 0x0f},
     {0x3612, 0x59},
     {0x3618, 0x00},
-    {0x5000, 0xff},  // Enable all ISP blocks
+    {0x5000, 0xff},
 
-    // LSC (Lens Shading Correction)
-    {0x583e, 0xf0},  // LSC max gain
-    {0x583f, 0x20},  // LSC min gain
+    {0x583e, 0xf0}, // LSC max gain
+    {0x583f, 0x20}, // LSC min gain
 
     {0x5002, 0x41},
     {0x5003, 0x08},
@@ -609,47 +608,48 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3c01, 0x80},
     {0x3c00, 0x40},
     {0x3b07, 0x0c},
-
-    // Timing configuration for 800x640 @ 50fps
-    // HTS (Horizontal Total Size) = 1896 pixels
+    //HTS line exposure time in # of pixels
     {0x380c, (1896 >> 8) & 0x1F},
     {0x380d, 1896 & 0xFF},
-    // VTS (Vertical Total Size) = 984 lines
+    //VTS frame exposure time in # lines
     {0x380e, (984 >> 8) & 0xFF},
     {0x380f, 984 & 0xFF},
-
-    // Binning configuration
-    {0x3814, 0x31},  // Horizontal subsample
-    {0x3815, 0x31},  // Vertical subsample
+    {0x3814, 0x31},
+    {0x3815, 0x31},
     {0x3708, 0x64},
     {0x3709, 0x52},
-
-    // Crop window: CENTERED on sensor for proper framing
-    // Sensor: 2592x1944, Crop: 2124x1954 pixels
-    // X centered: (2592 - 2124) / 2 = 234
-    // Y: full height
-    {0x3800, (234 >> 8) & 0x0F},   // X address start high
-    {0x3801, 234 & 0xFF},          // X address start low
-    {0x3802, (0 >> 8) & 0x07},     // Y address start high
-    {0x3803, 0 & 0xFF},            // Y address start low
-    {0x3804, ((2357) >> 8) & 0x0F},  // X address end high (234 + 2124 - 1)
-    {0x3805, (2357) & 0xFF},         // X address end low
-    {0x3806, ((1954 - 1) >> 8) & 0x07},  // Y address end high
-    {0x3807, (1954 - 1) & 0xFF},         // Y address end low
-
-    // Output size: 800x640
-    {0x3808, (800 >> 8) & 0x0F},  // Output horizontal width high
-    {0x3809, 800 & 0xFF},         // Output horizontal width low
-    {0x380a, (640 >> 8) & 0x7F},  // Output vertical height high
-    {0x380b, 640 & 0xFF},         // Output vertical height low
-
-    // Timing offset - set to 0 for proper centering
-    {0x3810, 0x00},   // Timing horizontal offset high
-    {0x3811, 0x00},   // Timing horizontal offset low
-    {0x3812, (0 >> 8) & 0x07},   // Timing vertical offset high
-    {0x3813, 0 & 0xFF},          // Timing vertical offset low
-
-    // Analog settings
+    //[3:0]=0 X address start high byte
+    {0x3800, (500 >> 8) & 0x0F},
+    //[7:0]=0 X address start low byte
+    {0x3801, 500 & 0xFF},
+    //[2:0]=0 Y address start high byte
+    {0x3802, (0 >> 8) & 0x07},
+    //[7:0]=0 Y address start low byte
+    {0x3803, 0 & 0xFF},
+    //[3:0] X address end high byte
+    {0x3804, ((2624 - 1) >> 8) & 0x0F},
+    //[7:0] X address end low byte
+    {0x3805, (2624 - 1) & 0xFF},
+    //[2:0] Y address end high byte
+    {0x3806, ((1954 - 1) >> 8) & 0x07},
+    //[7:0] Y address end low byte
+    {0x3807, (1954 - 1) & 0xFF},
+    //[3:0] Output horizontal width high byte
+    {0x3808, (800 >> 8) & 0x0F},
+    //[7:0] Output horizontal width low byte
+    {0x3809, 800 & 0xFF},
+    //[2:0] Output vertical height high byte
+    {0x380a, (640 >> 8) & 0x7F},
+    //[7:0] Output vertical height low byte
+    {0x380b, 640 & 0xFF},
+    //[3:0]=0 timing hoffset high byte
+    {0x3810, (8 >> 8) & 0x0F},
+    //[7:0]=0 timing hoffset low byte
+    {0x3811, 8 & 0xFF},
+    //[2:0]=0 timing voffset high byte
+    {0x3812, (0 >> 8) & 0x07},
+    //[7:0]=0 timing voffset low byte
+    {0x3813, 0 & 0xFF},
     {0x3630, 0x2e},
     {0x3632, 0xe2},
     {0x3633, 0x23},
@@ -665,8 +665,6 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3731, 0x02},
     {0x370b, 0x60},
     {0x3705, 0x1a},
-
-    // AEC/AGC settings (from testov5647)
     {0x3f05, 0x02},
     {0x3f06, 0x10},
     {0x3f01, 0x0a},
@@ -682,16 +680,12 @@ static const ov5647_reginfo_t ov5647_input_24M_MIPI_2lane_raw8_800x640_50fps[] =
     {0x3a1e, 0x50},
     {0x3a11, 0x60},
     {0x3a1f, 0x28},
-
-    // BLC (Black Level Calibration)
     {0x4001, 0x02},
     {0x4004, 0x02},
     {0x4000, 0x09},
-    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_800x640_50FPS / 4))},  // MIPI pclk period
+    {0x4837, (1000000000 / (OV5647_IDI_CLOCK_RATE_800x640_50FPS / 4))},
     {0x4050, 0x6e},
     {0x4051, 0x8f},
-
-    // End marker
     {OV5647_REG_END, 0x00},
 };
 
