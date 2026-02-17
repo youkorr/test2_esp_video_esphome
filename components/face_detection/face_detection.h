@@ -97,7 +97,7 @@ class FaceDetectionComponent : public Component {
   // Recognition configuration
   bool recognition_enabled_{false};
   std::string face_db_path_{"/sdcard/faces.db"};
-  float recognition_threshold_{0.7f};
+  float recognition_threshold_{0.9f};
 
   // Detection models
   HumanFaceDetect *face_detector_{nullptr};
