@@ -43,6 +43,13 @@ esp_err_t esp_vfs_fat_sdmmc_mount(const char                              *base_
                                    const esp_vfs_fat_sdmmc_mount_config_t  *mount_config,
                                    sdmmc_card_t                           **out_card);
 
+// Returns total and free bytes on the FAT volume mounted at base_path.
+// Available since ESP-IDF 4.4. Replaces statvfs() which may not be in the
+// include path for ESPHome components.
+esp_err_t esp_vfs_fat_info(const char *base_path,
+                            uint64_t   *out_total_bytes,
+                            uint64_t   *out_free_bytes);
+
 #ifdef __cplusplus
 }
 #endif

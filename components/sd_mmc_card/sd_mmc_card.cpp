@@ -16,7 +16,6 @@
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
 #include <dirent.h>
-#include <sys/statvfs.h>
 
 int constexpr SD_OCR_SDHC_CAP = (1 << 30);  // value defined in esp-idf/components/sdmmc/include/sd_protocol_defs.h
 #endif
@@ -354,10 +353,7 @@ void SdMmc::update_sensors() {
     return;
 
   uint64_t total_bytes = -1, free_bytes = -1, used_bytes = -1;
-  struct statvfs sv;
-  if (statvfs(MOUNT_POINT.c_str(), &sv) == 0) {
-    total_bytes = (uint64_t)sv.f_blocks * sv.f_frsize;
-    free_bytes = (uint64_t)sv.f_bavail * sv.f_frsize;
+  if (esp_vfs_fat_info(MOUNT_POINT.c_str(), &total_bytes, &free_bytes) == ESP_OK) {
     used_bytes = total_bytes - free_bytes;
   }
 
