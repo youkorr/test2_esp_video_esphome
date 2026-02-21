@@ -11,7 +11,7 @@
 
 #ifdef USE_ESP_IDF
 #include "esp_vfs.h"
-#include "esp_vfs_fat.h"
+#include "sd_mmc_card_vfs.h"   // provides esp_vfs_fat_sdmmc_mount_config_t + esp_vfs_fat_sdmmc_mount()
 #include "sdmmc_cmd.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
