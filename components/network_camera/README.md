@@ -52,7 +52,7 @@ lvgl:
 # Configuration caméra réseau
 network_camera:
   - id: security_cam_1
-    url: "http://192.168.1.38:1984/api/stream.mjpeg?src=frigate1_esp32"
+    url: "http://:1984/api/stream.mjpeg?src=frigate1_esp32"
     protocol: mjpeg
     width: 320
     height: 240
