@@ -29,7 +29,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: claude/fix-mjpeg-streaming-seuCV
+      ref: main
     components:
       - network_camera
       - multi_camera_display
@@ -71,7 +71,7 @@ Pour obtenir un flux MJPEG optimisé depuis vos caméras RTSP:
 go2rtc:
   streams:
     frigate1_esp32:
-      - "ffmpeg:rtsp://user:pass@192.168.1.56:554/stream2#video=mjpeg#width=320#height=240#quality=80#fps=15"
+      - "ffmpeg:rtsp://user:pass@/stream2#video=mjpeg#width=320#height=240#quality=80#fps=15"
 ```
 
 ### Configuration ESPHome
@@ -79,7 +79,7 @@ go2rtc:
 ```yaml
 network_camera:
   - id: security_cam_1
-    url: "http://192.168.1.38:1984/api/stream.mjpeg?src=frigate1_esp32"
+    url: "http:///api/stream.mjpeg?src=frigate1_esp32"
     protocol: mjpeg
     width: 320
     height: 240
