@@ -10,7 +10,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h>
-#include "ff.h"
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -677,12 +676,7 @@ bool MipiDSICamComponent::capture_snapshot_to_file(const std::string &path) {
   if (!dir.empty()) {
     struct stat st;
     if (stat(dir.c_str(), &st) != 0) {
-      // Convert VFS path to FatFS path (e.g., /sdcard/photos -> 0:/photos)
-      std::string fatfs_dir = dir;
-      if (fatfs_dir.find("/sdcard") == 0) {
-        fatfs_dir = "0:" + fatfs_dir.substr(7);
-      }
-      f_mkdir(fatfs_dir.c_str());
+      mkdir(dir.c_str(), 0755);
     }
   }
 

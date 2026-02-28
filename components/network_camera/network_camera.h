@@ -12,7 +12,8 @@ extern "C" {
 #include "esp_h264_dec_sw.h"
 }
 
-#include "lwip/sockets.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 namespace esphome {
 namespace network_camera {
