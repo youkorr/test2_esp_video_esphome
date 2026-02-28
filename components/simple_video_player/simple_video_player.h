@@ -35,8 +35,14 @@ extern "C" {
 
 }
 
-// ESP audio codec removed (not working)
-#define USE_ESP_AUDIO_CODEC 0
+// ESP audio codec for AAC decoding in MP4/MKV containers
+#define USE_ESP_AUDIO_CODEC 1
+
+extern "C" {
+#include "esp_audio_dec.h"
+#include "esp_audio_dec_reg.h"
+#include "esp_aac_dec.h"
+}
 
 namespace esphome {
 namespace simple_video_player {
@@ -241,11 +247,12 @@ class SimpleVideoPlayer : public Component {
   bool parse_mkv_clusters_();
   bool read_next_mkv_sample_();
 
-  // Audio codec methods removed (not working)
-  // bool init_aac_decoder_();
-  // bool read_next_audio_sample_();
-  // bool decode_audio_frame_();
-  // void process_audio_();
+  // Audio codec methods
+  bool init_aac_decoder_();
+  bool read_next_audio_sample_();
+  bool decode_audio_frame_();
+  void process_audio_();
+  void cleanup_aac_decoder_();
 
   // PPA hardware YUVRGB conversion (replaces software converter)
   bool init_ppa_color_converter_();
@@ -411,14 +418,18 @@ class SimpleVideoPlayer : public Component {
 
   speaker::Speaker *speaker_{nullptr};
   std::string media_player_entity_;
-  // Audio codec variables removed (not working)
-  // void *aac_decoder_{nullptr};
-  // uint8_t *audio_input_buffer_{nullptr};
-  // uint8_t *audio_output_buffer_{nullptr};
-  // size_t audio_input_size_{0};
-  // size_t audio_output_size_{0};
-  // bool has_audio_{false};
-  // bool aac_decoder_ready_{false};
+
+  // Audio codec variables
+  esp_audio_dec_handle_t aac_decoder_{nullptr};
+  uint8_t *audio_input_buffer_{nullptr};
+  uint8_t *audio_output_buffer_{nullptr};
+  size_t audio_input_size_{0};
+  size_t audio_output_size_{0};
+  bool has_audio_{false};
+  bool aac_decoder_ready_{false};
+  static constexpr size_t AUDIO_INPUT_BUFFER_SIZE = 8192;
+  static constexpr size_t AUDIO_OUTPUT_BUFFER_SIZE = 16384;
+  static constexpr uint32_t AV_SYNC_THRESHOLD_MS = 50;  // A/V sync threshold (like Waveshare)
 
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
