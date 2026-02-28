@@ -281,6 +281,22 @@ void SimpleVideoPlayer::setup() {
       }
     }
 
+    // Runtime MJPEG detection: check first bytes of sample #0 for JPEG SOI marker (FF D8)
+    // This catches cases where ffmpeg uses unexpected FourCC (e.g., mp4v instead of jpeg)
+    if (!this->mp4_has_mjpeg_ && !this->video_samples_.empty() && this->file_ != nullptr) {
+      uint8_t probe[4] = {0};
+      long saved_pos = this->cached_ftell_();
+      this->cached_fseek_(this->video_samples_[0].offset, SEEK_SET);
+      this->cached_fread_(probe, 1, 4);
+      this->cached_fseek_(saved_pos, SEEK_SET);
+
+      if (probe[0] == 0xFF && probe[1] == 0xD8 && probe[2] == 0xFF) {
+        this->mp4_has_mjpeg_ = true;
+        ESP_LOGW(TAG, "MJPEG detected from sample data (FF D8 FF) - stsd FourCC was not recognized");
+        ESP_LOGI(TAG, "Switching to hardware JPEG decoder for better performance");
+      }
+    }
+
     // Check if MP4 contains MJPEG codec (switch to hardware JPEG decoder)
     if (this->mp4_has_mjpeg_) {
       this->format_ = MediaFormat::MP4_MJPEG;
@@ -619,6 +635,22 @@ void SimpleVideoPlayer::complete_video_initialization_() {
             }
           }
         }
+      }
+    }
+
+    // Runtime MJPEG detection: check first bytes of sample #0 for JPEG SOI marker (FF D8)
+    // This catches cases where ffmpeg uses unexpected FourCC (e.g., mp4v instead of jpeg)
+    if (!this->mp4_has_mjpeg_ && !this->video_samples_.empty() && this->file_ != nullptr) {
+      uint8_t probe[4] = {0};
+      long saved_pos = this->cached_ftell_();
+      this->cached_fseek_(this->video_samples_[0].offset, SEEK_SET);
+      this->cached_fread_(probe, 1, 4);
+      this->cached_fseek_(saved_pos, SEEK_SET);
+
+      if (probe[0] == 0xFF && probe[1] == 0xD8 && probe[2] == 0xFF) {
+        this->mp4_has_mjpeg_ = true;
+        ESP_LOGW(TAG, "MJPEG detected from sample data (FF D8 FF) - stsd FourCC was not recognized");
+        ESP_LOGI(TAG, "Switching to hardware JPEG decoder for better performance");
       }
     }
 
@@ -2437,8 +2469,34 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
       this->parse_mp4a_(entry_size - 8);
       found_audio_codec = true;
     } else {
-      if (entry_size > 8) {
-        this->cached_fseek_(entry_size - 8, SEEK_CUR);
+      // Unknown codec FourCC - if this is a video track, still mark as video
+      // so the track doesn't get skipped. The runtime MJPEG probe will detect
+      // the actual codec from sample data.
+      if (is_video && !found_audio_codec) {
+        ESP_LOGW(TAG, "Unknown video codec FourCC: '%s' - will probe sample data", fourcc);
+        found_video_codec = true;
+
+        // Try to parse width/height from visual sample entry header
+        if (entry_size > 30) {
+          this->cached_fseek_(24, SEEK_CUR);  // Skip to width field
+          uint16_t w = this->read_be16_();
+          uint16_t h = this->read_be16_();
+          if (w > 0 && w <= 4096 && h > 0 && h <= 4096) {
+            this->actual_width_ = w;
+            this->actual_height_ = h;
+            ESP_LOGI(TAG, "Resolution from unknown codec stsd: %dx%d", w, h);
+          }
+          long remaining = (long)(entry_size - 8) - 28;
+          if (remaining > 0) {
+            this->cached_fseek_(remaining, SEEK_CUR);
+          }
+        } else if (entry_size > 8) {
+          this->cached_fseek_(entry_size - 8, SEEK_CUR);
+        }
+      } else {
+        if (entry_size > 8) {
+          this->cached_fseek_(entry_size - 8, SEEK_CUR);
+        }
       }
     }
   }
