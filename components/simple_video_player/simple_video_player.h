@@ -57,6 +57,7 @@ enum class MediaFormat {
   UNKNOWN,
   MJPEG,
   MP4_H264,
+  MP4_MJPEG,   // MJPEG codec in MP4 container (like Waveshare) - uses hardware JPEG decoder
   MKV_H264,
   GIF_ANIMATED
 };
@@ -397,6 +398,7 @@ class SimpleVideoPlayer : public Component {
   std::vector<uint8_t> build_constrained_baseline_pps_();
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
+  bool mp4_has_mjpeg_{false};  // true if MP4 contains MJPEG codec (not H.264)
 
   // MKV/Matroska data
   std::vector<MkvSample> mkv_samples_;

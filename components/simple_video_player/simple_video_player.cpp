@@ -103,6 +103,7 @@ void SimpleVideoPlayer::setup() {
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGI(TAG, "Detected format: %s", format_str);
@@ -280,11 +281,23 @@ void SimpleVideoPlayer::setup() {
       }
     }
 
-    // Initialize H.264 decoder
-    if (!this->init_h264_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-      this->mark_failed();
-      return;
+    // Check if MP4 contains MJPEG codec (switch to hardware JPEG decoder)
+    if (this->mp4_has_mjpeg_) {
+      this->format_ = MediaFormat::MP4_MJPEG;
+      ESP_LOGI(TAG, "MP4 contains MJPEG codec - using hardware JPEG decoder");
+
+      if (!this->init_jpeg_decoder_()) {
+        ESP_LOGE(TAG, "Failed to initialize JPEG decoder for MP4_MJPEG");
+        this->mark_failed();
+        return;
+      }
+    } else {
+      // H.264 software decoder
+      if (!this->init_h264_decoder_()) {
+        ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+        this->mark_failed();
+        return;
+      }
     }
 
     // Initialize AAC audio decoder if audio track found
@@ -431,6 +444,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGI(TAG, "Detected format: %s", format_str);
@@ -608,11 +622,23 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       }
     }
 
-    // Initialize H.264 decoder
-    if (!this->init_h264_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-      this->mark_failed();
-      return;
+    // Check if MP4 contains MJPEG codec (switch to hardware JPEG decoder)
+    if (this->mp4_has_mjpeg_) {
+      this->format_ = MediaFormat::MP4_MJPEG;
+      ESP_LOGI(TAG, "MP4 contains MJPEG codec - using hardware JPEG decoder");
+
+      if (!this->init_jpeg_decoder_()) {
+        ESP_LOGE(TAG, "Failed to initialize JPEG decoder for MP4_MJPEG");
+        this->mark_failed();
+        return;
+      }
+    } else {
+      // H.264 software decoder
+      if (!this->init_h264_decoder_()) {
+        ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
+        this->mark_failed();
+        return;
+      }
     }
 
     // Initialize AAC audio decoder if audio track found
@@ -849,6 +875,7 @@ void SimpleVideoPlayer::dump_config() {
   }
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGCONFIG(TAG, "  Format: %s", format_str);
@@ -2373,9 +2400,39 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
     ESP_LOGI(TAG, "stsd entry: format='%s', size=%u", fourcc, entry_size);
 
     if (format == make_fourcc('a', 'v', 'c', '1')) {
-      ESP_LOGI(TAG, "Found AVC1 codec, parsing...");
+      ESP_LOGI(TAG, "Found AVC1 codec (H.264), parsing...");
       this->parse_avc1_(entry_size - 8);
       found_video_codec = true;
+    } else if (format == make_fourcc('j', 'p', 'e', 'g') ||
+               format == make_fourcc('m', 'j', 'p', 'a') ||
+               format == make_fourcc('m', 'j', 'p', 'b') ||
+               format == make_fourcc('M', 'J', 'P', 'G') ||
+               format == make_fourcc('m', 'j', 'p', '2') ||
+               format == make_fourcc('J', 'P', 'E', 'G')) {
+      // MJPEG codec in MP4 container (like Waveshare uses)
+      // Skip the visual sample entry header (78 bytes for video)
+      // 6 reserved + 2 data_ref_idx + 2 pre_defined + 2 reserved + 12 pre_defined
+      // + 2 width + 2 height + 4 horiz_res + 4 vert_res + 4 reserved
+      // + 2 frame_count + 32 compressor_name + 2 depth + 2 pre_defined
+      if (entry_size > 8) {
+        // Parse width/height from the visual sample entry
+        this->cached_fseek_(24, SEEK_CUR);  // Skip to width field
+        uint16_t w = this->read_be16_();
+        uint16_t h = this->read_be16_();
+        if (w > 0 && h > 0) {
+          this->actual_width_ = w;
+          this->actual_height_ = h;
+          ESP_LOGI(TAG, "MJPEG resolution from stsd: %dx%d", w, h);
+        }
+        // Skip remaining visual sample entry fields
+        long remaining = (long)(entry_size - 8) - 28;  // Already read 24+4 bytes
+        if (remaining > 0) {
+          this->cached_fseek_(remaining, SEEK_CUR);
+        }
+      }
+      this->mp4_has_mjpeg_ = true;
+      found_video_codec = true;
+      ESP_LOGI(TAG, "Found MJPEG codec in MP4 (hardware JPEG decoder will be used)");
     } else if (format == make_fourcc('m', 'p', '4', 'a')) {
       this->parse_mp4a_(entry_size - 8);
       found_audio_codec = true;
@@ -4244,7 +4301,7 @@ void SimpleVideoPlayer::create_controls_() {
   // Format badge (bottom row, well below buttons)
   this->format_badge_ = lv_label_create(this->controls_container_);
   const char *format_text;
-  if (this->format_ == MediaFormat::MP4_H264) {
+  if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
     format_text = "MP4";
   } else if (this->format_ == MediaFormat::MKV_H264) {
     format_text = "MKV";
@@ -4334,12 +4391,19 @@ void SimpleVideoPlayer::play() {
       }
     }
 
-    // Re-initialize H.264 decoder if needed
+    // Re-initialize decoder if needed
     if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MKV_H264) {
       if (!this->h264_decoder_ready_) {
         ESP_LOGI(TAG, "Re-initializing H.264 decoder...");
         if (!this->init_h264_decoder_()) {
           ESP_LOGE(TAG, "Failed to re-initialize H.264 decoder");
+          return;
+        }
+      }
+    } else if (this->format_ == MediaFormat::MP4_MJPEG) {
+      if (this->jpeg_decoder_ == nullptr) {
+        if (!this->init_jpeg_decoder_()) {
+          ESP_LOGE(TAG, "Failed to re-initialize JPEG decoder");
           return;
         }
       }
@@ -4371,18 +4435,23 @@ void SimpleVideoPlayer::play() {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       this->cached_fseek_(0, SEEK_SET);
       this->current_pos_ = 0;
-    } else if (this->format_ == MediaFormat::MP4_H264) {
-      ESP_LOGI(TAG, "Starting MP4 playback: %u video samples, H264 decoder ready: %s",
-               this->video_samples_.size(), this->h264_decoder_ready_ ? "YES" : "NO");
+    } else if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
+      const char *codec = (this->format_ == MediaFormat::MP4_MJPEG) ? "MJPEG" : "H264";
+      ESP_LOGI(TAG, "Starting MP4 playback (%s): %u video samples", codec, this->video_samples_.size());
       if (this->video_samples_.empty()) {
-        ESP_LOGE(TAG, "Cannot play MP4: no video samples! MP4 parsing may have failed.");
+        ESP_LOGE(TAG, "Cannot play MP4: no video samples!");
         return;
       }
-      if (!this->h264_decoder_ready_) {
+      if (this->format_ == MediaFormat::MP4_H264 && !this->h264_decoder_ready_) {
         ESP_LOGE(TAG, "Cannot play MP4: H264 decoder not ready!");
         return;
       }
+      if (this->format_ == MediaFormat::MP4_MJPEG && this->jpeg_decoder_ == nullptr) {
+        ESP_LOGE(TAG, "Cannot play MP4: JPEG decoder not ready!");
+        return;
+      }
       this->current_video_sample_ = 0;
+      this->current_audio_sample_ = 0;
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
       // Find first keyframe to start playback
@@ -4558,8 +4627,9 @@ void SimpleVideoPlayer::stop() {
 
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
     this->cached_fseek_(0, SEEK_SET);
-  } else if (this->format_ == MediaFormat::MP4_H264) {
+  } else if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
     this->current_video_sample_ = 0;
+    this->current_audio_sample_ = 0;
     this->sps_pps_sent_ = false;
   }
   this->frame_count_ = 0;
@@ -4717,10 +4787,10 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
       player->cached_fseek_(new_pos, SEEK_SET);
       player->current_pos_ = new_pos;
     }
-  } else if (player->format_ == MediaFormat::MP4_H264) {
+  } else if (player->format_ == MediaFormat::MP4_H264 || player->format_ == MediaFormat::MP4_MJPEG) {
     size_t new_sample = (player->video_samples_.size() * value) / 100;
     player->current_video_sample_ = new_sample;
-    player->sps_pps_sent_ = false;  // Resend SPS/PPS
+    player->sps_pps_sent_ = false;  // Resend SPS/PPS (H.264 only)
   }
 }
 
@@ -4846,7 +4916,8 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
             // Detailed performance logging every 30 frames
             if (callback_count % 30 == 0) {
               const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
-                                       (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
+                                       (player->format_ == MediaFormat::MKV_H264) ? "H264" :
+                                       (player->format_ == MediaFormat::MP4_MJPEG) ? "MP4-MJPEG" : "MJPEG";
               ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
                        codec_name, player->actual_width_, player->actual_height_,
                        (unsigned long)total_time, (unsigned long)read_time,
@@ -4860,6 +4931,41 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           // read_next_mjpeg_frame_() returned false = reached end
           end_of_stream = true;
         }
+      } else if (player->format_ == MediaFormat::MP4_MJPEG) {
+        // MP4 with MJPEG codec: read from MP4 sample index, decode with hardware JPEG
+        uint32_t total_start = esp_timer_get_time() / 1000;
+
+        uint32_t read_start = esp_timer_get_time() / 1000;
+        if (player->read_next_mp4_sample_()) {
+          uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
+          // Strip COM markers if present (can cause ESP32 JPEG decoder to fail)
+          player->strip_jpeg_com_markers_();
+
+          uint32_t decode_start = esp_timer_get_time() / 1000;
+          if (player->decode_mjpeg_frame_()) {
+            uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
+            // Update current time from MP4 sample timestamp
+            if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
+              player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
+            }
+
+            player->frame_ready_ = true;
+            got_frame = true;
+
+            if (callback_count % 30 == 0) {
+              uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
+              ESP_LOGI(TAG, "MP4-MJPEG timing (%dx%d): TOTAL=%lums [read=%lums, JPEG decode=%lums]",
+                       player->actual_width_, player->actual_height_,
+                       (unsigned long)total_time, (unsigned long)read_time, (unsigned long)decode_time);
+            }
+          }
+        } else {
+          end_of_stream = true;
+        }
+        // Process audio samples with A/V sync
+        player->process_audio_();
       } else if (player->format_ == MediaFormat::MP4_H264) {
         uint32_t total_start = esp_timer_get_time() / 1000;
 
