@@ -16,7 +16,8 @@
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
-#include "ff.h"
+#include <dirent.h>
+#include <errno.h>
 
 int constexpr SD_OCR_SDHC_CAP = (1 << 30);  // value defined in esp-idf/components/sdmmc/include/sd_protocol_defs.h
 #endif
@@ -29,10 +30,8 @@ static const char *TAG = "sd_mmc_card";
 #ifdef USE_ESP_IDF
 static constexpr size_t FILE_PATH_MAX = ESP_VFS_PATH_MAX + CONFIG_SPIFFS_OBJ_NAME_LEN;
 static const std::string MOUNT_POINT("/sdcard");
-static const std::string FATFS_DRIVE("0:");
 
 std::string build_path(const char *path) { return MOUNT_POINT + path; }
-std::string build_fatfs_path(const char *path) { return FATFS_DRIVE + path; }
 #endif
 
 #ifdef USE_SENSOR
@@ -293,42 +292,38 @@ std::vector<FileInfo> SdMmc::list_directory_file_info(std::string path, uint8_t 
 std::vector<FileInfo> &SdMmc::list_directory_file_info_rec(const char *path, uint8_t depth,
                                                            std::vector<FileInfo> &list) {
   ESP_LOGV(TAG, "Listing directory file info: %s\n", path);
-  std::string fatfs_path = build_fatfs_path(path);
+  std::string vfs_path = build_path(path);
 
-  FF_DIR dir;
-  FILINFO fno;
-  FRESULT res = f_opendir(&dir, fatfs_path.c_str());
-  if (res != FR_OK) {
-    ESP_LOGE(TAG, "Failed to open directory: %s (error %d)", fatfs_path.c_str(), res);
+  DIR *dir = opendir(vfs_path.c_str());
+  if (dir == nullptr) {
+    ESP_LOGE(TAG, "Failed to open directory: %s (errno %d)", vfs_path.c_str(), errno);
     return list;
   }
 
-  char entry_fatfs_path[FILE_PATH_MAX];
   char entry_path[FILE_PATH_MAX];
-  const size_t drive_len = FATFS_DRIVE.size();
-  size_t entry_path_len = strlen(path);
+  size_t path_len = strlen(path);
   strlcpy(entry_path, path, sizeof(entry_path));
-  strlcpy(entry_path + entry_path_len, "/", sizeof(entry_path) - entry_path_len);
-  entry_path_len = strlen(entry_path);
+  strlcpy(entry_path + path_len, "/", sizeof(entry_path) - path_len);
+  path_len = strlen(entry_path);
 
-  strlcpy(entry_fatfs_path, FATFS_DRIVE.c_str(), sizeof(entry_fatfs_path));
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    strlcpy(entry_path + path_len, entry->d_name, sizeof(entry_path) - path_len);
 
-  while ((res = f_readdir(&dir, &fno)) == FR_OK && fno.fname[0] != 0) {
-    size_t file_size = 0;
-    bool is_dir = (fno.fattrib & AM_DIR) != 0;
-
-    strlcpy(entry_path + entry_path_len, fno.fname, sizeof(entry_path) - entry_path_len);
-    strlcpy(entry_fatfs_path + drive_len, entry_path, sizeof(entry_fatfs_path) - drive_len);
-
-    if (!is_dir) {
-      file_size = fno.fsize;
+    std::string entry_vfs_path = build_path(entry_path);
+    struct stat st;
+    if (stat(entry_vfs_path.c_str(), &st) != 0) {
+      continue;
     }
+
+    bool is_dir = S_ISDIR(st.st_mode);
+    size_t file_size = is_dir ? 0 : st.st_size;
 
     list.emplace_back(entry_path, file_size, is_dir);
     if (is_dir && depth)
-      list_directory_file_info_rec(entry_fatfs_path, depth - 1, list);
+      list_directory_file_info_rec(entry_path, depth - 1, list);
   }
-  f_closedir(&dir);
+  closedir(dir);
   return list;
 }
 
@@ -368,17 +363,12 @@ void SdMmc::update_sensors() {
   if (this->card_ == nullptr)
     return;
 
-  FATFS *fs;
-  DWORD fre_clust, fre_sect, tot_sect;
-  uint64_t total_bytes = -1, free_bytes = -1, used_bytes = -1;
-  auto res = f_getfree(MOUNT_POINT.c_str(), &fre_clust, &fs);
-  if (!res) {
-    tot_sect = (fs->n_fatent - 2) * fs->csize;
-    fre_sect = fre_clust * fs->csize;
-
-    total_bytes = static_cast<uint64_t>(tot_sect) * FF_SS_SDCARD;
-    free_bytes = static_cast<uint64_t>(fre_sect) * FF_SS_SDCARD;
+  uint64_t total_bytes = 0, free_bytes = 0, used_bytes = 0;
+  esp_err_t ret = esp_vfs_fat_info(MOUNT_POINT.c_str(), &total_bytes, &free_bytes);
+  if (ret == ESP_OK) {
     used_bytes = total_bytes - free_bytes;
+  } else {
+    ESP_LOGE(TAG, "Failed to get filesystem info: %s", esp_err_to_name(ret));
   }
 
   if (this->used_space_sensor_ != nullptr)
