@@ -316,6 +316,22 @@ void SimpleVideoPlayer::setup() {
       }
     }
 
+    // Allocate SD read-ahead buffer for MP4 (batches ~6 frames per SD read)
+    // Reduces per-frame SD latency from ~155ms to ~1ms for cached frames
+    if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ == nullptr) {
+      this->sd_read_ahead_buf_ = (uint8_t *)heap_caps_malloc(
+          this->sd_read_ahead_capacity_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->sd_read_ahead_buf_ != nullptr) {
+        size_t avg_frame_size = this->video_samples_.empty() ? 80000 : this->video_samples_[0].size;
+        ESP_LOGI(TAG, "SD read-ahead buffer: %uKB in PSRAM (covers ~%d frames per SD read)",
+                 (unsigned)(this->sd_read_ahead_capacity_ / 1024),
+                 (int)(this->sd_read_ahead_capacity_ / std::max((size_t)1, avg_frame_size)));
+      } else {
+        ESP_LOGW(TAG, "Failed to allocate SD read-ahead buffer (%uKB) - using direct SD reads",
+                 (unsigned)(this->sd_read_ahead_capacity_ / 1024));
+      }
+    }
+
     // Initialize AAC audio decoder if audio track found
     if (this->speaker_ != nullptr && this->has_audio_) {
       if (!this->init_aac_decoder_()) {
@@ -670,6 +686,22 @@ void SimpleVideoPlayer::complete_video_initialization_() {
         ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
         this->mark_failed();
         return;
+      }
+    }
+
+    // Allocate SD read-ahead buffer for MP4 (batches ~6 frames per SD read)
+    // Reduces per-frame SD latency from ~155ms to ~1ms for cached frames
+    if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ == nullptr) {
+      this->sd_read_ahead_buf_ = (uint8_t *)heap_caps_malloc(
+          this->sd_read_ahead_capacity_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+      if (this->sd_read_ahead_buf_ != nullptr) {
+        size_t avg_frame_size = this->video_samples_.empty() ? 80000 : this->video_samples_[0].size;
+        ESP_LOGI(TAG, "SD read-ahead buffer: %uKB in PSRAM (covers ~%d frames per SD read)",
+                 (unsigned)(this->sd_read_ahead_capacity_ / 1024),
+                 (int)(this->sd_read_ahead_capacity_ / std::max((size_t)1, avg_frame_size)));
+      } else {
+        ESP_LOGW(TAG, "Failed to allocate SD read-ahead buffer (%uKB) - using direct SD reads",
+                 (unsigned)(this->sd_read_ahead_capacity_ / 1024));
       }
     }
 
@@ -2879,6 +2911,9 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
       this->current_video_sample_ = 0;
       this->sps_pps_sent_ = false;
       this->frame_count_ = 0;
+      // Invalidate read-ahead buffer on loop restart
+      this->sd_read_ahead_valid_ = 0;
+      this->sd_read_ahead_offset_ = -1;
     } else {
       return false;
     }
@@ -2891,15 +2926,67 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
     this->sps_pps_sent_ = false;  // Reset flag to prepend SPS/PPS to keyframe
   }
 
-  // Seek to sample position
-  this->cached_fseek_(sample.offset, SEEK_SET);
-
   // Read sample data
   if (sample.size > this->buffer_size_) {
     ESP_LOGW(TAG, "Sample too large: %u > %u", sample.size, this->buffer_size_);
     this->current_video_sample_++;
     return false;
   }
+
+  // === SD Read-Ahead Buffer optimization ===
+  // Instead of reading each frame individually from SD (155ms per fseek+fread),
+  // read a large chunk (512KB) covering multiple frames, then serve subsequent
+  // frames from PSRAM buffer (< 1ms memcpy).
+  // Only used for direct SD card reads (not when file is already cached in PSRAM).
+
+  if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ != nullptr) {
+    // Check if this sample falls within the read-ahead buffer
+    long buf_end = this->sd_read_ahead_offset_ + (long)this->sd_read_ahead_valid_;
+    if (this->sd_read_ahead_offset_ >= 0 &&
+        (long)sample.offset >= this->sd_read_ahead_offset_ &&
+        (long)(sample.offset + sample.size) <= buf_end) {
+      // HIT - serve from read-ahead buffer (fast path: ~1ms memcpy vs ~155ms SD read)
+      size_t buf_pos = sample.offset - this->sd_read_ahead_offset_;
+      memcpy(this->input_buffer_, this->sd_read_ahead_buf_ + buf_pos, sample.size);
+      this->input_size_ = sample.size;
+      this->current_video_sample_++;
+      this->frame_count_++;
+      return true;
+    }
+
+    // MISS - read a large chunk from SD starting at this sample's offset
+    this->cached_fseek_(sample.offset, SEEK_SET);
+    size_t max_read = std::min(this->sd_read_ahead_capacity_,
+                               (size_t)(this->file_size_ - sample.offset));
+    size_t bytes_read = this->cached_fread_(this->sd_read_ahead_buf_, 1, max_read);
+
+    if (bytes_read >= sample.size) {
+      this->sd_read_ahead_offset_ = sample.offset;
+      this->sd_read_ahead_valid_ = bytes_read;
+
+      // Copy this sample from the freshly filled buffer
+      memcpy(this->input_buffer_, this->sd_read_ahead_buf_, sample.size);
+      this->input_size_ = sample.size;
+      this->current_video_sample_++;
+      this->frame_count_++;
+
+      if (this->frame_count_ == 1) {
+        ESP_LOGI(TAG, "SD read-ahead: loaded %u bytes covering ~%d frames from offset %lu",
+                 (unsigned)bytes_read,
+                 (int)(bytes_read / std::max((size_t)1, (size_t)sample.size)),
+                 (unsigned long)sample.offset);
+      }
+      return true;
+    }
+
+    // Read-ahead failed, fall through to direct read
+    ESP_LOGW(TAG, "Read-ahead failed: got %u, need %u", (unsigned)bytes_read, sample.size);
+    this->sd_read_ahead_valid_ = 0;
+    this->sd_read_ahead_offset_ = -1;
+  }
+
+  // Direct read path (used when file is cached in PSRAM, or read-ahead not available)
+  this->cached_fseek_(sample.offset, SEEK_SET);
 
   size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, sample.size);
   if (bytes_read != sample.size) {
@@ -4689,6 +4776,9 @@ void SimpleVideoPlayer::stop() {
     this->current_video_sample_ = 0;
     this->current_audio_sample_ = 0;
     this->sps_pps_sent_ = false;
+    // Invalidate read-ahead buffer (will re-fill on next play)
+    this->sd_read_ahead_valid_ = 0;
+    this->sd_read_ahead_offset_ = -1;
   }
   this->frame_count_ = 0;
   this->current_pos_ = 0;
@@ -4756,6 +4846,16 @@ void SimpleVideoPlayer::stop() {
   }
 
   this->rgb_buffer_size_ = 0;
+
+  // Free SD read-ahead buffer
+  if (this->sd_read_ahead_buf_ != nullptr) {
+    total_freed += this->sd_read_ahead_capacity_;
+    heap_caps_free(this->sd_read_ahead_buf_);
+    this->sd_read_ahead_buf_ = nullptr;
+    this->sd_read_ahead_valid_ = 0;
+    this->sd_read_ahead_offset_ = -1;
+    ESP_LOGD(TAG, "  Freed sd_read_ahead_buf_: %zu bytes", this->sd_read_ahead_capacity_);
+  }
 
   // Free rotation buffer (but keep rotation handle and rotation_initialized_ for next playback)
   if (this->rotate_buffer_ != nullptr) {
@@ -5014,9 +5114,12 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
 
             if (callback_count % 30 == 0) {
               uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
-              ESP_LOGI(TAG, "MP4-MJPEG timing (%dx%d): TOTAL=%lums [read=%lums, JPEG decode=%lums]",
+              const char *read_src = player->file_cache_loaded_ ? "PSRAM-cache" :
+                                     (player->sd_read_ahead_buf_ != nullptr ? "SD-readahead" : "SD-direct");
+              ESP_LOGI(TAG, "MP4-MJPEG timing (%dx%d): TOTAL=%lums [read=%lums (%s), JPEG decode=%lums]",
                        player->actual_width_, player->actual_height_,
-                       (unsigned long)total_time, (unsigned long)read_time, (unsigned long)decode_time);
+                       (unsigned long)total_time, (unsigned long)read_time, read_src,
+                       (unsigned long)decode_time);
             }
           }
         } else {

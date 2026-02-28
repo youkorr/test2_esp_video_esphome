@@ -324,6 +324,14 @@ class SimpleVideoPlayer : public Component {
   bool use_file_cache_{false};           // Enable PSRAM caching (for small files <32MB)
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
 
+  // SD Read-Ahead Buffer - Reduce SD card reads for MP4 by batching frame reads
+  // Instead of reading each 80KB frame individually (155ms each),
+  // read 512KB at once (~6 frames) and serve subsequent frames from PSRAM buffer
+  uint8_t *sd_read_ahead_buf_{nullptr};       // Read-ahead buffer in PSRAM
+  size_t sd_read_ahead_capacity_{512 * 1024}; // 512KB default
+  size_t sd_read_ahead_valid_{0};             // Bytes of valid data in buffer
+  long sd_read_ahead_offset_{-1};             // File offset of buffer start
+
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};          // Buffer 0 - triple buffering
   uint8_t *rgb_buffer_back_{nullptr};     // Buffer 1 - triple buffering
