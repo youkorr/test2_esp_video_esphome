@@ -285,10 +285,12 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
+  static void volume_slider_cb_(lv_event_t *e);  // Volume slider callback
   static void esp_timer_cb_(void *arg);  // ESP32 native timer callback (ultra-lightweight, just sets event bit)
   static void decode_task_(void *arg);  // FreeRTOS decode task (offloaded decoding from timer)
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
+  void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);  // Software volume scaling
 
   // Event bits for decode task synchronization (similar to avi_player)
   static constexpr EventBits_t EVENT_TIMER_TICK = (1 << 0);  // Timer fired, time to decode next frame
@@ -461,6 +463,8 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *loading_spinner_{nullptr};
   lv_obj_t *controls_container_{nullptr};
   lv_obj_t *touch_layer_{nullptr};
+  lv_obj_t *volume_slider_{nullptr};
+  lv_obj_t *volume_icon_{nullptr};
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
@@ -477,6 +481,7 @@ class SimpleVideoPlayer : public Component {
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};  // Auto-hide controls after 5 seconds
+  uint8_t volume_level_{80};  // Software volume level 0-100 (default 80%)
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {

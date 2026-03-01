@@ -2894,8 +2894,9 @@ void SimpleVideoPlayer::process_audio_() {
     if (!this->read_next_audio_sample_()) break;
     if (!this->decode_audio_frame_()) continue;
 
-    // Send decoded PCM to speaker
+    // Apply software volume scaling and send decoded PCM to speaker
     if (this->audio_output_size_ > 0) {
+      this->apply_volume_to_pcm_(this->audio_output_buffer_, this->audio_output_size_);
       this->speaker_->play(this->audio_output_buffer_, this->audio_output_size_);
     }
   }
@@ -4405,66 +4406,101 @@ void SimpleVideoPlayer::create_ui_() {
 void SimpleVideoPlayer::create_controls_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
-  // Controls container at bottom (use actual video width) - made taller for badges
+  // Controls container at bottom - taller to fit volume row
   this->controls_container_ = lv_obj_create(parent);
-  lv_obj_set_size(this->controls_container_, this->actual_width_, 100);
-  lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
+  lv_obj_set_size(this->controls_container_, this->actual_width_, 130);
+  lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -5);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
+  lv_obj_set_style_pad_all(this->controls_container_, 0, 0);
+  lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Play button (larger, better spaced, and rounded)
+  // === ROW 1: Play/Pause/Stop buttons + Progress slider (y offset = 5) ===
+
+  // Play button
   this->play_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->play_btn_, 65, 50);
-  lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, -5);
-  lv_obj_set_style_radius(this->play_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->play_btn_, 55, 40);
+  lv_obj_set_pos(this->play_btn_, 10, 5);
+  lv_obj_set_style_radius(this->play_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *play_label = lv_label_create(this->play_btn_);
   lv_label_set_text(play_label, LV_SYMBOL_PLAY);
   lv_obj_center(play_label);
   lv_obj_add_event_cb(this->play_btn_, play_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Pause button (larger, better spaced, and rounded)
+  // Pause button
   this->pause_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->pause_btn_, 65, 50);
-  lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 90, -5);
-  lv_obj_set_style_radius(this->pause_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->pause_btn_, 55, 40);
+  lv_obj_set_pos(this->pause_btn_, 75, 5);
+  lv_obj_set_style_radius(this->pause_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *pause_label = lv_label_create(this->pause_btn_);
   lv_label_set_text(pause_label, LV_SYMBOL_PAUSE);
   lv_obj_center(pause_label);
   lv_obj_add_event_cb(this->pause_btn_, pause_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Stop button (larger, better spaced, and rounded)
+  // Stop button
   this->stop_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->stop_btn_, 65, 50);
-  lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 170, -5);
-  lv_obj_set_style_radius(this->stop_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->stop_btn_, 55, 40);
+  lv_obj_set_pos(this->stop_btn_, 140, 5);
+  lv_obj_set_style_radius(this->stop_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *stop_label = lv_label_create(this->stop_btn_);
   lv_label_set_text(stop_label, LV_SYMBOL_STOP);
   lv_obj_center(stop_label);
   lv_obj_add_event_cb(this->stop_btn_, stop_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Progress slider (enhanced style)
+  // Progress slider (row 1, right of buttons)
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_size(this->slider_, this->actual_width_ - 350, 12);
-  lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 245, -5);
+  int slider_width = this->actual_width_ - 320;
+  if (slider_width < 100) slider_width = 100;
+  lv_obj_set_size(this->slider_, slider_width, 10);
+  lv_obj_set_pos(this->slider_, 210, 18);
   lv_slider_set_range(this->slider_, 0, 100);
 
-  // Style the slider for better visibility
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x404040), LV_PART_MAIN);  // Dark gray background
+  // Style the progress slider
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x404040), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);  // Blue indicator
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);  // White knob
-  lv_obj_set_style_pad_all(this->slider_, 0, LV_PART_MAIN);  // No padding
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->slider_, 0, LV_PART_MAIN);
 
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
 
-  // Time counter (top row, right side)
+  // Time counter (row 1, top right)
   this->time_label_ = lv_label_create(this->controls_container_);
   lv_label_set_text(this->time_label_, "00:00 / 00:00");
-  lv_obj_align(this->time_label_, LV_ALIGN_TOP_RIGHT, -10, 5);
+  lv_obj_set_pos(this->time_label_, this->actual_width_ - 140, 3);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->time_label_, &lv_font_montserrat_14, 0);
 
-  // Format badge (bottom row, well below buttons)
+  // === ROW 2: Volume slider (y offset = 52) ===
+
+  // Volume icon (speaker symbol)
+  this->volume_icon_ = lv_label_create(this->controls_container_);
+  lv_label_set_text(this->volume_icon_, LV_SYMBOL_VOLUME_MAX);
+  lv_obj_set_pos(this->volume_icon_, 12, 55);
+  lv_obj_set_style_text_color(this->volume_icon_, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_font(this->volume_icon_, &lv_font_montserrat_16, 0);
+
+  // Volume slider
+  this->volume_slider_ = lv_slider_create(this->controls_container_);
+  lv_obj_set_size(this->volume_slider_, 180, 10);
+  lv_obj_set_pos(this->volume_slider_, 45, 60);
+  lv_slider_set_range(this->volume_slider_, 0, 100);
+  lv_slider_set_value(this->volume_slider_, this->volume_level_, LV_ANIM_OFF);
+
+  // Style the volume slider - orange/amber theme
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0x404040), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(this->volume_slider_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0xFF8C00), LV_PART_INDICATOR);  // Orange
+  lv_obj_set_style_bg_opa(this->volume_slider_, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->volume_slider_, 0, LV_PART_MAIN);
+
+  lv_obj_add_event_cb(this->volume_slider_, volume_slider_cb_, LV_EVENT_VALUE_CHANGED, this);
+
+  // === ROW 3: Format badge + Resolution (y offset = 85) ===
+
+  // Format badge
   this->format_badge_ = lv_label_create(this->controls_container_);
   const char *format_text;
   if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
@@ -4479,18 +4515,29 @@ void SimpleVideoPlayer::create_controls_() {
     format_text = "???";
   }
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, 5);  // Moved down further: 0 → 5 (extends below container)
+  lv_obj_set_pos(this->format_badge_, 10, 85);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_14, 0);
 
-  // Resolution label (bottom row, to the right of format badge)
+  // Resolution label
   this->resolution_label_ = lv_label_create(this->controls_container_);
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 110, 5);  // Moved down further: 0 → 5
-  lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_16, 0);
+  lv_obj_set_pos(this->resolution_label_, 70, 85);
+  lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_14, 0);
+
+  // Audio indicator (show if audio track detected)
+  if (this->has_audio_ && this->speaker_ != nullptr) {
+    lv_obj_t *audio_label = lv_label_create(this->controls_container_);
+    char audio_text[32];
+    snprintf(audio_text, sizeof(audio_text), "AAC %uHz", this->audio_sample_rate_);
+    lv_label_set_text(audio_label, audio_text);
+    lv_obj_set_pos(audio_label, 160, 85);
+    lv_obj_set_style_text_color(audio_label, lv_color_hex(0x00BFFF), 0);  // Light blue
+    lv_obj_set_style_text_font(audio_label, &lv_font_montserrat_14, 0);
+  }
 }
 
 void SimpleVideoPlayer::play() {
@@ -4968,6 +5015,49 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
     size_t new_sample = (player->video_samples_.size() * value) / 100;
     player->current_video_sample_ = new_sample;
     player->sps_pps_sent_ = false;  // Resend SPS/PPS (H.264 only)
+  }
+}
+
+void SimpleVideoPlayer::volume_slider_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(e));
+
+  int value = lv_slider_get_value(slider);
+  player->volume_level_ = (uint8_t)value;
+
+  // Update volume icon based on level
+  if (player->volume_icon_ != nullptr) {
+    if (value == 0) {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_MUTE);
+    } else if (value < 50) {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_VOLUME_MID);
+    } else {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_VOLUME_MAX);
+    }
+  }
+
+  ESP_LOGD(TAG, "Volume changed to %d%%", value);
+}
+
+void SimpleVideoPlayer::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
+  if (this->volume_level_ >= 100) return;  // No scaling needed at max volume
+  if (this->volume_level_ == 0) {
+    // Mute - zero out all samples
+    memset(pcm_data, 0, size);
+    return;
+  }
+
+  // Scale 16-bit PCM samples by volume percentage
+  int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
+  size_t num_samples = size / 2;
+  uint8_t vol = this->volume_level_;
+
+  for (size_t i = 0; i < num_samples; i++) {
+    int32_t scaled = (static_cast<int32_t>(samples[i]) * vol) / 100;
+    // Clamp to int16_t range
+    if (scaled > 32767) scaled = 32767;
+    if (scaled < -32768) scaled = -32768;
+    samples[i] = static_cast<int16_t>(scaled);
   }
 }
 
