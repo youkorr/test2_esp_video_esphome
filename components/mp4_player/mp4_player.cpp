@@ -3,6 +3,7 @@
 #ifdef USE_ESP_IDF
 
 #include "esp_heap_caps.h"
+#include <cstdio>
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
@@ -13,45 +14,59 @@ namespace mp4_player {
 static const char *TAG = "mp4_player";
 
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
-static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
+static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache (was 512KB)
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;           // 8 blocks of 128KB (was 4)
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
+// Read-ahead buffer for SD card I/O to reduce small read overhead
+static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
+
 // ============================================================================
 // File I/O wrappers for esp_extractor
-// esp_extractor has its own internal Data_Cache, so we use direct I/O here
+// Uses stdio (fopen/fread) with setvbuf for large read-ahead buffering
+// This dramatically reduces SD card transaction overhead for streaming
 // ============================================================================
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
-  int fd = open(url, O_RDONLY);
-  if (fd < 0) {
+  FILE *fp = fopen(url, "rb");
+  if (!fp) {
     ESP_LOGE(TAG, "Failed to open: %s", url);
     return nullptr;
   }
-  return (void *)(intptr_t)fd;
+  // Set a large read-ahead buffer to reduce SD card transactions
+  // This is critical for sustained read performance on SDMMC
+  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
+  if (io_buf) {
+    setvbuf(fp, (char *)io_buf, _IOFBF, FILE_READ_AHEAD_SIZE);
+    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead", FILE_READ_AHEAD_SIZE / 1024);
+  } else {
+    ESP_LOGW(TAG, "Failed to allocate I/O buffer, using default");
+  }
+  return (void *)fp;
 }
 
 int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  ssize_t bytes = read(fd, data, size);
-  return bytes < 0 ? 0 : (int)bytes;
+  FILE *fp = (FILE *)ctx;
+  size_t bytes = fread(data, 1, size, fp);
+  return (int)bytes;
 }
 
 int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  return lseek(fd, position, SEEK_SET) < 0 ? -1 : 0;
+  FILE *fp = (FILE *)ctx;
+  return fseek(fp, (long)position, SEEK_SET);
 }
 
 int Mp4Player::file_close_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  return close(fd);
+  FILE *fp = (FILE *)ctx;
+  return fclose(fp);
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  off_t cur = lseek(fd, 0, SEEK_CUR);
-  off_t end = lseek(fd, 0, SEEK_END);
-  lseek(fd, cur, SEEK_SET);
+  FILE *fp = (FILE *)ctx;
+  long cur = ftell(fp);
+  fseek(fp, 0, SEEK_END);
+  long end = ftell(fp);
+  fseek(fp, cur, SEEK_SET);
   return end <= 0 ? 0 : (uint32_t)end;
 }
 
