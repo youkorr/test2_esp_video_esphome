@@ -247,9 +247,11 @@ void Mp4Player::setup() {
 
   // Setup audio decoder if audio track found and speaker configured
   if (this->has_audio_ && this->speaker_) {
-    // Register default audio decoders (AAC, MP3, etc.)
-    esp_audio_dec_register_default();
-    esp_audio_simple_dec_register_default();
+    // Register individual audio decoders (AAC, MP3, FLAC, PCM)
+    esp_aac_dec_register();
+    esp_mp3_dec_register();
+    esp_flac_dec_register();
+    esp_pcm_dec_register();
 
     // Allocate PCM output buffer
     this->audio_pcm_buffer_size_ = AUDIO_PCM_BUFFER_SIZE;

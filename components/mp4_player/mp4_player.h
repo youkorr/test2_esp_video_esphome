@@ -23,7 +23,11 @@ extern "C" {
 #include "esp_avi_extractor.h"
 #include "mem_pool.h"
 #include "esp_audio_simple_dec.h"
-#include "esp_audio_simple_dec_default.h"
+#include "esp_audio_simple_dec_reg.h"
+#include "esp_aac_dec.h"
+#include "esp_mp3_dec.h"
+#include "esp_flac_dec.h"
+#include "esp_pcm_dec.h"
 }
 
 namespace esphome {
