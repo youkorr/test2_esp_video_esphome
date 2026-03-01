@@ -320,6 +320,9 @@ void Mp4Player::play() {
 
   ESP_LOGI(TAG, "Play");
 
+  // Fire on_play trigger (e.g. to stop microphone/wake word and free I2S bus)
+  this->on_play_callbacks_.call();
+
   if (this->state_ == PlayerState::PAUSED) {
     this->state_ = PlayerState::PLAYING;
     xEventGroupSetBits(this->playback_event_group_, EVENT_START);
@@ -395,6 +398,9 @@ void Mp4Player::stop() {
     lv_obj_t *lbl = lv_obj_get_child(this->play_btn_, 0);
     if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
   }
+
+  // Fire on_stop trigger (e.g. to restart microphone/wake word)
+  this->on_stop_callbacks_.call();
 }
 
 // ============================================================================

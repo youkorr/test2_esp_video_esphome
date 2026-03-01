@@ -15,6 +15,10 @@ PlayAction = mp4_player_ns.class_("PlayAction", automation.Action)
 PauseAction = mp4_player_ns.class_("PauseAction", automation.Action)
 StopAction = mp4_player_ns.class_("StopAction", automation.Action)
 
+# Triggers
+PlayTrigger = mp4_player_ns.class_("PlayTrigger", automation.Trigger.template())
+StopTrigger = mp4_player_ns.class_("StopTrigger", automation.Trigger.template())
+
 CONF_FILE_PATH = "file_path"
 CONF_PARENT_ID = "parent_id"
 CONF_SPEAKER = "speaker"
@@ -22,6 +26,8 @@ CONF_VOLUME = "volume"
 CONF_LOOP = "loop"
 CONF_AUTO_PLAY = "auto_play"
 CONF_SHOW_CONTROLS = "show_controls"
+CONF_ON_PLAY = "on_play"
+CONF_ON_STOP = "on_stop"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
@@ -32,6 +38,8 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=True): cv.boolean,
+    cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
+    cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -52,6 +60,14 @@ async def to_code(config):
     if CONF_SPEAKER in config:
         spk = await cg.get_variable(config[CONF_SPEAKER])
         cg.add(var.set_speaker(spk))
+
+    if CONF_ON_PLAY in config:
+        trigger = cg.new_Pvariable(config[CONF_ON_PLAY][automation.CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [], config[CONF_ON_PLAY])
+
+    if CONF_ON_STOP in config:
+        trigger = cg.new_Pvariable(config[CONF_ON_STOP][automation.CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [], config[CONF_ON_STOP])
 
     import os
     component_dir = os.path.dirname(__file__)

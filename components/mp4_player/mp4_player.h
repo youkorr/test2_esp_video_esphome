@@ -49,6 +49,9 @@ class Mp4Player : public Component {
   void set_auto_play(bool auto_play) { auto_play_ = auto_play; }
   void set_show_controls(bool show) { controls_enabled_ = show; }
 
+  void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
+  void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
+
   void setup() override;
   void loop() override;
   void dump_config() override;
@@ -168,6 +171,10 @@ class Mp4Player : public Component {
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};
+
+  // Automation triggers
+  CallbackManager<void()> on_play_callbacks_;
+  CallbackManager<void()> on_stop_callbacks_;
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<Mp4Player> {
@@ -183,6 +190,16 @@ template<typename... Ts> class PauseAction : public Action<Ts...>, public Parent
 template<typename... Ts> class StopAction : public Action<Ts...>, public Parented<Mp4Player> {
  public:
   void play(const Ts &...x) override { this->parent_->stop(); }
+};
+
+class PlayTrigger : public Trigger<> {
+ public:
+  explicit PlayTrigger(Mp4Player *player) { player->add_on_play_callback([this]() { this->trigger(); }); }
+};
+
+class StopTrigger : public Trigger<> {
+ public:
+  explicit StopTrigger(Mp4Player *player) { player->add_on_stop_callback([this]() { this->trigger(); }); }
 };
 
 }  // namespace mp4_player
