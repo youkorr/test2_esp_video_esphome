@@ -83,7 +83,10 @@ int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
     }
 
     // Buffer empty - refill with a large sequential read
-    bctx->file_offset = lseek(bctx->fd, 0, SEEK_CUR);
+    // Seek fd to correct position (buffer position may differ from fd position after in-buffer seeks)
+    off_t expected_pos = bctx->file_offset + (off_t)bctx->buf_pos;
+    lseek(bctx->fd, expected_pos, SEEK_SET);
+    bctx->file_offset = expected_pos;
     ssize_t bytes = read(bctx->fd, bctx->buffer, bctx->buf_size);
     if (bytes <= 0) break;  // EOF or error
     bctx->buf_filled = (size_t)bytes;
@@ -255,9 +258,12 @@ void Mp4Player::setup() {
   probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
   probe_cfg.url = (char *)this->file_path_.c_str();
   probe_cfg.input_ctx = nullptr;
-  probe_cfg.output_pool_size = EXTRACTOR_POOL_SIZE;
-  probe_cfg.cache_block_num = EXTRACTOR_POOL_BLOCKS;
-  probe_cfg.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
+  // Probe only needs metadata - use smaller pool than playback
+  static constexpr size_t PROBE_POOL_SIZE = 128 * 1024;
+  static constexpr size_t PROBE_POOL_BLOCKS = 2;
+  probe_cfg.output_pool_size = PROBE_POOL_SIZE;
+  probe_cfg.cache_block_num = PROBE_POOL_BLOCKS;
+  probe_cfg.cache_block_size = PROBE_POOL_SIZE / PROBE_POOL_BLOCKS;
 
   if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
     if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
