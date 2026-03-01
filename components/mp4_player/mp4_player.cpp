@@ -303,7 +303,8 @@ void Mp4Player::loop() {
     this->frame_ready_ = false;
     this->frame_count_++;
 
-    if (this->loading_label_ && this->frame_count_ == 1) {
+    // Hide loading label on first video frame displayed
+    if (this->loading_label_ && !lv_obj_has_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN)) {
       lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
     }
   }
@@ -487,17 +488,19 @@ void Mp4Player::playback_task_(void *arg) {
         break;
       }
 
-      // Get video info
+      // Get video info (only update fps/duration - dimensions are set during probe/setup
+      // and must not change because display buffers are already allocated to that size)
       uint16_t vnum = 0;
       esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
       if (vnum > 0) {
         extractor_stream_info_t sinfo = {};
         if (esp_extractor_get_stream_info(ext, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
-          player->video_width_ = sinfo.stream_info.video_info.width;
-          player->video_height_ = sinfo.stream_info.video_info.height;
           uint32_t fps = sinfo.stream_info.video_info.fps;
           player->video_fps_ = fps > 0 ? fps : 25;
           player->total_duration_ms_ = sinfo.duration;
+          ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (display: %ux%u)",
+                   sinfo.stream_info.video_info.width, sinfo.stream_info.video_info.height,
+                   player->video_fps_, player->video_width_, player->video_height_);
         }
       }
 
@@ -645,13 +648,18 @@ void Mp4Player::playback_task_(void *arg) {
           if (frame.frame_buffer) {
             mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
           }
-          player->frame_count_++;
           continue;  // Skip to next frame immediately - don't wait for video timing
         }
 
         // Process video frames (after audio has been handled)
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_VIDEO &&
             frame.frame_buffer && frame.frame_size > 0) {
+
+          // Log first video frame for diagnostics
+          if (player->frame_count_ == 0) {
+            ESP_LOGI(TAG, "First video frame: %u bytes (JPEG buf: %u, display buf: %u)",
+                     frame.frame_size, JPEG_BUFFER_SIZE, player->display_buffer_size_);
+          }
 
           // Frame rate control - only delay for video frames to maintain fps
           int64_t now = esp_timer_get_time() / 1000;
@@ -665,6 +673,13 @@ void Mp4Player::playback_task_(void *arg) {
           last_frame_time = esp_timer_get_time() / 1000;
 
           // Decode JPEG frame
+          if (frame.frame_size > JPEG_BUFFER_SIZE) {
+            if (player->frame_count_ == 0) {
+              ESP_LOGE(TAG, "Video frame too large: %u > %u bytes", frame.frame_size, JPEG_BUFFER_SIZE);
+            }
+          } else if (!player->jpeg_decoder_) {
+            ESP_LOGE(TAG, "No JPEG decoder available");
+          }
           if (frame.frame_size <= JPEG_BUFFER_SIZE && player->jpeg_decoder_) {
             memcpy(player->jpeg_buffer_, frame.frame_buffer, frame.frame_size);
 
