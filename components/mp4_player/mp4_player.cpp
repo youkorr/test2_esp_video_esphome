@@ -216,7 +216,12 @@ void Mp4Player::setup() {
   }
 
   // Allocate display buffers (RGB565 double buffer)
-  this->display_buffer_size_ = this->video_width_ * this->video_height_ * 2;
+  // JPEG hardware decoder aligns output to 16-byte boundaries, so allocate with aligned dimensions
+  uint32_t aligned_w = (this->video_width_ + 15) & ~15;
+  uint32_t aligned_h = (this->video_height_ + 15) & ~15;
+  this->display_buffer_size_ = aligned_w * aligned_h * 2;
+  ESP_LOGI(TAG, "Display buffer: %ux%u (aligned %ux%u), %u bytes",
+           this->video_width_, this->video_height_, aligned_w, aligned_h, this->display_buffer_size_);
   for (int i = 0; i < 2; i++) {
     this->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(
         64, this->display_buffer_size_, MALLOC_CAP_SPIRAM);
