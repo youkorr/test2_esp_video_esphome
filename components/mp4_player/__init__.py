@@ -1,6 +1,6 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.const import CONF_ID
+from esphome.const import CONF_ID, CONF_TRIGGER_ID
 from esphome import automation
 from esphome.components import speaker
 
@@ -38,8 +38,12 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_LOOP, default=True): cv.boolean,
     cv.Optional(CONF_AUTO_PLAY, default=True): cv.boolean,
     cv.Optional(CONF_SHOW_CONTROLS, default=True): cv.boolean,
-    cv.Optional(CONF_ON_PLAY): automation.validate_automation(single=True),
-    cv.Optional(CONF_ON_STOP): automation.validate_automation(single=True),
+    cv.Optional(CONF_ON_PLAY): automation.validate_automation(
+        {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(PlayTrigger)}, single=True
+    ),
+    cv.Optional(CONF_ON_STOP): automation.validate_automation(
+        {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(StopTrigger)}, single=True
+    ),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
