@@ -81,6 +81,7 @@ async def to_code(config):
             os.path.join(esp_audio_codec_dir, "include", "decoder"),
             os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
             os.path.join(esp_audio_codec_dir, "include", "simple_dec"),
+            os.path.join(esp_audio_codec_dir, "include", "simple_dec", "impl"),
         ]
         for inc_path in audio_inc_paths:
             if os.path.exists(inc_path):

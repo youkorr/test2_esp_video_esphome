@@ -15,6 +15,7 @@ static const char *TAG = "mp4_player";
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
+static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 16 * 1024;  // 16KB for decoded PCM
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
@@ -202,7 +203,18 @@ void Mp4Player::setup() {
       uint16_t anum = 0;
       esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
       this->has_audio_ = (anum > 0);
-      if (this->has_audio_) ESP_LOGI(TAG, "Audio track detected");
+      if (this->has_audio_) {
+        extractor_stream_info_t ainfo = {};
+        if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+          this->audio_format_ = ainfo.stream_info.audio_info.format;
+          this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+          this->audio_channels_ = ainfo.stream_info.audio_info.channel;
+          this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+          ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
+                   this->audio_format_, this->audio_sample_rate_,
+                   this->audio_channels_, this->audio_bits_per_sample_);
+        }
+      }
     }
     esp_extractor_close(probe);
   }
@@ -231,6 +243,23 @@ void Mp4Player::setup() {
       return;
     }
     memset(this->display_buffer_[i], 0, this->display_buffer_size_);
+  }
+
+  // Setup audio decoder if audio track found and speaker configured
+  if (this->has_audio_ && this->speaker_) {
+    // Register default audio decoders (AAC, MP3, etc.)
+    esp_audio_dec_register_default();
+    esp_audio_simple_dec_register_default();
+
+    // Allocate PCM output buffer
+    this->audio_pcm_buffer_size_ = AUDIO_PCM_BUFFER_SIZE;
+    this->audio_pcm_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_pcm_buffer_size_, MALLOC_CAP_SPIRAM);
+    if (!this->audio_pcm_buffer_) {
+      ESP_LOGW(TAG, "Failed to allocate audio PCM buffer, audio disabled");
+      this->has_audio_ = false;
+    } else {
+      ESP_LOGI(TAG, "Audio decoder initialized, PCM buffer %u bytes", this->audio_pcm_buffer_size_);
+    }
   }
 
   // Create LVGL UI
@@ -312,7 +341,7 @@ void Mp4Player::play() {
   if (!this->playback_task_handle_) {
     xEventGroupClearBits(this->playback_event_group_, EVENT_START | EVENT_STOP | EVENT_TASK_EXIT);
     BaseType_t ret = xTaskCreatePinnedToCore(
-        playback_task_, "mp4_play", 8192, this, 5,
+        playback_task_, "mp4_play", 16384, this, 5,
         &this->playback_task_handle_, 1);
     if (ret != pdPASS) {
       ESP_LOGE(TAG, "Failed to create playback task");
@@ -396,7 +425,9 @@ void Mp4Player::playback_task_(void *arg) {
       ext_cfg.seek = file_seek_cb_;
       ext_cfg.file_size = file_size_cb_;
       ext_cfg.close = file_close_cb_;
-      ext_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO;
+      // Extract both audio and video if speaker is available
+      ext_cfg.extract_mask = (player->has_audio_ && player->speaker_)
+                              ? ESP_EXTRACT_MASK_AV : ESP_EXTRACT_MASK_VIDEO;
       ext_cfg.url = (char *)player->file_path_.c_str();
       ext_cfg.input_ctx = nullptr;
       ext_cfg.output_pool_size = EXTRACTOR_POOL_SIZE;
@@ -429,6 +460,38 @@ void Mp4Player::playback_task_(void *arg) {
           player->total_duration_ms_ = sinfo.duration;
         }
       }
+
+      // Open audio decoder if audio is available
+      esp_audio_simple_dec_handle_t audio_dec = nullptr;
+      if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        if (anum > 0) {
+          extractor_stream_info_t ainfo = {};
+          if (esp_extractor_get_stream_info(ext, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+            player->audio_format_ = ainfo.stream_info.audio_info.format;
+            player->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+            player->audio_channels_ = ainfo.stream_info.audio_info.channel;
+            player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+          }
+          esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
+          if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+            esp_audio_simple_dec_cfg_t dec_cfg = {};
+            dec_cfg.dec_type = dec_type;
+            if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
+              player->audio_decoder_ready_ = true;
+              ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
+            } else {
+              ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
+            }
+          } else {
+            ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
+          }
+        }
+      }
+
+      player->jpeg_hw_error_logged_ = false;
+      player->jpeg_hw_error_count_ = 0;
 
       uint32_t frame_interval_ms = 1000 / player->video_fps_;
       int64_t last_frame_time = esp_timer_get_time() / 1000;
@@ -473,7 +536,7 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Only process video frames
+        // Process video frames
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_VIDEO &&
             frame.frame_buffer && frame.frame_size > 0) {
 
@@ -504,6 +567,59 @@ void Mp4Player::playback_task_(void *arg) {
               player->current_display_buf_ = buf_idx;
               player->frame_ready_ = true;
               player->current_time_ms_ = (player->frame_count_ * 1000) / player->video_fps_;
+            } else {
+              // Hardware JPEG decoder failed (unsupported sampling factor, etc.)
+              player->jpeg_hw_error_count_++;
+              if (!player->jpeg_hw_error_logged_) {
+                player->jpeg_hw_error_logged_ = true;
+                ESP_LOGE(TAG, "JPEG HW decode failed (err=%d). Video uses unsupported chroma subsampling.", dec_ret);
+                ESP_LOGE(TAG, "Re-encode with: ffmpeg -i input.mp4 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 output.mp4");
+              }
+              // Update time even on failed frames
+              player->current_time_ms_ = (player->frame_count_ * 1000) / player->video_fps_;
+            }
+          }
+        }
+
+        // Process audio frames
+        if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
+            frame.frame_buffer && frame.frame_size > 0 &&
+            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
+          esp_audio_simple_dec_raw_t raw = {};
+          raw.buffer = frame.frame_buffer;
+          raw.len = frame.frame_size;
+          raw.eos = false;
+          raw.consumed = 0;
+          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+          while (raw.consumed < raw.len && !player->stop_requested_) {
+            esp_audio_simple_dec_out_t out = {};
+            out.buffer = player->audio_pcm_buffer_;
+            out.len = player->audio_pcm_buffer_size_;
+            out.decoded_size = 0;
+
+            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+              // Apply volume
+              player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
+              // Send to speaker
+              size_t written = 0;
+              size_t remaining = out.decoded_size;
+              while (remaining > 0 && !player->stop_requested_) {
+                size_t w = player->speaker_->play(
+                    player->audio_pcm_buffer_ + written, remaining);
+                if (w > 0) {
+                  written += w;
+                  remaining -= w;
+                } else {
+                  vTaskDelay(pdMS_TO_TICKS(5));
+                }
+              }
+            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+              ESP_LOGW(TAG, "Audio PCM buffer too small, need %u", out.needed_size);
+              break;
+            } else {
+              break;
             }
           }
         }
@@ -514,7 +630,18 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
+      // Close audio decoder
+      if (audio_dec) {
+        esp_audio_simple_dec_close(audio_dec);
+        audio_dec = nullptr;
+        player->audio_decoder_ready_ = false;
+      }
+
       esp_extractor_close(ext);
+
+      if (player->jpeg_hw_error_count_ > 0) {
+        ESP_LOGW(TAG, "JPEG HW decode errors: %u frames skipped", player->jpeg_hw_error_count_);
+      }
 
       if (player->stop_requested_ || !player->loop_) {
         do_loop = false;
@@ -532,6 +659,26 @@ void Mp4Player::playback_task_(void *arg) {
   xEventGroupSetBits(player->playback_event_group_, EVENT_TASK_EXIT);
   player->playback_task_handle_ = nullptr;
   vTaskDelete(nullptr);
+}
+
+// ============================================================================
+// Audio format mapping
+// ============================================================================
+esp_audio_simple_dec_type_t Mp4Player::map_audio_format_(extractor_audio_format_t fmt) {
+  switch (fmt) {
+    case EXTRACTOR_AUDIO_FORMAT_AAC:  return ESP_AUDIO_SIMPLE_DEC_TYPE_AAC;
+    case EXTRACTOR_AUDIO_FORMAT_MP3:  return ESP_AUDIO_SIMPLE_DEC_TYPE_MP3;
+    case EXTRACTOR_AUDIO_FORMAT_FLAC: return ESP_AUDIO_SIMPLE_DEC_TYPE_FLAC;
+    case EXTRACTOR_AUDIO_FORMAT_PCM:  return ESP_AUDIO_SIMPLE_DEC_TYPE_PCM;
+    case EXTRACTOR_AUDIO_FORMAT_ADPCM: return ESP_AUDIO_SIMPLE_DEC_TYPE_ADPCM;
+    case EXTRACTOR_AUDIO_FORMAT_OPUS: return ESP_AUDIO_SIMPLE_DEC_TYPE_RAW_OPUS;
+    case EXTRACTOR_AUDIO_FORMAT_AMRNB: return ESP_AUDIO_SIMPLE_DEC_TYPE_AMRNB;
+    case EXTRACTOR_AUDIO_FORMAT_AMRWB: return ESP_AUDIO_SIMPLE_DEC_TYPE_AMRWB;
+    case EXTRACTOR_AUDIO_FORMAT_G711A: return ESP_AUDIO_SIMPLE_DEC_TYPE_G711A;
+    case EXTRACTOR_AUDIO_FORMAT_G711U: return ESP_AUDIO_SIMPLE_DEC_TYPE_G711U;
+    case EXTRACTOR_AUDIO_FORMAT_ALAC: return ESP_AUDIO_SIMPLE_DEC_TYPE_ALAC;
+    default: return ESP_AUDIO_SIMPLE_DEC_TYPE_NONE;
+  }
 }
 
 // ============================================================================

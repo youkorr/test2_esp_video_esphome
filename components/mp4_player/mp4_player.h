@@ -22,6 +22,8 @@ extern "C" {
 #include "esp_mp4_extractor.h"
 #include "esp_avi_extractor.h"
 #include "mem_pool.h"
+#include "esp_audio_simple_dec.h"
+#include "esp_audio_simple_dec_default.h"
 }
 
 namespace esphome {
@@ -65,6 +67,9 @@ class Mp4Player : public Component {
 
   // JPEG processing
   static size_t strip_jpeg_com_markers_(uint8_t *data, size_t size);
+
+  // Audio
+  static esp_audio_simple_dec_type_t map_audio_format_(extractor_audio_format_t fmt);
 
   // Volume
   void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);
@@ -142,6 +147,20 @@ class Mp4Player : public Component {
 
   // Speaker
   speaker::Speaker *speaker_{nullptr};
+
+  // Audio decoder
+  esp_audio_simple_dec_handle_t audio_decoder_{nullptr};
+  uint8_t *audio_pcm_buffer_{nullptr};
+  uint32_t audio_pcm_buffer_size_{0};
+  extractor_audio_format_t audio_format_{};
+  uint32_t audio_sample_rate_{0};
+  uint8_t audio_channels_{0};
+  uint8_t audio_bits_per_sample_{0};
+  bool audio_decoder_ready_{false};
+
+  // JPEG error tracking
+  bool jpeg_hw_error_logged_{false};
+  uint32_t jpeg_hw_error_count_{0};
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};
