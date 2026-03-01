@@ -13,44 +13,119 @@ namespace mp4_player {
 static const char *TAG = "mp4_player";
 
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
-static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
+static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 128 * 1024; // 128KB audio ring buffer
+static constexpr size_t SD_READ_BUFFER_SIZE = 64 * 1024;     // 64KB SD read-ahead buffer
 
 // ============================================================================
-// File I/O wrappers for esp_extractor
+// Buffered file I/O for esp_extractor - reduces SD card latency spikes
 // ============================================================================
+struct BufferedFileCtx {
+  int fd;
+  uint8_t *buffer;
+  size_t buf_size;
+  size_t buf_pos;     // current read position within buffer
+  size_t buf_filled;  // how much valid data is in buffer
+  off_t file_offset;  // file position corresponding to buffer start
+};
+
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
   int fd = open(url, O_RDONLY);
   if (fd < 0) {
     ESP_LOGE(TAG, "Failed to open: %s", url);
     return nullptr;
   }
-  return (void *)(intptr_t)fd;
+
+  auto *bctx = (BufferedFileCtx *)heap_caps_malloc(sizeof(BufferedFileCtx), MALLOC_CAP_SPIRAM);
+  if (!bctx) {
+    close(fd);
+    ESP_LOGE(TAG, "Failed to allocate buffered file context");
+    return nullptr;
+  }
+
+  bctx->buffer = (uint8_t *)heap_caps_malloc(SD_READ_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+  if (!bctx->buffer) {
+    close(fd);
+    free(bctx);
+    ESP_LOGE(TAG, "Failed to allocate SD read buffer");
+    return nullptr;
+  }
+
+  bctx->fd = fd;
+  bctx->buf_size = SD_READ_BUFFER_SIZE;
+  bctx->buf_pos = 0;
+  bctx->buf_filled = 0;
+  bctx->file_offset = 0;
+
+  ESP_LOGI(TAG, "Opened file with %uKB read-ahead buffer", SD_READ_BUFFER_SIZE / 1024);
+  return bctx;
 }
 
 int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  ssize_t bytes = read(fd, data, size);
-  return bytes < 0 ? 0 : (int)bytes;
+  auto *bctx = (BufferedFileCtx *)ctx;
+  uint8_t *dst = (uint8_t *)data;
+  uint32_t remaining = size;
+  uint32_t total_read = 0;
+
+  while (remaining > 0) {
+    // Serve from buffer if data available
+    size_t avail = bctx->buf_filled - bctx->buf_pos;
+    if (avail > 0) {
+      size_t to_copy = remaining < avail ? remaining : avail;
+      memcpy(dst, bctx->buffer + bctx->buf_pos, to_copy);
+      bctx->buf_pos += to_copy;
+      dst += to_copy;
+      remaining -= to_copy;
+      total_read += to_copy;
+      continue;
+    }
+
+    // Buffer empty - refill with a large sequential read
+    bctx->file_offset = lseek(bctx->fd, 0, SEEK_CUR);
+    ssize_t bytes = read(bctx->fd, bctx->buffer, bctx->buf_size);
+    if (bytes <= 0) break;  // EOF or error
+    bctx->buf_filled = (size_t)bytes;
+    bctx->buf_pos = 0;
+  }
+
+  return (int)total_read;
 }
 
 int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  return lseek(fd, position, SEEK_SET) < 0 ? -1 : 0;
+  auto *bctx = (BufferedFileCtx *)ctx;
+
+  // Check if target position is within the current buffer
+  off_t buf_start = bctx->file_offset;
+  off_t buf_end = buf_start + (off_t)bctx->buf_filled;
+  if ((off_t)position >= buf_start && (off_t)position < buf_end) {
+    bctx->buf_pos = (size_t)(position - buf_start);
+    // Also move file descriptor to match where buffer ends
+    // (next read after buffer exhaustion will be correct)
+    return 0;
+  }
+
+  // Position outside buffer - invalidate and seek
+  bctx->buf_pos = 0;
+  bctx->buf_filled = 0;
+  bctx->file_offset = position;
+  return lseek(bctx->fd, position, SEEK_SET) < 0 ? -1 : 0;
 }
 
 int Mp4Player::file_close_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  return close(fd);
+  auto *bctx = (BufferedFileCtx *)ctx;
+  int ret = close(bctx->fd);
+  free(bctx->buffer);
+  free(bctx);
+  return ret;
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx;
-  off_t cur = lseek(fd, 0, SEEK_CUR);
-  off_t end = lseek(fd, 0, SEEK_END);
-  lseek(fd, cur, SEEK_SET);
+  auto *bctx = (BufferedFileCtx *)ctx;
+  off_t cur = lseek(bctx->fd, 0, SEEK_CUR);
+  off_t end = lseek(bctx->fd, 0, SEEK_END);
+  lseek(bctx->fd, cur, SEEK_SET);
   return end <= 0 ? 0 : (uint32_t)end;
 }
 
@@ -588,7 +663,67 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Process video frames
+        // Process audio frames FIRST (priority over video timing)
+        if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
+            frame.frame_buffer && frame.frame_size > 0 &&
+            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
+          esp_audio_simple_dec_raw_t raw = {};
+          raw.buffer = frame.frame_buffer;
+          raw.len = frame.frame_size;
+          raw.eos = false;
+          raw.consumed = 0;
+          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+          while (raw.consumed < raw.len && !player->stop_requested_) {
+            esp_audio_simple_dec_out_t out = {};
+            out.buffer = player->audio_pcm_buffer_;
+            out.len = player->audio_pcm_buffer_size_;
+            out.decoded_size = 0;
+
+            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+              if (player->audio_ring_buffer_) {
+                size_t pushed = 0;
+                int retries = 0;
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 200) {
+                  size_t p = player->audio_ring_push_(
+                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
+                  pushed += p;
+                  if (pushed < out.decoded_size) {
+                    uint32_t delay_ms = (retries < 10) ? 5 : (retries < 50 ? 10 : 20);
+                    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+                    retries++;
+                  }
+                }
+              } else {
+                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
+                size_t written = 0;
+                while (written < out.decoded_size && !player->stop_requested_) {
+                  size_t w = player->speaker_->play(
+                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
+                  if (w > 0) {
+                    written += w;
+                  } else {
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                  }
+                }
+              }
+            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+              break;
+            } else {
+              break;
+            }
+          }
+
+          // Release audio frame and continue reading immediately
+          if (frame.frame_buffer) {
+            mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
+          }
+          player->frame_count_++;
+          continue;  // Skip to next frame immediately - don't wait for video timing
+        }
+
+        // Process video frames (after audio has been handled)
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_VIDEO &&
             frame.frame_buffer && frame.frame_size > 0) {
 
@@ -640,62 +775,6 @@ void Mp4Player::playback_task_(void *arg) {
               }
               // Update time even on failed frames
               player->current_time_ms_ = (player->frame_count_ * 1000) / player->video_fps_;
-            }
-          }
-        }
-
-        // Process audio frames - decode and push to ring buffer (non-blocking)
-        if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
-            frame.frame_buffer && frame.frame_size > 0 &&
-            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
-          esp_audio_simple_dec_raw_t raw = {};
-          raw.buffer = frame.frame_buffer;
-          raw.len = frame.frame_size;
-          raw.eos = false;
-          raw.consumed = 0;
-          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
-
-          while (raw.consumed < raw.len && !player->stop_requested_) {
-            esp_audio_simple_dec_out_t out = {};
-            out.buffer = player->audio_pcm_buffer_;
-            out.len = player->audio_pcm_buffer_size_;
-            out.decoded_size = 0;
-
-            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
-            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-              // Push decoded PCM to ring buffer (audio output task handles volume + speaker)
-              if (player->audio_ring_buffer_) {
-                size_t pushed = 0;
-                int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 200) {
-                  size_t p = player->audio_ring_push_(
-                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
-                  pushed += p;
-                  if (pushed < out.decoded_size) {
-                    uint32_t delay_ms = (retries < 10) ? 5 : (retries < 50 ? 10 : 20);
-                    vTaskDelay(pdMS_TO_TICKS(delay_ms));
-                    retries++;
-                  }
-                }
-              } else {
-                // Fallback: direct speaker output if no ring buffer
-                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
-                size_t written = 0;
-                while (written < out.decoded_size && !player->stop_requested_) {
-                  size_t w = player->speaker_->play(
-                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
-                  if (w > 0) {
-                    written += w;
-                  } else {
-                    vTaskDelay(pdMS_TO_TICKS(5));
-                  }
-                }
-              }
-            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-              ESP_LOGW(TAG, "Audio PCM buffer too small, need %u", out.needed_size);
-              break;
-            } else {
-              break;
             }
           }
         }
