@@ -945,14 +945,15 @@ void Mp4Player::format_time_(char *buf, size_t buf_size, uint32_t time_ms) {
 // Volume
 // ============================================================================
 void Mp4Player::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
-  if (this->volume_level_ >= 100) return;
   if (this->volume_level_ == 0) { memset(pcm_data, 0, size); return; }
 
+  // Software gain amplification: slider 0-100 maps to 0x - 4x gain
+  // 25% slider = 1.0x (unity), 50% = 2.0x, 75% = 3.0x, 100% = 4.0x
   int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
   size_t num = size / 2;
-  uint8_t vol = this->volume_level_;
+  uint32_t gain_x100 = static_cast<uint32_t>(this->volume_level_) * 4;  // 0-400
   for (size_t i = 0; i < num; i++) {
-    int32_t s = (static_cast<int32_t>(samples[i]) * vol) / 100;
+    int32_t s = (static_cast<int32_t>(samples[i]) * gain_x100) / 100;
     if (s > 32767) s = 32767;
     if (s < -32768) s = -32768;
     samples[i] = static_cast<int16_t>(s);

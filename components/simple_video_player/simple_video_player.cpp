@@ -5040,21 +5040,21 @@ void SimpleVideoPlayer::volume_slider_cb_(lv_event_t *e) {
 }
 
 void SimpleVideoPlayer::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
-  if (this->volume_level_ >= 100) return;  // No scaling needed at max volume
   if (this->volume_level_ == 0) {
-    // Mute - zero out all samples
     memset(pcm_data, 0, size);
     return;
   }
 
-  // Scale 16-bit PCM samples by volume percentage
+  // Software gain amplification: slider 0-100 maps to 0x - 4x gain
+  // 25% slider = 1.0x (unity), 50% = 2.0x, 75% = 3.0x, 100% = 4.0x
+  // This allows boosting quiet audio sources significantly
   int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
   size_t num_samples = size / 2;
-  uint8_t vol = this->volume_level_;
+  uint32_t gain_x100 = static_cast<uint32_t>(this->volume_level_) * 4;  // 0-400
 
   for (size_t i = 0; i < num_samples; i++) {
-    int32_t scaled = (static_cast<int32_t>(samples[i]) * vol) / 100;
-    // Clamp to int16_t range
+    int32_t scaled = (static_cast<int32_t>(samples[i]) * gain_x100) / 100;
+    // Clamp to int16_t range (hard clip)
     if (scaled > 32767) scaled = 32767;
     if (scaled < -32768) scaled = -32768;
     samples[i] = static_cast<int16_t>(scaled);
