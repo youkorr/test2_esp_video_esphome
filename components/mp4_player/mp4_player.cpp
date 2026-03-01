@@ -15,7 +15,8 @@ static const char *TAG = "mp4_player";
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
-static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 16 * 1024;  // 16KB for decoded PCM
+static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 64 * 1024; // 64KB audio ring buffer
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
@@ -261,6 +262,18 @@ void Mp4Player::setup() {
       this->has_audio_ = false;
     } else {
       ESP_LOGI(TAG, "Audio decoder initialized, PCM buffer %u bytes", this->audio_pcm_buffer_size_);
+
+      // Allocate audio ring buffer for decoupled output
+      this->audio_ring_size_ = AUDIO_RING_BUFFER_SIZE;
+      this->audio_ring_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_ring_size_, MALLOC_CAP_SPIRAM);
+      if (!this->audio_ring_buffer_) {
+        ESP_LOGW(TAG, "Failed to allocate audio ring buffer, using direct output");
+        this->audio_ring_size_ = 0;
+      } else {
+        this->audio_ring_read_ = 0;
+        this->audio_ring_write_ = 0;
+        ESP_LOGI(TAG, "Audio ring buffer: %u bytes", this->audio_ring_size_);
+      }
     }
   }
 
@@ -330,6 +343,11 @@ void Mp4Player::play() {
       lv_obj_t *lbl = lv_obj_get_child(this->play_btn_, 0);
       if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
     }
+    // Start auto-hide timer for controls on resume
+    if (this->controls_visible_ && this->hide_timer_) {
+      lv_timer_reset(this->hide_timer_);
+      lv_timer_resume(this->hide_timer_);
+    }
     return;
   }
 
@@ -341,6 +359,12 @@ void Mp4Player::play() {
   if (this->play_btn_) {
     lv_obj_t *lbl = lv_obj_get_child(this->play_btn_, 0);
     if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+  }
+
+  // Start auto-hide timer for controls
+  if (this->controls_visible_ && this->hide_timer_) {
+    lv_timer_reset(this->hide_timer_);
+    lv_timer_resume(this->hide_timer_);
   }
 
   if (!this->playback_task_handle_) {
@@ -369,6 +393,9 @@ void Mp4Player::pause() {
     lv_obj_t *lbl = lv_obj_get_child(this->play_btn_, 0);
     if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
   }
+  // Show controls and stop auto-hide when paused
+  this->show_controls_();
+  if (this->hide_timer_) lv_timer_pause(this->hide_timer_);
 }
 
 // ============================================================================
@@ -398,6 +425,10 @@ void Mp4Player::stop() {
     lv_obj_t *lbl = lv_obj_get_child(this->play_btn_, 0);
     if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
   }
+
+  // Show controls when stopped (user needs them visible)
+  this->show_controls_();
+  if (this->hide_timer_) lv_timer_pause(this->hide_timer_);
 
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
@@ -500,6 +531,16 @@ void Mp4Player::playback_task_(void *arg) {
               player->speaker_->start();
               speaker_started = true;
               ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
+
+              // Start audio output task if ring buffer is available
+              if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
+                player->audio_ring_read_ = 0;
+                player->audio_ring_write_ = 0;
+                player->audio_task_running_ = true;
+                xTaskCreatePinnedToCore(
+                    audio_output_task_, "audio_out", 4096, player, 6,
+                    &player->audio_task_handle_, 0);
+              }
             } else {
               ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
             }
@@ -600,7 +641,7 @@ void Mp4Player::playback_task_(void *arg) {
           }
         }
 
-        // Process audio frames
+        // Process audio frames - decode and push to ring buffer (non-blocking)
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
             audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
@@ -619,19 +660,31 @@ void Mp4Player::playback_task_(void *arg) {
 
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-              // Apply volume
-              player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
-              // Send to speaker
-              size_t written = 0;
-              size_t remaining = out.decoded_size;
-              while (remaining > 0 && !player->stop_requested_) {
-                size_t w = player->speaker_->play(
-                    player->audio_pcm_buffer_ + written, remaining);
-                if (w > 0) {
-                  written += w;
-                  remaining -= w;
-                } else {
-                  vTaskDelay(pdMS_TO_TICKS(5));
+              // Push decoded PCM to ring buffer (audio output task handles volume + speaker)
+              if (player->audio_ring_buffer_) {
+                size_t pushed = 0;
+                int retries = 0;
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 50) {
+                  size_t p = player->audio_ring_push_(
+                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
+                  pushed += p;
+                  if (pushed < out.decoded_size) {
+                    vTaskDelay(pdMS_TO_TICKS(2));
+                    retries++;
+                  }
+                }
+              } else {
+                // Fallback: direct speaker output if no ring buffer
+                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
+                size_t written = 0;
+                while (written < out.decoded_size && !player->stop_requested_) {
+                  size_t w = player->speaker_->play(
+                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
+                  if (w > 0) {
+                    written += w;
+                  } else {
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                  }
                 }
               }
             } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
@@ -647,6 +700,13 @@ void Mp4Player::playback_task_(void *arg) {
         if (frame.frame_buffer) {
           mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
         }
+      }
+
+      // Stop audio output task first
+      if (player->audio_task_handle_) {
+        player->audio_task_running_ = false;
+        vTaskDelay(pdMS_TO_TICKS(50));  // Let audio task drain and exit
+        player->audio_task_handle_ = nullptr;
       }
 
       // Close audio decoder and stop speaker
@@ -897,6 +957,100 @@ void Mp4Player::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
     if (s < -32768) s = -32768;
     samples[i] = static_cast<int16_t>(s);
   }
+}
+
+// ============================================================================
+// Audio ring buffer - lock-free single producer / single consumer
+// ============================================================================
+size_t Mp4Player::audio_ring_available_() const {
+  size_t w = this->audio_ring_write_;
+  size_t r = this->audio_ring_read_;
+  if (w >= r) return w - r;
+  return this->audio_ring_size_ - r + w;
+}
+
+size_t Mp4Player::audio_ring_free_() const {
+  return this->audio_ring_size_ - 1 - audio_ring_available_();
+}
+
+size_t Mp4Player::audio_ring_push_(const uint8_t *data, size_t len) {
+  size_t free = audio_ring_free_();
+  if (len > free) len = free;
+  if (len == 0) return 0;
+
+  size_t w = this->audio_ring_write_;
+  size_t to_end = this->audio_ring_size_ - w;
+  if (len <= to_end) {
+    memcpy(this->audio_ring_buffer_ + w, data, len);
+  } else {
+    memcpy(this->audio_ring_buffer_ + w, data, to_end);
+    memcpy(this->audio_ring_buffer_, data + to_end, len - to_end);
+  }
+  this->audio_ring_write_ = (w + len) % this->audio_ring_size_;
+  return len;
+}
+
+size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
+  size_t avail = audio_ring_available_();
+  if (len > avail) len = avail;
+  if (len == 0) return 0;
+
+  size_t r = this->audio_ring_read_;
+  size_t to_end = this->audio_ring_size_ - r;
+  if (len <= to_end) {
+    memcpy(data, this->audio_ring_buffer_ + r, len);
+  } else {
+    memcpy(data, this->audio_ring_buffer_ + r, to_end);
+    memcpy(data + to_end, this->audio_ring_buffer_, len - to_end);
+  }
+  this->audio_ring_read_ = (r + len) % this->audio_ring_size_;
+  return len;
+}
+
+// ============================================================================
+// Audio output task - drains ring buffer to speaker at steady rate
+// ============================================================================
+void Mp4Player::audio_output_task_(void *arg) {
+  Mp4Player *player = static_cast<Mp4Player *>(arg);
+  const size_t chunk_size = 1024;
+  uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
+  if (!chunk) {
+    ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
+    player->audio_task_running_ = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  ESP_LOGI(TAG, "Audio output task started");
+
+  while (player->audio_task_running_) {
+    size_t avail = player->audio_ring_available_();
+    if (avail == 0 || player->state_ == PlayerState::PAUSED) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      continue;
+    }
+
+    size_t to_read = avail < chunk_size ? avail : chunk_size;
+    size_t got = player->audio_ring_pop_(chunk, to_read);
+    if (got > 0) {
+      // Apply volume before sending to speaker
+      player->apply_volume_to_pcm_(chunk, got);
+
+      size_t written = 0;
+      while (written < got && player->audio_task_running_) {
+        size_t w = player->speaker_->play(chunk + written, got - written);
+        if (w > 0) {
+          written += w;
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(2));
+        }
+      }
+    }
+  }
+
+  free(chunk);
+  ESP_LOGI(TAG, "Audio output task exiting");
+  vTaskDelete(nullptr);
 }
 
 // ============================================================================

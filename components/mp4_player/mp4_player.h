@@ -166,6 +166,22 @@ class Mp4Player : public Component {
   uint8_t audio_bits_per_sample_{0};
   bool audio_decoder_ready_{false};
 
+  // Audio ring buffer for decoupling decode from speaker output
+  uint8_t *audio_ring_buffer_{nullptr};
+  size_t audio_ring_size_{0};
+  volatile size_t audio_ring_read_{0};
+  volatile size_t audio_ring_write_{0};
+
+  // Audio output task
+  static void audio_output_task_(void *arg);
+  TaskHandle_t audio_task_handle_{nullptr};
+  volatile bool audio_task_running_{false};
+
+  size_t audio_ring_available_() const;
+  size_t audio_ring_free_() const;
+  size_t audio_ring_push_(const uint8_t *data, size_t len);
+  size_t audio_ring_pop_(uint8_t *data, size_t len);
+
   // JPEG error tracking
   bool jpeg_hw_error_logged_{false};
   uint32_t jpeg_hw_error_count_{0};
