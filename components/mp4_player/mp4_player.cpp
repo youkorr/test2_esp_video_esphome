@@ -53,6 +53,83 @@ uint32_t Mp4Player::file_size_cb_(void *ctx) {
 }
 
 // ============================================================================
+// Strip JPEG COM markers that crash ESP32-P4 hardware JPEG decoder
+// FFmpeg/Libavcodec adds COM markers like "Lavc60.39." which trigger:
+// "jpeg_parse_com_marker: COM marker data underflow"
+// Returns the new size after stripping
+// ============================================================================
+size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
+  if (size < 4) return size;
+
+  size_t read_pos = 2;   // Skip SOI (0xFFD8)
+  size_t write_pos = 2;
+  bool stripped = false;
+
+  while (read_pos + 1 < size) {
+    if (data[read_pos] != 0xFF) {
+      data[write_pos++] = data[read_pos++];
+      continue;
+    }
+
+    uint8_t marker = data[read_pos + 1];
+
+    // 0xFF 0x00 is byte stuffing, not a marker
+    if (marker == 0x00) {
+      data[write_pos++] = data[read_pos++];
+      data[write_pos++] = data[read_pos++];
+      continue;
+    }
+
+    // COM marker (0xFFFE) - strip it
+    if (marker == 0xFE) {
+      if (read_pos + 3 >= size) break;
+
+      uint16_t marker_size = (data[read_pos + 2] << 8) | data[read_pos + 3];
+      if (marker_size < 2) break;
+
+      size_t skip = 2 + marker_size;  // 0xFF 0xFE + size+data
+      if (read_pos + skip > size) break;
+
+      ESP_LOGD(TAG, "Stripping COM marker at %zu (%u bytes)", read_pos, marker_size);
+      read_pos += skip;
+      stripped = true;
+      continue;
+    }
+
+    // SOS (0xFFDA) - copy everything after (entropy-coded data)
+    if (marker == 0xDA) {
+      while (read_pos < size) {
+        data[write_pos++] = data[read_pos++];
+      }
+      break;
+    }
+
+    // Other markers with length field - copy as-is
+    if (marker != 0xD8 && marker != 0xD9 && marker != 0x01) {
+      if (read_pos + 3 < size) {
+        uint16_t marker_size = (data[read_pos + 2] << 8) | data[read_pos + 3];
+        size_t copy_size = 2 + marker_size;
+        if (read_pos + copy_size <= size) {
+          for (size_t i = 0; i < copy_size; i++) {
+            data[write_pos++] = data[read_pos++];
+          }
+          continue;
+        }
+      }
+    }
+
+    // Default: copy byte
+    data[write_pos++] = data[read_pos++];
+  }
+
+  if (stripped && write_pos < size) {
+    ESP_LOGI(TAG, "COM markers stripped: %zu -> %zu bytes", size, write_pos);
+    return write_pos;
+  }
+  return size;
+}
+
+// ============================================================================
 // Setup
 // ============================================================================
 void Mp4Player::setup() {
@@ -399,6 +476,9 @@ void Mp4Player::playback_task_(void *arg) {
           if (frame.frame_size <= JPEG_BUFFER_SIZE && player->jpeg_decoder_) {
             memcpy(player->jpeg_buffer_, frame.frame_buffer, frame.frame_size);
 
+            // Strip COM markers that crash ESP32-P4 JPEG hardware decoder
+            size_t jpeg_size = strip_jpeg_com_markers_(player->jpeg_buffer_, frame.frame_size);
+
             uint8_t buf_idx = (player->current_display_buf_ + 1) % 2;
 
             jpeg_decode_cfg_t decode_cfg = {
@@ -411,7 +491,7 @@ void Mp4Player::playback_task_(void *arg) {
             esp_err_t dec_ret = jpeg_decoder_process(player->jpeg_decoder_,
                                                       &decode_cfg,
                                                       player->jpeg_buffer_,
-                                                      frame.frame_size,
+                                                      jpeg_size,
                                                       player->display_buffer_[buf_idx],
                                                       player->display_buffer_size_,
                                                       &decoded_size);

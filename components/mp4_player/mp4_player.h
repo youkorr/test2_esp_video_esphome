@@ -63,6 +63,9 @@ class Mp4Player : public Component {
   void update_progress_();
   void format_time_(char *buf, size_t buf_size, uint32_t time_ms);
 
+  // JPEG processing
+  static size_t strip_jpeg_com_markers_(uint8_t *data, size_t size);
+
   // Volume
   void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);
 
