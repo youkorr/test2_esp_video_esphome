@@ -15,9 +15,8 @@
 #include "freertos/task.h"
 #include "esphome/components/speaker/speaker.h"
 
+// Use esp_extractor API directly (no BSP dependency)
 extern "C" {
-#include "app_extractor.h"
-#include "app_stream_adapter.h"
 #include "esp_extractor.h"
 #include "esp_extractor_reg.h"
 #include "esp_mp4_extractor.h"
@@ -56,7 +55,7 @@ class Mp4Player : public Component {
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
 
  protected:
-  // UI creation
+  // UI
   void create_ui_();
   void create_controls_();
   void show_controls_();
@@ -64,10 +63,7 @@ class Mp4Player : public Component {
   void update_progress_();
   void format_time_(char *buf, size_t buf_size, uint32_t time_ms);
 
-  // Playback
-  bool init_extractor_();
-  bool start_playback_();
-  void stop_playback_();
+  // Volume
   void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);
 
   // Static callbacks
@@ -78,13 +74,15 @@ class Mp4Player : public Component {
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
 
-  // Frame display callback (called from extractor)
-  static esp_err_t frame_display_cb_(uint8_t *buffer, uint32_t buffer_size,
-                                      uint32_t width, uint32_t height,
-                                      uint32_t frame_index, void *user_data);
-
   // Playback task
   static void playback_task_(void *arg);
+
+  // File I/O callbacks for esp_extractor
+  static void *file_open_cb_(char *url, void *ctx);
+  static int file_read_cb_(void *data, uint32_t size, void *ctx);
+  static int file_seek_cb_(uint32_t position, void *ctx);
+  static int file_close_cb_(void *ctx);
+  static uint32_t file_size_cb_(void *ctx);
 
   // Configuration
   std::string file_path_;
@@ -102,10 +100,8 @@ class Mp4Player : public Component {
   uint32_t video_height_{0};
   uint32_t video_fps_{25};
   bool has_audio_{false};
-  bool extractor_initialized_{false};
 
-  // Extractor handles
-  app_extractor_handle_t extractor_handle_{nullptr};
+  // JPEG decoder
   jpeg_decoder_handle_t jpeg_decoder_{nullptr};
 
   // Display buffers
@@ -133,7 +129,6 @@ class Mp4Player : public Component {
   // Playback task
   TaskHandle_t playback_task_handle_{nullptr};
   EventGroupHandle_t playback_event_group_{nullptr};
-  SemaphoreHandle_t frame_mutex_{nullptr};
   volatile bool frame_ready_{false};
   volatile bool stop_requested_{false};
 
