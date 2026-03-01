@@ -532,6 +532,9 @@ void Mp4Player::playback_task_(void *arg) {
               speaker_started = true;
               ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
 
+              // Wait for I2S channel to fully initialize before sending audio data
+              vTaskDelay(pdMS_TO_TICKS(100));
+
               // Start audio output task if ring buffer is available
               if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
                 player->audio_ring_read_ = 0;
@@ -1019,6 +1022,9 @@ void Mp4Player::audio_output_task_(void *arg) {
   }
 
   ESP_LOGI(TAG, "Audio output task started");
+
+  // Initial delay to ensure I2S channel is fully enabled
+  vTaskDelay(pdMS_TO_TICKS(50));
 
   while (player->audio_task_running_) {
     size_t avail = player->audio_ring_available_();
