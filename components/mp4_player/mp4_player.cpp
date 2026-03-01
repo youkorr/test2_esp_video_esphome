@@ -16,7 +16,7 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 64 * 1024; // 64KB audio ring buffer
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 128 * 1024; // 128KB audio ring buffer
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
@@ -664,12 +664,14 @@ void Mp4Player::playback_task_(void *arg) {
               if (player->audio_ring_buffer_) {
                 size_t pushed = 0;
                 int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 50) {
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 200) {
                   size_t p = player->audio_ring_push_(
                       player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
                   pushed += p;
                   if (pushed < out.decoded_size) {
-                    vTaskDelay(pdMS_TO_TICKS(2));
+                    // Progressive backoff: give audio output task time to drain
+                    uint32_t delay_ms = (retries < 10) ? 5 : (retries < 50 ? 10 : 20);
+                    vTaskDelay(pdMS_TO_TICKS(delay_ms));
                     retries++;
                   }
                 }
@@ -1013,7 +1015,7 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  const size_t chunk_size = 1024;
+  const size_t chunk_size = 4096;  // Larger chunks reduce I2S DMA descriptor pressure
   uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
@@ -1027,8 +1029,15 @@ void Mp4Player::audio_output_task_(void *arg) {
   while (player->audio_task_running_) {
     size_t avail = player->audio_ring_available_();
     if (avail == 0 || player->state_ == PlayerState::PAUSED) {
-      vTaskDelay(pdMS_TO_TICKS(5));
+      vTaskDelay(pdMS_TO_TICKS(10));
       continue;
+    }
+
+    // Wait until we have a full chunk or enough data to send
+    // This reduces the number of small writes that overwhelm the I2S DMA queue
+    if (avail < chunk_size) {
+      vTaskDelay(pdMS_TO_TICKS(5));
+      avail = player->audio_ring_available_();
     }
 
     size_t to_read = avail < chunk_size ? avail : chunk_size;
@@ -1038,12 +1047,18 @@ void Mp4Player::audio_output_task_(void *arg) {
       player->apply_volume_to_pcm_(chunk, got);
 
       size_t written = 0;
+      int stall_count = 0;
       while (written < got && player->audio_task_running_) {
         size_t w = player->speaker_->play(chunk + written, got - written);
         if (w > 0) {
           written += w;
+          stall_count = 0;
         } else {
-          vTaskDelay(pdMS_TO_TICKS(2));
+          stall_count++;
+          // Progressive backoff: longer waits when speaker buffer is persistently full
+          // This prevents overwhelming the I2S DMA descriptor queue
+          uint32_t delay_ms = (stall_count < 5) ? 5 : (stall_count < 20 ? 10 : 20);
+          vTaskDelay(pdMS_TO_TICKS(delay_ms));
         }
       }
     }
