@@ -14,6 +14,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "esphome/components/speaker/speaker.h"
+#include "esphome/components/audio/audio.h"
 
 // Use esp_extractor API directly (no BSP dependency)
 extern "C" {

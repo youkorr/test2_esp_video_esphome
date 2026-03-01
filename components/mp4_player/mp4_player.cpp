@@ -471,6 +471,7 @@ void Mp4Player::playback_task_(void *arg) {
 
       // Open audio decoder if audio is available
       esp_audio_simple_dec_handle_t audio_dec = nullptr;
+      bool speaker_started = false;
       if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
         uint16_t anum = 0;
         esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
@@ -489,6 +490,16 @@ void Mp4Player::playback_task_(void *arg) {
             if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
               player->audio_decoder_ready_ = true;
               ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
+
+              // Configure speaker with correct audio stream parameters
+              uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
+              uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
+              uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
+              audio::AudioStreamInfo stream_info(bps, ch, sr);
+              player->speaker_->set_audio_stream_info(stream_info);
+              player->speaker_->start();
+              speaker_started = true;
+              ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
             } else {
               ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
             }
@@ -520,18 +531,7 @@ void Mp4Player::playback_task_(void *arg) {
           continue;
         }
 
-        // Frame rate control
-        int64_t now = esp_timer_get_time() / 1000;
-        int64_t target = last_frame_time + frame_interval_ms;
-        if (now < target) {
-          uint32_t delay = target - now;
-          if (delay > 0 && delay < 1000) {
-            vTaskDelay(pdMS_TO_TICKS(delay));
-          }
-        }
-        last_frame_time = esp_timer_get_time() / 1000;
-
-        // Read next frame from extractor
+        // Read next frame from extractor (no delay before read - process audio immediately)
         extractor_frame_info_t frame = {};
         ret = esp_extractor_read_frame(ext, &frame);
 
@@ -547,6 +547,17 @@ void Mp4Player::playback_task_(void *arg) {
         // Process video frames
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_VIDEO &&
             frame.frame_buffer && frame.frame_size > 0) {
+
+          // Frame rate control - only delay for video frames to maintain fps
+          int64_t now = esp_timer_get_time() / 1000;
+          int64_t target = last_frame_time + frame_interval_ms;
+          if (now < target) {
+            uint32_t delay = target - now;
+            if (delay > 0 && delay < 1000) {
+              vTaskDelay(pdMS_TO_TICKS(delay));
+            }
+          }
+          last_frame_time = esp_timer_get_time() / 1000;
 
           // Decode JPEG frame
           if (frame.frame_size <= JPEG_BUFFER_SIZE && player->jpeg_decoder_) {
@@ -638,11 +649,15 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Close audio decoder
+      // Close audio decoder and stop speaker
       if (audio_dec) {
         esp_audio_simple_dec_close(audio_dec);
         audio_dec = nullptr;
         player->audio_decoder_ready_ = false;
+      }
+      if (speaker_started) {
+        player->speaker_->finish();
+        speaker_started = false;
       }
 
       esp_extractor_close(ext);
