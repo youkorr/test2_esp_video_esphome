@@ -17,118 +17,41 @@ static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 128 * 1024; // 128KB audio ring buffer
-static constexpr size_t SD_READ_BUFFER_SIZE = 64 * 1024;     // 64KB SD read-ahead buffer
 
 // ============================================================================
-// Buffered file I/O for esp_extractor - reduces SD card latency spikes
+// File I/O wrappers for esp_extractor
+// esp_extractor has its own internal Data_Cache, so we use direct I/O here
 // ============================================================================
-struct BufferedFileCtx {
-  int fd;
-  uint8_t *buffer;
-  size_t buf_size;
-  size_t buf_pos;     // current read position within buffer
-  size_t buf_filled;  // how much valid data is in buffer
-  off_t file_offset;  // file position corresponding to buffer start
-};
-
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
   int fd = open(url, O_RDONLY);
   if (fd < 0) {
     ESP_LOGE(TAG, "Failed to open: %s", url);
     return nullptr;
   }
-
-  auto *bctx = (BufferedFileCtx *)heap_caps_malloc(sizeof(BufferedFileCtx), MALLOC_CAP_SPIRAM);
-  if (!bctx) {
-    close(fd);
-    ESP_LOGE(TAG, "Failed to allocate buffered file context");
-    return nullptr;
-  }
-
-  bctx->buffer = (uint8_t *)heap_caps_malloc(SD_READ_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
-  if (!bctx->buffer) {
-    close(fd);
-    free(bctx);
-    ESP_LOGE(TAG, "Failed to allocate SD read buffer");
-    return nullptr;
-  }
-
-  bctx->fd = fd;
-  bctx->buf_size = SD_READ_BUFFER_SIZE;
-  bctx->buf_pos = 0;
-  bctx->buf_filled = 0;
-  bctx->file_offset = 0;
-
-  ESP_LOGI(TAG, "Opened file with %uKB read-ahead buffer", SD_READ_BUFFER_SIZE / 1024);
-  return bctx;
+  return (void *)(intptr_t)fd;
 }
 
 int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
-  auto *bctx = (BufferedFileCtx *)ctx;
-  uint8_t *dst = (uint8_t *)data;
-  uint32_t remaining = size;
-  uint32_t total_read = 0;
-
-  while (remaining > 0) {
-    // Serve from buffer if data available
-    size_t avail = bctx->buf_filled - bctx->buf_pos;
-    if (avail > 0) {
-      size_t to_copy = remaining < avail ? remaining : avail;
-      memcpy(dst, bctx->buffer + bctx->buf_pos, to_copy);
-      bctx->buf_pos += to_copy;
-      dst += to_copy;
-      remaining -= to_copy;
-      total_read += to_copy;
-      continue;
-    }
-
-    // Buffer empty - refill with a large sequential read
-    // Seek fd to correct position (buffer position may differ from fd position after in-buffer seeks)
-    off_t expected_pos = bctx->file_offset + (off_t)bctx->buf_pos;
-    lseek(bctx->fd, expected_pos, SEEK_SET);
-    bctx->file_offset = expected_pos;
-    ssize_t bytes = read(bctx->fd, bctx->buffer, bctx->buf_size);
-    if (bytes <= 0) break;  // EOF or error
-    bctx->buf_filled = (size_t)bytes;
-    bctx->buf_pos = 0;
-  }
-
-  return (int)total_read;
+  int fd = (int)(intptr_t)ctx;
+  ssize_t bytes = read(fd, data, size);
+  return bytes < 0 ? 0 : (int)bytes;
 }
 
 int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
-  auto *bctx = (BufferedFileCtx *)ctx;
-
-  // Check if target position is within the current buffer
-  off_t buf_start = bctx->file_offset;
-  off_t buf_end = buf_start + (off_t)bctx->buf_filled;
-  if ((off_t)position >= buf_start && (off_t)position < buf_end) {
-    bctx->buf_pos = (size_t)(position - buf_start);
-    // Also move file descriptor to match where buffer ends
-    // (next read after buffer exhaustion will be correct)
-    return 0;
-  }
-
-  // Position outside buffer - invalidate and seek
-  bctx->buf_pos = 0;
-  bctx->buf_filled = 0;
-  bctx->file_offset = position;
-  return lseek(bctx->fd, position, SEEK_SET) < 0 ? -1 : 0;
+  int fd = (int)(intptr_t)ctx;
+  return lseek(fd, position, SEEK_SET) < 0 ? -1 : 0;
 }
 
 int Mp4Player::file_close_cb_(void *ctx) {
-  auto *bctx = (BufferedFileCtx *)ctx;
-  int ret = close(bctx->fd);
-  free(bctx->buffer);
-  free(bctx);
-  return ret;
+  int fd = (int)(intptr_t)ctx;
+  return close(fd);
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
-  auto *bctx = (BufferedFileCtx *)ctx;
-  off_t cur = lseek(bctx->fd, 0, SEEK_CUR);
-  off_t end = lseek(bctx->fd, 0, SEEK_END);
-  lseek(bctx->fd, cur, SEEK_SET);
+  int fd = (int)(intptr_t)ctx;
+  off_t cur = lseek(fd, 0, SEEK_CUR);
+  off_t end = lseek(fd, 0, SEEK_END);
+  lseek(fd, cur, SEEK_SET);
   return end <= 0 ? 0 : (uint32_t)end;
 }
 
@@ -258,12 +181,9 @@ void Mp4Player::setup() {
   probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
   probe_cfg.url = (char *)this->file_path_.c_str();
   probe_cfg.input_ctx = nullptr;
-  // Probe only needs metadata - use smaller pool than playback
-  static constexpr size_t PROBE_POOL_SIZE = 128 * 1024;
-  static constexpr size_t PROBE_POOL_BLOCKS = 2;
-  probe_cfg.output_pool_size = PROBE_POOL_SIZE;
-  probe_cfg.cache_block_num = PROBE_POOL_BLOCKS;
-  probe_cfg.cache_block_size = PROBE_POOL_SIZE / PROBE_POOL_BLOCKS;
+  probe_cfg.output_pool_size = 256 * 1024;
+  probe_cfg.cache_block_num = 3;
+  probe_cfg.cache_block_size = 256 * 1024 / 3;
 
   if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
     if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
