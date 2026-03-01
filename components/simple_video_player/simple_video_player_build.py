@@ -185,4 +185,42 @@ if os.path.exists(esp_audio_codec_dir):
 else:
     print(f"[Simple Video Player] WARNING: esp_audio_codec component not found")
 
+# ========================================================================
+# esp_extractor - Optimized MP4/AVI parser with data_cache (buffered SD I/O)
+# Uses Espressif's prebuilt libesp_extractor.a with built-in caching layer
+# ========================================================================
+esp_extractor_dir = os.path.join(parent_components_dir, "esp_extractor")
+if os.path.exists(esp_extractor_dir):
+    # Add include paths
+    esp_extractor_inc = os.path.join(esp_extractor_dir, "include")
+    if os.path.exists(esp_extractor_inc):
+        env.Append(CPPPATH=[esp_extractor_inc])
+        print(f"[Simple Video Player] + esp_extractor includes")
+
+    # Compile esp_extractor_reg.c (registers MP4/AVI/WAV extractors)
+    esp_extractor_reg_src = os.path.join(esp_extractor_dir, "esp_extractor_reg.c")
+    if os.path.exists(esp_extractor_reg_src):
+        reg_obj = env.Object(esp_extractor_reg_src)
+        env.Prepend(LIBS=[env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libesp_extractor_reg"),
+            reg_obj
+        )])
+        print(f"[Simple Video Player] + esp_extractor_reg.c compiled")
+
+    # Link prebuilt libesp_extractor.a
+    extractor_lib_dir = os.path.join(esp_extractor_dir, "lib", "esp32p4")
+    extractor_lib = os.path.join(extractor_lib_dir, "libesp_extractor.a")
+    if os.path.exists(extractor_lib):
+        env.Append(LIBPATH=[extractor_lib_dir])
+        env.Append(LINKFLAGS=[
+            "-Wl,--whole-archive",
+            extractor_lib,
+            "-Wl,--no-whole-archive",
+        ])
+        print(f"[Simple Video Player] Linked libesp_extractor.a (MP4/AVI parser with data_cache)")
+    else:
+        print(f"[Simple Video Player] WARNING: libesp_extractor.a not found for esp32p4")
+else:
+    print(f"[Simple Video Player] WARNING: esp_extractor component not found")
+
 print("[Simple Video Player] Build script completed")

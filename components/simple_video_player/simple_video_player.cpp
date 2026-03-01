@@ -12,6 +12,8 @@
 #include "yuv_rgb_lut.h"      // Lookup table YUVRGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
 #include "ppa_compat.h"       // PPA YUV420 compatibility for older ESP-IDF versions
+#include <fcntl.h>            // POSIX open()
+#include <unistd.h>           // POSIX read(), close(), lseek()
 
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
@@ -25,6 +27,39 @@ static const char *const TAG = "simple_video_player";
 // Memory allocation caps for SPIRAM buffers (matches Espressif video subsystem)
 // MALLOC_CAP_CACHE_ALIGNED is CRITICAL for optimal PSRAM bandwidth
 #define VIDEO_BUFFER_CAPS (MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED)
+
+// esp_extractor pool configuration (matches Waveshare's working settings)
+#define EXTRACTOR_POOL_SIZE    (256 * 1024)  // 256KB output pool for frames
+#define EXTRACTOR_POOL_BLOCKS  3             // 3 cache blocks (~85KB each)
+
+// POSIX file I/O callbacks for esp_extractor's data_cache
+static void *extractor_file_open(char *url, void *ctx) {
+  int fd = open(url, O_RDONLY);
+  if (fd < 0) {
+    ESP_LOGE("video_decode", "esp_extractor: failed to open %s", url);
+    return nullptr;
+  }
+  return (void *)(intptr_t)fd;
+}
+static int extractor_file_read(void *data, uint32_t size, void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return (int)read(fd, data, size);
+}
+static int extractor_file_seek(uint32_t position, void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return (lseek(fd, position, SEEK_SET) < 0) ? -1 : 0;
+}
+static uint32_t extractor_file_size(void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  off_t cur = lseek(fd, 0, SEEK_CUR);
+  off_t end = lseek(fd, 0, SEEK_END);
+  lseek(fd, cur, SEEK_SET);
+  return (end > 0) ? (uint32_t)end : 0;
+}
+static int extractor_file_close(void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return close(fd);
+}
 
 // Buffer size alignment macro (from esp_video_internal.h)
 #define ALIGN_SIZE(s, a) (((s) + ((a) - 1)) / (a) * (a))
@@ -214,123 +249,113 @@ void SimpleVideoPlayer::setup() {
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
-    // Parse MP4 file (this will extract resolution)
-    if (!this->parse_mp4_()) {
-      ESP_LOGE(TAG, "Failed to parse MP4 file");
+    // === Use esp_extractor for MP4 parsing (Espressif's optimized library) ===
+    // The esp_extractor uses data_cache with ~256KB buffered I/O for fast SD reads
+
+    // Register MP4 extractor (once)
+    if (!this->esp_extractor_registered_) {
+      esp_extr_err_t reg_ret = esp_mp4_extractor_register();
+      if (reg_ret != ESP_EXTR_ERR_OK && reg_ret != ESP_EXTR_ERR_ALREADY_EXIST) {
+        ESP_LOGE(TAG, "Failed to register MP4 extractor: %d", reg_ret);
+        this->mark_failed();
+        return;
+      }
+      this->esp_extractor_registered_ = true;
+    }
+
+    // Close any previous extractor
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+    }
+
+    // Configure extractor with POSIX file I/O and data_cache
+    esp_extractor_config_t ext_config = {};
+    ext_config.open = extractor_file_open;
+    ext_config.read = extractor_file_read;
+    ext_config.seek = extractor_file_seek;
+    ext_config.file_size = extractor_file_size;
+    ext_config.close = extractor_file_close;
+    ext_config.extract_mask = ESP_EXTRACT_MASK_VIDEO;
+    ext_config.url = const_cast<char *>(this->file_path_.c_str());
+    ext_config.input_ctx = nullptr;
+    ext_config.output_pool_size = EXTRACTOR_POOL_SIZE;
+    ext_config.cache_block_num = EXTRACTOR_POOL_BLOCKS;
+    ext_config.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
+
+    esp_extr_err_t ext_ret = esp_extractor_open(&ext_config, &this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_open failed: %d", ext_ret);
       this->mark_failed();
       return;
     }
-    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
-             this->video_samples_.size(), this->audio_samples_.size());
 
-    // Re-calculate dimensions if they were updated during parsing
-    if (this->actual_width_ != this->aligned_width_ ||
-        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
-      int new_aligned_width = (this->actual_width_ + 15) & ~15;
-      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+    ext_ret = esp_extractor_parse_stream_info(this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_parse_stream_info failed: %d", ext_ret);
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
-        this->aligned_width_ = new_aligned_width;
-        this->aligned_height_ = new_aligned_height;
+    // Get video stream info
+    uint16_t video_num = 0;
+    esp_extractor_get_stream_num(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, &video_num);
+    if (video_num == 0) {
+      ESP_LOGE(TAG, "No video stream found in MP4");
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
-                 this->actual_width_, this->actual_height_,
-                 this->aligned_width_, this->aligned_height_);
+    extractor_stream_info_t stream_info = {};
+    esp_extractor_get_stream_info(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &stream_info);
+    extractor_video_stream_info_t *vinfo = &stream_info.stream_info.video_info;
+    this->actual_width_ = vinfo->width;
+    this->actual_height_ = vinfo->height;
+    this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+    this->aligned_height_ = (this->actual_height_ + 15) & ~15;
 
-        // Re-allocate RGB buffers with correct size
-        heap_caps_free(this->rgb_buffer_);
-        if (this->rgb_buffer_back_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_back_);
-          this->rgb_buffer_back_ = nullptr;
-        }
-        if (this->rgb_buffer_third_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_third_);
-          this->rgb_buffer_third_ = nullptr;
-        }
+    if (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+      this->mp4_has_mjpeg_ = true;
+    }
 
-        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                VIDEO_BUFFER_CAPS);
-        if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
-          this->mark_failed();
-          return;
-        }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+    ESP_LOGI(TAG, "esp_extractor: Video %ux%u @ %u fps, format=%s, duration=%ums",
+             vinfo->width, vinfo->height, vinfo->fps,
+             (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG" : "H264",
+             stream_info.duration);
 
-        // Re-allocate buffers 1 and 2 for triple buffering
-        if (this->use_triple_buffer_) {
-          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                       VIDEO_BUFFER_CAPS);
-          if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
-            this->use_triple_buffer_ = false;
-          } else {
-            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+    // Re-allocate RGB buffers with correct resolution
+    {
+      heap_caps_free(this->rgb_buffer_);
+      if (this->rgb_buffer_back_) { heap_caps_free(this->rgb_buffer_back_); this->rgb_buffer_back_ = nullptr; }
+      if (this->rgb_buffer_third_) { heap_caps_free(this->rgb_buffer_third_); this->rgb_buffer_third_ = nullptr; }
 
-            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                         VIDEO_BUFFER_CAPS);
-            if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
-              this->use_triple_buffer_ = false;
-            } else {
-              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-            }
-          }
-        }
+      this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+      if (!this->rgb_buffer_) { ESP_LOGE(TAG, "Failed to allocate RGB buffer"); this->mark_failed(); return; }
+      if (this->use_triple_buffer_) {
+        this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+        if (this->rgb_buffer_back_) {
+          this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+          if (!this->rgb_buffer_third_) this->use_triple_buffer_ = false;
+        } else { this->use_triple_buffer_ = false; }
       }
     }
 
-    // Runtime MJPEG detection: check first bytes of sample #0 for JPEG SOI marker (FF D8)
-    // This catches cases where ffmpeg uses unexpected FourCC (e.g., mp4v instead of jpeg)
-    if (!this->mp4_has_mjpeg_ && !this->video_samples_.empty() && this->file_ != nullptr) {
-      uint8_t probe[4] = {0};
-      long saved_pos = this->cached_ftell_();
-      this->cached_fseek_(this->video_samples_[0].offset, SEEK_SET);
-      this->cached_fread_(probe, 1, 4);
-      this->cached_fseek_(saved_pos, SEEK_SET);
-
-      if (probe[0] == 0xFF && probe[1] == 0xD8 && probe[2] == 0xFF) {
-        this->mp4_has_mjpeg_ = true;
-        ESP_LOGW(TAG, "MJPEG detected from sample data (FF D8 FF) - stsd FourCC was not recognized");
-        ESP_LOGI(TAG, "Switching to hardware JPEG decoder for better performance");
-      }
-    }
-
-    // Check if MP4 contains MJPEG codec (switch to hardware JPEG decoder)
+    // Initialize codec
     if (this->mp4_has_mjpeg_) {
       this->format_ = MediaFormat::MP4_MJPEG;
-      ESP_LOGI(TAG, "MP4 contains MJPEG codec - using hardware JPEG decoder");
-
-      if (!this->init_jpeg_decoder_()) {
-        ESP_LOGE(TAG, "Failed to initialize JPEG decoder for MP4_MJPEG");
-        this->mark_failed();
-        return;
-      }
+      ESP_LOGI(TAG, "MP4 MJPEG - using hardware JPEG decoder");
+      if (!this->init_jpeg_decoder_()) { ESP_LOGE(TAG, "JPEG decoder init failed"); this->mark_failed(); return; }
     } else {
-      // H.264 software decoder
-      if (!this->init_h264_decoder_()) {
-        ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-        this->mark_failed();
-        return;
-      }
+      if (!this->init_h264_decoder_()) { ESP_LOGE(TAG, "H264 decoder init failed"); this->mark_failed(); return; }
     }
 
-    // Allocate SD read-ahead buffer for MP4 (batches ~6 frames per SD read)
-    // Reduces per-frame SD latency from ~155ms to ~1ms for cached frames
-    if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ == nullptr) {
-      this->sd_read_ahead_buf_ = (uint8_t *)heap_caps_malloc(
-          this->sd_read_ahead_capacity_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-      if (this->sd_read_ahead_buf_ != nullptr) {
-        size_t avg_frame_size = this->video_samples_.empty() ? 80000 : this->video_samples_[0].size;
-        ESP_LOGI(TAG, "SD read-ahead buffer: %uKB in PSRAM (covers ~%d frames per SD read)",
-                 (unsigned)(this->sd_read_ahead_capacity_ / 1024),
-                 (int)(this->sd_read_ahead_capacity_ / std::max((size_t)1, avg_frame_size)));
-      } else {
-        ESP_LOGW(TAG, "Failed to allocate SD read-ahead buffer (%uKB) - using direct SD reads",
-                 (unsigned)(this->sd_read_ahead_capacity_ / 1024));
-      }
-    }
+    ESP_LOGI(TAG, "esp_extractor: data_cache with %d blocks x %uKB buffered SD I/O",
+             EXTRACTOR_POOL_BLOCKS, (unsigned)(EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS / 1024));
 
     // Initialize AAC audio decoder if audio track found
     if (this->speaker_ != nullptr && this->has_audio_) {
@@ -587,123 +612,113 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
-    // Parse MP4 file (this will extract resolution)
-    if (!this->parse_mp4_()) {
-      ESP_LOGE(TAG, "Failed to parse MP4 file");
+    // === Use esp_extractor for MP4 parsing (Espressif's optimized library) ===
+    // The esp_extractor uses data_cache with ~256KB buffered I/O for fast SD reads
+
+    // Register MP4 extractor (once)
+    if (!this->esp_extractor_registered_) {
+      esp_extr_err_t reg_ret = esp_mp4_extractor_register();
+      if (reg_ret != ESP_EXTR_ERR_OK && reg_ret != ESP_EXTR_ERR_ALREADY_EXIST) {
+        ESP_LOGE(TAG, "Failed to register MP4 extractor: %d", reg_ret);
+        this->mark_failed();
+        return;
+      }
+      this->esp_extractor_registered_ = true;
+    }
+
+    // Close any previous extractor
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+    }
+
+    // Configure extractor with POSIX file I/O and data_cache
+    esp_extractor_config_t ext_config = {};
+    ext_config.open = extractor_file_open;
+    ext_config.read = extractor_file_read;
+    ext_config.seek = extractor_file_seek;
+    ext_config.file_size = extractor_file_size;
+    ext_config.close = extractor_file_close;
+    ext_config.extract_mask = ESP_EXTRACT_MASK_VIDEO;
+    ext_config.url = const_cast<char *>(this->file_path_.c_str());
+    ext_config.input_ctx = nullptr;
+    ext_config.output_pool_size = EXTRACTOR_POOL_SIZE;
+    ext_config.cache_block_num = EXTRACTOR_POOL_BLOCKS;
+    ext_config.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
+
+    esp_extr_err_t ext_ret = esp_extractor_open(&ext_config, &this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_open failed: %d", ext_ret);
       this->mark_failed();
       return;
     }
-    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
-             this->video_samples_.size(), this->audio_samples_.size());
 
-    // Re-calculate dimensions if they were updated during parsing
-    if (this->actual_width_ != this->aligned_width_ ||
-        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
-      int new_aligned_width = (this->actual_width_ + 15) & ~15;
-      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+    ext_ret = esp_extractor_parse_stream_info(this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_parse_stream_info failed: %d", ext_ret);
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
-        this->aligned_width_ = new_aligned_width;
-        this->aligned_height_ = new_aligned_height;
+    // Get video stream info
+    uint16_t video_num = 0;
+    esp_extractor_get_stream_num(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, &video_num);
+    if (video_num == 0) {
+      ESP_LOGE(TAG, "No video stream found in MP4");
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
-                 this->actual_width_, this->actual_height_,
-                 this->aligned_width_, this->aligned_height_);
+    extractor_stream_info_t stream_info = {};
+    esp_extractor_get_stream_info(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &stream_info);
+    extractor_video_stream_info_t *vinfo = &stream_info.stream_info.video_info;
+    this->actual_width_ = vinfo->width;
+    this->actual_height_ = vinfo->height;
+    this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+    this->aligned_height_ = (this->actual_height_ + 15) & ~15;
 
-        // Re-allocate RGB buffers with correct size
-        heap_caps_free(this->rgb_buffer_);
-        if (this->rgb_buffer_back_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_back_);
-          this->rgb_buffer_back_ = nullptr;
-        }
-        if (this->rgb_buffer_third_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_third_);
-          this->rgb_buffer_third_ = nullptr;
-        }
+    if (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+      this->mp4_has_mjpeg_ = true;
+    }
 
-        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                VIDEO_BUFFER_CAPS);
-        if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
-          this->mark_failed();
-          return;
-        }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+    ESP_LOGI(TAG, "esp_extractor: Video %ux%u @ %u fps, format=%s, duration=%ums",
+             vinfo->width, vinfo->height, vinfo->fps,
+             (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG" : "H264",
+             stream_info.duration);
 
-        // Re-allocate buffers 1 and 2 for triple buffering
-        if (this->use_triple_buffer_) {
-          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                       VIDEO_BUFFER_CAPS);
-          if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
-            this->use_triple_buffer_ = false;
-          } else {
-            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+    // Re-allocate RGB buffers with correct resolution
+    {
+      heap_caps_free(this->rgb_buffer_);
+      if (this->rgb_buffer_back_) { heap_caps_free(this->rgb_buffer_back_); this->rgb_buffer_back_ = nullptr; }
+      if (this->rgb_buffer_third_) { heap_caps_free(this->rgb_buffer_third_); this->rgb_buffer_third_ = nullptr; }
 
-            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                         VIDEO_BUFFER_CAPS);
-            if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
-              this->use_triple_buffer_ = false;
-            } else {
-              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-            }
-          }
-        }
+      this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+      if (!this->rgb_buffer_) { ESP_LOGE(TAG, "Failed to allocate RGB buffer"); this->mark_failed(); return; }
+      if (this->use_triple_buffer_) {
+        this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+        if (this->rgb_buffer_back_) {
+          this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+          if (!this->rgb_buffer_third_) this->use_triple_buffer_ = false;
+        } else { this->use_triple_buffer_ = false; }
       }
     }
 
-    // Runtime MJPEG detection: check first bytes of sample #0 for JPEG SOI marker (FF D8)
-    // This catches cases where ffmpeg uses unexpected FourCC (e.g., mp4v instead of jpeg)
-    if (!this->mp4_has_mjpeg_ && !this->video_samples_.empty() && this->file_ != nullptr) {
-      uint8_t probe[4] = {0};
-      long saved_pos = this->cached_ftell_();
-      this->cached_fseek_(this->video_samples_[0].offset, SEEK_SET);
-      this->cached_fread_(probe, 1, 4);
-      this->cached_fseek_(saved_pos, SEEK_SET);
-
-      if (probe[0] == 0xFF && probe[1] == 0xD8 && probe[2] == 0xFF) {
-        this->mp4_has_mjpeg_ = true;
-        ESP_LOGW(TAG, "MJPEG detected from sample data (FF D8 FF) - stsd FourCC was not recognized");
-        ESP_LOGI(TAG, "Switching to hardware JPEG decoder for better performance");
-      }
-    }
-
-    // Check if MP4 contains MJPEG codec (switch to hardware JPEG decoder)
+    // Initialize codec
     if (this->mp4_has_mjpeg_) {
       this->format_ = MediaFormat::MP4_MJPEG;
-      ESP_LOGI(TAG, "MP4 contains MJPEG codec - using hardware JPEG decoder");
-
-      if (!this->init_jpeg_decoder_()) {
-        ESP_LOGE(TAG, "Failed to initialize JPEG decoder for MP4_MJPEG");
-        this->mark_failed();
-        return;
-      }
+      ESP_LOGI(TAG, "MP4 MJPEG - using hardware JPEG decoder");
+      if (!this->init_jpeg_decoder_()) { ESP_LOGE(TAG, "JPEG decoder init failed"); this->mark_failed(); return; }
     } else {
-      // H.264 software decoder
-      if (!this->init_h264_decoder_()) {
-        ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-        this->mark_failed();
-        return;
-      }
+      if (!this->init_h264_decoder_()) { ESP_LOGE(TAG, "H264 decoder init failed"); this->mark_failed(); return; }
     }
 
-    // Allocate SD read-ahead buffer for MP4 (batches ~6 frames per SD read)
-    // Reduces per-frame SD latency from ~155ms to ~1ms for cached frames
-    if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ == nullptr) {
-      this->sd_read_ahead_buf_ = (uint8_t *)heap_caps_malloc(
-          this->sd_read_ahead_capacity_, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-      if (this->sd_read_ahead_buf_ != nullptr) {
-        size_t avg_frame_size = this->video_samples_.empty() ? 80000 : this->video_samples_[0].size;
-        ESP_LOGI(TAG, "SD read-ahead buffer: %uKB in PSRAM (covers ~%d frames per SD read)",
-                 (unsigned)(this->sd_read_ahead_capacity_ / 1024),
-                 (int)(this->sd_read_ahead_capacity_ / std::max((size_t)1, avg_frame_size)));
-      } else {
-        ESP_LOGW(TAG, "Failed to allocate SD read-ahead buffer (%uKB) - using direct SD reads",
-                 (unsigned)(this->sd_read_ahead_capacity_ / 1024));
-      }
-    }
+    ESP_LOGI(TAG, "esp_extractor: data_cache with %d blocks x %uKB buffered SD I/O",
+             EXTRACTOR_POOL_BLOCKS, (unsigned)(EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS / 1024));
 
     // Initialize AAC audio decoder if audio track found
     if (this->speaker_ != nullptr && this->has_audio_) {
@@ -2906,14 +2921,77 @@ void SimpleVideoPlayer::cleanup_aac_decoder_() {
 }
 
 bool SimpleVideoPlayer::read_next_mp4_sample_() {
+  // === esp_extractor path: uses data_cache for buffered SD I/O ===
+  if (this->esp_extractor_ != nullptr) {
+    extractor_frame_info_t frame = {};
+    esp_extr_err_t ret = esp_extractor_read_frame(this->esp_extractor_, &frame);
+
+    if (ret == ESP_EXTR_ERR_EOS) {
+      // End of stream
+      if (this->loop_) {
+        // Seek back to beginning for loop
+        esp_extractor_seek(this->esp_extractor_, 0);
+        this->frame_count_ = 0;
+        this->sps_pps_sent_ = false;
+        // Try reading again after seek
+        ret = esp_extractor_read_frame(this->esp_extractor_, &frame);
+        if (ret != ESP_EXTR_ERR_OK) {
+          ESP_LOGW(TAG, "esp_extractor: loop seek+read failed: %d", ret);
+          return false;
+        }
+      } else {
+        return false;
+      }
+    } else if (ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGW(TAG, "esp_extractor_read_frame failed: %d", ret);
+      return false;
+    }
+
+    // Skip non-video frames (shouldn't happen with VIDEO-only mask, but be safe)
+    if (frame.stream_type != EXTRACTOR_STREAM_TYPE_VIDEO) {
+      // Free the frame buffer and try next frame
+      if (frame.frame_buffer) {
+        mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      }
+      return this->read_next_mp4_sample_();  // Recursive call for next frame
+    }
+
+    // Check EOS flag
+    if (frame.eos) {
+      if (frame.frame_buffer) {
+        mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      }
+      if (this->loop_) {
+        esp_extractor_seek(this->esp_extractor_, 0);
+        this->frame_count_ = 0;
+        return this->read_next_mp4_sample_();
+      }
+      return false;
+    }
+
+    // Copy frame data to input buffer
+    if (frame.frame_size > this->buffer_size_) {
+      ESP_LOGW(TAG, "Frame too large: %u > %u", frame.frame_size, this->buffer_size_);
+      mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      return false;
+    }
+
+    memcpy(this->input_buffer_, frame.frame_buffer, frame.frame_size);
+    this->input_size_ = frame.frame_size;
+    this->frame_count_++;
+
+    // Free the frame buffer back to the extractor's memory pool
+    mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+
+    return true;
+  }
+
+  // === Legacy path: direct file reading (fallback for non-MP4 or when extractor unavailable) ===
   if (this->current_video_sample_ >= this->video_samples_.size()) {
     if (this->loop_) {
       this->current_video_sample_ = 0;
       this->sps_pps_sent_ = false;
       this->frame_count_ = 0;
-      // Invalidate read-ahead buffer on loop restart
-      this->sd_read_ahead_valid_ = 0;
-      this->sd_read_ahead_offset_ = -1;
     } else {
       return false;
     }
@@ -2921,73 +2999,17 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
 
   Mp4Sample &sample = this->video_samples_[this->current_video_sample_];
 
-  // Mark if we need to send SPS/PPS before this keyframe
   if (sample.is_keyframe) {
-    this->sps_pps_sent_ = false;  // Reset flag to prepend SPS/PPS to keyframe
+    this->sps_pps_sent_ = false;
   }
 
-  // Read sample data
   if (sample.size > this->buffer_size_) {
     ESP_LOGW(TAG, "Sample too large: %u > %u", sample.size, this->buffer_size_);
     this->current_video_sample_++;
     return false;
   }
 
-  // === SD Read-Ahead Buffer optimization ===
-  // Instead of reading each frame individually from SD (155ms per fseek+fread),
-  // read a large chunk (512KB) covering multiple frames, then serve subsequent
-  // frames from PSRAM buffer (< 1ms memcpy).
-  // Only used for direct SD card reads (not when file is already cached in PSRAM).
-
-  if (!this->file_cache_loaded_ && this->sd_read_ahead_buf_ != nullptr) {
-    // Check if this sample falls within the read-ahead buffer
-    long buf_end = this->sd_read_ahead_offset_ + (long)this->sd_read_ahead_valid_;
-    if (this->sd_read_ahead_offset_ >= 0 &&
-        (long)sample.offset >= this->sd_read_ahead_offset_ &&
-        (long)(sample.offset + sample.size) <= buf_end) {
-      // HIT - serve from read-ahead buffer (fast path: ~1ms memcpy vs ~155ms SD read)
-      size_t buf_pos = sample.offset - this->sd_read_ahead_offset_;
-      memcpy(this->input_buffer_, this->sd_read_ahead_buf_ + buf_pos, sample.size);
-      this->input_size_ = sample.size;
-      this->current_video_sample_++;
-      this->frame_count_++;
-      return true;
-    }
-
-    // MISS - read a large chunk from SD starting at this sample's offset
-    this->cached_fseek_(sample.offset, SEEK_SET);
-    size_t max_read = std::min(this->sd_read_ahead_capacity_,
-                               (size_t)(this->file_size_ - sample.offset));
-    size_t bytes_read = this->cached_fread_(this->sd_read_ahead_buf_, 1, max_read);
-
-    if (bytes_read >= sample.size) {
-      this->sd_read_ahead_offset_ = sample.offset;
-      this->sd_read_ahead_valid_ = bytes_read;
-
-      // Copy this sample from the freshly filled buffer
-      memcpy(this->input_buffer_, this->sd_read_ahead_buf_, sample.size);
-      this->input_size_ = sample.size;
-      this->current_video_sample_++;
-      this->frame_count_++;
-
-      if (this->frame_count_ == 1) {
-        ESP_LOGI(TAG, "SD read-ahead: loaded %u bytes covering ~%d frames from offset %lu",
-                 (unsigned)bytes_read,
-                 (int)(bytes_read / std::max((size_t)1, (size_t)sample.size)),
-                 (unsigned long)sample.offset);
-      }
-      return true;
-    }
-
-    // Read-ahead failed, fall through to direct read
-    ESP_LOGW(TAG, "Read-ahead failed: got %u, need %u", (unsigned)bytes_read, sample.size);
-    this->sd_read_ahead_valid_ = 0;
-    this->sd_read_ahead_offset_ = -1;
-  }
-
-  // Direct read path (used when file is cached in PSRAM, or read-ahead not available)
   this->cached_fseek_(sample.offset, SEEK_SET);
-
   size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, sample.size);
   if (bytes_read != sample.size) {
     ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
@@ -2997,7 +3019,6 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   this->input_size_ = sample.size;
   this->current_video_sample_++;
   this->frame_count_++;
-
   return true;
 }
 
@@ -4776,9 +4797,10 @@ void SimpleVideoPlayer::stop() {
     this->current_video_sample_ = 0;
     this->current_audio_sample_ = 0;
     this->sps_pps_sent_ = false;
-    // Invalidate read-ahead buffer (will re-fill on next play)
-    this->sd_read_ahead_valid_ = 0;
-    this->sd_read_ahead_offset_ = -1;
+    // Seek esp_extractor back to beginning
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_seek(this->esp_extractor_, 0);
+    }
   }
   this->frame_count_ = 0;
   this->current_pos_ = 0;
@@ -4847,14 +4869,11 @@ void SimpleVideoPlayer::stop() {
 
   this->rgb_buffer_size_ = 0;
 
-  // Free SD read-ahead buffer
-  if (this->sd_read_ahead_buf_ != nullptr) {
-    total_freed += this->sd_read_ahead_capacity_;
-    heap_caps_free(this->sd_read_ahead_buf_);
-    this->sd_read_ahead_buf_ = nullptr;
-    this->sd_read_ahead_valid_ = 0;
-    this->sd_read_ahead_offset_ = -1;
-    ESP_LOGD(TAG, "  Freed sd_read_ahead_buf_: %zu bytes", this->sd_read_ahead_capacity_);
+  // Close esp_extractor (releases data_cache and output pool)
+  if (this->esp_extractor_ != nullptr) {
+    esp_extractor_close(this->esp_extractor_);
+    this->esp_extractor_ = nullptr;
+    ESP_LOGD(TAG, "  Closed esp_extractor (data_cache + output pool freed)");
   }
 
   // Free rotation buffer (but keep rotation handle and rotation_initialized_ for next playback)
@@ -5115,7 +5134,7 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
             if (callback_count % 30 == 0) {
               uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
               const char *read_src = player->file_cache_loaded_ ? "PSRAM-cache" :
-                                     (player->sd_read_ahead_buf_ != nullptr ? "SD-readahead" : "SD-direct");
+                                     (player->esp_extractor_ != nullptr ? "esp_extractor" : "SD-direct");
               ESP_LOGI(TAG, "MP4-MJPEG timing (%dx%d): TOTAL=%lums [read=%lums (%s), JPEG decode=%lums]",
                        player->actual_width_, player->actual_height_,
                        (unsigned long)total_time, (unsigned long)read_time, read_src,
