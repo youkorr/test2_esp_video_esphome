@@ -20,7 +20,7 @@ static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded 
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
 // Read-ahead buffer for SD card I/O to reduce small read overhead
-//static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
+static constexpr size_t FILE_READ_AHEAD_SIZE = 16 * 1024;  // 64KB read-ahead buffer
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
