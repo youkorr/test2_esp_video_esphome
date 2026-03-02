@@ -35,8 +35,23 @@ extern "C" {
 
 }
 
-// ESP audio codec removed (not working)
-#define USE_ESP_AUDIO_CODEC 0
+// ESP audio codec for AAC decoding in MP4/MKV containers
+#define USE_ESP_AUDIO_CODEC 1
+
+extern "C" {
+#include "esp_audio_dec.h"
+#include "esp_audio_dec_reg.h"
+#include "esp_aac_dec.h"
+}
+
+// ESP extractor for optimized MP4 parsing with data_cache (buffered SD I/O)
+extern "C" {
+#include "esp_extractor.h"
+#include "esp_extractor_reg.h"
+#include "esp_mp4_extractor.h"
+#include "esp_avi_extractor.h"
+#include "mem_pool.h"
+}
 
 namespace esphome {
 namespace simple_video_player {
@@ -51,6 +66,7 @@ enum class MediaFormat {
   UNKNOWN,
   MJPEG,
   MP4_H264,
+  MP4_MJPEG,   // MJPEG codec in MP4 container (like Waveshare) - uses hardware JPEG decoder
   MKV_H264,
   GIF_ANIMATED
 };
@@ -241,11 +257,12 @@ class SimpleVideoPlayer : public Component {
   bool parse_mkv_clusters_();
   bool read_next_mkv_sample_();
 
-  // Audio codec methods removed (not working)
-  // bool init_aac_decoder_();
-  // bool read_next_audio_sample_();
-  // bool decode_audio_frame_();
-  // void process_audio_();
+  // Audio codec methods
+  bool init_aac_decoder_();
+  bool read_next_audio_sample_();
+  bool decode_audio_frame_();
+  void process_audio_();
+  void cleanup_aac_decoder_();
 
   // PPA hardware YUVRGB conversion (replaces software converter)
   bool init_ppa_color_converter_();
@@ -268,10 +285,12 @@ class SimpleVideoPlayer : public Component {
   static void pause_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
   static void slider_cb_(lv_event_t *e);
+  static void volume_slider_cb_(lv_event_t *e);  // Volume slider callback
   static void esp_timer_cb_(void *arg);  // ESP32 native timer callback (ultra-lightweight, just sets event bit)
   static void decode_task_(void *arg);  // FreeRTOS decode task (offloaded decoding from timer)
   static void hide_timer_cb_(lv_timer_t *timer);
   static void touch_cb_(lv_event_t *e);
+  void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);  // Software volume scaling
 
   // Event bits for decode task synchronization (similar to avi_player)
   static constexpr EventBits_t EVENT_TIMER_TICK = (1 << 0);  // Timer fired, time to decode next frame
@@ -315,6 +334,13 @@ class SimpleVideoPlayer : public Component {
   size_t file_cache_pos_{0};             // Current read position in cache
   bool use_file_cache_{false};           // Enable PSRAM caching (for small files <32MB)
   bool file_cache_loaded_{false};        // true after file is loaded to PSRAM
+
+  // ESP Extractor - Optimized MP4 parsing with built-in data_cache for buffered SD I/O
+  // Replaces our custom fread-based parser which was slow (155ms per frame read)
+  // The esp_extractor data_cache reads in ~85KB blocks and caches 3 blocks (~256KB)
+  esp_extractor_handle_t esp_extractor_{nullptr};
+  int esp_extractor_fd_{-1};                      // POSIX file descriptor for extractor
+  bool esp_extractor_registered_{false};           // Extractor formats registered
 
   uint8_t *input_buffer_{nullptr};
   uint8_t *rgb_buffer_{nullptr};          // Buffer 0 - triple buffering
@@ -390,6 +416,7 @@ class SimpleVideoPlayer : public Component {
   std::vector<uint8_t> build_constrained_baseline_pps_();
   uint32_t video_timescale_{1000};
   uint32_t audio_timescale_{44100};
+  bool mp4_has_mjpeg_{false};  // true if MP4 contains MJPEG codec (not H.264)
 
   // MKV/Matroska data
   std::vector<MkvSample> mkv_samples_;
@@ -411,14 +438,18 @@ class SimpleVideoPlayer : public Component {
 
   speaker::Speaker *speaker_{nullptr};
   std::string media_player_entity_;
-  // Audio codec variables removed (not working)
-  // void *aac_decoder_{nullptr};
-  // uint8_t *audio_input_buffer_{nullptr};
-  // uint8_t *audio_output_buffer_{nullptr};
-  // size_t audio_input_size_{0};
-  // size_t audio_output_size_{0};
-  // bool has_audio_{false};
-  // bool aac_decoder_ready_{false};
+
+  // Audio codec variables
+  esp_audio_dec_handle_t aac_decoder_{nullptr};
+  uint8_t *audio_input_buffer_{nullptr};
+  uint8_t *audio_output_buffer_{nullptr};
+  size_t audio_input_size_{0};
+  size_t audio_output_size_{0};
+  bool has_audio_{false};
+  bool aac_decoder_ready_{false};
+  static constexpr size_t AUDIO_INPUT_BUFFER_SIZE = 8192;
+  static constexpr size_t AUDIO_OUTPUT_BUFFER_SIZE = 16384;
+  static constexpr uint32_t AV_SYNC_THRESHOLD_MS = 50;  // A/V sync threshold (like Waveshare)
 
   lv_obj_t *parent_{nullptr};
   lv_obj_t *canvas_{nullptr};
@@ -432,6 +463,8 @@ class SimpleVideoPlayer : public Component {
   lv_obj_t *loading_spinner_{nullptr};
   lv_obj_t *controls_container_{nullptr};
   lv_obj_t *touch_layer_{nullptr};
+  lv_obj_t *volume_slider_{nullptr};
+  lv_obj_t *volume_icon_{nullptr};
   esp_timer_handle_t playback_timer_{nullptr};  // ESP32 native timer for precise framerate
   lv_timer_t *hide_timer_{nullptr};
   SemaphoreHandle_t lvgl_mutex_{nullptr};  // Mutex for thread-safe LVGL access from timer callback
@@ -448,6 +481,7 @@ class SimpleVideoPlayer : public Component {
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};  // Auto-hide controls after 5 seconds
+  uint8_t volume_level_{80};  // Software volume level 0-100 (default 80%)
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<SimpleVideoPlayer> {

@@ -12,6 +12,8 @@
 #include "yuv_rgb_lut.h"      // Lookup table YUVRGB conversion (test alternative)
 #include <vector>             // For dynamic buffer during HTTP download
 #include "ppa_compat.h"       // PPA YUV420 compatibility for older ESP-IDF versions
+#include <fcntl.h>            // POSIX open()
+#include <unistd.h>           // POSIX read(), close(), lseek()
 
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
@@ -25,6 +27,39 @@ static const char *const TAG = "simple_video_player";
 // Memory allocation caps for SPIRAM buffers (matches Espressif video subsystem)
 // MALLOC_CAP_CACHE_ALIGNED is CRITICAL for optimal PSRAM bandwidth
 #define VIDEO_BUFFER_CAPS (MALLOC_CAP_8BIT | MALLOC_CAP_SPIRAM | MALLOC_CAP_CACHE_ALIGNED)
+
+// esp_extractor pool configuration (matches Waveshare's working settings)
+#define EXTRACTOR_POOL_SIZE    (256 * 1024)  // 256KB output pool for frames
+#define EXTRACTOR_POOL_BLOCKS  3             // 3 cache blocks (~85KB each)
+
+// POSIX file I/O callbacks for esp_extractor's data_cache
+static void *extractor_file_open(char *url, void *ctx) {
+  int fd = open(url, O_RDONLY);
+  if (fd < 0) {
+    ESP_LOGE("video_decode", "esp_extractor: failed to open %s", url);
+    return nullptr;
+  }
+  return (void *)(intptr_t)fd;
+}
+static int extractor_file_read(void *data, uint32_t size, void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return (int)read(fd, data, size);
+}
+static int extractor_file_seek(uint32_t position, void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return (lseek(fd, position, SEEK_SET) < 0) ? -1 : 0;
+}
+static uint32_t extractor_file_size(void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  off_t cur = lseek(fd, 0, SEEK_CUR);
+  off_t end = lseek(fd, 0, SEEK_END);
+  lseek(fd, cur, SEEK_SET);
+  return (end > 0) ? (uint32_t)end : 0;
+}
+static int extractor_file_close(void *ctx) {
+  int fd = (int)(intptr_t)ctx;
+  return close(fd);
+}
 
 // Buffer size alignment macro (from esp_video_internal.h)
 #define ALIGN_SIZE(s, a) (((s) + ((a) - 1)) / (a) * (a))
@@ -103,6 +138,7 @@ void SimpleVideoPlayer::setup() {
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGI(TAG, "Detected format: %s", format_str);
@@ -213,86 +249,120 @@ void SimpleVideoPlayer::setup() {
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
-    // Parse MP4 file (this will extract resolution)
-    if (!this->parse_mp4_()) {
-      ESP_LOGE(TAG, "Failed to parse MP4 file");
+    // === Use esp_extractor for MP4 parsing (Espressif's optimized library) ===
+    // The esp_extractor uses data_cache with ~256KB buffered I/O for fast SD reads
+
+    // Register MP4 extractor (once)
+    if (!this->esp_extractor_registered_) {
+      esp_extr_err_t reg_ret = esp_mp4_extractor_register();
+      if (reg_ret != ESP_EXTR_ERR_OK && reg_ret != ESP_EXTR_ERR_ALREADY_EXIST) {
+        ESP_LOGE(TAG, "Failed to register MP4 extractor: %d", reg_ret);
+        this->mark_failed();
+        return;
+      }
+      this->esp_extractor_registered_ = true;
+    }
+
+    // Close any previous extractor
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+    }
+
+    // Configure extractor with POSIX file I/O and data_cache
+    esp_extractor_config_t ext_config = {};
+    ext_config.open = extractor_file_open;
+    ext_config.read = extractor_file_read;
+    ext_config.seek = extractor_file_seek;
+    ext_config.file_size = extractor_file_size;
+    ext_config.close = extractor_file_close;
+    ext_config.extract_mask = ESP_EXTRACT_MASK_VIDEO;
+    ext_config.url = const_cast<char *>(this->file_path_.c_str());
+    ext_config.input_ctx = nullptr;
+    ext_config.output_pool_size = EXTRACTOR_POOL_SIZE;
+    ext_config.cache_block_num = EXTRACTOR_POOL_BLOCKS;
+    ext_config.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
+
+    esp_extr_err_t ext_ret = esp_extractor_open(&ext_config, &this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_open failed: %d", ext_ret);
       this->mark_failed();
       return;
     }
-    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
-             this->video_samples_.size(), this->audio_samples_.size());
 
-    // Re-calculate dimensions if they were updated during parsing
-    if (this->actual_width_ != this->aligned_width_ ||
-        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
-      int new_aligned_width = (this->actual_width_ + 15) & ~15;
-      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+    ext_ret = esp_extractor_parse_stream_info(this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_parse_stream_info failed: %d", ext_ret);
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
-        this->aligned_width_ = new_aligned_width;
-        this->aligned_height_ = new_aligned_height;
+    // Get video stream info
+    uint16_t video_num = 0;
+    esp_extractor_get_stream_num(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, &video_num);
+    if (video_num == 0) {
+      ESP_LOGE(TAG, "No video stream found in MP4");
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
-                 this->actual_width_, this->actual_height_,
-                 this->aligned_width_, this->aligned_height_);
+    extractor_stream_info_t stream_info = {};
+    esp_extractor_get_stream_info(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &stream_info);
+    extractor_video_stream_info_t *vinfo = &stream_info.stream_info.video_info;
+    this->actual_width_ = vinfo->width;
+    this->actual_height_ = vinfo->height;
+    this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+    this->aligned_height_ = (this->actual_height_ + 15) & ~15;
 
-        // Re-allocate RGB buffers with correct size
-        heap_caps_free(this->rgb_buffer_);
-        if (this->rgb_buffer_back_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_back_);
-          this->rgb_buffer_back_ = nullptr;
-        }
-        if (this->rgb_buffer_third_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_third_);
-          this->rgb_buffer_third_ = nullptr;
-        }
+    if (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+      this->mp4_has_mjpeg_ = true;
+    }
 
-        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                VIDEO_BUFFER_CAPS);
-        if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
-          this->mark_failed();
-          return;
-        }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+    ESP_LOGI(TAG, "esp_extractor: Video %ux%u @ %u fps, format=%s, duration=%ums",
+             vinfo->width, vinfo->height, vinfo->fps,
+             (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG" : "H264",
+             stream_info.duration);
 
-        // Re-allocate buffers 1 and 2 for triple buffering
-        if (this->use_triple_buffer_) {
-          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                       VIDEO_BUFFER_CAPS);
-          if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
-            this->use_triple_buffer_ = false;
-          } else {
-            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+    // Re-allocate RGB buffers with correct resolution
+    {
+      heap_caps_free(this->rgb_buffer_);
+      if (this->rgb_buffer_back_) { heap_caps_free(this->rgb_buffer_back_); this->rgb_buffer_back_ = nullptr; }
+      if (this->rgb_buffer_third_) { heap_caps_free(this->rgb_buffer_third_); this->rgb_buffer_third_ = nullptr; }
 
-            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                         VIDEO_BUFFER_CAPS);
-            if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
-              this->use_triple_buffer_ = false;
-            } else {
-              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-            }
-          }
-        }
+      this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+      if (!this->rgb_buffer_) { ESP_LOGE(TAG, "Failed to allocate RGB buffer"); this->mark_failed(); return; }
+      if (this->use_triple_buffer_) {
+        this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+        if (this->rgb_buffer_back_) {
+          this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+          if (!this->rgb_buffer_third_) this->use_triple_buffer_ = false;
+        } else { this->use_triple_buffer_ = false; }
       }
     }
 
-    // Initialize H.264 decoder
-    if (!this->init_h264_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-      this->mark_failed();
-      return;
+    // Initialize codec
+    if (this->mp4_has_mjpeg_) {
+      this->format_ = MediaFormat::MP4_MJPEG;
+      ESP_LOGI(TAG, "MP4 MJPEG - using hardware JPEG decoder");
+      if (!this->init_jpeg_decoder_()) { ESP_LOGE(TAG, "JPEG decoder init failed"); this->mark_failed(); return; }
+    } else {
+      if (!this->init_h264_decoder_()) { ESP_LOGE(TAG, "H264 decoder init failed"); this->mark_failed(); return; }
     }
 
-    // Audio codec removed (not working)
-    // if (this->speaker_ != nullptr && this->has_audio_) {
-    //   if (!this->init_aac_decoder_()) {
-    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-    //   }
-    // }
+    ESP_LOGI(TAG, "esp_extractor: data_cache with %d blocks x %uKB buffered SD I/O",
+             EXTRACTOR_POOL_BLOCKS, (unsigned)(EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS / 1024));
+
+    // Initialize AAC audio decoder if audio track found
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Audio decoder init failed (video will play without audio)");
+      }
+    }
   } else if (this->format_ == MediaFormat::MKV_H264) {
     // Parse MKV file (this will extract resolution)
     if (!this->parse_mkv_()) {
@@ -376,12 +446,12 @@ void SimpleVideoPlayer::setup() {
       return;
     }
 
-    // Audio codec removed (not working)
-    // if (this->speaker_ != nullptr && this->has_audio_) {
-    //   if (!this->init_aac_decoder_()) {
-    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-    //   }
-    // }
+    // Initialize AAC audio decoder if audio track found
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Audio decoder init failed (video will play without audio)");
+      }
+    }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -431,6 +501,7 @@ void SimpleVideoPlayer::complete_video_initialization_() {
   this->format_ = this->detect_format_();
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGI(TAG, "Detected format: %s", format_str);
@@ -541,86 +612,120 @@ void SimpleVideoPlayer::complete_video_initialization_() {
 
   // Initialize appropriate decoder
   if (this->format_ == MediaFormat::MP4_H264) {
-    // Parse MP4 file (this will extract resolution)
-    if (!this->parse_mp4_()) {
-      ESP_LOGE(TAG, "Failed to parse MP4 file");
+    // === Use esp_extractor for MP4 parsing (Espressif's optimized library) ===
+    // The esp_extractor uses data_cache with ~256KB buffered I/O for fast SD reads
+
+    // Register MP4 extractor (once)
+    if (!this->esp_extractor_registered_) {
+      esp_extr_err_t reg_ret = esp_mp4_extractor_register();
+      if (reg_ret != ESP_EXTR_ERR_OK && reg_ret != ESP_EXTR_ERR_ALREADY_EXIST) {
+        ESP_LOGE(TAG, "Failed to register MP4 extractor: %d", reg_ret);
+        this->mark_failed();
+        return;
+      }
+      this->esp_extractor_registered_ = true;
+    }
+
+    // Close any previous extractor
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+    }
+
+    // Configure extractor with POSIX file I/O and data_cache
+    esp_extractor_config_t ext_config = {};
+    ext_config.open = extractor_file_open;
+    ext_config.read = extractor_file_read;
+    ext_config.seek = extractor_file_seek;
+    ext_config.file_size = extractor_file_size;
+    ext_config.close = extractor_file_close;
+    ext_config.extract_mask = ESP_EXTRACT_MASK_VIDEO;
+    ext_config.url = const_cast<char *>(this->file_path_.c_str());
+    ext_config.input_ctx = nullptr;
+    ext_config.output_pool_size = EXTRACTOR_POOL_SIZE;
+    ext_config.cache_block_num = EXTRACTOR_POOL_BLOCKS;
+    ext_config.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
+
+    esp_extr_err_t ext_ret = esp_extractor_open(&ext_config, &this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_open failed: %d", ext_ret);
       this->mark_failed();
       return;
     }
-    ESP_LOGI(TAG, "MP4 parsed: %u video samples, %u audio samples",
-             this->video_samples_.size(), this->audio_samples_.size());
 
-    // Re-calculate dimensions if they were updated during parsing
-    if (this->actual_width_ != this->aligned_width_ ||
-        this->actual_height_ != ((this->aligned_height_ >> 4) << 4)) {
-      int new_aligned_width = (this->actual_width_ + 15) & ~15;
-      int new_aligned_height = (this->actual_height_ + 15) & ~15;
+    ext_ret = esp_extractor_parse_stream_info(this->esp_extractor_);
+    if (ext_ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGE(TAG, "esp_extractor_parse_stream_info failed: %d", ext_ret);
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-      if (new_aligned_width != this->aligned_width_ || new_aligned_height != this->aligned_height_) {
-        this->aligned_width_ = new_aligned_width;
-        this->aligned_height_ = new_aligned_height;
+    // Get video stream info
+    uint16_t video_num = 0;
+    esp_extractor_get_stream_num(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, &video_num);
+    if (video_num == 0) {
+      ESP_LOGE(TAG, "No video stream found in MP4");
+      esp_extractor_close(this->esp_extractor_);
+      this->esp_extractor_ = nullptr;
+      this->mark_failed();
+      return;
+    }
 
-        ESP_LOGI(TAG, "Updated resolution after MP4 parsing: %dx%d (actual) -> %dx%d (aligned)",
-                 this->actual_width_, this->actual_height_,
-                 this->aligned_width_, this->aligned_height_);
+    extractor_stream_info_t stream_info = {};
+    esp_extractor_get_stream_info(this->esp_extractor_, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &stream_info);
+    extractor_video_stream_info_t *vinfo = &stream_info.stream_info.video_info;
+    this->actual_width_ = vinfo->width;
+    this->actual_height_ = vinfo->height;
+    this->aligned_width_ = (this->actual_width_ + 15) & ~15;
+    this->aligned_height_ = (this->actual_height_ + 15) & ~15;
 
-        // Re-allocate RGB buffers with correct size
-        heap_caps_free(this->rgb_buffer_);
-        if (this->rgb_buffer_back_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_back_);
-          this->rgb_buffer_back_ = nullptr;
-        }
-        if (this->rgb_buffer_third_ != nullptr) {
-          heap_caps_free(this->rgb_buffer_third_);
-          this->rgb_buffer_third_ = nullptr;
-        }
+    if (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+      this->mp4_has_mjpeg_ = true;
+    }
 
-        this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
-        this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                VIDEO_BUFFER_CAPS);
-        if (this->rgb_buffer_ == nullptr) {
-          ESP_LOGE(TAG, "Failed to re-allocate RGB buffer 0 (%u bytes)", this->rgb_buffer_size_);
-          this->mark_failed();
-          return;
-        }
-        ESP_LOGI(TAG, "Re-allocated RGB buffer 0: %u bytes", this->rgb_buffer_size_);
+    ESP_LOGI(TAG, "esp_extractor: Video %ux%u @ %u fps, format=%s, duration=%ums",
+             vinfo->width, vinfo->height, vinfo->fps,
+             (vinfo->format == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG" : "H264",
+             stream_info.duration);
 
-        // Re-allocate buffers 1 and 2 for triple buffering
-        if (this->use_triple_buffer_) {
-          this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                       VIDEO_BUFFER_CAPS);
-          if (this->rgb_buffer_back_ == nullptr) {
-            ESP_LOGD(TAG, "Buffer 1 re-allocation failed (disabling triple buffering)");
-            this->use_triple_buffer_ = false;
-          } else {
-            ESP_LOGI(TAG, "Re-allocated RGB buffer 1: %u bytes", this->rgb_buffer_size_);
+    // Re-allocate RGB buffers with correct resolution
+    {
+      heap_caps_free(this->rgb_buffer_);
+      if (this->rgb_buffer_back_) { heap_caps_free(this->rgb_buffer_back_); this->rgb_buffer_back_ = nullptr; }
+      if (this->rgb_buffer_third_) { heap_caps_free(this->rgb_buffer_third_); this->rgb_buffer_third_ = nullptr; }
 
-            this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_,
-                                                                         VIDEO_BUFFER_CAPS);
-            if (this->rgb_buffer_third_ == nullptr) {
-              ESP_LOGD(TAG, "Buffer 2 re-allocation failed (using double buffering)");
-              this->use_triple_buffer_ = false;
-            } else {
-              ESP_LOGI(TAG, "Re-allocated RGB buffer 2: %u bytes", this->rgb_buffer_size_);
-            }
-          }
-        }
+      this->rgb_buffer_size_ = ALIGN_SIZE(this->aligned_width_ * this->aligned_height_ * 2, 128);
+      this->rgb_buffer_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+      if (!this->rgb_buffer_) { ESP_LOGE(TAG, "Failed to allocate RGB buffer"); this->mark_failed(); return; }
+      if (this->use_triple_buffer_) {
+        this->rgb_buffer_back_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+        if (this->rgb_buffer_back_) {
+          this->rgb_buffer_third_ = (uint8_t *)heap_caps_aligned_alloc(128, this->rgb_buffer_size_, VIDEO_BUFFER_CAPS);
+          if (!this->rgb_buffer_third_) this->use_triple_buffer_ = false;
+        } else { this->use_triple_buffer_ = false; }
       }
     }
 
-    // Initialize H.264 decoder
-    if (!this->init_h264_decoder_()) {
-      ESP_LOGE(TAG, "Failed to initialize H.264 decoder");
-      this->mark_failed();
-      return;
+    // Initialize codec
+    if (this->mp4_has_mjpeg_) {
+      this->format_ = MediaFormat::MP4_MJPEG;
+      ESP_LOGI(TAG, "MP4 MJPEG - using hardware JPEG decoder");
+      if (!this->init_jpeg_decoder_()) { ESP_LOGE(TAG, "JPEG decoder init failed"); this->mark_failed(); return; }
+    } else {
+      if (!this->init_h264_decoder_()) { ESP_LOGE(TAG, "H264 decoder init failed"); this->mark_failed(); return; }
     }
 
-    // Audio codec removed (not working)
-    // if (this->speaker_ != nullptr && this->has_audio_) {
-    //   if (!this->init_aac_decoder_()) {
-    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-    //   }
-    // }
+    ESP_LOGI(TAG, "esp_extractor: data_cache with %d blocks x %uKB buffered SD I/O",
+             EXTRACTOR_POOL_BLOCKS, (unsigned)(EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS / 1024));
+
+    // Initialize AAC audio decoder if audio track found
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Audio decoder init failed (video will play without audio)");
+      }
+    }
   } else if (this->format_ == MediaFormat::MKV_H264) {
     // Parse MKV file (this will extract resolution)
     if (!this->parse_mkv_()) {
@@ -704,12 +809,12 @@ void SimpleVideoPlayer::complete_video_initialization_() {
       return;
     }
 
-    // Audio codec removed (not working)
-    // if (this->speaker_ != nullptr && this->has_audio_) {
-    //   if (!this->init_aac_decoder_()) {
-    //     ESP_LOGD(TAG, "Audio decoder initialization failed (no audio)");
-    //   }
-    // }
+    // Initialize AAC audio decoder if audio track found
+    if (this->speaker_ != nullptr && this->has_audio_) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Audio decoder init failed (video will play without audio)");
+      }
+    }
   } else {
     // Initialize JPEG decoder
     if (!this->init_jpeg_decoder_()) {
@@ -849,6 +954,7 @@ void SimpleVideoPlayer::dump_config() {
   }
   const char *format_str = "UNKNOWN";
   if (this->format_ == MediaFormat::MP4_H264) format_str = "MP4/H.264";
+  else if (this->format_ == MediaFormat::MP4_MJPEG) format_str = "MP4/MJPEG";
   else if (this->format_ == MediaFormat::MKV_H264) format_str = "MKV/H.264";
   else if (this->format_ == MediaFormat::MJPEG) format_str = "MJPEG";
   ESP_LOGCONFIG(TAG, "  Format: %s", format_str);
@@ -1965,9 +2071,12 @@ bool SimpleVideoPlayer::parse_moov_(uint32_t size) {
     if (!this->read_mp4_box_(box_size, box_type)) break;
 
     if (box_type == make_fourcc('t', 'r', 'a', 'k')) {
-      // We'll determine if it's video or audio inside parse_trak_
+      // Parse each trak twice: once for video, once for audio
+      // The track type is auto-detected inside parse_stsd_ and parse_stbl_
       long trak_start = this->cached_ftell_();
-      this->parse_trak_(box_size - 8, true);  // Try as video first
+      this->parse_trak_(box_size - 8, true);   // Try as video
+      this->cached_fseek_(trak_start, SEEK_SET);
+      this->parse_trak_(box_size - 8, false);  // Try as audio
       this->cached_fseek_(trak_start + box_size - 8, SEEK_SET);
     } else {
       if (box_size > 8) {
@@ -2066,8 +2175,9 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
   };
   std::vector<SampleToChunk> sample_to_chunk;
 
-  // CRITICAL FIX: Track if this is actually a video track (not audio)
-  bool is_actual_video_track = true;  // Will be set to false if audio track detected
+  // Track what type of track this actually is (detected by stsd codec)
+  bool is_actual_video_track = true;   // Will be set to false if audio codec detected
+  bool is_actual_audio_track = false;  // Will be set to true if audio codec detected
 
   while (this->cached_ftell_() < end_pos) {
     long current_pos = this->cached_ftell_();
@@ -2101,10 +2211,15 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGD(TAG, "  stbl box: '%s' size=%u at pos=%ld", fourcc, box_size, current_pos);
 
     if (box_type == make_fourcc('s', 't', 's', 'd')) {
-      // CRITICAL FIX: Check if this is actually a video track
       bool stsd_result = this->parse_stsd_(box_size - 8, is_video);
-      if (!stsd_result) {
-        is_actual_video_track = false;  // Audio track detected, don't create video samples
+      if (!stsd_result && is_video) {
+        is_actual_video_track = false;  // Audio codec found when expecting video
+      }
+      if (!stsd_result && !is_video) {
+        is_actual_audio_track = false;  // Video codec found when expecting audio
+      }
+      if (stsd_result && !is_video) {
+        is_actual_audio_track = true;   // Audio codec confirmed
       }
     } else if (box_type == make_fourcc('s', 't', 's', 'z')) {
       // Sample sizes
@@ -2293,6 +2408,54 @@ bool SimpleVideoPlayer::parse_stbl_(uint32_t size, bool is_video) {
     ESP_LOGW(TAG, "No video samples created: sample_sizes empty=%d", sample_sizes.empty());
   }
 
+  // Build audio sample list when this is an audio track
+  if (!is_video && is_actual_audio_track && !sample_sizes.empty() && !chunk_offsets.empty()) {
+    ESP_LOGI(TAG, "Building audio samples: sizes=%u, chunks=%u, durations=%u, stsc_entries=%u",
+             sample_sizes.size(), chunk_offsets.size(), sample_durations.size(), sample_to_chunk.size());
+
+    if (sample_to_chunk.empty()) {
+      sample_to_chunk.push_back({1, 1, 1});
+    }
+
+    uint32_t sample_index = 0;
+    uint32_t timestamp = 0;
+
+    for (size_t chunk_idx = 0; chunk_idx < chunk_offsets.size() && sample_index < sample_sizes.size(); chunk_idx++) {
+      uint32_t chunk_number = chunk_idx + 1;
+      uint32_t chunk_offset = chunk_offsets[chunk_idx];
+
+      uint32_t samples_in_this_chunk = 1;
+      for (size_t stsc_idx = 0; stsc_idx < sample_to_chunk.size(); stsc_idx++) {
+        if (chunk_number >= sample_to_chunk[stsc_idx].first_chunk) {
+          if (stsc_idx + 1 >= sample_to_chunk.size() ||
+              chunk_number < sample_to_chunk[stsc_idx + 1].first_chunk) {
+            samples_in_this_chunk = sample_to_chunk[stsc_idx].samples_per_chunk;
+            break;
+          }
+        }
+      }
+
+      uint32_t sample_offset_in_chunk = chunk_offset;
+      for (uint32_t j = 0; j < samples_in_this_chunk && sample_index < sample_sizes.size(); j++) {
+        AudioSample asample;
+        asample.offset = sample_offset_in_chunk;
+        asample.size = sample_sizes[sample_index];
+        asample.timestamp_ms = (this->audio_timescale_ > 0) ?
+            (uint32_t)((uint64_t)timestamp * 1000 / this->audio_timescale_) : 0;
+
+        this->audio_samples_.push_back(asample);
+
+        sample_offset_in_chunk += asample.size;
+        if (sample_index < sample_durations.size()) {
+          timestamp += sample_durations[sample_index];
+        }
+        sample_index++;
+      }
+    }
+
+    ESP_LOGI(TAG, "Created %u audio samples", this->audio_samples_.size());
+  }
+
   return true;
 }
 
@@ -2316,24 +2479,83 @@ bool SimpleVideoPlayer::parse_stsd_(uint32_t size, bool is_video) {
     ESP_LOGI(TAG, "stsd entry: format='%s', size=%u", fourcc, entry_size);
 
     if (format == make_fourcc('a', 'v', 'c', '1')) {
-      ESP_LOGI(TAG, "Found AVC1 codec, parsing...");
+      ESP_LOGI(TAG, "Found AVC1 codec (H.264), parsing...");
       this->parse_avc1_(entry_size - 8);
       found_video_codec = true;
+    } else if (format == make_fourcc('j', 'p', 'e', 'g') ||
+               format == make_fourcc('m', 'j', 'p', 'a') ||
+               format == make_fourcc('m', 'j', 'p', 'b') ||
+               format == make_fourcc('M', 'J', 'P', 'G') ||
+               format == make_fourcc('m', 'j', 'p', '2') ||
+               format == make_fourcc('J', 'P', 'E', 'G')) {
+      // MJPEG codec in MP4 container (like Waveshare uses)
+      // Skip the visual sample entry header (78 bytes for video)
+      // 6 reserved + 2 data_ref_idx + 2 pre_defined + 2 reserved + 12 pre_defined
+      // + 2 width + 2 height + 4 horiz_res + 4 vert_res + 4 reserved
+      // + 2 frame_count + 32 compressor_name + 2 depth + 2 pre_defined
+      if (entry_size > 8) {
+        // Parse width/height from the visual sample entry
+        this->cached_fseek_(24, SEEK_CUR);  // Skip to width field
+        uint16_t w = this->read_be16_();
+        uint16_t h = this->read_be16_();
+        if (w > 0 && h > 0) {
+          this->actual_width_ = w;
+          this->actual_height_ = h;
+          ESP_LOGI(TAG, "MJPEG resolution from stsd: %dx%d", w, h);
+        }
+        // Skip remaining visual sample entry fields
+        long remaining = (long)(entry_size - 8) - 28;  // Already read 24+4 bytes
+        if (remaining > 0) {
+          this->cached_fseek_(remaining, SEEK_CUR);
+        }
+      }
+      this->mp4_has_mjpeg_ = true;
+      found_video_codec = true;
+      ESP_LOGI(TAG, "Found MJPEG codec in MP4 (hardware JPEG decoder will be used)");
     } else if (format == make_fourcc('m', 'p', '4', 'a')) {
       this->parse_mp4a_(entry_size - 8);
       found_audio_codec = true;
     } else {
-      if (entry_size > 8) {
-        this->cached_fseek_(entry_size - 8, SEEK_CUR);
+      // Unknown codec FourCC - if this is a video track, still mark as video
+      // so the track doesn't get skipped. The runtime MJPEG probe will detect
+      // the actual codec from sample data.
+      if (is_video && !found_audio_codec) {
+        ESP_LOGW(TAG, "Unknown video codec FourCC: '%s' - will probe sample data", fourcc);
+        found_video_codec = true;
+
+        // Try to parse width/height from visual sample entry header
+        if (entry_size > 30) {
+          this->cached_fseek_(24, SEEK_CUR);  // Skip to width field
+          uint16_t w = this->read_be16_();
+          uint16_t h = this->read_be16_();
+          if (w > 0 && w <= 4096 && h > 0 && h <= 4096) {
+            this->actual_width_ = w;
+            this->actual_height_ = h;
+            ESP_LOGI(TAG, "Resolution from unknown codec stsd: %dx%d", w, h);
+          }
+          long remaining = (long)(entry_size - 8) - 28;
+          if (remaining > 0) {
+            this->cached_fseek_(remaining, SEEK_CUR);
+          }
+        } else if (entry_size > 8) {
+          this->cached_fseek_(entry_size - 8, SEEK_CUR);
+        }
+      } else {
+        if (entry_size > 8) {
+          this->cached_fseek_(entry_size - 8, SEEK_CUR);
+        }
       }
     }
   }
 
   // Return true ONLY if this matches the expected track type
-  // This prevents audio tracks from being added to video_samples_
   if (is_video && found_audio_codec && !found_video_codec) {
     ESP_LOGI(TAG, "Skipping audio track (mp4a) - not adding to video_samples_");
-    return false;  // Signal to skip this track
+    return false;  // Signal to caller: this is an audio track, not video
+  }
+  if (!is_video && found_video_codec && !found_audio_codec) {
+    ESP_LOGD(TAG, "Skipping video track (avc1) - not adding to audio_samples_");
+    return false;  // Signal to caller: this is a video track, not audio
   }
 
   return true;
@@ -2400,7 +2622,7 @@ bool SimpleVideoPlayer::parse_avc1_(uint32_t size) {
 
   // Ensure we're at the end of this box
   this->cached_fseek_(end_pos, SEEK_SET);
-  clearerr(this->file_);  // Clear any EOF/error flags
+  if (this->file_ != nullptr) clearerr(this->file_);  // Clear any EOF/error flags
 
   return true;
 }
@@ -2447,9 +2669,24 @@ bool SimpleVideoPlayer::parse_mp4a_(uint32_t size) {
   long start_pos = this->cached_ftell_();
   long end_pos = start_pos + size;
 
-  // Skip to esds
-  this->cached_fseek_(28, SEEK_CUR);  // Skip fixed mp4a header
-  clearerr(this->file_);  // Clear any flags from previous operations
+  // Parse mp4a box header (28 bytes)
+  // 6 bytes reserved + 2 bytes data_ref_index
+  this->cached_fseek_(8, SEEK_CUR);
+  // 2 bytes version + 2 bytes revision + 4 bytes vendor
+  this->cached_fseek_(8, SEEK_CUR);
+  // 2 bytes channel_count
+  uint16_t channels = this->read_be16_();
+  // 2 bytes sample_size + 2 bytes compression_id + 2 bytes packet_size
+  this->cached_fseek_(6, SEEK_CUR);
+  // 4 bytes sample_rate (16.16 fixed point)
+  uint32_t sr_fixed = this->read_be32_();
+  uint32_t sample_rate = sr_fixed >> 16;
+
+  if (channels > 0) this->audio_channels_ = channels;
+  if (sample_rate > 0) this->audio_sample_rate_ = sample_rate;
+  ESP_LOGI(TAG, "mp4a: channels=%u, sample_rate=%u", this->audio_channels_, this->audio_sample_rate_);
+
+  if (this->file_ != nullptr) clearerr(this->file_);
 
   while (this->cached_ftell_() < end_pos && !this->cached_feof_()) {
     uint32_t box_size, box_type;
@@ -2496,11 +2733,10 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
     } while (b & 0x80);
 
     if (tag == 0x05) {  // DecoderSpecificInfo
-      // This is the AAC config (audio codec removed - not working)
       this->audio_config_.resize(len);
       this->cached_fread_(this->audio_config_.data(), 1, len);
-      // this->has_audio_ = true;  // Audio codec removed
-      ESP_LOGI(TAG, "Found AAC config: %d bytes (audio codec disabled)", len);
+      this->has_audio_ = true;
+      ESP_LOGI(TAG, "Found AAC config: %d bytes", len);
       break;
     } else {
       // Skip other descriptors (but parse nested ones)
@@ -2525,19 +2761,233 @@ bool SimpleVideoPlayer::parse_esds_(uint32_t size) {
 // AUDIO DECODER
 // ==============================================
 
-// Audio codec removed (not working)
-// bool SimpleVideoPlayer::init_aac_decoder_() { ... }
+bool SimpleVideoPlayer::init_aac_decoder_() {
+#if USE_ESP_AUDIO_CODEC
+  if (this->aac_decoder_ready_) return true;
 
-// Audio codec removed (not working)
-// bool SimpleVideoPlayer::read_next_audio_sample_() { ... }
+  // Register AAC decoder
+  esp_audio_err_t err = esp_aac_dec_register();
+  if (err != ESP_AUDIO_ERR_OK && err != ESP_AUDIO_ERR_ALREADY_EXIST) {
+    ESP_LOGE(TAG, "Failed to register AAC decoder: %d", err);
+    return false;
+  }
 
-// Audio codec removed (not working)
-// bool SimpleVideoPlayer::decode_audio_frame_() { ... }
+  // Configure AAC decoder for MP4 container (raw AAC without ADTS headers)
+  esp_aac_dec_cfg_t aac_cfg = {};
+  aac_cfg.sample_rate = (int32_t)this->audio_sample_rate_;
+  aac_cfg.channel = this->audio_channels_;
+  aac_cfg.bits_per_sample = 16;
+  aac_cfg.no_adts_header = true;   // KEY: MP4 AAC frames have no ADTS header
+  aac_cfg.aac_plus_enable = true;  // Support HE-AAC (SBR/PS)
 
-// Audio codec removed (not working)
-// void SimpleVideoPlayer::process_audio_() { ... }
+  esp_audio_dec_cfg_t dec_cfg = {};
+  dec_cfg.type = ESP_AUDIO_TYPE_AAC;
+  dec_cfg.cfg = &aac_cfg;
+  dec_cfg.cfg_sz = sizeof(aac_cfg);
+
+  err = esp_audio_dec_open(&dec_cfg, &this->aac_decoder_);
+  if (err != ESP_AUDIO_ERR_OK) {
+    ESP_LOGE(TAG, "Failed to open AAC decoder: %d", err);
+    return false;
+  }
+
+  // Allocate audio buffers
+  this->audio_input_buffer_ = (uint8_t *)heap_caps_malloc(AUDIO_INPUT_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+  this->audio_output_buffer_ = (uint8_t *)heap_caps_malloc(AUDIO_OUTPUT_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+
+  if (this->audio_input_buffer_ == nullptr || this->audio_output_buffer_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to allocate audio buffers");
+    this->cleanup_aac_decoder_();
+    return false;
+  }
+
+  this->aac_decoder_ready_ = true;
+  ESP_LOGI(TAG, "AAC decoder initialized: %u Hz, %u ch, no_adts_header=true",
+           this->audio_sample_rate_, this->audio_channels_);
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool SimpleVideoPlayer::read_next_audio_sample_() {
+  if (this->current_audio_sample_ >= this->audio_samples_.size()) {
+    if (this->loop_) {
+      this->current_audio_sample_ = 0;
+    } else {
+      return false;
+    }
+  }
+
+  AudioSample &sample = this->audio_samples_[this->current_audio_sample_];
+
+  if (sample.size > AUDIO_INPUT_BUFFER_SIZE) {
+    ESP_LOGW(TAG, "Audio sample too large: %u > %u", sample.size, AUDIO_INPUT_BUFFER_SIZE);
+    this->current_audio_sample_++;
+    return false;
+  }
+
+  this->cached_fseek_(sample.offset, SEEK_SET);
+  size_t bytes_read = this->cached_fread_(this->audio_input_buffer_, 1, sample.size);
+  if (bytes_read != sample.size) {
+    ESP_LOGW(TAG, "Audio read failed: got %u, expected %u", bytes_read, sample.size);
+    return false;
+  }
+
+  this->audio_input_size_ = sample.size;
+  this->current_audio_sample_++;
+  return true;
+}
+
+bool SimpleVideoPlayer::decode_audio_frame_() {
+#if USE_ESP_AUDIO_CODEC
+  if (!this->aac_decoder_ready_ || this->aac_decoder_ == nullptr) return false;
+
+  esp_audio_dec_in_raw_t raw = {};
+  raw.buffer = this->audio_input_buffer_;
+  raw.len = this->audio_input_size_;
+
+  esp_audio_dec_out_frame_t frame = {};
+  frame.buffer = this->audio_output_buffer_;
+  frame.len = AUDIO_OUTPUT_BUFFER_SIZE;
+
+  esp_audio_err_t err = esp_audio_dec_process(this->aac_decoder_, &raw, &frame);
+  if (err == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+    // Output buffer too small, skip this frame
+    ESP_LOGW(TAG, "Audio output buffer too small, needed %u", frame.needed_size);
+    return false;
+  }
+  if (err != ESP_AUDIO_ERR_OK) {
+    ESP_LOGD(TAG, "AAC decode error: %d", err);
+    return false;
+  }
+
+  this->audio_output_size_ = frame.decoded_size;
+  return true;
+#else
+  return false;
+#endif
+}
+
+void SimpleVideoPlayer::process_audio_() {
+  if (!this->has_audio_ || !this->aac_decoder_ready_ || this->speaker_ == nullptr) return;
+  if (this->audio_samples_.empty()) return;
+
+  // Simple A/V sync: decode and play audio samples up to current video time
+  uint32_t video_time = this->current_time_ms_;
+
+  while (this->current_audio_sample_ < this->audio_samples_.size()) {
+    uint32_t audio_time = this->audio_samples_[this->current_audio_sample_].timestamp_ms;
+
+    // If audio is ahead of video by more than threshold, stop and wait
+    if (audio_time > video_time + AV_SYNC_THRESHOLD_MS) {
+      break;
+    }
+
+    // If audio is too far behind, skip without decoding
+    if (audio_time + AV_SYNC_THRESHOLD_MS < video_time) {
+      this->current_audio_sample_++;
+      continue;
+    }
+
+    // Read and decode this audio sample
+    if (!this->read_next_audio_sample_()) break;
+    if (!this->decode_audio_frame_()) continue;
+
+    // Apply software volume scaling and send decoded PCM to speaker
+    if (this->audio_output_size_ > 0) {
+      this->apply_volume_to_pcm_(this->audio_output_buffer_, this->audio_output_size_);
+      this->speaker_->play(this->audio_output_buffer_, this->audio_output_size_);
+    }
+  }
+}
+
+void SimpleVideoPlayer::cleanup_aac_decoder_() {
+#if USE_ESP_AUDIO_CODEC
+  if (this->aac_decoder_ != nullptr) {
+    esp_audio_dec_close(this->aac_decoder_);
+    this->aac_decoder_ = nullptr;
+  }
+#endif
+  if (this->audio_input_buffer_ != nullptr) {
+    heap_caps_free(this->audio_input_buffer_);
+    this->audio_input_buffer_ = nullptr;
+  }
+  if (this->audio_output_buffer_ != nullptr) {
+    heap_caps_free(this->audio_output_buffer_);
+    this->audio_output_buffer_ = nullptr;
+  }
+  this->aac_decoder_ready_ = false;
+  this->has_audio_ = false;
+}
 
 bool SimpleVideoPlayer::read_next_mp4_sample_() {
+  // === esp_extractor path: uses data_cache for buffered SD I/O ===
+  if (this->esp_extractor_ != nullptr) {
+    extractor_frame_info_t frame = {};
+    esp_extr_err_t ret = esp_extractor_read_frame(this->esp_extractor_, &frame);
+
+    if (ret == ESP_EXTR_ERR_EOS) {
+      // End of stream
+      if (this->loop_) {
+        // Seek back to beginning for loop
+        esp_extractor_seek(this->esp_extractor_, 0);
+        this->frame_count_ = 0;
+        this->sps_pps_sent_ = false;
+        // Try reading again after seek
+        ret = esp_extractor_read_frame(this->esp_extractor_, &frame);
+        if (ret != ESP_EXTR_ERR_OK) {
+          ESP_LOGW(TAG, "esp_extractor: loop seek+read failed: %d", ret);
+          return false;
+        }
+      } else {
+        return false;
+      }
+    } else if (ret != ESP_EXTR_ERR_OK) {
+      ESP_LOGW(TAG, "esp_extractor_read_frame failed: %d", ret);
+      return false;
+    }
+
+    // Skip non-video frames (shouldn't happen with VIDEO-only mask, but be safe)
+    if (frame.stream_type != EXTRACTOR_STREAM_TYPE_VIDEO) {
+      // Free the frame buffer and try next frame
+      if (frame.frame_buffer) {
+        mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      }
+      return this->read_next_mp4_sample_();  // Recursive call for next frame
+    }
+
+    // Check EOS flag
+    if (frame.eos) {
+      if (frame.frame_buffer) {
+        mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      }
+      if (this->loop_) {
+        esp_extractor_seek(this->esp_extractor_, 0);
+        this->frame_count_ = 0;
+        return this->read_next_mp4_sample_();
+      }
+      return false;
+    }
+
+    // Copy frame data to input buffer
+    if (frame.frame_size > this->buffer_size_) {
+      ESP_LOGW(TAG, "Frame too large: %u > %u", frame.frame_size, this->buffer_size_);
+      mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+      return false;
+    }
+
+    memcpy(this->input_buffer_, frame.frame_buffer, frame.frame_size);
+    this->input_size_ = frame.frame_size;
+    this->frame_count_++;
+
+    // Free the frame buffer back to the extractor's memory pool
+    mem_pool_free(esp_extractor_get_output_pool(this->esp_extractor_), frame.frame_buffer);
+
+    return true;
+  }
+
+  // === Legacy path: direct file reading (fallback for non-MP4 or when extractor unavailable) ===
   if (this->current_video_sample_ >= this->video_samples_.size()) {
     if (this->loop_) {
       this->current_video_sample_ = 0;
@@ -2550,21 +3000,17 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
 
   Mp4Sample &sample = this->video_samples_[this->current_video_sample_];
 
-  // Mark if we need to send SPS/PPS before this keyframe
   if (sample.is_keyframe) {
-    this->sps_pps_sent_ = false;  // Reset flag to prepend SPS/PPS to keyframe
+    this->sps_pps_sent_ = false;
   }
 
-  // Seek to sample position
-  this->cached_fseek_(sample.offset, SEEK_SET);
-
-  // Read sample data
   if (sample.size > this->buffer_size_) {
     ESP_LOGW(TAG, "Sample too large: %u > %u", sample.size, this->buffer_size_);
     this->current_video_sample_++;
     return false;
   }
 
+  this->cached_fseek_(sample.offset, SEEK_SET);
   size_t bytes_read = this->cached_fread_(this->input_buffer_, 1, sample.size);
   if (bytes_read != sample.size) {
     ESP_LOGW(TAG, "Failed to read sample: got %u, expected %u", bytes_read, sample.size);
@@ -2574,7 +3020,6 @@ bool SimpleVideoPlayer::read_next_mp4_sample_() {
   this->input_size_ = sample.size;
   this->current_video_sample_++;
   this->frame_count_++;
-
   return true;
 }
 
@@ -3597,10 +4042,9 @@ bool SimpleVideoPlayer::parse_mkv_track_entry_(uint64_t size) {
       ESP_LOGI(TAG, "Found H.264 video track %u: %dx%d", track_number, width, height);
     }
   } else if (track_type == 2 && (codec_id == "A_AAC" || codec_id.find("AAC") != std::string::npos)) {
-    // Audio track (audio codec removed - not working)
     this->mkv_audio_track_ = track_number;
-    // this->has_audio_ = true;  // Audio codec removed
-    ESP_LOGI(TAG, "Found AAC audio track %u (audio codec disabled)", track_number);
+    this->has_audio_ = true;
+    ESP_LOGI(TAG, "Found AAC audio track %u", track_number);
   }
 
   return true;
@@ -3962,69 +4406,104 @@ void SimpleVideoPlayer::create_ui_() {
 void SimpleVideoPlayer::create_controls_() {
   lv_obj_t *parent = this->parent_ != nullptr ? this->parent_ : lv_scr_act();
 
-  // Controls container at bottom (use actual video width) - made taller for badges
+  // Controls container at bottom - taller to fit volume row
   this->controls_container_ = lv_obj_create(parent);
-  lv_obj_set_size(this->controls_container_, this->actual_width_, 100);
-  lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -10);
+  lv_obj_set_size(this->controls_container_, this->actual_width_, 130);
+  lv_obj_align(this->controls_container_, LV_ALIGN_BOTTOM_MID, 0, -5);
   lv_obj_set_style_bg_opa(this->controls_container_, LV_OPA_70, 0);
   lv_obj_set_style_bg_color(this->controls_container_, lv_color_black(), 0);
+  lv_obj_set_style_pad_all(this->controls_container_, 0, 0);
+  lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Play button (larger, better spaced, and rounded)
+  // === ROW 1: Play/Pause/Stop buttons + Progress slider (y offset = 5) ===
+
+  // Play button
   this->play_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->play_btn_, 65, 50);
-  lv_obj_align(this->play_btn_, LV_ALIGN_LEFT_MID, 10, -5);
-  lv_obj_set_style_radius(this->play_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->play_btn_, 55, 40);
+  lv_obj_set_pos(this->play_btn_, 10, 5);
+  lv_obj_set_style_radius(this->play_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *play_label = lv_label_create(this->play_btn_);
   lv_label_set_text(play_label, LV_SYMBOL_PLAY);
   lv_obj_center(play_label);
   lv_obj_add_event_cb(this->play_btn_, play_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Pause button (larger, better spaced, and rounded)
+  // Pause button
   this->pause_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->pause_btn_, 65, 50);
-  lv_obj_align(this->pause_btn_, LV_ALIGN_LEFT_MID, 90, -5);
-  lv_obj_set_style_radius(this->pause_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->pause_btn_, 55, 40);
+  lv_obj_set_pos(this->pause_btn_, 75, 5);
+  lv_obj_set_style_radius(this->pause_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *pause_label = lv_label_create(this->pause_btn_);
   lv_label_set_text(pause_label, LV_SYMBOL_PAUSE);
   lv_obj_center(pause_label);
   lv_obj_add_event_cb(this->pause_btn_, pause_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Stop button (larger, better spaced, and rounded)
+  // Stop button
   this->stop_btn_ = lv_btn_create(this->controls_container_);
-  lv_obj_set_size(this->stop_btn_, 65, 50);
-  lv_obj_align(this->stop_btn_, LV_ALIGN_LEFT_MID, 170, -5);
-  lv_obj_set_style_radius(this->stop_btn_, LV_RADIUS_CIRCLE, 0);  // Rounded/pill-shaped
+  lv_obj_set_size(this->stop_btn_, 55, 40);
+  lv_obj_set_pos(this->stop_btn_, 140, 5);
+  lv_obj_set_style_radius(this->stop_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_t *stop_label = lv_label_create(this->stop_btn_);
   lv_label_set_text(stop_label, LV_SYMBOL_STOP);
   lv_obj_center(stop_label);
   lv_obj_add_event_cb(this->stop_btn_, stop_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // Progress slider (enhanced style)
+  // Progress slider (row 1, right of buttons)
   this->slider_ = lv_slider_create(this->controls_container_);
-  lv_obj_set_size(this->slider_, this->actual_width_ - 350, 12);
-  lv_obj_align(this->slider_, LV_ALIGN_LEFT_MID, 245, -5);
+  int slider_width = this->actual_width_ - 320;
+  if (slider_width < 100) slider_width = 100;
+  lv_obj_set_size(this->slider_, slider_width, 10);
+  lv_obj_set_pos(this->slider_, 210, 18);
   lv_slider_set_range(this->slider_, 0, 100);
 
-  // Style the slider for better visibility
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x404040), LV_PART_MAIN);  // Dark gray background
+  // Style the progress slider
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x404040), LV_PART_MAIN);
   lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_MAIN);
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);  // Blue indicator
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0x00A8FF), LV_PART_INDICATOR);
   lv_obj_set_style_bg_opa(this->slider_, LV_OPA_COVER, LV_PART_INDICATOR);
-  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);  // White knob
-  lv_obj_set_style_pad_all(this->slider_, 0, LV_PART_MAIN);  // No padding
+  lv_obj_set_style_bg_color(this->slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->slider_, 0, LV_PART_MAIN);
 
   lv_obj_add_event_cb(this->slider_, slider_cb_, LV_EVENT_VALUE_CHANGED, this);
 
-  // Time counter (top row, right side)
+  // Time counter (row 1, top right)
   this->time_label_ = lv_label_create(this->controls_container_);
   lv_label_set_text(this->time_label_, "00:00 / 00:00");
-  lv_obj_align(this->time_label_, LV_ALIGN_TOP_RIGHT, -10, 5);
+  lv_obj_set_pos(this->time_label_, this->actual_width_ - 140, 3);
   lv_obj_set_style_text_color(this->time_label_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->time_label_, &lv_font_montserrat_14, 0);
 
-  // Format badge (bottom row, well below buttons)
+  // === ROW 2: Volume slider (y offset = 52) ===
+
+  // Volume icon (speaker symbol)
+  this->volume_icon_ = lv_label_create(this->controls_container_);
+  lv_label_set_text(this->volume_icon_, LV_SYMBOL_VOLUME_MAX);
+  lv_obj_set_pos(this->volume_icon_, 12, 55);
+  lv_obj_set_style_text_color(this->volume_icon_, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_font(this->volume_icon_, &lv_font_montserrat_16, 0);
+
+  // Volume slider
+  this->volume_slider_ = lv_slider_create(this->controls_container_);
+  lv_obj_set_size(this->volume_slider_, 180, 10);
+  lv_obj_set_pos(this->volume_slider_, 45, 60);
+  lv_slider_set_range(this->volume_slider_, 0, 100);
+  lv_slider_set_value(this->volume_slider_, this->volume_level_, LV_ANIM_OFF);
+
+  // Style the volume slider - orange/amber theme
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0x404040), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(this->volume_slider_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0xFF8C00), LV_PART_INDICATOR);  // Orange
+  lv_obj_set_style_bg_opa(this->volume_slider_, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(this->volume_slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->volume_slider_, 0, LV_PART_MAIN);
+
+  lv_obj_add_event_cb(this->volume_slider_, volume_slider_cb_, LV_EVENT_VALUE_CHANGED, this);
+
+  // === ROW 3: Format badge + Resolution (y offset = 85) ===
+
+  // Format badge
   this->format_badge_ = lv_label_create(this->controls_container_);
   const char *format_text;
-  if (this->format_ == MediaFormat::MP4_H264) {
+  if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
     format_text = "MP4";
   } else if (this->format_ == MediaFormat::MKV_H264) {
     format_text = "MKV";
@@ -4036,18 +4515,29 @@ void SimpleVideoPlayer::create_controls_() {
     format_text = "???";
   }
   lv_label_set_text(this->format_badge_, format_text);
-  lv_obj_align(this->format_badge_, LV_ALIGN_BOTTOM_LEFT, 10, 5);  // Moved down further: 0 → 5 (extends below container)
+  lv_obj_set_pos(this->format_badge_, 10, 85);
   lv_obj_set_style_text_color(this->format_badge_, lv_color_hex(0x00FF00), 0);  // Green
-  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_16, 0);
+  lv_obj_set_style_text_font(this->format_badge_, &lv_font_montserrat_14, 0);
 
-  // Resolution label (bottom row, to the right of format badge)
+  // Resolution label
   this->resolution_label_ = lv_label_create(this->controls_container_);
   char res_text[32];
   snprintf(res_text, sizeof(res_text), "%dx%d", this->actual_width_, this->actual_height_);
   lv_label_set_text(this->resolution_label_, res_text);
-  lv_obj_align(this->resolution_label_, LV_ALIGN_BOTTOM_LEFT, 110, 5);  // Moved down further: 0 → 5
-  lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);  // White
-  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_16, 0);
+  lv_obj_set_pos(this->resolution_label_, 70, 85);
+  lv_obj_set_style_text_color(this->resolution_label_, lv_color_hex(0xFFFFFF), 0);
+  lv_obj_set_style_text_font(this->resolution_label_, &lv_font_montserrat_14, 0);
+
+  // Audio indicator (show if audio track detected)
+  if (this->has_audio_ && this->speaker_ != nullptr) {
+    lv_obj_t *audio_label = lv_label_create(this->controls_container_);
+    char audio_text[32];
+    snprintf(audio_text, sizeof(audio_text), "AAC %uHz", this->audio_sample_rate_);
+    lv_label_set_text(audio_label, audio_text);
+    lv_obj_set_pos(audio_label, 160, 85);
+    lv_obj_set_style_text_color(audio_label, lv_color_hex(0x00BFFF), 0);  // Light blue
+    lv_obj_set_style_text_font(audio_label, &lv_font_montserrat_14, 0);
+  }
 }
 
 void SimpleVideoPlayer::play() {
@@ -4114,7 +4604,7 @@ void SimpleVideoPlayer::play() {
       }
     }
 
-    // Re-initialize H.264 decoder if needed
+    // Re-initialize decoder if needed
     if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MKV_H264) {
       if (!this->h264_decoder_ready_) {
         ESP_LOGI(TAG, "Re-initializing H.264 decoder...");
@@ -4123,17 +4613,21 @@ void SimpleVideoPlayer::play() {
           return;
         }
       }
+    } else if (this->format_ == MediaFormat::MP4_MJPEG) {
+      if (this->jpeg_decoder_ == nullptr) {
+        if (!this->init_jpeg_decoder_()) {
+          ESP_LOGE(TAG, "Failed to re-initialize JPEG decoder");
+          return;
+        }
+      }
     }
 
-    // Audio codec removed (not working)
     // Re-initialize audio decoder if needed
-// #if USE_ESP_AUDIO_CODEC
-//     if (this->has_audio_ && !this->aac_decoder_ready_ && this->speaker_ != nullptr) {
-//       if (!this->init_aac_decoder_()) {
-//         ESP_LOGE(TAG, "Failed to re-initialize AAC decoder");
-//       }
-//     }
-// #endif
+    if (this->has_audio_ && !this->aac_decoder_ready_ && this->speaker_ != nullptr) {
+      if (!this->init_aac_decoder_()) {
+        ESP_LOGW(TAG, "Failed to re-initialize AAC decoder");
+      }
+    }
 
     // Re-initialize GMF PPA hardware for YUVRGB conversion
     // This is necessary after stop() calls gmf_ppa_deinit()
@@ -4154,18 +4648,23 @@ void SimpleVideoPlayer::play() {
     if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
       this->cached_fseek_(0, SEEK_SET);
       this->current_pos_ = 0;
-    } else if (this->format_ == MediaFormat::MP4_H264) {
-      ESP_LOGI(TAG, "Starting MP4 playback: %u video samples, H264 decoder ready: %s",
-               this->video_samples_.size(), this->h264_decoder_ready_ ? "YES" : "NO");
+    } else if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
+      const char *codec = (this->format_ == MediaFormat::MP4_MJPEG) ? "MJPEG" : "H264";
+      ESP_LOGI(TAG, "Starting MP4 playback (%s): %u video samples", codec, this->video_samples_.size());
       if (this->video_samples_.empty()) {
-        ESP_LOGE(TAG, "Cannot play MP4: no video samples! MP4 parsing may have failed.");
+        ESP_LOGE(TAG, "Cannot play MP4: no video samples!");
         return;
       }
-      if (!this->h264_decoder_ready_) {
+      if (this->format_ == MediaFormat::MP4_H264 && !this->h264_decoder_ready_) {
         ESP_LOGE(TAG, "Cannot play MP4: H264 decoder not ready!");
         return;
       }
+      if (this->format_ == MediaFormat::MP4_MJPEG && this->jpeg_decoder_ == nullptr) {
+        ESP_LOGE(TAG, "Cannot play MP4: JPEG decoder not ready!");
+        return;
+      }
       this->current_video_sample_ = 0;
+      this->current_audio_sample_ = 0;
       this->sps_pps_sent_ = false;
     } else if (this->format_ == MediaFormat::MKV_H264) {
       // Find first keyframe to start playback
@@ -4341,9 +4840,14 @@ void SimpleVideoPlayer::stop() {
 
   if (this->format_ == MediaFormat::MJPEG && this->file_ != nullptr) {
     this->cached_fseek_(0, SEEK_SET);
-  } else if (this->format_ == MediaFormat::MP4_H264) {
+  } else if (this->format_ == MediaFormat::MP4_H264 || this->format_ == MediaFormat::MP4_MJPEG) {
     this->current_video_sample_ = 0;
+    this->current_audio_sample_ = 0;
     this->sps_pps_sent_ = false;
+    // Seek esp_extractor back to beginning
+    if (this->esp_extractor_ != nullptr) {
+      esp_extractor_seek(this->esp_extractor_, 0);
+    }
   }
   this->frame_count_ = 0;
   this->current_pos_ = 0;
@@ -4412,6 +4916,13 @@ void SimpleVideoPlayer::stop() {
 
   this->rgb_buffer_size_ = 0;
 
+  // Close esp_extractor (releases data_cache and output pool)
+  if (this->esp_extractor_ != nullptr) {
+    esp_extractor_close(this->esp_extractor_);
+    this->esp_extractor_ = nullptr;
+    ESP_LOGD(TAG, "  Closed esp_extractor (data_cache + output pool freed)");
+  }
+
   // Free rotation buffer (but keep rotation handle and rotation_initialized_ for next playback)
   if (this->rotate_buffer_ != nullptr) {
     total_freed += this->rotate_buffer_size_;
@@ -4432,32 +4943,10 @@ void SimpleVideoPlayer::stop() {
     ESP_LOGD(TAG, "  Freed yuv_buffer_: %zu bytes", yuv_size);
   }
 
-  // Audio codec removed (not working)
-  // Free audio buffers
-  // if (this->audio_input_buffer_ != nullptr) {
-  //   total_freed += 8192;
-  //   heap_caps_free(this->audio_input_buffer_);
-  //   this->audio_input_buffer_ = nullptr;
-  //   ESP_LOGD(TAG, "  Freed audio_input_buffer_: 8192 bytes");
-  // }
-
-  // if (this->audio_output_buffer_ != nullptr) {
-  //   total_freed += 16384;
-  //   heap_caps_free(this->audio_output_buffer_);
-  //   this->audio_output_buffer_ = nullptr;
-  //   ESP_LOGD(TAG, "  Freed audio_output_buffer_: 16384 bytes");
-  // }
-
-  // Audio codec removed (not working)
-  // Close AAC decoder
-// #if USE_ESP_AUDIO_CODEC
-//   if (this->aac_decoder_ != nullptr) {
-//     esp_audio_dec_close(this->aac_decoder_);
-//     this->aac_decoder_ = nullptr;
-//     this->aac_decoder_ready_ = false;
-//     ESP_LOGD(TAG, "  Closed AAC decoder");
-//   }
-// #endif
+  // Free audio buffers and close AAC decoder
+  this->cleanup_aac_decoder_();
+  this->current_audio_sample_ = 0;
+  this->audio_samples_.clear();
 
   // Close H.264 decoder (CRITICAL for SPIRAM release!)
   if (this->h264_decoder_ != nullptr) {
@@ -4522,10 +5011,45 @@ void SimpleVideoPlayer::slider_cb_(lv_event_t *e) {
       player->cached_fseek_(new_pos, SEEK_SET);
       player->current_pos_ = new_pos;
     }
-  } else if (player->format_ == MediaFormat::MP4_H264) {
+  } else if (player->format_ == MediaFormat::MP4_H264 || player->format_ == MediaFormat::MP4_MJPEG) {
     size_t new_sample = (player->video_samples_.size() * value) / 100;
     player->current_video_sample_ = new_sample;
-    player->sps_pps_sent_ = false;  // Resend SPS/PPS
+    player->sps_pps_sent_ = false;  // Resend SPS/PPS (H.264 only)
+  }
+}
+
+void SimpleVideoPlayer::volume_slider_cb_(lv_event_t *e) {
+  SimpleVideoPlayer *player = static_cast<SimpleVideoPlayer *>(lv_event_get_user_data(e));
+  lv_obj_t *slider = static_cast<lv_obj_t *>(lv_event_get_target(e));
+
+  int value = lv_slider_get_value(slider);
+  player->volume_level_ = (uint8_t)value;
+
+  // Update volume icon based on level
+  if (player->volume_icon_ != nullptr) {
+    if (value == 0) {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_MUTE);
+    } else if (value < 50) {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_VOLUME_MID);
+    } else {
+      lv_label_set_text(player->volume_icon_, LV_SYMBOL_VOLUME_MAX);
+    }
+  }
+
+  ESP_LOGD(TAG, "Volume changed to %d%%", value);
+}
+
+void SimpleVideoPlayer::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
+  if (this->volume_level_ >= 100) return;  // No adjustment at max
+  if (this->volume_level_ == 0) {
+    memset(pcm_data, 0, size);
+    return;
+  }
+
+  int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
+  size_t num_samples = size / 2;
+  for (size_t i = 0; i < num_samples; i++) {
+    samples[i] = (int16_t)((int32_t)samples[i] * this->volume_level_ / 100);
   }
 }
 
@@ -4651,7 +5175,8 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
             // Detailed performance logging every 30 frames
             if (callback_count % 30 == 0) {
               const char *codec_name = (player->format_ == MediaFormat::MP4_H264) ? "H264" :
-                                       (player->format_ == MediaFormat::MKV_H264) ? "H264" : "MJPEG";
+                                       (player->format_ == MediaFormat::MKV_H264) ? "H264" :
+                                       (player->format_ == MediaFormat::MP4_MJPEG) ? "MP4-MJPEG" : "MJPEG";
               ESP_LOGI(TAG, "%s timing (%dx%d): TOTAL=%lums [File read=%lums, decode=%lums, LVGL display=%lums]",
                        codec_name, player->actual_width_, player->actual_height_,
                        (unsigned long)total_time, (unsigned long)read_time,
@@ -4665,6 +5190,44 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           // read_next_mjpeg_frame_() returned false = reached end
           end_of_stream = true;
         }
+      } else if (player->format_ == MediaFormat::MP4_MJPEG) {
+        // MP4 with MJPEG codec: read from MP4 sample index, decode with hardware JPEG
+        uint32_t total_start = esp_timer_get_time() / 1000;
+
+        uint32_t read_start = esp_timer_get_time() / 1000;
+        if (player->read_next_mp4_sample_()) {
+          uint32_t read_time = (esp_timer_get_time() / 1000) - read_start;
+
+          // Strip COM markers if present (can cause ESP32 JPEG decoder to fail)
+          player->strip_jpeg_com_markers_();
+
+          uint32_t decode_start = esp_timer_get_time() / 1000;
+          if (player->decode_mjpeg_frame_()) {
+            uint32_t decode_time = (esp_timer_get_time() / 1000) - decode_start;
+
+            // Update current time from MP4 sample timestamp
+            if (player->current_video_sample_ > 0 && player->current_video_sample_ <= player->video_samples_.size()) {
+              player->current_time_ms_ = player->video_samples_[player->current_video_sample_ - 1].timestamp_ms;
+            }
+
+            player->frame_ready_ = true;
+            got_frame = true;
+
+            if (callback_count % 30 == 0) {
+              uint32_t total_time = (esp_timer_get_time() / 1000) - total_start;
+              const char *read_src = player->file_cache_loaded_ ? "PSRAM-cache" :
+                                     (player->esp_extractor_ != nullptr ? "esp_extractor" : "SD-direct");
+              ESP_LOGI(TAG, "MP4-MJPEG timing (%dx%d): TOTAL=%lums [read=%lums (%s), JPEG decode=%lums]",
+                       player->actual_width_, player->actual_height_,
+                       (unsigned long)total_time, (unsigned long)read_time, read_src,
+                       (unsigned long)decode_time);
+            }
+          }
+        } else {
+          end_of_stream = true;
+        }
+        // Process audio samples with A/V sync
+        player->process_audio_();
       } else if (player->format_ == MediaFormat::MP4_H264) {
         uint32_t total_start = esp_timer_get_time() / 1000;
 
@@ -4725,8 +5288,8 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           // read_next_mp4_sample_() returned false = reached end of video
           end_of_stream = true;
         }
-        // Audio codec removed (not working)
-        // player->process_audio_();
+        // Process audio samples with A/V sync
+        player->process_audio_();
       } else if (player->format_ == MediaFormat::MKV_H264) {
         uint32_t decode_start = esp_timer_get_time() / 1000;
 
@@ -4757,8 +5320,8 @@ void SimpleVideoPlayer::decode_task_(void *arg) {
           ESP_LOGD(TAG, "MKV read_next_sample returned false - end of stream");
           end_of_stream = true;
         }
-        // Audio codec removed (not working)
-        // player->process_audio_();
+        // Process audio samples with A/V sync
+        player->process_audio_();
       }
 
       // Hide loading spinner after first frame

@@ -131,8 +131,96 @@ else:
 print("[Simple Video Player] YUVRGB: PPA hardware + software LUT (esp_imgfx removed)")
 
 # ========================================================================
-# Audio codec library - REMOVED (not working)
+# Audio codec library (AAC decoder for MP4/MKV audio)
 # ========================================================================
-print("[Simple Video Player] Audio codec disabled (esp_audio_codec removed)")
+esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+if os.path.exists(esp_audio_codec_dir):
+    # Add include paths
+    audio_codec_includes = [
+        os.path.join(esp_audio_codec_dir, "include"),
+        os.path.join(esp_audio_codec_dir, "include", "decoder"),
+        os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
+        os.path.join(esp_audio_codec_dir, "include", "encoder"),
+        os.path.join(esp_audio_codec_dir, "include", "encoder", "impl"),
+        os.path.join(esp_audio_codec_dir, "include", "simple_dec"),
+    ]
+    for inc_path in audio_codec_includes:
+        if os.path.exists(inc_path):
+            env.Append(CPPPATH=[inc_path])
+
+    # Compile registration source files
+    audio_codec_sources = [
+        os.path.join(esp_audio_codec_dir, "src", "audio_decoder_reg.c"),
+        os.path.join(esp_audio_codec_dir, "src", "audio_encoder_reg.c"),
+        os.path.join(esp_audio_codec_dir, "src", "simple_decoder_reg.c"),
+    ]
+    audio_codec_objects = []
+    for src_path in audio_codec_sources:
+        if os.path.exists(src_path):
+            obj = env.Object(src_path)
+            audio_codec_objects.extend(obj)
+            print(f"[Simple Video Player] + esp_audio_codec/{os.path.basename(src_path)}")
+
+    if audio_codec_objects:
+        audio_codec_lib = env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libaudio_codec_reg"),
+            audio_codec_objects
+        )
+        env.Prepend(LIBS=[audio_codec_lib])
+
+    # Link prebuilt audio codec libraries
+    audio_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+    if os.path.exists(audio_lib_dir):
+        env.Append(LIBPATH=[audio_lib_dir])
+        audio_codec_a = os.path.join(audio_lib_dir, "libesp_audio_codec.a")
+        audio_simple_a = os.path.join(audio_lib_dir, "libesp_audio_simple_dec.a")
+        if os.path.exists(audio_codec_a):
+            env.Append(LIBS=["esp_audio_codec"])
+            print(f"[Simple Video Player] Linked esp_audio_codec (AAC decoder)")
+        if os.path.exists(audio_simple_a):
+            env.Append(LIBS=["esp_audio_simple_dec"])
+            print(f"[Simple Video Player] Linked esp_audio_simple_dec")
+    else:
+        print(f"[Simple Video Player] WARNING: esp_audio_codec lib dir not found for esp32p4")
+else:
+    print(f"[Simple Video Player] WARNING: esp_audio_codec component not found")
+
+# ========================================================================
+# esp_extractor - Optimized MP4/AVI parser with data_cache (buffered SD I/O)
+# Uses Espressif's prebuilt libesp_extractor.a with built-in caching layer
+# ========================================================================
+esp_extractor_dir = os.path.join(parent_components_dir, "esp_extractor")
+if os.path.exists(esp_extractor_dir):
+    # Add include paths
+    esp_extractor_inc = os.path.join(esp_extractor_dir, "include")
+    if os.path.exists(esp_extractor_inc):
+        env.Append(CPPPATH=[esp_extractor_inc])
+        print(f"[Simple Video Player] + esp_extractor includes")
+
+    # Compile esp_extractor_reg.c (registers MP4/AVI/WAV extractors)
+    esp_extractor_reg_src = os.path.join(esp_extractor_dir, "esp_extractor_reg.c")
+    if os.path.exists(esp_extractor_reg_src):
+        reg_obj = env.Object(esp_extractor_reg_src)
+        env.Prepend(LIBS=[env.StaticLibrary(
+            os.path.join("$BUILD_DIR", "libesp_extractor_reg"),
+            reg_obj
+        )])
+        print(f"[Simple Video Player] + esp_extractor_reg.c compiled")
+
+    # Link prebuilt libesp_extractor.a
+    extractor_lib_dir = os.path.join(esp_extractor_dir, "lib", "esp32p4")
+    extractor_lib = os.path.join(extractor_lib_dir, "libesp_extractor.a")
+    if os.path.exists(extractor_lib):
+        env.Append(LIBPATH=[extractor_lib_dir])
+        env.Append(LINKFLAGS=[
+            "-Wl,--whole-archive",
+            extractor_lib,
+            "-Wl,--no-whole-archive",
+        ])
+        print(f"[Simple Video Player] Linked libesp_extractor.a (MP4/AVI parser with data_cache)")
+    else:
+        print(f"[Simple Video Player] WARNING: libesp_extractor.a not found for esp32p4")
+else:
+    print(f"[Simple Video Player] WARNING: esp_extractor component not found")
 
 print("[Simple Video Player] Build script completed")

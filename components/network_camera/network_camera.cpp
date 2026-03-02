@@ -1103,7 +1103,7 @@ bool NetworkCamera::connect_rtsp_stream_() {
   ESP_LOGI(TAG, "Connecting to RTSP: %s:%u%s", host.c_str(), port, path.c_str());
 
   // Create TCP socket for RTSP
-  this->rtsp_socket_ = socket(AF_INET, SOCK_STREAM, 0);
+  this->rtsp_socket_ = ::socket(AF_INET, SOCK_STREAM, 0);
   if (this->rtsp_socket_ < 0) {
     ESP_LOGE(TAG, "Failed to create socket");
     return false;

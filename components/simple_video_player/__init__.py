@@ -80,7 +80,6 @@ async def to_code(config):
     if CONF_MEDIA_PLAYER_ENTITY in config:
         cg.add(var.set_media_player_entity(config[CONF_MEDIA_PLAYER_ENTITY]))
 
-    # esp_audio_codec has been removed (not working)
     import os
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
@@ -107,6 +106,24 @@ async def to_code(config):
         for inc_path in h264_inc_paths:
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
+
+    # esp_audio_codec - AAC decoder for MP4/MKV audio support
+    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(esp_audio_codec_dir):
+        audio_inc_paths = [
+            os.path.join(esp_audio_codec_dir, "include"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
+        ]
+        for inc_path in audio_inc_paths:
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+        # Link prebuilt libraries
+        audio_lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+        if os.path.exists(audio_lib_dir):
+            cg.add_build_flag(f"-L{audio_lib_dir}")
+            cg.add_build_flag("-lesp_audio_codec")
+            cg.add_build_flag("-lesp_audio_simple_dec")
 
     # esp_image_effects (esp_imgfx) - only used for hardware rotation
     esp_imgfx_dir = os.path.join(parent_components_dir, "esp_image_effects")
