@@ -105,7 +105,7 @@ class Mp4Player : public Component {
   bool loop_{true};
   bool auto_play_{true};
   bool controls_enabled_{true};
-  uint8_t volume_level_{80};
+  uint8_t volume_level_{60};
 
   // State
   PlayerState state_{PlayerState::STOPPED};
