@@ -97,7 +97,7 @@ void SdMmc::setup() {
   // Étape 2 : Configuration optimale pour le montage de la carte SD
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = false,
-    .max_files = 32,  // Augmenté pour améliorer les performances (was 16)
+    .max_files = 64,  // (32) Augmenté pour améliorer les performances (was 16)
     .allocation_unit_size = 64 * 1024  // 64KB optimisé pour la vidéo (was 256KB)
                                        // Réduit le gaspillage d'espace et améliore les performances
                                        // pour les écritures séquentielles de frames vidéo
