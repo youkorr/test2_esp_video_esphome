@@ -108,6 +108,20 @@ void SdMmc::setup() {
   host.max_freq_khz = SDMMC_FREQ_52M;  // 52MHz (au lieu de SDMMC_FREQ_HIGHSPEED 40MHz)
                                         // Gain: +30% de vitesse théorique sur cartes compatibles
 
+  // ESP32-P4: Configure on-chip LDO power control for stable high-speed operation
+  // Required for reliable 52MHz operation (Waveshare reference: LDO channel 4)
+  sd_pwr_ctrl_ldo_config_t ldo_config = {
+    .ldo_chan_id = 4,
+  };
+  sd_pwr_ctrl_handle_t pwr_ctrl_handle = nullptr;
+  esp_err_t ldo_ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
+  if (ldo_ret == ESP_OK) {
+    host.pwr_ctrl_handle = pwr_ctrl_handle;
+    ESP_LOGI(TAG, "SD card LDO power control initialized (channel 4)");
+  } else {
+    ESP_LOGW(TAG, "Failed to init LDO power control: %s (continuing without)", esp_err_to_name(ldo_ret));
+  }
+
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
 
