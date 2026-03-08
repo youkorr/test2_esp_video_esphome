@@ -5,8 +5,10 @@
 #include "esp_heap_caps.h"
 #include <cstdio>
 #include <cstring>
+#include <cerrno>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/types.h>
 
 namespace esphome {
 namespace mp4_player {
@@ -14,74 +16,64 @@ namespace mp4_player {
 static const char *TAG = "mp4_player";
 
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
-// Extractor pool: matches Waveshare reference (256KB / 3 blocks = ~85KB each)
-// Proven configuration that works well with SD card streaming
-static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
+// Extractor pool: 512KB / 4 blocks = 128KB each
+// Larger than Waveshare (256KB/3) to buffer ahead for large file SD card latency
+// Each block > max MJPEG frame size (~105KB) for efficient caching
+static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
-
-// Read-ahead buffer for SD card I/O to reduce small read overhead
-static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
 
 // Threshold for enabling dynamic MP4 parser (avoids loading huge index tables into RAM)
 static constexpr size_t LARGE_FILE_THRESHOLD = 10UL * 1024 * 1024;  // 10MB
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
-// Uses stdio (fopen/fread) with setvbuf for large read-ahead buffering
-// This dramatically reduces SD card transaction overhead for streaming
+// Uses POSIX I/O (open/read/lseek) like Waveshare reference implementation
+// POSIX avoids stdio buffering overhead and PSRAM double-copy that causes
+// "Data_Cache: Read finished 31415/87381" partial reads
 // ============================================================================
 
-// Track setvbuf buffers to free them on close (fclose doesn't free user buffers)
-static uint8_t *s_io_buf_ = nullptr;
-
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
-  FILE *fp = fopen(url, "rb");
-  if (!fp) {
-    ESP_LOGE(TAG, "Failed to open: %s", url);
+  int fd = open(url, O_RDONLY);
+  if (fd < 0) {
+    ESP_LOGE(TAG, "Failed to open: %s (errno %d)", url, errno);
     return nullptr;
   }
-  // Set a large read-ahead buffer to reduce SD card transactions
-  // This is critical for sustained read performance on SDMMC
-  s_io_buf_ = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
-  if (s_io_buf_) {
-    setvbuf(fp, (char *)s_io_buf_, _IOFBF, FILE_READ_AHEAD_SIZE);
-    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead (SPIRAM)", FILE_READ_AHEAD_SIZE / 1024);
-  } else {
-    ESP_LOGW(TAG, "Failed to allocate I/O buffer, using default");
-  }
-  return (void *)fp;
+  ESP_LOGI(TAG, "Opened file fd=%d: %s", fd, url);
+  // Store fd as void* (POSIX fd is a small int, safe to cast)
+  return (void *)(intptr_t)(fd + 1);  // +1 so fd=0 doesn't look like NULL
 }
 
 int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
-  FILE *fp = (FILE *)ctx;
-  size_t bytes = fread(data, 1, size, fp);
-  return (int)bytes;
+  int fd = (int)(intptr_t)ctx - 1;
+  ssize_t total = 0;
+  uint8_t *buf = (uint8_t *)data;
+  // Loop to handle partial reads from SD card
+  while ((uint32_t)total < size) {
+    ssize_t n = read(fd, buf + total, size - total);
+    if (n <= 0) break;
+    total += n;
+  }
+  return (int)total;
 }
 
 int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
-  FILE *fp = (FILE *)ctx;
-  return fseek(fp, (long)position, SEEK_SET);
+  int fd = (int)(intptr_t)ctx - 1;
+  off_t ret = lseek(fd, (off_t)position, SEEK_SET);
+  return (ret == (off_t)position) ? 0 : -1;
 }
 
 int Mp4Player::file_close_cb_(void *ctx) {
-  FILE *fp = (FILE *)ctx;
-  int ret = fclose(fp);
-  // Free the setvbuf buffer (fclose does NOT free user-provided buffers)
-  if (s_io_buf_) {
-    heap_caps_free(s_io_buf_);
-    s_io_buf_ = nullptr;
-  }
-  return ret;
+  int fd = (int)(intptr_t)ctx - 1;
+  return close(fd);
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
-  FILE *fp = (FILE *)ctx;
-  long cur = ftell(fp);
-  fseek(fp, 0, SEEK_END);
-  long end = ftell(fp);
-  fseek(fp, cur, SEEK_SET);
+  int fd = (int)(intptr_t)ctx - 1;
+  off_t cur = lseek(fd, 0, SEEK_CUR);
+  off_t end = lseek(fd, 0, SEEK_END);
+  lseek(fd, cur, SEEK_SET);
   return end <= 0 ? 0 : (uint32_t)end;
 }
 
@@ -123,7 +115,7 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
       size_t skip = 2 + marker_size;  // 0xFF 0xFE + size+data
       if (read_pos + skip > size) break;
 
-      ESP_LOGD(TAG, "Stripping COM marker at %zu (%u bytes)", read_pos, marker_size);
+      // Don't log every frame - COM markers are expected in ffmpeg-encoded files
       read_pos += skip;
       stripped = true;
       continue;
@@ -156,7 +148,6 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
   }
 
   if (stripped && write_pos < size) {
-    ESP_LOGI(TAG, "COM markers stripped: %zu -> %zu bytes", size, write_pos);
     return write_pos;
   }
   return size;
@@ -201,11 +192,10 @@ void Mp4Player::setup() {
   // Check file size to enable dynamic parser for large files
   // Dynamic parser avoids loading huge index tables (stts, stsz, stco, stsc) into RAM all at once
   {
-    FILE *probe_fp = fopen(this->file_path_.c_str(), "rb");
-    if (probe_fp) {
-      fseek(probe_fp, 0, SEEK_END);
-      long fsize = ftell(probe_fp);
-      fclose(probe_fp);
+    int probe_fd = open(this->file_path_.c_str(), O_RDONLY);
+    if (probe_fd >= 0) {
+      off_t fsize = lseek(probe_fd, 0, SEEK_END);
+      close(probe_fd);
       if (fsize > (long)LARGE_FILE_THRESHOLD) {
         esp_mp4_extractor_use_dynamic_parser(true);
         ESP_LOGI(TAG, "Large file detected (%ld MB) - dynamic MP4 parser ENABLED", fsize / (1024 * 1024));
