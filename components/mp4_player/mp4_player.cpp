@@ -699,30 +699,13 @@ void Mp4Player::playback_task_(void *arg) {
                      frame.frame_size, JPEG_BUFFER_SIZE, player->display_buffer_size_);
           }
 
-          // Frame rate control with adaptive frame skipping
-          // If we are too far behind (>3 frame intervals), skip this frame to catch up
-          // This prevents stuttering by dropping frames instead of accumulating delay
+          // Frame rate control - Waveshare approach (no frame skipping)
+          // If behind schedule: no delay, play as fast as possible
+          // If on schedule: delay to maintain target fps
+          // last_frame_time always resets to NOW, so after a stall
+          // (e.g. dynamic parser reload), timing recovers naturally
           int64_t now = esp_timer_get_time() / 1000;
           int64_t target = last_frame_time + frame_interval_ms;
-          int64_t behind_ms = now - target;
-
-          if (behind_ms > (int64_t)(frame_interval_ms * 3)) {
-            // We are more than 3 frames behind - skip this frame to catch up
-            static uint32_t frames_skipped = 0;
-            frames_skipped++;
-            if (frames_skipped % 30 == 1) {
-              ESP_LOGW(TAG, "Frame skip: %lld ms behind schedule (%u frames skipped total)",
-                       (long long)behind_ms, frames_skipped);
-            }
-            // Update frame count and time even when skipping
-            player->frame_count_++;
-            player->current_time_ms_ = (player->frame_count_ * 1000) / player->video_fps_;
-            // Release frame buffer and continue to next frame
-            if (frame.frame_buffer) {
-              mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
-            }
-            continue;
-          }
 
           if (now < target) {
             uint32_t delay = target - now;
@@ -1092,9 +1075,10 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  // Use larger chunks to reduce overhead and keep I2S fed
-  const size_t chunk_size = 8192;
-  uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
+  // Use DMA-capable internal SRAM for audio chunks
+  // PSRAM chunks cause slow DMA transfers to I2S which starves the speaker
+  const size_t chunk_size = 4096;
+  uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
     player->audio_task_running_ = false;
