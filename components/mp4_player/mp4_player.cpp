@@ -13,20 +13,27 @@ namespace mp4_player {
 
 static const char *TAG = "mp4_player";
 
-static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;    //static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024; 
-static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache (was 512KB)
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 10;           // 8 blocks of 128KB (was 4)
+static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
+static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;           // 8 blocks of 128KB
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
 // Read-ahead buffer for SD card I/O to reduce small read overhead
 static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
 
+// Threshold for enabling dynamic MP4 parser (avoids loading huge index tables into RAM)
+static constexpr size_t LARGE_FILE_THRESHOLD = 10UL * 1024 * 1024;  // 10MB
+
 // ============================================================================
 // File I/O wrappers for esp_extractor
 // Uses stdio (fopen/fread) with setvbuf for large read-ahead buffering
 // This dramatically reduces SD card transaction overhead for streaming
 // ============================================================================
+
+// Track setvbuf buffers to free them on close (fclose doesn't free user buffers)
+static uint8_t *s_io_buf_ = nullptr;
+
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
   FILE *fp = fopen(url, "rb");
   if (!fp) {
@@ -35,10 +42,10 @@ void *Mp4Player::file_open_cb_(char *url, void *ctx) {
   }
   // Set a large read-ahead buffer to reduce SD card transactions
   // This is critical for sustained read performance on SDMMC
-  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
-  if (io_buf) {
-    setvbuf(fp, (char *)io_buf, _IOFBF, FILE_READ_AHEAD_SIZE);
-    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead", FILE_READ_AHEAD_SIZE / 1024);
+  s_io_buf_ = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
+  if (s_io_buf_) {
+    setvbuf(fp, (char *)s_io_buf_, _IOFBF, FILE_READ_AHEAD_SIZE);
+    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead (SPIRAM)", FILE_READ_AHEAD_SIZE / 1024);
   } else {
     ESP_LOGW(TAG, "Failed to allocate I/O buffer, using default");
   }
@@ -58,7 +65,13 @@ int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
 
 int Mp4Player::file_close_cb_(void *ctx) {
   FILE *fp = (FILE *)ctx;
-  return fclose(fp);
+  int ret = fclose(fp);
+  // Free the setvbuf buffer (fclose does NOT free user-provided buffers)
+  if (s_io_buf_) {
+    heap_caps_free(s_io_buf_);
+    s_io_buf_ = nullptr;
+  }
+  return ret;
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
@@ -183,6 +196,23 @@ void Mp4Player::setup() {
   esp_mp4_extractor_register();
   esp_avi_extractor_register();
 
+  // Check file size to enable dynamic parser for large files
+  // Dynamic parser avoids loading huge index tables (stts, stsz, stco, stsc) into RAM all at once
+  {
+    FILE *probe_fp = fopen(this->file_path_.c_str(), "rb");
+    if (probe_fp) {
+      fseek(probe_fp, 0, SEEK_END);
+      long fsize = ftell(probe_fp);
+      fclose(probe_fp);
+      if (fsize > (long)LARGE_FILE_THRESHOLD) {
+        esp_mp4_extractor_use_dynamic_parser(true);
+        ESP_LOGI(TAG, "Large file detected (%ld MB) - dynamic MP4 parser ENABLED", fsize / (1024 * 1024));
+      } else {
+        esp_mp4_extractor_use_dynamic_parser(false);
+      }
+    }
+  }
+
   // Probe video file to get resolution/fps/duration
   ESP_LOGI(TAG, "Probing: %s", this->file_path_.c_str());
 
@@ -196,9 +226,9 @@ void Mp4Player::setup() {
   probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
   probe_cfg.url = (char *)this->file_path_.c_str();
   probe_cfg.input_ctx = nullptr;
-  probe_cfg.output_pool_size = 256 * 1024;
-  probe_cfg.cache_block_num = 3;
-  probe_cfg.cache_block_size = 256 * 1024 / 3;
+  probe_cfg.output_pool_size = EXTRACTOR_POOL_SIZE;
+  probe_cfg.cache_block_num = EXTRACTOR_POOL_BLOCKS;
+  probe_cfg.cache_block_size = EXTRACTOR_POOL_SIZE / EXTRACTOR_POOL_BLOCKS;
 
   if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
     if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
@@ -678,9 +708,31 @@ void Mp4Player::playback_task_(void *arg) {
                      frame.frame_size, JPEG_BUFFER_SIZE, player->display_buffer_size_);
           }
 
-          // Frame rate control - only delay for video frames to maintain fps
+          // Frame rate control with adaptive frame skipping
+          // If we are too far behind (>3 frame intervals), skip this frame to catch up
+          // This prevents stuttering by dropping frames instead of accumulating delay
           int64_t now = esp_timer_get_time() / 1000;
           int64_t target = last_frame_time + frame_interval_ms;
+          int64_t behind_ms = now - target;
+
+          if (behind_ms > (int64_t)(frame_interval_ms * 3)) {
+            // We are more than 3 frames behind - skip this frame to catch up
+            static uint32_t frames_skipped = 0;
+            frames_skipped++;
+            if (frames_skipped % 30 == 1) {
+              ESP_LOGW(TAG, "Frame skip: %lld ms behind schedule (%u frames skipped total)",
+                       (long long)behind_ms, frames_skipped);
+            }
+            // Update frame count and time even when skipping
+            player->frame_count_++;
+            player->current_time_ms_ = (player->frame_count_ * 1000) / player->video_fps_;
+            // Release frame buffer and continue to next frame
+            if (frame.frame_buffer) {
+              mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
+            }
+            continue;
+          }
+
           if (now < target) {
             uint32_t delay = target - now;
             if (delay > 0 && delay < 1000) {
