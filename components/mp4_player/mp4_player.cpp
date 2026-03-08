@@ -555,6 +555,12 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_channels_ = ainfo.stream_info.audio_info.channel;
             player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
           }
+          // AVI files with PCM audio may report format as NONE (0) from extractor
+          // Fall back to PCM in that case since Audio Tag 1 = WAVE_FORMAT_PCM
+          if (player->audio_format_ == EXTRACTOR_AUDIO_FORMAT_NONE) {
+            ESP_LOGW(TAG, "Audio format NONE from extractor, assuming PCM");
+            player->audio_format_ = EXTRACTOR_AUDIO_FORMAT_PCM;
+          }
           esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
           if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
             esp_audio_simple_dec_cfg_t dec_cfg = {};
