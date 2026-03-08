@@ -20,7 +20,7 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 // Larger than Waveshare (256KB/3) to buffer ahead for large file SD card latency
 // Each block > max MJPEG frame size (~105KB) for efficient caching
 static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
