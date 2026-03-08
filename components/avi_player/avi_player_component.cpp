@@ -218,6 +218,11 @@ void AviPlayerComponent::stop() {
   avi_player_play_stop(avi_handle_);
   state_ = PlayerState::STOPPED;
 
+  // Stop speaker when playback stops
+  if (speaker_ != nullptr) {
+    speaker_->finish();
+  }
+
   // Trigger on_stop callbacks (e.g., to restart microphone)
   if (on_stop_trigger_ != nullptr) {
     on_stop_trigger_->trigger();
@@ -282,7 +287,14 @@ void AviPlayerComponent::audio_set_clock_callback(uint32_t rate, uint32_t bits_c
     ESP_LOGI(TAG, "Audio config: rate=%u, bits=%u, channels=%u", rate, bits_cfg, ch);
 
     if (player->speaker_ != nullptr) {
-      ESP_LOGI(TAG, "Audio output enabled via speaker");
+      // Configure speaker with correct audio stream parameters
+      uint8_t bps = bits_cfg > 0 ? bits_cfg : 16;
+      uint8_t channels = ch > 0 ? ch : 1;
+      uint32_t sample_rate = rate > 0 ? rate : 16000;
+      audio::AudioStreamInfo stream_info(bps, channels, sample_rate);
+      player->speaker_->set_audio_stream_info(stream_info);
+      player->speaker_->start();
+      ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sample_rate, channels, bps);
     } else {
       ESP_LOGI(TAG, "No speaker configured - audio will not be played");
     }
@@ -294,6 +306,11 @@ void AviPlayerComponent::play_end_callback(void *arg) {
   if (player != nullptr) {
     ESP_LOGI(TAG, "Playback ended");
     player->state_ = PlayerState::STOPPED;
+
+    // Stop speaker when playback ends
+    if (player->speaker_ != nullptr) {
+      player->speaker_->finish();
+    }
 
     // Reset dimension detection for next playback
     player->actual_width_ = 0;

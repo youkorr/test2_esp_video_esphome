@@ -4,6 +4,7 @@
 #include "esphome/core/log.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/speaker/speaker.h"
+#include "esphome/components/audio/audio.h"
 
 #ifdef USE_ESP_IDF
 

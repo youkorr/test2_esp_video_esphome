@@ -1072,6 +1072,8 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 
 // ============================================================================
 // Audio output task - drains ring buffer to speaker at steady rate
+// Feeds silence when ring buffer is empty to prevent speaker auto-stop
+// during dynamic MP4 parser reloads (which can take ~3 seconds)
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
@@ -1091,17 +1093,36 @@ void Mp4Player::audio_output_task_(void *arg) {
   // Initial delay to ensure I2S channel is fully enabled
   vTaskDelay(pdMS_TO_TICKS(50));
 
+  // Track consecutive empty reads to detect parser reload stalls
+  uint32_t empty_count = 0;
+  // Max silence iterations before giving up (~5 seconds at 10ms intervals)
+  static constexpr uint32_t MAX_SILENCE_ITERATIONS = 500;
+
   while (player->audio_task_running_) {
     if (player->state_ == PlayerState::PAUSED) {
       vTaskDelay(pdMS_TO_TICKS(20));
+      empty_count = 0;
       continue;
     }
 
     size_t avail = player->audio_ring_available_();
     if (avail == 0) {
-      vTaskDelay(pdMS_TO_TICKS(3));
+      // Ring buffer empty but still playing - feed silence to prevent
+      // the ESPHome I2S speaker from auto-stopping during dynamic
+      // MP4 parser reloads (sample index boundary every 4096 samples)
+      if (player->state_ == PlayerState::PLAYING && empty_count < MAX_SILENCE_ITERATIONS) {
+        empty_count++;
+        memset(chunk, 0, chunk_size);
+        player->speaker_->play(chunk, chunk_size);
+        vTaskDelay(pdMS_TO_TICKS(10));
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(3));
+      }
       continue;
     }
+
+    // Got real audio data - reset empty counter
+    empty_count = 0;
 
     // Read as much as possible per iteration to drain ring buffer fast
     size_t to_read = avail < chunk_size ? avail : chunk_size;
