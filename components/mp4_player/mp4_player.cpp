@@ -14,8 +14,10 @@ namespace mp4_player {
 static const char *TAG = "mp4_player";
 
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
-static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;           // 8 blocks of 128KB
+// Extractor pool: matches Waveshare reference (256KB / 3 blocks = ~85KB each)
+// Proven configuration that works well with SD card streaming
+static constexpr size_t EXTRACTOR_POOL_SIZE = 256 * 1024;
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 3;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
@@ -637,7 +639,8 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Process audio frames FIRST (priority over video timing)
+        // Process audio frames - non-blocking to avoid stalling video
+        // Waveshare approach: audio must NEVER block video decode loop
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
             audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
@@ -657,32 +660,30 @@ void Mp4Player::playback_task_(void *arg) {
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
               if (player->audio_ring_buffer_) {
-                // Non-blocking push: try briefly, then drop audio to avoid stalling video
-                size_t pushed = 0;
-                int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 10) {
-                  size_t p = player->audio_ring_push_(
-                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
-                  pushed += p;
-                  if (pushed < out.decoded_size) {
-                    vTaskDelay(pdMS_TO_TICKS(2));
-                    retries++;
-                  }
+                // Fire-and-forget: try once, drop if ring buffer full
+                // A brief audio glitch is far better than video stuttering
+                size_t pushed = player->audio_ring_push_(
+                    player->audio_pcm_buffer_, out.decoded_size);
+                if (pushed < out.decoded_size) {
+                  // Ring buffer full - drop this audio chunk silently
+                  // Audio task will drain it, next chunks will succeed
                 }
-                // If buffer is full after brief wait, drop remaining audio
-                // (brief glitch is better than stalling video for seconds)
               } else {
+                // Direct speaker output - try once with short timeout
                 player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
                 size_t written = 0;
-                while (written < out.decoded_size && !player->stop_requested_) {
+                int audio_retries = 0;
+                while (written < out.decoded_size && !player->stop_requested_ && audio_retries < 3) {
                   size_t w = player->speaker_->play(
                       player->audio_pcm_buffer_ + written, out.decoded_size - written);
                   if (w > 0) {
                     written += w;
                   } else {
-                    vTaskDelay(pdMS_TO_TICKS(5));
+                    vTaskDelay(pdMS_TO_TICKS(2));
+                    audio_retries++;
                   }
                 }
+                // Drop remaining audio if speaker can't accept it in time
               }
             } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
               break;
