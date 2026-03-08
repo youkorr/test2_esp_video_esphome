@@ -16,23 +16,36 @@ namespace mp4_player {
 static const char *TAG = "mp4_player";
 
 static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
-// Extractor pool: 512KB / 4 blocks = 128KB each
-// Larger than Waveshare (256KB/3) to buffer ahead for large file SD card latency
-// Each block > max MJPEG frame size (~105KB) for efficient caching
-static constexpr size_t EXTRACTOR_POOL_SIZE = 512 * 1024;
-static constexpr size_t EXTRACTOR_POOL_BLOCKS = 4;
+// Extractor pool: 1.5MB / 8 blocks = 192KB each
+// Large pool is critical for 1.5GB+ MP4 files with dynamic parser:
+// when the parser reloads index chunks (seeking to end of file), a larger
+// pool means more frames are pre-cached, reducing stall frequency
+static constexpr size_t EXTRACTOR_POOL_SIZE = 1536 * 1024;  // 1.5MB
+static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 512 * 1024; // 512KB audio ring buffer (~2.7s at 48kHz stereo)
+                                                              // Needs to bridge dynamic parser reload stalls
 
 // Threshold for enabling dynamic MP4 parser (avoids loading huge index tables into RAM)
 static constexpr size_t LARGE_FILE_THRESHOLD = 10UL * 1024 * 1024;  // 10MB
 
 // ============================================================================
-// File I/O wrappers for esp_extractor
-// Uses POSIX I/O (open/read/lseek) like Waveshare reference implementation
-// POSIX avoids stdio buffering overhead and PSRAM double-copy that causes
-// "Data_Cache: Read finished 31415/87381" partial reads
+// File I/O wrappers for esp_extractor with read-ahead cache
+// A 256KB read cache dramatically reduces SD card I/O overhead for large
+// MP4 files where the extractor makes many small reads. This is especially
+// important during dynamic parser index reloads which cause many small seeks.
 // ============================================================================
+
+// Read-ahead cache context
+static constexpr size_t FILE_CACHE_SIZE = 256 * 1024;  // 256KB read-ahead
+
+struct FileCtx {
+  int fd;
+  uint8_t *cache;
+  off_t cache_file_offset;  // File offset where cache starts
+  size_t cache_valid;        // Number of valid bytes in cache
+  off_t file_pos;            // Current logical file position
+};
 
 void *Mp4Player::file_open_cb_(char *url, void *ctx) {
   int fd = open(url, O_RDONLY);
@@ -40,40 +53,98 @@ void *Mp4Player::file_open_cb_(char *url, void *ctx) {
     ESP_LOGE(TAG, "Failed to open: %s (errno %d)", url, errno);
     return nullptr;
   }
-  ESP_LOGI(TAG, "Opened file fd=%d: %s", fd, url);
-  // Store fd as void* (POSIX fd is a small int, safe to cast)
-  return (void *)(intptr_t)(fd + 1);  // +1 so fd=0 doesn't look like NULL
+
+  FileCtx *fctx = new (std::nothrow) FileCtx();
+  if (!fctx) {
+    close(fd);
+    return nullptr;
+  }
+  fctx->fd = fd;
+  fctx->cache = (uint8_t *)heap_caps_malloc(FILE_CACHE_SIZE, MALLOC_CAP_SPIRAM);
+  if (!fctx->cache) {
+    ESP_LOGW(TAG, "Read cache alloc failed, using unbuffered I/O");
+  }
+  fctx->cache_file_offset = 0;
+  fctx->cache_valid = 0;
+  fctx->file_pos = 0;
+
+  ESP_LOGI(TAG, "Opened file fd=%d: %s (cache: %s)", fd, url,
+           fctx->cache ? "256KB" : "none");
+  return fctx;
 }
 
 int Mp4Player::file_read_cb_(void *data, uint32_t size, void *ctx) {
-  int fd = (int)(intptr_t)ctx - 1;
-  ssize_t total = 0;
+  FileCtx *fctx = static_cast<FileCtx *>(ctx);
   uint8_t *buf = (uint8_t *)data;
-  // Loop to handle partial reads from SD card
-  while ((uint32_t)total < size) {
-    ssize_t n = read(fd, buf + total, size - total);
-    if (n <= 0) break;
-    total += n;
+  uint32_t total = 0;
+
+  // No cache - direct read
+  if (!fctx->cache) {
+    while (total < size) {
+      ssize_t n = read(fctx->fd, buf + total, size - total);
+      if (n <= 0) break;
+      total += n;
+    }
+    fctx->file_pos += total;
+    return (int)total;
+  }
+
+  while (total < size) {
+    // Check if requested data is in cache
+    off_t cache_end = fctx->cache_file_offset + fctx->cache_valid;
+    if (fctx->file_pos >= fctx->cache_file_offset && fctx->file_pos < cache_end) {
+      // Serve from cache
+      size_t cache_offset = fctx->file_pos - fctx->cache_file_offset;
+      size_t avail = fctx->cache_valid - cache_offset;
+      size_t to_copy = (size - total) < avail ? (size - total) : avail;
+      memcpy(buf + total, fctx->cache + cache_offset, to_copy);
+      total += to_copy;
+      fctx->file_pos += to_copy;
+    } else {
+      // Cache miss - refill cache from current file position
+      lseek(fctx->fd, fctx->file_pos, SEEK_SET);
+      fctx->cache_file_offset = fctx->file_pos;
+      fctx->cache_valid = 0;
+
+      // Read full cache block
+      size_t to_read = FILE_CACHE_SIZE;
+      size_t got = 0;
+      while (got < to_read) {
+        ssize_t n = read(fctx->fd, fctx->cache + got, to_read - got);
+        if (n <= 0) break;
+        got += n;
+      }
+      fctx->cache_valid = got;
+      if (got == 0) break;  // EOF
+    }
   }
   return (int)total;
 }
 
 int Mp4Player::file_seek_cb_(uint32_t position, void *ctx) {
-  int fd = (int)(intptr_t)ctx - 1;
-  off_t ret = lseek(fd, (off_t)position, SEEK_SET);
+  FileCtx *fctx = static_cast<FileCtx *>(ctx);
+  // Just update logical position - actual seek happens on next read if cache miss
+  fctx->file_pos = position;
+  // Also seek the fd for correctness
+  off_t ret = lseek(fctx->fd, (off_t)position, SEEK_SET);
   return (ret == (off_t)position) ? 0 : -1;
 }
 
 int Mp4Player::file_close_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx - 1;
-  return close(fd);
+  FileCtx *fctx = static_cast<FileCtx *>(ctx);
+  int ret = close(fctx->fd);
+  if (fctx->cache) {
+    heap_caps_free(fctx->cache);
+  }
+  delete fctx;
+  return ret;
 }
 
 uint32_t Mp4Player::file_size_cb_(void *ctx) {
-  int fd = (int)(intptr_t)ctx - 1;
-  off_t cur = lseek(fd, 0, SEEK_CUR);
-  off_t end = lseek(fd, 0, SEEK_END);
-  lseek(fd, cur, SEEK_SET);
+  FileCtx *fctx = static_cast<FileCtx *>(ctx);
+  off_t cur = lseek(fctx->fd, 0, SEEK_CUR);
+  off_t end = lseek(fctx->fd, 0, SEEK_END);
+  lseek(fctx->fd, cur, SEEK_SET);
   return end <= 0 ? 0 : (uint32_t)end;
 }
 
