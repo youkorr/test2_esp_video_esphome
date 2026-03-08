@@ -544,6 +544,7 @@ void Mp4Player::playback_task_(void *arg) {
       // Open audio decoder if audio is available
       esp_audio_simple_dec_handle_t audio_dec = nullptr;
       bool speaker_started = false;
+      bool pcm_passthrough = false;
       if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
         uint16_t anum = 0;
         esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
@@ -555,47 +556,50 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_channels_ = ainfo.stream_info.audio_info.channel;
             player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
           }
-          // AVI files with PCM audio may report format as NONE (0) from extractor
-          // Fall back to PCM in that case since Audio Tag 1 = WAVE_FORMAT_PCM
+
+          auto start_speaker = [&]() {
+            uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
+            uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
+            uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
+            audio::AudioStreamInfo stream_info(bps, ch, sr);
+            player->speaker_->set_audio_stream_info(stream_info);
+            player->speaker_->start();
+            speaker_started = true;
+            ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
+              player->audio_ring_read_ = 0;
+              player->audio_ring_write_ = 0;
+              player->audio_task_running_ = true;
+              xTaskCreatePinnedToCore(
+                  audio_output_task_, "audio_out", 4096, player, 6,
+                  &player->audio_task_handle_, 0);
+            }
+          };
+
+          // AVI files with PCM audio report format as NONE (0) from extractor
+          // Use PCM passthrough (no decoder needed) in that case
           if (player->audio_format_ == EXTRACTOR_AUDIO_FORMAT_NONE) {
-            ESP_LOGW(TAG, "Audio format NONE from extractor, assuming PCM");
-            player->audio_format_ = EXTRACTOR_AUDIO_FORMAT_PCM;
-          }
-          esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
-          if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
-            esp_audio_simple_dec_cfg_t dec_cfg = {};
-            dec_cfg.dec_type = dec_type;
-            if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
-              player->audio_decoder_ready_ = true;
-              ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
-
-              // Configure speaker with correct audio stream parameters
-              uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
-              uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
-              uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
-              audio::AudioStreamInfo stream_info(bps, ch, sr);
-              player->speaker_->set_audio_stream_info(stream_info);
-              player->speaker_->start();
-              speaker_started = true;
-              ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
-
-              // Wait for I2S channel to fully initialize before sending audio data
-              vTaskDelay(pdMS_TO_TICKS(100));
-
-              // Start audio output task if ring buffer is available
-              if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
-                player->audio_ring_read_ = 0;
-                player->audio_ring_write_ = 0;
-                player->audio_task_running_ = true;
-                xTaskCreatePinnedToCore(
-                    audio_output_task_, "audio_out", 4096, player, 6,
-                    &player->audio_task_handle_, 0);
+            ESP_LOGI(TAG, "Audio format NONE, using PCM passthrough");
+            pcm_passthrough = true;
+            player->audio_decoder_ready_ = true;
+            start_speaker();
+          } else {
+            esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
+            if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+              esp_audio_simple_dec_cfg_t dec_cfg = {};
+              dec_cfg.dec_type = dec_type;
+              if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
+                player->audio_decoder_ready_ = true;
+                ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
+                start_speaker();
+              } else {
+                ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
               }
             } else {
-              ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
+              ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
             }
-          } else {
-            ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
           }
         }
       }
@@ -639,52 +643,67 @@ void Mp4Player::playback_task_(void *arg) {
         // Waveshare approach: audio must NEVER block video decode loop
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
-            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
-          esp_audio_simple_dec_raw_t raw = {};
-          raw.buffer = frame.frame_buffer;
-          raw.len = frame.frame_size;
-          raw.eos = false;
-          raw.consumed = 0;
-          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+            (audio_dec || pcm_passthrough) && player->speaker_ && player->audio_pcm_buffer_) {
 
-          while (raw.consumed < raw.len && !player->stop_requested_) {
-            esp_audio_simple_dec_out_t out = {};
-            out.buffer = player->audio_pcm_buffer_;
-            out.len = player->audio_pcm_buffer_size_;
-            out.decoded_size = 0;
-
-            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
-            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-              if (player->audio_ring_buffer_) {
-                // Fire-and-forget: try once, drop if ring buffer full
-                // A brief audio glitch is far better than video stuttering
-                size_t pushed = player->audio_ring_push_(
-                    player->audio_pcm_buffer_, out.decoded_size);
-                if (pushed < out.decoded_size) {
-                  // Ring buffer full - drop this audio chunk silently
-                  // Audio task will drain it, next chunks will succeed
+          if (pcm_passthrough) {
+            // PCM passthrough: send raw audio data directly without decoder
+            if (player->audio_ring_buffer_) {
+              player->audio_ring_push_(frame.frame_buffer, frame.frame_size);
+            } else {
+              player->apply_volume_to_pcm_(frame.frame_buffer, frame.frame_size);
+              size_t written = 0;
+              int audio_retries = 0;
+              while (written < frame.frame_size && !player->stop_requested_ && audio_retries < 3) {
+                size_t w = player->speaker_->play(
+                    frame.frame_buffer + written, frame.frame_size - written);
+                if (w > 0) {
+                  written += w;
+                } else {
+                  vTaskDelay(pdMS_TO_TICKS(2));
+                  audio_retries++;
                 }
-              } else {
-                // Direct speaker output - try once with short timeout
-                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
-                size_t written = 0;
-                int audio_retries = 0;
-                while (written < out.decoded_size && !player->stop_requested_ && audio_retries < 3) {
-                  size_t w = player->speaker_->play(
-                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
-                  if (w > 0) {
-                    written += w;
-                  } else {
-                    vTaskDelay(pdMS_TO_TICKS(2));
-                    audio_retries++;
+              }
+            }
+          } else {
+            // Compressed audio: decode then output
+            esp_audio_simple_dec_raw_t raw = {};
+            raw.buffer = frame.frame_buffer;
+            raw.len = frame.frame_size;
+            raw.eos = false;
+            raw.consumed = 0;
+            raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+            while (raw.consumed < raw.len && !player->stop_requested_) {
+              esp_audio_simple_dec_out_t out = {};
+              out.buffer = player->audio_pcm_buffer_;
+              out.len = player->audio_pcm_buffer_size_;
+              out.decoded_size = 0;
+
+              esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+              if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+                if (player->audio_ring_buffer_) {
+                  player->audio_ring_push_(
+                      player->audio_pcm_buffer_, out.decoded_size);
+                } else {
+                  player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
+                  size_t written = 0;
+                  int audio_retries = 0;
+                  while (written < out.decoded_size && !player->stop_requested_ && audio_retries < 3) {
+                    size_t w = player->speaker_->play(
+                        player->audio_pcm_buffer_ + written, out.decoded_size - written);
+                    if (w > 0) {
+                      written += w;
+                    } else {
+                      vTaskDelay(pdMS_TO_TICKS(2));
+                      audio_retries++;
+                    }
                   }
                 }
-                // Drop remaining audio if speaker can't accept it in time
+              } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+                break;
+              } else {
+                break;
               }
-            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-              break;
-            } else {
-              break;
             }
           }
 
