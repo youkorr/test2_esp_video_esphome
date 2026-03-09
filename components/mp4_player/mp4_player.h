@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/audio/audio.h"
 
@@ -156,31 +157,31 @@ class Mp4Player : public Component {
   // Speaker
   speaker::Speaker *speaker_{nullptr};
 
-  // Audio decoder
-  esp_audio_simple_dec_handle_t audio_decoder_{nullptr};
-  uint8_t *audio_pcm_buffer_{nullptr};
-  uint32_t audio_pcm_buffer_size_{0};
+  // Audio stream info (populated during probe/open, used by audio task)
   extractor_audio_format_t audio_format_{};
   uint32_t audio_sample_rate_{0};
   uint8_t audio_channels_{0};
   uint8_t audio_bits_per_sample_{0};
   bool audio_decoder_ready_{false};
 
-  // Audio ring buffer for decoupling decode from speaker output
-  uint8_t *audio_ring_buffer_{nullptr};
-  size_t audio_ring_size_{0};
-  volatile size_t audio_ring_read_{0};
-  volatile size_t audio_ring_write_{0};
+  // Audio queue (Waveshare architecture): compressed frames queued from
+  // main extractor loop, decoded and played on dedicated audio task.
+  // This decouples audio from video decode timing.
+  struct AudioFrameItem {
+    uint8_t *buffer;
+    uint32_t size;
+    uint32_t pts;
+  };
+
+  static constexpr size_t AUDIO_QUEUE_SIZE = 30;
+  static constexpr uint32_t AUDIO_QUEUE_TIMEOUT_MS = 100;
+
+  QueueHandle_t audio_queue_{nullptr};
 
   // Audio output task
   static void audio_output_task_(void *arg);
   TaskHandle_t audio_task_handle_{nullptr};
   volatile bool audio_task_running_{false};
-
-  size_t audio_ring_available_() const;
-  size_t audio_ring_free_() const;
-  size_t audio_ring_push_(const uint8_t *data, size_t len);
-  size_t audio_ring_pop_(uint8_t *data, size_t len);
 
   // JPEG error tracking
   bool jpeg_hw_error_logged_{false};

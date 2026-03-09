@@ -22,11 +22,7 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 // pool means more frames are pre-cached, reducing stall frequency
 static constexpr size_t EXTRACTOR_POOL_SIZE = 1536 * 1024;  // 1.5MB
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;
-static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-// 1MB audio ring buffer: ~5.5s at 48kHz stereo 16-bit (192KB/s)
-// Must be larger than worst-case MP4 dynamic parser reload stalls (~3.7s observed)
-// so the speaker never runs dry and doesn't auto-stop/recreate its internal buffer
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 1024 * 1024;
+static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 64 * 1024;  // 64KB for decoded PCM (matches Waveshare HDMI_AUDIO_BUFFER_SIZE)
 
 // Threshold for enabling dynamic MP4 parser (avoids loading huge index tables into RAM)
 static constexpr size_t LARGE_FILE_THRESHOLD = 10UL * 1024 * 1024;  // 10MB
@@ -359,39 +355,20 @@ void Mp4Player::setup() {
 
   // Setup audio decoder if audio track found and speaker configured
   if (this->has_audio_ && this->speaker_) {
-    // Register individual audio decoders (AAC, MP3, FLAC, PCM)
+    // Register audio decoders
     esp_aac_dec_register();
     esp_mp3_dec_register();
     esp_flac_dec_register();
     esp_pcm_dec_register();
 
-    // Allocate PCM output buffer - try internal DMA-capable RAM first (like Waveshare),
-    // fall back to SPIRAM if internal RAM is insufficient
-    this->audio_pcm_buffer_size_ = AUDIO_PCM_BUFFER_SIZE;
-    this->audio_pcm_buffer_ = (uint8_t *)heap_caps_aligned_alloc(
-        64, this->audio_pcm_buffer_size_, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if (!this->audio_pcm_buffer_) {
-      // Fallback to SPIRAM
-      this->audio_pcm_buffer_ = (uint8_t *)heap_caps_aligned_alloc(
-          64, this->audio_pcm_buffer_size_, MALLOC_CAP_SPIRAM);
-    }
-    if (!this->audio_pcm_buffer_) {
-      ESP_LOGW(TAG, "Failed to allocate audio PCM buffer, audio disabled");
+    // Create audio frame queue (Waveshare architecture)
+    // Compressed frames are queued from extractor loop, decoded on audio task
+    this->audio_queue_ = xQueueCreate(AUDIO_QUEUE_SIZE, sizeof(AudioFrameItem *));
+    if (!this->audio_queue_) {
+      ESP_LOGW(TAG, "Failed to create audio queue, audio disabled");
       this->has_audio_ = false;
     } else {
-      ESP_LOGI(TAG, "Audio decoder initialized, PCM buffer %u bytes", this->audio_pcm_buffer_size_);
-
-      // Allocate audio ring buffer for decoupled output
-      this->audio_ring_size_ = AUDIO_RING_BUFFER_SIZE;
-      this->audio_ring_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_ring_size_, MALLOC_CAP_SPIRAM);
-      if (!this->audio_ring_buffer_) {
-        ESP_LOGW(TAG, "Failed to allocate audio ring buffer, using direct output");
-        this->audio_ring_size_ = 0;
-      } else {
-        this->audio_ring_read_ = 0;
-        this->audio_ring_write_ = 0;
-        ESP_LOGI(TAG, "Audio ring buffer: %u bytes", this->audio_ring_size_);
-      }
+      ESP_LOGI(TAG, "Audio queue created: %u slots", AUDIO_QUEUE_SIZE);
     }
   }
 
@@ -621,11 +598,11 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Open audio decoder if audio is available
-      esp_audio_simple_dec_handle_t audio_dec = nullptr;
-      bool speaker_started = false;
-      bool pcm_passthrough = false;
-      if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
+      // Start audio task if audio is available (Waveshare architecture)
+      // The audio task handles decoder open, speaker start, decode and playback.
+      // Main loop just queues compressed frames to it.
+      bool audio_enabled = false;
+      if (player->has_audio_ && player->speaker_ && player->audio_queue_) {
         uint16_t anum = 0;
         esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
         if (anum > 0) {
@@ -637,52 +614,15 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
           }
 
-          auto start_speaker = [&]() {
-            uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
-            uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
-            uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
-            audio::AudioStreamInfo stream_info(bps, ch, sr);
-            player->speaker_->set_audio_stream_info(stream_info);
-            player->speaker_->start();
-            speaker_started = true;
-            uint32_t audio_bytes_per_sec = sr * ch * (bps / 8);
-            ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit (%u bytes/sec, ring=%.1fs)",
-                     sr, ch, bps, audio_bytes_per_sec,
-                     (float)AUDIO_RING_BUFFER_SIZE / audio_bytes_per_sec);
-            vTaskDelay(pdMS_TO_TICKS(100));
-
-            if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
-              player->audio_ring_read_ = 0;
-              player->audio_ring_write_ = 0;
-              player->audio_task_running_ = true;
-              xTaskCreatePinnedToCore(
-                  audio_output_task_, "audio_out", 4096, player, 6,
-                  &player->audio_task_handle_, 0);
-            }
-          };
-
-          // AVI files with PCM audio report format as NONE (0) from extractor
-          // Use PCM passthrough (no decoder needed) in that case
-          if (player->audio_format_ == EXTRACTOR_AUDIO_FORMAT_NONE) {
-            ESP_LOGI(TAG, "Audio format NONE, using PCM passthrough");
-            pcm_passthrough = true;
-            player->audio_decoder_ready_ = true;
-            start_speaker();
-          } else {
-            esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
-            if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
-              esp_audio_simple_dec_cfg_t dec_cfg = {};
-              dec_cfg.dec_type = dec_type;
-              if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
-                player->audio_decoder_ready_ = true;
-                ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
-                start_speaker();
-              } else {
-                ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
-              }
-            } else {
-              ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
-            }
+          // Start audio task (it will open decoder and start speaker)
+          if (!player->audio_task_handle_) {
+            player->audio_task_running_ = true;
+            xTaskCreatePinnedToCore(
+                audio_output_task_, "audio_task", 8192, player, 7,
+                &player->audio_task_handle_, 0);
+            audio_enabled = true;
+            ESP_LOGI(TAG, "Audio task started (format=%d, %uHz, %uch)",
+                     player->audio_format_, player->audio_sample_rate_, player->audio_channels_);
           }
         }
       }
@@ -718,8 +658,7 @@ void Mp4Player::playback_task_(void *arg) {
 
         // Log if read_frame took unusually long (parser reload stall)
         if (read_elapsed > 100) {
-          ESP_LOGW(TAG, "read_frame stall: %lld ms (ring: %u/%u bytes)",
-                   read_elapsed, player->audio_ring_available_(), player->audio_ring_size_);
+          ESP_LOGW(TAG, "read_frame stall: %lld ms", read_elapsed);
         }
 
         if (ret != ESP_OK || frame.eos) {
@@ -731,116 +670,34 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Process audio frames
+        // Process audio frames: queue to audio task (Waveshare architecture)
+        // The audio task handles decoding and speaker output on its own thread,
+        // completely decoupling audio timing from video decode.
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
-            (audio_dec || pcm_passthrough) && player->speaker_ && player->audio_pcm_buffer_) {
-          // Log audio ring buffer status periodically (every 100 audio frames)
-          static uint32_t audio_frame_count = 0;
-          audio_frame_count++;
-          if (audio_frame_count % 100 == 1) {
-            ESP_LOGD(TAG, "Audio frame #%u: size=%u, ring=%u/%u bytes (%.0f%%)",
-                     audio_frame_count, frame.frame_size,
-                     player->audio_ring_available_(), player->audio_ring_size_,
-                     100.0f * player->audio_ring_available_() / player->audio_ring_size_);
-          }
+            audio_enabled && player->audio_queue_) {
 
-          if (pcm_passthrough) {
-            // PCM passthrough: push raw audio data to ring buffer
-            if (player->audio_ring_buffer_) {
-              // Wait for ring buffer space (up to 50ms) to avoid dropping audio
-              size_t remaining = frame.frame_size;
-              const uint8_t *src = frame.frame_buffer;
-              int wait_count = 0;
-              while (remaining > 0 && !player->stop_requested_ && wait_count < 25) {
-                size_t pushed = player->audio_ring_push_(src, remaining);
-                if (pushed > 0) {
-                  src += pushed;
-                  remaining -= pushed;
-                  wait_count = 0;
-                } else {
-                  vTaskDelay(pdMS_TO_TICKS(2));
-                  wait_count++;
-                }
-              }
-            } else {
-              player->apply_volume_to_pcm_(frame.frame_buffer, frame.frame_size);
-              size_t written = 0;
-              int audio_retries = 0;
-              while (written < frame.frame_size && !player->stop_requested_ && audio_retries < 5) {
-                size_t w = player->speaker_->play(
-                    frame.frame_buffer + written, frame.frame_size - written);
-                if (w > 0) {
-                  written += w;
-                  audio_retries = 0;
-                } else {
-                  vTaskDelay(pdMS_TO_TICKS(2));
-                  audio_retries++;
-                }
-              }
-            }
-          } else {
-            // Compressed audio: decode then push PCM to ring buffer
-            esp_audio_simple_dec_raw_t raw = {};
-            raw.buffer = frame.frame_buffer;
-            raw.len = frame.frame_size;
-            raw.eos = false;
-            raw.consumed = 0;
-            raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+          // Allocate frame item with embedded buffer (like Waveshare process_frame)
+          auto *item = (Mp4Player::AudioFrameItem *)malloc(
+              sizeof(Mp4Player::AudioFrameItem) + frame.frame_size);
+          if (item) {
+            item->buffer = (uint8_t *)(item + 1);
+            item->size = frame.frame_size;
+            item->pts = 0;
+            memcpy(item->buffer, frame.frame_buffer, frame.frame_size);
 
-            while (raw.consumed < raw.len && !player->stop_requested_) {
-              esp_audio_simple_dec_out_t out = {};
-              out.buffer = player->audio_pcm_buffer_;
-              out.len = player->audio_pcm_buffer_size_;
-              out.decoded_size = 0;
-
-              esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
-              if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-                if (player->audio_ring_buffer_) {
-                  // Wait for ring buffer space to avoid dropping audio data
-                  size_t remaining = out.decoded_size;
-                  const uint8_t *src = player->audio_pcm_buffer_;
-                  int wait_count = 0;
-                  while (remaining > 0 && !player->stop_requested_ && wait_count < 25) {
-                    size_t pushed = player->audio_ring_push_(src, remaining);
-                    if (pushed > 0) {
-                      src += pushed;
-                      remaining -= pushed;
-                      wait_count = 0;
-                    } else {
-                      vTaskDelay(pdMS_TO_TICKS(2));
-                      wait_count++;
-                    }
-                  }
-                } else {
-                  player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
-                  size_t written = 0;
-                  int audio_retries = 0;
-                  while (written < out.decoded_size && !player->stop_requested_ && audio_retries < 5) {
-                    size_t w = player->speaker_->play(
-                        player->audio_pcm_buffer_ + written, out.decoded_size - written);
-                    if (w > 0) {
-                      written += w;
-                      audio_retries = 0;
-                    } else {
-                      vTaskDelay(pdMS_TO_TICKS(2));
-                      audio_retries++;
-                    }
-                  }
-                }
-              } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-                break;
-              } else {
-                break;
-              }
+            // Non-blocking send: drop frame if queue full (like Waveshare)
+            if (xQueueSend(player->audio_queue_, &item, 0) != pdTRUE) {
+              free(item);
+              ESP_LOGW(TAG, "Audio queue full, dropping frame (%u bytes)", frame.frame_size);
             }
           }
 
-          // Release audio frame and continue reading immediately
+          // Release extractor buffer and continue immediately
           if (frame.frame_buffer) {
             mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
           }
-          continue;  // Skip to next frame immediately - don't wait for video timing
+          continue;
         }
 
         // Process video frames (after audio has been handled)
@@ -923,22 +780,24 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Stop audio output task first
+      // Stop audio task (it owns decoder and speaker lifecycle)
       if (player->audio_task_handle_) {
         player->audio_task_running_ = false;
-        vTaskDelay(pdMS_TO_TICKS(50));  // Let audio task drain and exit
-        player->audio_task_handle_ = nullptr;
+        // Wait for audio task to finish processing and exit
+        for (int i = 0; i < 50 && player->audio_task_handle_ != nullptr; i++) {
+          vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        // Drain any remaining items from queue
+        if (player->audio_queue_) {
+          AudioFrameItem *item = nullptr;
+          while (xQueueReceive(player->audio_queue_, &item, 0) == pdTRUE) {
+            free(item);
+          }
+        }
       }
-
-      // Close audio decoder and stop speaker
-      if (audio_dec) {
-        esp_audio_simple_dec_close(audio_dec);
-        audio_dec = nullptr;
-        player->audio_decoder_ready_ = false;
-      }
-      if (speaker_started) {
+      player->audio_decoder_ready_ = false;
+      if (player->speaker_) {
         player->speaker_->finish();
-        speaker_started = false;
       }
 
       esp_extractor_close(ext);
@@ -1176,205 +1035,166 @@ void Mp4Player::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
   }
 }
 
-// ============================================================================
-// Audio ring buffer - lock-free single producer / single consumer
-// ============================================================================
-size_t Mp4Player::audio_ring_available_() const {
-  size_t w = this->audio_ring_write_;
-  size_t r = this->audio_ring_read_;
-  if (w >= r) return w - r;
-  return this->audio_ring_size_ - r + w;
-}
-
-size_t Mp4Player::audio_ring_free_() const {
-  return this->audio_ring_size_ - 1 - audio_ring_available_();
-}
-
-size_t Mp4Player::audio_ring_push_(const uint8_t *data, size_t len) {
-  size_t free = audio_ring_free_();
-  if (len > free) len = free;
-  if (len == 0) return 0;
-
-  size_t w = this->audio_ring_write_;
-  size_t to_end = this->audio_ring_size_ - w;
-  if (len <= to_end) {
-    memcpy(this->audio_ring_buffer_ + w, data, len);
-  } else {
-    memcpy(this->audio_ring_buffer_ + w, data, to_end);
-    memcpy(this->audio_ring_buffer_, data + to_end, len - to_end);
-  }
-  this->audio_ring_write_ = (w + len) % this->audio_ring_size_;
-  return len;
-}
-
-size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
-  size_t avail = audio_ring_available_();
-  if (len > avail) len = avail;
-  if (len == 0) return 0;
-
-  size_t r = this->audio_ring_read_;
-  size_t to_end = this->audio_ring_size_ - r;
-  if (len <= to_end) {
-    memcpy(data, this->audio_ring_buffer_ + r, len);
-  } else {
-    memcpy(data, this->audio_ring_buffer_ + r, to_end);
-    memcpy(data + to_end, this->audio_ring_buffer_, len - to_end);
-  }
-  this->audio_ring_read_ = (r + len) % this->audio_ring_size_;
-  return len;
-}
+// (Ring buffer removed - replaced by FreeRTOS queue, Waveshare architecture)
 
 // ============================================================================
-// Audio output task - drains ring buffer to speaker at steady rate
-// Feeds silence at correct audio rate during dynamic MP4 parser reloads
-// to prevent the ESPHome I2S speaker from auto-stopping and destroying
-// its internal ring buffer (which causes audio gaps and re-initialization)
+// Audio output task (Waveshare architecture)
+// Receives compressed audio frames from FreeRTOS queue, decodes them,
+// and writes PCM to the ESPHome speaker with back-pressure pacing.
+// This completely decouples audio from video decode timing.
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  // Use DMA-capable internal SRAM for audio chunks
-  // PSRAM chunks cause slow DMA transfers to I2S which starves the speaker
-  const size_t chunk_size = 4096;
-  uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-  if (!chunk) {
-    ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
+
+  ESP_LOGI(TAG, "Audio task started");
+
+  // Open audio decoder on this task
+  esp_audio_simple_dec_handle_t audio_dec = nullptr;
+  bool pcm_passthrough = false;
+
+  if (player->audio_format_ == EXTRACTOR_AUDIO_FORMAT_NONE) {
+    pcm_passthrough = true;
+    ESP_LOGI(TAG, "Audio task: PCM passthrough mode");
+  } else {
+    esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
+    if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+      esp_audio_simple_dec_cfg_t dec_cfg = {};
+      dec_cfg.dec_type = dec_type;
+      if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
+        ESP_LOGI(TAG, "Audio task: decoder opened (format=%d)", player->audio_format_);
+      } else {
+        ESP_LOGE(TAG, "Audio task: failed to open decoder");
+      }
+    }
+  }
+
+  // Allocate PCM output buffer in internal DMA-capable RAM
+  const size_t pcm_buf_size = AUDIO_PCM_BUFFER_SIZE;
+  uint8_t *pcm_buf = (uint8_t *)heap_caps_aligned_alloc(
+      64, pcm_buf_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (!pcm_buf) {
+    pcm_buf = (uint8_t *)heap_caps_aligned_alloc(64, pcm_buf_size, MALLOC_CAP_SPIRAM);
+  }
+  if (!pcm_buf) {
+    ESP_LOGE(TAG, "Audio task: failed to allocate PCM buffer");
+    if (audio_dec) esp_audio_simple_dec_close(audio_dec);
     player->audio_task_running_ = false;
     vTaskDelete(nullptr);
     return;
   }
 
-  ESP_LOGI(TAG, "Audio output task started");
-
-  // Audio timing constants
+  // Audio timing info
   uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
   uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
-  uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
-  uint32_t bytes_per_sec = sr * ch * (bps / 8);
+  uint8_t bps_val = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
+  uint32_t bytes_per_sec = sr * ch * (bps_val / 8);
 
-  // How long one chunk represents in audio time (for pacing)
-  uint32_t chunk_duration_ms = (chunk_size * 1000) / bytes_per_sec;
-  if (chunk_duration_ms < 5) chunk_duration_ms = 5;
-  if (chunk_duration_ms > 50) chunk_duration_ms = 50;
+  // Start speaker with correct audio format
+  audio::AudioStreamInfo stream_info(bps_val, ch, sr);
+  player->speaker_->set_audio_stream_info(stream_info);
+  player->speaker_->start();
+  ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit (%u bytes/sec)",
+           sr, ch, bps_val, bytes_per_sec);
+  vTaskDelay(pdMS_TO_TICKS(100));
 
-  // ---- Pre-buffering phase ----
-  // Accumulate audio data before starting output. The ESPHome speaker->play()
-  // is non-blocking and accepts data into internal buffers (~67KB for mixer+I2S).
-  // Without pre-buffering, the output task dumps all ring data into speaker
-  // buffers instantly, leaving no cushion for video decode gaps.
-  // Target: 1 second of audio data (covers speaker internal buffers + margin)
-  uint32_t prebuffer_target = bytes_per_sec;  // 1 second
-  if (prebuffer_target > player->audio_ring_size_ / 2) {
-    prebuffer_target = player->audio_ring_size_ / 2;
-  }
-  ESP_LOGI(TAG, "Pre-buffering: waiting for %u bytes (%.0fms) in ring buffer...",
-           prebuffer_target, 1000.0f * prebuffer_target / bytes_per_sec);
+  uint32_t processed_frames = 0;
 
-  // Feed silence during pre-buffering to keep the I2S speaker alive
-  int64_t buffer_start = esp_timer_get_time() / 1000;
-  while (player->audio_task_running_ && player->audio_ring_available_() < prebuffer_target) {
-    memset(chunk, 0, chunk_size);
-    player->speaker_->play(chunk, chunk_size);
-    vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms));
-    if ((esp_timer_get_time() / 1000) - buffer_start > 8000) {
-      ESP_LOGW(TAG, "Pre-buffer timeout after 8s, starting with %u/%u bytes",
-               player->audio_ring_available_(), prebuffer_target);
-      break;
-    }
-    if (player->stop_requested_) break;
-  }
-  ESP_LOGI(TAG, "Pre-buffer done: %u bytes (%.0fms cushion)",
-           player->audio_ring_available_(),
-           1000.0f * player->audio_ring_available_() / bytes_per_sec);
-
-  ESP_LOGI(TAG, "Audio rate: %u bytes/sec, chunk=%u bytes (%ums)",
-           bytes_per_sec, chunk_size, chunk_duration_ms);
-
-  // ---- Main output loop ----
-  // CRITICAL: pace output at real-time audio rate using a timing clock.
-  // speaker->play() is non-blocking - without pacing, the ring buffer
-  // drains into speaker internal buffers (~67KB) in milliseconds,
-  // leaving no cushion for video decode gaps.
-  int64_t playback_start = esp_timer_get_time();
-  uint64_t total_bytes_output = 0;
-  uint32_t silence_count = 0;
-
+  // Main loop: receive compressed frames from queue, decode, write to speaker
   while (player->audio_task_running_) {
     if (player->state_ == PlayerState::PAUSED) {
-      vTaskDelay(pdMS_TO_TICKS(20));
-      // Reset clock after pause so we don't try to "catch up"
-      playback_start = esp_timer_get_time();
-      total_bytes_output = 0;
-      silence_count = 0;
+      vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
 
-    // Calculate how many bytes we should have output by now
-    int64_t elapsed_us = esp_timer_get_time() - playback_start;
-    uint64_t target_bytes = (uint64_t)bytes_per_sec * elapsed_us / 1000000ULL;
+    AudioFrameItem *item = nullptr;
+    if (xQueueReceive(player->audio_queue_, &item, pdMS_TO_TICKS(AUDIO_QUEUE_TIMEOUT_MS))) {
+      if (!item) continue;
 
-    // If we're ahead of schedule, wait before pushing more data
-    if (total_bytes_output >= target_bytes + chunk_size) {
-      vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms / 2));
-      continue;
-    }
-
-    size_t avail = player->audio_ring_available_();
-    if (avail > 0) {
-      // Real audio data available
-      if (silence_count > 0) {
-        ESP_LOGI(TAG, "Audio data resumed after %u silence chunks (ring: %u bytes)",
-                 silence_count, avail);
-        silence_count = 0;
-      }
-
-      size_t to_read = avail < chunk_size ? avail : chunk_size;
-      size_t got = player->audio_ring_pop_(chunk, to_read);
-      if (got > 0) {
-        player->apply_volume_to_pcm_(chunk, got);
-
+      if (pcm_passthrough) {
+        // PCM: write directly to speaker
+        player->apply_volume_to_pcm_(item->buffer, item->size);
         size_t written = 0;
-        int stall_count = 0;
-        while (written < got && player->audio_task_running_) {
-          size_t w = player->speaker_->play(chunk + written, got - written);
+        int stall = 0;
+        while (written < item->size && player->audio_task_running_ && stall < 250) {
+          size_t w = player->speaker_->play(item->buffer + written, item->size - written);
           if (w > 0) {
             written += w;
-            stall_count = 0;
+            stall = 0;
           } else {
-            // Speaker buffer full - wait for it to drain
-            stall_count++;
-            if (stall_count > 100) {
-              ESP_LOGW(TAG, "Speaker stalled, dropping %u bytes", got - written);
-              break;
-            }
             vTaskDelay(pdMS_TO_TICKS(2));
+            stall++;
           }
         }
-        total_bytes_output += written;
-      }
-    } else {
-      // Ring empty - feed silence to keep speaker alive
-      if (player->state_ == PlayerState::PLAYING) {
-        memset(chunk, 0, chunk_size);
-        player->speaker_->play(chunk, chunk_size);
-        total_bytes_output += chunk_size;
-        silence_count++;
 
-        if (silence_count == 1) {
-          ESP_LOGW(TAG, "Audio ring empty, feeding silence");
-        } else if (silence_count % 50 == 0) {
-          ESP_LOGW(TAG, "Audio stall: %u silence chunks (ring: %u/%u)",
-                   silence_count, player->audio_ring_available_(), player->audio_ring_size_);
+        // Pacing delay (like Waveshare: frame_duration * 60%)
+        uint32_t frame_dur_ms = (item->size * 1000) / bytes_per_sec;
+        if (frame_dur_ms > 0 && frame_dur_ms < 50) {
+          vTaskDelay(pdMS_TO_TICKS(frame_dur_ms * 6 / 10));
+        }
+      } else if (audio_dec) {
+        // Compressed: decode then write PCM
+        esp_audio_simple_dec_raw_t raw = {};
+        raw.buffer = item->buffer;
+        raw.len = item->size;
+        raw.eos = false;
+        raw.consumed = 0;
+        raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+        while (raw.consumed < raw.len && player->audio_task_running_) {
+          esp_audio_simple_dec_out_t out = {};
+          out.buffer = pcm_buf;
+          out.len = pcm_buf_size;
+          out.decoded_size = 0;
+
+          esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+          if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+            player->apply_volume_to_pcm_(pcm_buf, out.decoded_size);
+
+            // Write PCM to speaker with back-pressure (replaces esp_codec_dev_write)
+            size_t written = 0;
+            int stall = 0;
+            while (written < out.decoded_size && player->audio_task_running_ && stall < 250) {
+              size_t w = player->speaker_->play(pcm_buf + written, out.decoded_size - written);
+              if (w > 0) {
+                written += w;
+                stall = 0;
+              } else {
+                vTaskDelay(pdMS_TO_TICKS(2));
+                stall++;
+              }
+            }
+
+            // Pacing delay (like Waveshare: decoded_duration * 40%)
+            uint32_t decoded_dur_ms = (out.decoded_size * 1000) / bytes_per_sec;
+            if (decoded_dur_ms > 0 && decoded_dur_ms < 50) {
+              vTaskDelay(pdMS_TO_TICKS(decoded_dur_ms * 4 / 10));
+            }
+          } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+            break;
+          } else {
+            break;
+          }
         }
       }
-    }
 
-    // Always pace: wait for approximately one chunk duration
-    // This is the key to not draining the ring buffer faster than real-time
-    vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms > 2 ? chunk_duration_ms - 1 : 1));
+      free(item);
+      processed_frames++;
+
+      if (processed_frames % 100 == 0) {
+        ESP_LOGD(TAG, "Audio processed %u frames", processed_frames);
+      }
+    }
+    // Queue timeout (no frame available) - just loop back, no silence needed.
+    // The speaker's internal buffer continues playing existing data.
   }
 
-  free(chunk);
-  ESP_LOGI(TAG, "Audio output task exiting");
+  // Cleanup
+  heap_caps_free(pcm_buf);
+  if (audio_dec) {
+    esp_audio_simple_dec_close(audio_dec);
+  }
+  ESP_LOGI(TAG, "Audio task exiting, processed %u frames", processed_frames);
+  player->audio_task_handle_ = nullptr;
   vTaskDelete(nullptr);
 }
 
