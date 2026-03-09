@@ -23,8 +23,10 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;
 static constexpr size_t EXTRACTOR_POOL_SIZE = 1536 * 1024;  // 1.5MB
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 8;
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 512 * 1024; // 512KB audio ring buffer (~2.7s at 48kHz stereo)
-                                                              // Needs to bridge dynamic parser reload stalls
+// 1MB audio ring buffer: ~5.5s at 48kHz stereo 16-bit (192KB/s)
+// Must be larger than worst-case MP4 dynamic parser reload stalls (~3.7s observed)
+// so the speaker never runs dry and doesn't auto-stop/recreate its internal buffer
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 1024 * 1024;
 
 // Threshold for enabling dynamic MP4 parser (avoids loading huge index tables into RAM)
 static constexpr size_t LARGE_FILE_THRESHOLD = 10UL * 1024 * 1024;  // 10MB
