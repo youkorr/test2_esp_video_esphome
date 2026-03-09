@@ -1245,17 +1245,51 @@ void Mp4Player::audio_output_task_(void *arg) {
 
   ESP_LOGI(TAG, "Audio output task started");
 
-  // Initial delay to ensure I2S channel is fully enabled
-  vTaskDelay(pdMS_TO_TICKS(50));
-
-  // Calculate silence feeding interval based on actual audio sample rate
-  // This ensures silence is fed at the correct rate to keep the speaker
-  // alive without overflowing its internal buffer
+  // ---- Pre-buffering phase ----
+  // Wait for ring buffer to accumulate audio data before starting output.
+  // Without this, the output task starts consuming immediately while the main
+  // loop is still parsing the MP4 header, causing constant empty→silence→resume cycles.
+  // Target: 500ms of audio data (or half the ring buffer, whichever is smaller)
   uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
   uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
   uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
   uint32_t bytes_per_sec = sr * ch * (bps / 8);
-  // How long does one chunk_size of audio represent in ms?
+
+  uint32_t prebuffer_target = bytes_per_sec / 2;  // 500ms of audio
+  if (prebuffer_target > player->audio_ring_size_ / 4) {
+    prebuffer_target = player->audio_ring_size_ / 4;
+  }
+  ESP_LOGI(TAG, "Pre-buffering: waiting for %u bytes (%.0fms) in ring buffer...",
+           prebuffer_target, 1000.0f * prebuffer_target / bytes_per_sec);
+
+  // Feed silence to the speaker during pre-buffering to keep I2S alive.
+  // Without this, the speaker auto-stops when its internal buffer drains
+  // (buffer_duration is typically 100ms), and we'd have to re-start it.
+  uint32_t prebuf_chunk_ms = (chunk_size * 1000) / bytes_per_sec;
+  if (prebuf_chunk_ms < 10) prebuf_chunk_ms = 10;
+
+  int64_t buffer_start = esp_timer_get_time() / 1000;
+  while (player->audio_task_running_ && player->audio_ring_available_() < prebuffer_target) {
+    // Feed silence at audio rate to keep speaker alive during buffering
+    memset(chunk, 0, chunk_size);
+    player->speaker_->play(chunk, chunk_size);
+    vTaskDelay(pdMS_TO_TICKS(prebuf_chunk_ms));
+
+    // Timeout after 8 seconds to avoid hanging if main loop is slow
+    if ((esp_timer_get_time() / 1000) - buffer_start > 8000) {
+      ESP_LOGW(TAG, "Pre-buffer timeout after 8s, starting with %u/%u bytes",
+               player->audio_ring_available_(), prebuffer_target);
+      break;
+    }
+    if (player->stop_requested_) break;
+  }
+  ESP_LOGI(TAG, "Pre-buffer done: %u bytes (%.0fms cushion)",
+           player->audio_ring_available_(),
+           1000.0f * player->audio_ring_available_() / bytes_per_sec);
+
+  // Calculate silence feeding interval based on actual audio sample rate
+  // This ensures silence is fed at the correct rate to keep the speaker
+  // alive without overflowing its internal buffer
   uint32_t chunk_duration_ms = (chunk_size * 1000) / bytes_per_sec;
   if (chunk_duration_ms < 5) chunk_duration_ms = 5;
   if (chunk_duration_ms > 50) chunk_duration_ms = 50;
