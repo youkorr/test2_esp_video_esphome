@@ -1245,37 +1245,36 @@ void Mp4Player::audio_output_task_(void *arg) {
 
   ESP_LOGI(TAG, "Audio output task started");
 
-  // ---- Pre-buffering phase ----
-  // Wait for ring buffer to accumulate audio data before starting output.
-  // Without this, the output task starts consuming immediately while the main
-  // loop is still parsing the MP4 header, causing constant empty→silence→resume cycles.
-  // Target: 500ms of audio data (or half the ring buffer, whichever is smaller)
+  // Audio timing constants
   uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
   uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
   uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
   uint32_t bytes_per_sec = sr * ch * (bps / 8);
 
-  uint32_t prebuffer_target = bytes_per_sec / 2;  // 500ms of audio
-  if (prebuffer_target > player->audio_ring_size_ / 4) {
-    prebuffer_target = player->audio_ring_size_ / 4;
+  // How long one chunk represents in audio time (for pacing)
+  uint32_t chunk_duration_ms = (chunk_size * 1000) / bytes_per_sec;
+  if (chunk_duration_ms < 5) chunk_duration_ms = 5;
+  if (chunk_duration_ms > 50) chunk_duration_ms = 50;
+
+  // ---- Pre-buffering phase ----
+  // Accumulate audio data before starting output. The ESPHome speaker->play()
+  // is non-blocking and accepts data into internal buffers (~67KB for mixer+I2S).
+  // Without pre-buffering, the output task dumps all ring data into speaker
+  // buffers instantly, leaving no cushion for video decode gaps.
+  // Target: 1 second of audio data (covers speaker internal buffers + margin)
+  uint32_t prebuffer_target = bytes_per_sec;  // 1 second
+  if (prebuffer_target > player->audio_ring_size_ / 2) {
+    prebuffer_target = player->audio_ring_size_ / 2;
   }
   ESP_LOGI(TAG, "Pre-buffering: waiting for %u bytes (%.0fms) in ring buffer...",
            prebuffer_target, 1000.0f * prebuffer_target / bytes_per_sec);
 
-  // Feed silence to the speaker during pre-buffering to keep I2S alive.
-  // Without this, the speaker auto-stops when its internal buffer drains
-  // (buffer_duration is typically 100ms), and we'd have to re-start it.
-  uint32_t prebuf_chunk_ms = (chunk_size * 1000) / bytes_per_sec;
-  if (prebuf_chunk_ms < 10) prebuf_chunk_ms = 10;
-
+  // Feed silence during pre-buffering to keep the I2S speaker alive
   int64_t buffer_start = esp_timer_get_time() / 1000;
   while (player->audio_task_running_ && player->audio_ring_available_() < prebuffer_target) {
-    // Feed silence at audio rate to keep speaker alive during buffering
     memset(chunk, 0, chunk_size);
     player->speaker_->play(chunk, chunk_size);
-    vTaskDelay(pdMS_TO_TICKS(prebuf_chunk_ms));
-
-    // Timeout after 8 seconds to avoid hanging if main loop is slow
+    vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms));
     if ((esp_timer_get_time() / 1000) - buffer_start > 8000) {
       ESP_LOGW(TAG, "Pre-buffer timeout after 8s, starting with %u/%u bytes",
                player->audio_ring_available_(), prebuffer_target);
@@ -1287,81 +1286,91 @@ void Mp4Player::audio_output_task_(void *arg) {
            player->audio_ring_available_(),
            1000.0f * player->audio_ring_available_() / bytes_per_sec);
 
-  // Calculate silence feeding interval based on actual audio sample rate
-  // This ensures silence is fed at the correct rate to keep the speaker
-  // alive without overflowing its internal buffer
-  uint32_t chunk_duration_ms = (chunk_size * 1000) / bytes_per_sec;
-  if (chunk_duration_ms < 5) chunk_duration_ms = 5;
-  if (chunk_duration_ms > 50) chunk_duration_ms = 50;
-  ESP_LOGI(TAG, "Audio rate: %u bytes/sec, silence chunk=%ums", bytes_per_sec, chunk_duration_ms);
+  ESP_LOGI(TAG, "Audio rate: %u bytes/sec, chunk=%u bytes (%ums)",
+           bytes_per_sec, chunk_size, chunk_duration_ms);
 
+  // ---- Main output loop ----
+  // CRITICAL: pace output at real-time audio rate using a timing clock.
+  // speaker->play() is non-blocking - without pacing, the ring buffer
+  // drains into speaker internal buffers (~67KB) in milliseconds,
+  // leaving no cushion for video decode gaps.
+  int64_t playback_start = esp_timer_get_time();
+  uint64_t total_bytes_output = 0;
   uint32_t silence_count = 0;
-  uint32_t total_silence_ms = 0;
 
   while (player->audio_task_running_) {
     if (player->state_ == PlayerState::PAUSED) {
       vTaskDelay(pdMS_TO_TICKS(20));
+      // Reset clock after pause so we don't try to "catch up"
+      playback_start = esp_timer_get_time();
+      total_bytes_output = 0;
       silence_count = 0;
-      total_silence_ms = 0;
+      continue;
+    }
+
+    // Calculate how many bytes we should have output by now
+    int64_t elapsed_us = esp_timer_get_time() - playback_start;
+    uint64_t target_bytes = (uint64_t)bytes_per_sec * elapsed_us / 1000000ULL;
+
+    // If we're ahead of schedule, wait before pushing more data
+    if (total_bytes_output >= target_bytes + chunk_size) {
+      vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms / 2));
       continue;
     }
 
     size_t avail = player->audio_ring_available_();
-    if (avail == 0) {
-      // Ring buffer empty - feed silence at correct audio rate to keep
-      // the ESPHome I2S speaker alive and prevent it from auto-stopping
-      // (which destroys its internal ring buffer and causes audio gaps)
+    if (avail > 0) {
+      // Real audio data available
+      if (silence_count > 0) {
+        ESP_LOGI(TAG, "Audio data resumed after %u silence chunks (ring: %u bytes)",
+                 silence_count, avail);
+        silence_count = 0;
+      }
+
+      size_t to_read = avail < chunk_size ? avail : chunk_size;
+      size_t got = player->audio_ring_pop_(chunk, to_read);
+      if (got > 0) {
+        player->apply_volume_to_pcm_(chunk, got);
+
+        size_t written = 0;
+        int stall_count = 0;
+        while (written < got && player->audio_task_running_) {
+          size_t w = player->speaker_->play(chunk + written, got - written);
+          if (w > 0) {
+            written += w;
+            stall_count = 0;
+          } else {
+            // Speaker buffer full - wait for it to drain
+            stall_count++;
+            if (stall_count > 100) {
+              ESP_LOGW(TAG, "Speaker stalled, dropping %u bytes", got - written);
+              break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(2));
+          }
+        }
+        total_bytes_output += written;
+      }
+    } else {
+      // Ring empty - feed silence to keep speaker alive
       if (player->state_ == PlayerState::PLAYING) {
         memset(chunk, 0, chunk_size);
         player->speaker_->play(chunk, chunk_size);
-        vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms));
+        total_bytes_output += chunk_size;
         silence_count++;
-        total_silence_ms += chunk_duration_ms;
 
-        // Log periodically during stalls (every ~1 second)
         if (silence_count == 1) {
-          ESP_LOGW(TAG, "Audio ring empty, feeding silence to keep speaker alive");
-        } else if (total_silence_ms % 1000 < chunk_duration_ms) {
-          ESP_LOGW(TAG, "Audio stall: %u ms of silence fed (ring: %u/%u bytes)",
-                   total_silence_ms, player->audio_ring_available_(), player->audio_ring_size_);
-        }
-      } else {
-        vTaskDelay(pdMS_TO_TICKS(5));
-      }
-      continue;
-    }
-
-    // Got real audio data
-    if (silence_count > 0) {
-      ESP_LOGI(TAG, "Audio data resumed after %u ms of silence (%u chunks)",
-               total_silence_ms, silence_count);
-      silence_count = 0;
-      total_silence_ms = 0;
-    }
-
-    // Read as much as possible per iteration to drain ring buffer fast
-    size_t to_read = avail < chunk_size ? avail : chunk_size;
-    size_t got = player->audio_ring_pop_(chunk, to_read);
-    if (got > 0) {
-      player->apply_volume_to_pcm_(chunk, got);
-
-      size_t written = 0;
-      int stall_count = 0;
-      while (written < got && player->audio_task_running_) {
-        size_t w = player->speaker_->play(chunk + written, got - written);
-        if (w > 0) {
-          written += w;
-          stall_count = 0;
-        } else {
-          stall_count++;
-          if (stall_count > 100) {
-            ESP_LOGW(TAG, "Speaker stalled, dropping %u bytes", got - written);
-            break;
-          }
-          vTaskDelay(pdMS_TO_TICKS(2));
+          ESP_LOGW(TAG, "Audio ring empty, feeding silence");
+        } else if (silence_count % 50 == 0) {
+          ESP_LOGW(TAG, "Audio stall: %u silence chunks (ring: %u/%u)",
+                   silence_count, player->audio_ring_available_(), player->audio_ring_size_);
         }
       }
     }
+
+    // Always pace: wait for approximately one chunk duration
+    // This is the key to not draining the ring buffer faster than real-time
+    vTaskDelay(pdMS_TO_TICKS(chunk_duration_ms > 2 ? chunk_duration_ms - 1 : 1));
   }
 
   free(chunk);
