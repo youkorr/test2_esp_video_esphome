@@ -51,7 +51,7 @@ async def to_code(config):
     cg.add_build_flag(f"-I{os.path.join(msc_dir, 'private_include')}")
 
     # Add usb_host_msc as a local library for source compilation
-    cg.add_library("usb_host_msc", None, msc_dir)
+    cg.add_library("usb_host_msc", None, f"symlink://{msc_dir}")
 
     # Framework-specific build flags
     cg.add_build_flag("-DUSE_USB_MEDIA_STORAGE")
