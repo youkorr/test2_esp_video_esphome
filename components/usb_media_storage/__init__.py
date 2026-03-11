@@ -44,8 +44,12 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Register build script to compile bundled usb_host_msc
+    # Add usb_host_msc include path directly as build flag
     component_dir = os.path.dirname(__file__)
+    msc_include = os.path.join(component_dir, "components", "usb_host_msc", "include")
+    cg.add_build_flag(f"-I{msc_include}")
+
+    # Register build script to compile bundled usb_host_msc sources
     build_script_path = os.path.join(component_dir, "usb_media_storage_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
