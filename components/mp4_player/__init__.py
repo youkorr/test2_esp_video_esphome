@@ -7,6 +7,8 @@ from esphome.components import speaker
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
+CONF_USB_MEDIA_STORAGE_ID = "usb_media_storage_id"
+
 mp4_player_ns = cg.esphome_ns.namespace("mp4_player")
 Mp4Player = mp4_player_ns.class_("Mp4Player", cg.Component)
 
@@ -32,6 +34,7 @@ CONF_ON_STOP = "on_stop"
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
     cv.Required(CONF_FILE_PATH): cv.string,
+    cv.Optional(CONF_USB_MEDIA_STORAGE_ID): cv.use_id(cg.Component),
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
     cv.Optional(CONF_VOLUME, default=80): cv.int_range(min=0, max=100),
@@ -56,6 +59,10 @@ async def to_code(config):
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+    if CONF_USB_MEDIA_STORAGE_ID in config:
+        usb_storage = await cg.get_variable(config[CONF_USB_MEDIA_STORAGE_ID])
+        cg.add(var.set_usb_storage(usb_storage))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

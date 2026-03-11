@@ -49,6 +49,7 @@ class Mp4Player : public Component {
   void set_loop(bool loop) { loop_ = loop; }
   void set_auto_play(bool auto_play) { auto_play_ = auto_play; }
   void set_show_controls(bool show) { controls_enabled_ = show; }
+  void set_usb_storage(Component *usb_storage) { usb_storage_ = usb_storage; }
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
@@ -106,6 +107,9 @@ class Mp4Player : public Component {
   bool auto_play_{true};
   bool controls_enabled_{true};
   uint8_t volume_level_{60};
+
+  // USB storage (optional - when set, ensures USB is mounted before file access)
+  Component *usb_storage_{nullptr};
 
   // State
   PlayerState state_{PlayerState::STOPPED};

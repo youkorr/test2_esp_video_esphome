@@ -19,8 +19,10 @@ static constexpr size_t EXTRACTOR_POOL_BLOCKS = 10;           // 8 blocks of 128
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
 static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
 
-// Read-ahead buffer for SD card I/O to reduce small read overhead
-static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
+// Read-ahead buffer for file I/O to reduce small read overhead
+// USB storage can handle larger buffers for better throughput
+static constexpr size_t FILE_READ_AHEAD_SIZE_SD = 64 * 1024;   // 64KB for SD card
+static constexpr size_t FILE_READ_AHEAD_SIZE_USB = 128 * 1024; // 128KB for USB (faster bus)
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
@@ -33,12 +35,15 @@ void *Mp4Player::file_open_cb_(char *url, void *ctx) {
     ESP_LOGE(TAG, "Failed to open: %s", url);
     return nullptr;
   }
-  // Set a large read-ahead buffer to reduce SD card transactions
-  // This is critical for sustained read performance on SDMMC
-  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
+  // Use larger read-ahead buffer for USB (128KB) vs SD card (64KB)
+  // USB 2.0 has higher throughput and benefits from larger sequential reads
+  bool is_usb = (strncmp(url, "/usb", 4) == 0);
+  size_t buf_size = is_usb ? FILE_READ_AHEAD_SIZE_USB : FILE_READ_AHEAD_SIZE_SD;
+
+  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
   if (io_buf) {
-    setvbuf(fp, (char *)io_buf, _IOFBF, FILE_READ_AHEAD_SIZE);
-    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead", FILE_READ_AHEAD_SIZE / 1024);
+    setvbuf(fp, (char *)io_buf, _IOFBF, buf_size);
+    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead (%s)", buf_size / 1024, is_usb ? "USB" : "SD");
   } else {
     ESP_LOGW(TAG, "Failed to allocate I/O buffer, using default");
   }
@@ -152,6 +157,16 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
 // ============================================================================
 void Mp4Player::setup() {
   ESP_LOGI(TAG, "Setting up MP4 Player...");
+
+  // If USB storage is configured, verify it's ready before accessing files
+  if (this->usb_storage_ != nullptr) {
+    if (this->usb_storage_->is_failed()) {
+      ESP_LOGE(TAG, "USB storage component failed to initialize - cannot access media files");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "USB storage available, file path: %s", this->file_path_.c_str());
+  }
 
   this->playback_event_group_ = xEventGroupCreate();
   if (!this->playback_event_group_) {
@@ -335,6 +350,7 @@ void Mp4Player::loop() {
 void Mp4Player::dump_config() {
   ESP_LOGCONFIG(TAG, "MP4 Player:");
   ESP_LOGCONFIG(TAG, "  File: %s", this->file_path_.c_str());
+  ESP_LOGCONFIG(TAG, "  Storage: %s", this->usb_storage_ != nullptr ? "USB" : "SD Card");
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->video_width_, this->video_height_);
   ESP_LOGCONFIG(TAG, "  FPS: %u", this->video_fps_);
   ESP_LOGCONFIG(TAG, "  Volume: %u%%", this->volume_level_);
