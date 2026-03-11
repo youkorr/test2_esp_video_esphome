@@ -44,10 +44,14 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Register bundled usb_host_msc as a PlatformIO library
+    # Add usb_host_msc include paths
     component_dir = os.path.dirname(__file__)
-    lib_dir = os.path.join(component_dir, "components")
-    cg.add_platformio_option("lib_extra_dirs", [lib_dir])
+    msc_dir = os.path.join(component_dir, "components", "usb_host_msc")
+    cg.add_build_flag(f"-I{os.path.join(msc_dir, 'include')}")
+    cg.add_build_flag(f"-I{os.path.join(msc_dir, 'private_include')}")
+
+    # Add usb_host_msc as a local library for source compilation
+    cg.add_library("usb_host_msc", None, msc_dir)
 
     # Framework-specific build flags
     cg.add_build_flag("-DUSE_USB_MEDIA_STORAGE")
