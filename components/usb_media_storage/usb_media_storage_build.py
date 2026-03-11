@@ -6,10 +6,11 @@ Compiles and links bundled usb_host_msc library (from espressif/esp-usb)
 import os
 Import("env")
 
-script_dir = Dir('.').srcnode().abspath
-component_dir = script_dir
+project_dir = env.subst("$PROJECT_DIR")
+component_dir = os.path.join(project_dir, "components", "usb_media_storage")
 
-print("[USB Media Storage] Build script running...")
+print(f"[USB Media Storage] Build script running...")
+print(f"[USB Media Storage] Component dir: {component_dir}")
 
 # ========================================================================
 # usb_host_msc include paths
