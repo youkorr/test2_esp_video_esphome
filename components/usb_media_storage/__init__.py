@@ -43,12 +43,11 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Add required ESP-IDF components from Espressif Component Registry
-    cg.add_platformio_option("lib_deps", ["espressif/usb_host_msc@^1.1.0"])
+    # usb_host_msc is bundled locally (components/usb_host_msc/)
+    # and compiled via usb_media_storage_build.py build script
 
     # Framework-specific build flags
-    if CORE.using_esp_idf:
-        cg.add_build_flag("-DUSE_USB_MEDIA_STORAGE")
+    cg.add_build_flag("-DUSE_USB_MEDIA_STORAGE")
 
 
 USB_PATH_ACTION_SCHEMA = cv.Schema(
