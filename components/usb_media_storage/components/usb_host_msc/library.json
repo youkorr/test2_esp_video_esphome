@@ -1,0 +1,13 @@
+{
+  "name": "usb_host_msc",
+  "version": "1.0.0",
+  "build": {
+    "flags": [
+      "-Iprivate_include"
+    ],
+    "srcFilter": [
+      "+<src/>"
+    ],
+    "includeDir": "include"
+  }
+}
