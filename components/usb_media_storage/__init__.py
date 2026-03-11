@@ -43,8 +43,8 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Add required ESP-IDF components
-    cg.add_platformio_option("lib_deps", ["usb_host_msc"])
+    # Add required ESP-IDF components from Espressif Component Registry
+    cg.add_platformio_option("lib_deps", ["espressif/usb_host_msc@^1.1.0"])
 
     # Framework-specific build flags
     if CORE.using_esp_idf:
