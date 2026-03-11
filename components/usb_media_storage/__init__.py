@@ -1,3 +1,4 @@
+import os
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
@@ -43,8 +44,11 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # usb_host_msc is bundled locally (components/usb_host_msc/)
-    # and compiled via usb_media_storage_build.py build script
+    # Register build script to compile bundled usb_host_msc
+    component_dir = os.path.dirname(__file__)
+    build_script_path = os.path.join(component_dir, "usb_media_storage_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
 
     # Framework-specific build flags
     cg.add_build_flag("-DUSE_USB_MEDIA_STORAGE")
