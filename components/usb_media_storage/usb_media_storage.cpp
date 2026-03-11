@@ -26,6 +26,19 @@ static const char *TAG = "usb_media_storage";
 
 #ifdef USE_ESP_IDF
 static const size_t FILE_PATH_MAX = ESP_VFS_PATH_MAX + 256;
+ 
+static void msc_event_callback(const msc_host_event_t *event, void *arg) {
+  switch (event->event) {
+    case msc_host_event_t::MSC_DEVICE_CONNECTED:
+      ESP_LOGI(TAG, "MSC device connected, address: %d", event->device.address);
+      break;
+    case msc_host_event_t::MSC_DEVICE_DISCONNECTED:
+      ESP_LOGW(TAG, "MSC device disconnected");
+      break;
+    default:
+      break;
+  }
+}
 #endif
 
 const std::string UsbMediaStorage::MOUNT_POINT("/usb");
