@@ -50,6 +50,9 @@ async def to_code(config):
     cg.add_build_flag(f"-I{os.path.join(msc_dir, 'include')}")
     cg.add_build_flag(f"-I{os.path.join(msc_dir, 'private_include')}")
 
+    # Pass msc_dir to the build script via environment variable
+    os.environ["USB_HOST_MSC_DIR"] = msc_dir
+
     # Use extra_scripts to compile usb_host_msc sources directly
     build_script = os.path.join(component_dir, "build_msc.py")
     cg.add_platformio_option("extra_scripts", [f"pre:{build_script}"])
