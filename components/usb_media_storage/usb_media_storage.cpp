@@ -26,7 +26,7 @@ static const char *TAG = "usb_media_storage";
 
 #ifdef USE_ESP_IDF
 static const size_t FILE_PATH_MAX = ESP_VFS_PATH_MAX + 256;
- 
+
 static void msc_event_callback(const msc_host_event_t *event, void *arg) {
   switch (event->event) {
     case msc_host_event_t::MSC_DEVICE_CONNECTED:
@@ -149,7 +149,7 @@ void UsbMediaStorage::setup() {
     .create_backround_task = true,
     .task_priority = 5,
     .stack_size = 4096,
-    .callback = NULL,
+    .callback = msc_event_callback,
   };
 
   ret = msc_host_install(&msc_config);
