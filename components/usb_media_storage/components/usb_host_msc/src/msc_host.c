@@ -380,13 +380,16 @@ static void client_event_cb(const usb_host_client_event_msg_t *event, void *arg)
 {
     switch (event->event) {
     case USB_HOST_CLIENT_EVENT_NEW_DEV:
-        ESP_LOGD(TAG, "New device connected");
+        ESP_LOGI(TAG, "New USB device connected at address %d", event->new_dev.address);
         if (is_mass_storage_device(event->new_dev.address)) {
+            ESP_LOGI(TAG, "Device is a Mass Storage device");
             const msc_host_event_t msc_event = {
                 .event = MSC_DEVICE_CONNECTED,
                 .device.address = event->new_dev.address,
             };
             s_msc_driver->user_cb(&msc_event, s_msc_driver->user_arg);
+        } else {
+            ESP_LOGW(TAG, "Device at address %d is NOT a Mass Storage device", event->new_dev.address);
         }
         break;
     case USB_HOST_CLIENT_EVENT_DEV_GONE:

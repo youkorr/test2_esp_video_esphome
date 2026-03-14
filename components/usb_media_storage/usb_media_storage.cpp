@@ -58,14 +58,8 @@ std::string UsbMediaStorage::build_path(const char *path) const {
 }
 
 void UsbMediaStorage::loop() {
-#ifdef USE_ESP_IDF
-  // The USB host library needs periodic servicing
-  // This handles USB events (connect, disconnect, etc.)
-  if (this->install_attempted_) {
-    // Short non-blocking check for USB events
-    usb_host_lib_handle_events(0, NULL);
-  }
-#endif
+  // USB host library events are handled by the dedicated usb_host_task
+  // No additional servicing needed here
 }
 
 void UsbMediaStorage::dump_config() {
@@ -100,15 +94,19 @@ void UsbMediaStorage::dump_config() {
 
 // USB Host library task - runs in background to handle USB events
 static void usb_host_task(void *arg) {
+  ESP_LOGI(TAG, "USB Host library task started");
   while (true) {
     uint32_t event_flags;
-    usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+    esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+    if (err != ESP_OK) {
+      ESP_LOGW(TAG, "USB Host lib event error: %s", esp_err_to_name(err));
+      continue;
+    }
     if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
-      // No more clients, but keep running
-      ESP_LOGD(TAG, "USB Host: no clients connected");
+      ESP_LOGI(TAG, "USB Host: no clients connected");
     }
     if (event_flags & USB_HOST_LIB_EVENT_FLAGS_ALL_FREE) {
-      ESP_LOGD(TAG, "USB Host: all devices freed");
+      ESP_LOGI(TAG, "USB Host: all devices freed");
     }
   }
 }
@@ -134,14 +132,15 @@ void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "USB Host Library installed");
 
   // Step 2: Create USB host task for event handling
+  // Priority must be higher than MSC task to process enumeration first
   BaseType_t task_created = xTaskCreatePinnedToCore(
     usb_host_task,
     "usb_host_task",
     4096,
     NULL,
-    2,  // Priority
+    5,  // Priority - same as MSC task
     NULL,
-    0   // Core 0
+    tskNO_AFFINITY  // Any core
   );
 
   if (task_created != pdTRUE) {
