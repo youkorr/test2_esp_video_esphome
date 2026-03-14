@@ -16,7 +16,6 @@
 #include "usb/msc_host.h"
 #include "usb/msc_host_vfs.h"
 #include "driver/gpio.h"
-#include "esp_private/usb_phy.h"
 #include <dirent.h>
 #include <errno.h>
 #endif
@@ -119,32 +118,26 @@ static void usb_host_task(void *arg) {
 void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "Initializing USB Media Storage...");
 
-  // Step 1: Initialize USB PHY for ESP32-P4 USB HS
-  usb_phy_config_t phy_config = {
-    .controller = USB_PHY_CTRL_OTG,
-    .target = USB_PHY_TARGET_INT,
-    .otg_mode = USB_OTG_MODE_HOST,
-    .otg_speed = USB_PHY_SPEED_UNDEFINED,
-  };
-  usb_phy_handle_t phy_hdl = NULL;
-  esp_err_t ret = usb_new_phy(&phy_config, &phy_hdl);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize USB PHY: %s", esp_err_to_name(ret));
-    this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
+  // Step 1: Create semaphore BEFORE installing drivers (avoid race condition)
+  s_device_connect_sem = xSemaphoreCreateBinary();
+  if (!s_device_connect_sem) {
+    ESP_LOGE(TAG, "Failed to create semaphore");
+    this->init_error_ = ErrorCode::ERR_NO_DEVICE;
     mark_failed();
     return;
   }
-  ESP_LOGI(TAG, "USB PHY initialized (Host mode)");
 
-  // Step 2: Install USB Host Library (skip_phy_setup=true since we did it manually)
+  // Step 2: Install USB Host Library
   const usb_host_config_t host_config = {
-    .skip_phy_setup = true,
+    .skip_phy_setup = false,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
 
-  ret = usb_host_install(&host_config);
+  esp_err_t ret = usb_host_install(&host_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install USB Host Library: %s", esp_err_to_name(ret));
+    vSemaphoreDelete(s_device_connect_sem);
+    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
     mark_failed();
     return;
@@ -154,23 +147,27 @@ void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "USB Host Library installed");
 
   // Step 3: Create USB host task for event handling
-  // Priority must be higher than MSC task to process enumeration first
   BaseType_t task_created = xTaskCreatePinnedToCore(
     usb_host_task,
     "usb_host_task",
     4096,
     NULL,
-    10,  // High priority (matches ESP-IDF BSP)
+    10,
     NULL,
-    tskNO_AFFINITY  // Any core
+    tskNO_AFFINITY
   );
 
   if (task_created != pdTRUE) {
     ESP_LOGE(TAG, "Failed to create USB host task");
+    vSemaphoreDelete(s_device_connect_sem);
+    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
     mark_failed();
     return;
   }
+
+  // Small delay to let USB host task start processing events
+  vTaskDelay(pdMS_TO_TICKS(100));
 
   // Step 4: Install MSC Host driver
   const msc_host_driver_config_t msc_config = {
@@ -183,6 +180,8 @@ void UsbMediaStorage::setup() {
   ret = msc_host_install(&msc_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install MSC Host driver: %s", esp_err_to_name(ret));
+    vSemaphoreDelete(s_device_connect_sem);
+    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_MSC_INIT;
     mark_failed();
     return;
@@ -191,14 +190,6 @@ void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "MSC Host driver installed");
 
   // Step 5: Wait for USB device connection via callback
-  s_device_connect_sem = xSemaphoreCreateBinary();
-  if (!s_device_connect_sem) {
-    ESP_LOGE(TAG, "Failed to create semaphore");
-    this->init_error_ = ErrorCode::ERR_NO_DEVICE;
-    mark_failed();
-    return;
-  }
-
   ESP_LOGI(TAG, "Waiting for USB device to be connected (up to 15s)...");
   ESP_LOGI(TAG, "Please ensure USB flash drive is plugged into USB HS Type-C port");
   msc_host_device_handle_t msc_device = NULL;
