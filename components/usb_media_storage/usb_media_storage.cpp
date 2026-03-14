@@ -126,7 +126,7 @@ void UsbMediaStorage::setup() {
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
 
-  ret = usb_host_install(&host_config);
+  esp_err_t ret = usb_host_install(&host_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install USB Host Library: %s", esp_err_to_name(ret));
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
