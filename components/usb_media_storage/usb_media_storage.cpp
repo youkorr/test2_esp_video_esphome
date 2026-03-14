@@ -27,10 +27,17 @@ static const char *TAG = "usb_media_storage";
 #ifdef USE_ESP_IDF
 static const size_t FILE_PATH_MAX = ESP_VFS_PATH_MAX + 256;
 
+static SemaphoreHandle_t s_device_connect_sem = NULL;
+static uint8_t s_device_address = 0;
+
 static void msc_event_callback(const msc_host_event_t *event, void *arg) {
   switch (event->event) {
     case msc_host_event_t::MSC_DEVICE_CONNECTED:
       ESP_LOGI(TAG, "MSC device connected, address: %d", event->device.address);
+      s_device_address = event->device.address;
+      if (s_device_connect_sem) {
+        xSemaphoreGive(s_device_connect_sem);
+      }
       break;
     case msc_host_event_t::MSC_DEVICE_DISCONNECTED:
       ESP_LOGW(TAG, "MSC device disconnected");
@@ -162,31 +169,42 @@ void UsbMediaStorage::setup() {
 
   ESP_LOGI(TAG, "MSC Host driver installed");
 
-  // Step 4: Wait for USB device to be connected
-  // Try multiple times as USB enumeration takes time
-  msc_host_device_handle_t msc_device = NULL;
-  bool device_found = false;
-
-  for (int attempt = 1; attempt <= 10; attempt++) {
-    ESP_LOGI(TAG, "Waiting for USB device... (attempt %d/10)", attempt);
-
-    ret = msc_host_install_device(0, &msc_device);
-    if (ret == ESP_OK) {
-      device_found = true;
-      this->device_connected_ = true;
-      ESP_LOGI(TAG, "USB device found and connected!");
-      break;
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
-
-  if (!device_found) {
-    ESP_LOGE(TAG, "No USB storage device found after 10 attempts");
+  // Step 4: Wait for USB device connection via callback
+  s_device_connect_sem = xSemaphoreCreateBinary();
+  if (!s_device_connect_sem) {
+    ESP_LOGE(TAG, "Failed to create semaphore");
     this->init_error_ = ErrorCode::ERR_NO_DEVICE;
     mark_failed();
     return;
   }
+
+  ESP_LOGI(TAG, "Waiting for USB device to be connected (up to 10s)...");
+  msc_host_device_handle_t msc_device = NULL;
+
+  if (xSemaphoreTake(s_device_connect_sem, pdMS_TO_TICKS(10000)) == pdTRUE) {
+    ESP_LOGI(TAG, "USB device detected at address %d, installing device...", s_device_address);
+    ret = msc_host_install_device(s_device_address, &msc_device);
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to install MSC device: %s", esp_err_to_name(ret));
+      vSemaphoreDelete(s_device_connect_sem);
+      s_device_connect_sem = NULL;
+      this->init_error_ = ErrorCode::ERR_NO_DEVICE;
+      mark_failed();
+      return;
+    }
+    this->device_connected_ = true;
+    ESP_LOGI(TAG, "USB device found and connected!");
+  } else {
+    ESP_LOGE(TAG, "No USB storage device found within 10 seconds");
+    vSemaphoreDelete(s_device_connect_sem);
+    s_device_connect_sem = NULL;
+    this->init_error_ = ErrorCode::ERR_NO_DEVICE;
+    mark_failed();
+    return;
+  }
+
+  vSemaphoreDelete(s_device_connect_sem);
+  s_device_connect_sem = NULL;
 
   // Step 5: Mount the USB device filesystem via VFS
   const esp_vfs_fat_mount_config_t mount_config = {
