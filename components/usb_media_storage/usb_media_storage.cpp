@@ -15,7 +15,7 @@
 #include "usb/usb_host.h"
 #include "usb/msc_host.h"
 #include "usb/msc_host_vfs.h"
-#include "esp_private/usb_phy.h"
+#include "driver/gpio.h"
 #include <dirent.h>
 #include <errno.h>
 #endif
@@ -95,14 +95,19 @@ void UsbMediaStorage::dump_config() {
 
 // USB Host library task - runs in background to handle USB events
 static void usb_host_task(void *arg) {
-  ESP_LOGI(TAG, "USB Host library task started");
+  ESP_LOGI(TAG, "USB Host library task started (priority %d)", uxTaskPriorityGet(NULL));
   while (true) {
     uint32_t event_flags;
-    esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &event_flags);
+    esp_err_t err = usb_host_lib_handle_events(1000 / portTICK_PERIOD_MS, &event_flags);
+    if (err == ESP_ERR_TIMEOUT) {
+      // Normal timeout, just continue polling
+      continue;
+    }
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "USB Host lib event error: %s", esp_err_to_name(err));
       continue;
     }
+    ESP_LOGI(TAG, "USB Host event flags: 0x%lx", (unsigned long)event_flags);
     if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
       ESP_LOGI(TAG, "USB Host: no clients connected");
     }
@@ -115,28 +120,9 @@ static void usb_host_task(void *arg) {
 void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "Initializing USB Media Storage...");
 
-  // Step 1a: Explicitly configure USB PHY in Host mode
-  // This is required on ESP32-P4 where the USB HS controller needs explicit PHY setup
-  usb_phy_config_t phy_config = {
-    .controller = USB_PHY_CTRL_OTG,
-    .target = USB_PHY_TARGET_INT,
-    .otg_mode = USB_OTG_MODE_HOST,
-    .otg_speed = USB_PHY_SPEED_UNDEFINED,
-  };
-
-  usb_phy_handle_t phy_handle = NULL;
-  esp_err_t ret = usb_new_phy(&phy_config, &phy_handle);
-  if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to configure USB PHY: %s", esp_err_to_name(ret));
-    this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
-    mark_failed();
-    return;
-  }
-  ESP_LOGI(TAG, "USB PHY configured in Host mode");
-
-  // Step 1b: Install USB Host Library (skip PHY setup since we did it above)
+  // Step 1: Install USB Host Library
   const usb_host_config_t host_config = {
-    .skip_phy_setup = true,
+    .skip_phy_setup = false,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
 
@@ -158,7 +144,7 @@ void UsbMediaStorage::setup() {
     "usb_host_task",
     4096,
     NULL,
-    5,  // Priority - same as MSC task
+    10,  // High priority (matches ESP-IDF BSP)
     NULL,
     tskNO_AFFINITY  // Any core
   );
@@ -197,10 +183,11 @@ void UsbMediaStorage::setup() {
     return;
   }
 
-  ESP_LOGI(TAG, "Waiting for USB device to be connected (up to 10s)...");
+  ESP_LOGI(TAG, "Waiting for USB device to be connected (up to 15s)...");
+  ESP_LOGI(TAG, "Please ensure USB flash drive is plugged into USB HS Type-C port");
   msc_host_device_handle_t msc_device = NULL;
 
-  if (xSemaphoreTake(s_device_connect_sem, pdMS_TO_TICKS(10000)) == pdTRUE) {
+  if (xSemaphoreTake(s_device_connect_sem, pdMS_TO_TICKS(15000)) == pdTRUE) {
     ESP_LOGI(TAG, "USB device detected at address %d, installing device...", s_device_address);
     ret = msc_host_install_device(s_device_address, &msc_device);
     if (ret != ESP_OK) {
@@ -214,7 +201,10 @@ void UsbMediaStorage::setup() {
     this->device_connected_ = true;
     ESP_LOGI(TAG, "USB device found and connected!");
   } else {
-    ESP_LOGE(TAG, "No USB storage device found within 10 seconds");
+    ESP_LOGE(TAG, "No USB storage device found within 15 seconds");
+    ESP_LOGE(TAG, "Check: 1) USB drive plugged into USB HS (not JTAG) port");
+    ESP_LOGE(TAG, "Check: 2) Use USB-C to USB-A adapter if drive is USB-A");
+    ESP_LOGE(TAG, "Check: 3) USB drive must be FAT32 formatted");
     vSemaphoreDelete(s_device_connect_sem);
     s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_NO_DEVICE;
