@@ -16,6 +16,7 @@
 #include "usb/msc_host.h"
 #include "usb/msc_host_vfs.h"
 #include "driver/gpio.h"
+#include "esp_private/usb_phy.h"
 #include <dirent.h>
 #include <errno.h>
 #endif
@@ -98,16 +99,14 @@ static void usb_host_task(void *arg) {
   ESP_LOGI(TAG, "USB Host library task started (priority %d)", uxTaskPriorityGet(NULL));
   while (true) {
     uint32_t event_flags;
-    esp_err_t err = usb_host_lib_handle_events(1000 / portTICK_PERIOD_MS, &event_flags);
+    esp_err_t err = usb_host_lib_handle_events(pdMS_TO_TICKS(1000), &event_flags);
     if (err == ESP_ERR_TIMEOUT) {
-      // Normal timeout, just continue polling
       continue;
     }
     if (err != ESP_OK) {
       ESP_LOGW(TAG, "USB Host lib event error: %s", esp_err_to_name(err));
       continue;
     }
-    ESP_LOGI(TAG, "USB Host event flags: 0x%lx", (unsigned long)event_flags);
     if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
       ESP_LOGI(TAG, "USB Host: no clients connected");
     }
@@ -120,13 +119,30 @@ static void usb_host_task(void *arg) {
 void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "Initializing USB Media Storage...");
 
-  // Step 1: Install USB Host Library
+  // Step 1: Initialize USB PHY for ESP32-P4 USB HS
+  usb_phy_config_t phy_config = {
+    .controller = USB_PHY_CTRL_OTG,
+    .target = USB_PHY_TARGET_INT,
+    .otg_mode = USB_OTG_MODE_HOST,
+    .otg_speed = USB_PHY_SPEED_UNDEFINED,
+  };
+  usb_phy_handle_t phy_hdl = NULL;
+  esp_err_t ret = usb_new_phy(&phy_config, &phy_hdl);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize USB PHY: %s", esp_err_to_name(ret));
+    this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
+    mark_failed();
+    return;
+  }
+  ESP_LOGI(TAG, "USB PHY initialized (Host mode)");
+
+  // Step 2: Install USB Host Library (skip_phy_setup=true since we did it manually)
   const usb_host_config_t host_config = {
-    .skip_phy_setup = false,
+    .skip_phy_setup = true,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
 
-  esp_err_t ret = usb_host_install(&host_config);
+  ret = usb_host_install(&host_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install USB Host Library: %s", esp_err_to_name(ret));
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
@@ -137,7 +153,7 @@ void UsbMediaStorage::setup() {
 
   ESP_LOGI(TAG, "USB Host Library installed");
 
-  // Step 2: Create USB host task for event handling
+  // Step 3: Create USB host task for event handling
   // Priority must be higher than MSC task to process enumeration first
   BaseType_t task_created = xTaskCreatePinnedToCore(
     usb_host_task,
@@ -156,7 +172,7 @@ void UsbMediaStorage::setup() {
     return;
   }
 
-  // Step 3: Install MSC Host driver
+  // Step 4: Install MSC Host driver
   const msc_host_driver_config_t msc_config = {
     .create_backround_task = true,
     .task_priority = 5,
@@ -174,7 +190,7 @@ void UsbMediaStorage::setup() {
 
   ESP_LOGI(TAG, "MSC Host driver installed");
 
-  // Step 4: Wait for USB device connection via callback
+  // Step 5: Wait for USB device connection via callback
   s_device_connect_sem = xSemaphoreCreateBinary();
   if (!s_device_connect_sem) {
     ESP_LOGE(TAG, "Failed to create semaphore");
@@ -215,7 +231,7 @@ void UsbMediaStorage::setup() {
   vSemaphoreDelete(s_device_connect_sem);
   s_device_connect_sem = NULL;
 
-  // Step 5: Mount the USB device filesystem via VFS
+  // Step 6: Mount the USB device filesystem via VFS
   const esp_vfs_fat_mount_config_t mount_config = {
     .format_if_mount_failed = false,
     .max_files = 64,
