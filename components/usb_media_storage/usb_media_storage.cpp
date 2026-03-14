@@ -15,6 +15,7 @@
 #include "usb/usb_host.h"
 #include "usb/msc_host.h"
 #include "usb/msc_host_vfs.h"
+#include "esp_private/usb_phy.h"
 #include <dirent.h>
 #include <errno.h>
 #endif
@@ -114,13 +115,32 @@ static void usb_host_task(void *arg) {
 void UsbMediaStorage::setup() {
   ESP_LOGI(TAG, "Initializing USB Media Storage...");
 
-  // Step 1: Install USB Host Library
+  // Step 1a: Explicitly configure USB PHY in Host mode
+  // This is required on ESP32-P4 where the USB HS controller needs explicit PHY setup
+  usb_phy_config_t phy_config = {
+    .controller = USB_PHY_CTRL_OTG,
+    .target = USB_PHY_TARGET_INT,
+    .otg_mode = USB_OTG_MODE_HOST,
+    .otg_speed = USB_PHY_SPEED_UNDEFINED,
+  };
+
+  usb_phy_handle_t phy_handle = NULL;
+  esp_err_t ret = usb_new_phy(&phy_config, &phy_handle);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to configure USB PHY: %s", esp_err_to_name(ret));
+    this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
+    mark_failed();
+    return;
+  }
+  ESP_LOGI(TAG, "USB PHY configured in Host mode");
+
+  // Step 1b: Install USB Host Library (skip PHY setup since we did it above)
   const usb_host_config_t host_config = {
-    .skip_phy_setup = false,
+    .skip_phy_setup = true,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
 
-  esp_err_t ret = usb_host_install(&host_config);
+  ret = usb_host_install(&host_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install USB Host Library: %s", esp_err_to_name(ret));
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
