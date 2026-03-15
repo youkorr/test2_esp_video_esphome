@@ -199,59 +199,73 @@ void Mp4Player::setup() {
   esp_avi_extractor_register();
 
   // Probe video file to get resolution/fps/duration
-  ESP_LOGI(TAG, "Probing: %s", this->file_path_.c_str());
-
-  esp_extractor_handle_t probe = nullptr;
-  esp_extractor_config_t probe_cfg = {};
-  probe_cfg.open = file_open_cb_;
-  probe_cfg.read = file_read_cb_;
-  probe_cfg.seek = file_seek_cb_;
-  probe_cfg.file_size = file_size_cb_;
-  probe_cfg.close = file_close_cb_;
-  probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
-  probe_cfg.url = (char *)this->file_path_.c_str();
-  probe_cfg.input_ctx = nullptr;
-  probe_cfg.output_pool_size = 256 * 1024;
-  probe_cfg.cache_block_num = 3;
-  probe_cfg.cache_block_size = 256 * 1024 / 3;
-
-  if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
-    if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
-      // Video info
-      uint16_t vnum = 0;
-      esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
-      if (vnum > 0) {
-        extractor_stream_info_t sinfo = {};
-        if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
-          this->video_width_ = sinfo.stream_info.video_info.width;
-          this->video_height_ = sinfo.stream_info.video_info.height;
-          this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
-          this->total_duration_ms_ = sinfo.duration;
-          ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                   this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
-        }
-      }
-      // Audio info
-      uint16_t anum = 0;
-      esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
-      this->has_audio_ = (anum > 0);
-      if (this->has_audio_) {
-        extractor_stream_info_t ainfo = {};
-        if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
-          this->audio_format_ = ainfo.stream_info.audio_info.format;
-          this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
-          this->audio_channels_ = ainfo.stream_info.audio_info.channel;
-          this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
-          ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
-                   this->audio_format_, this->audio_sample_rate_,
-                   this->audio_channels_, this->audio_bits_per_sample_);
-        }
-      }
+  // Skip probe if file is not accessible yet (e.g. USB drive not mounted)
+  bool probe_skipped = false;
+  {
+    FILE *test_fp = fopen(this->file_path_.c_str(), "rb");
+    if (test_fp) {
+      fclose(test_fp);
+    } else {
+      ESP_LOGI(TAG, "File not accessible yet, skipping probe (will detect at playback)");
+      probe_skipped = true;
     }
-    esp_extractor_close(probe);
   }
 
-  esp_extractor_unregister_all();
+  if (!probe_skipped) {
+    ESP_LOGI(TAG, "Probing: %s", this->file_path_.c_str());
+
+    esp_extractor_handle_t probe = nullptr;
+    esp_extractor_config_t probe_cfg = {};
+    probe_cfg.open = file_open_cb_;
+    probe_cfg.read = file_read_cb_;
+    probe_cfg.seek = file_seek_cb_;
+    probe_cfg.file_size = file_size_cb_;
+    probe_cfg.close = file_close_cb_;
+    probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
+    probe_cfg.url = (char *)this->file_path_.c_str();
+    probe_cfg.input_ctx = nullptr;
+    probe_cfg.output_pool_size = 256 * 1024;
+    probe_cfg.cache_block_num = 3;
+    probe_cfg.cache_block_size = 256 * 1024 / 3;
+
+    if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
+      if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
+        // Video info
+        uint16_t vnum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
+        if (vnum > 0) {
+          extractor_stream_info_t sinfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
+            this->video_width_ = sinfo.stream_info.video_info.width;
+            this->video_height_ = sinfo.stream_info.video_info.height;
+            this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->total_duration_ms_ = sinfo.duration;
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
+                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+          }
+        }
+        // Audio info
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        this->has_audio_ = (anum > 0);
+        if (this->has_audio_) {
+          extractor_stream_info_t ainfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+            this->audio_format_ = ainfo.stream_info.audio_info.format;
+            this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+            this->audio_channels_ = ainfo.stream_info.audio_info.channel;
+            this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
+                     this->audio_format_, this->audio_sample_rate_,
+                     this->audio_channels_, this->audio_bits_per_sample_);
+          }
+        }
+      }
+      esp_extractor_close(probe);
+    }
+
+    esp_extractor_unregister_all();
+  }
 
   if (this->video_width_ == 0 || this->video_height_ == 0) {
     ESP_LOGW(TAG, "Could not probe video, using 800x480");
@@ -277,8 +291,8 @@ void Mp4Player::setup() {
     memset(this->display_buffer_[i], 0, this->display_buffer_size_);
   }
 
-  // Setup audio decoder if audio track found and speaker configured
-  if (this->has_audio_ && this->speaker_) {
+  // Setup audio decoder if audio track found (or probe skipped) and speaker configured
+  if ((this->has_audio_ || probe_skipped) && this->speaker_) {
     // Register individual audio decoders (AAC, MP3, FLAC, PCM)
     esp_aac_dec_register();
     esp_mp3_dec_register();
@@ -498,7 +512,8 @@ void Mp4Player::playback_task_(void *arg) {
       ext_cfg.file_size = file_size_cb_;
       ext_cfg.close = file_close_cb_;
       // Extract both audio and video if speaker is available
-      ext_cfg.extract_mask = (player->has_audio_ && player->speaker_)
+      // Always extract AV when speaker exists (probe may have been skipped for USB)
+      ext_cfg.extract_mask = player->speaker_
                               ? ESP_EXTRACT_MASK_AV : ESP_EXTRACT_MASK_VIDEO;
       ext_cfg.url = (char *)player->file_path_.c_str();
       ext_cfg.input_ctx = nullptr;
@@ -519,8 +534,7 @@ void Mp4Player::playback_task_(void *arg) {
         break;
       }
 
-      // Get video info (only update fps/duration - dimensions are set during probe/setup
-      // and must not change because display buffers are already allocated to that size)
+      // Get video info and reallocate display buffers if dimensions changed
       uint16_t vnum = 0;
       esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
       if (vnum > 0) {
@@ -529,9 +543,59 @@ void Mp4Player::playback_task_(void *arg) {
           uint32_t fps = sinfo.stream_info.video_info.fps;
           player->video_fps_ = fps > 0 ? fps : 25;
           player->total_duration_ms_ = sinfo.duration;
-          ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (display: %ux%u)",
-                   sinfo.stream_info.video_info.width, sinfo.stream_info.video_info.height,
-                   player->video_fps_, player->video_width_, player->video_height_);
+
+          uint32_t actual_w = sinfo.stream_info.video_info.width;
+          uint32_t actual_h = sinfo.stream_info.video_info.height;
+
+          // Check if display buffers need reallocation (e.g. probe failed at setup)
+          uint32_t aligned_w = (actual_w + 15) & ~15;
+          uint32_t aligned_h = (actual_h + 15) & ~15;
+          uint32_t needed_size = aligned_w * aligned_h * 2;
+
+          if (needed_size > player->display_buffer_size_) {
+            ESP_LOGW(TAG, "Video %ux%u needs %u bytes but buffer is %u, reallocating",
+                     actual_w, actual_h, needed_size, player->display_buffer_size_);
+            for (int i = 0; i < 2; i++) {
+              if (player->display_buffer_[i]) {
+                heap_caps_free(player->display_buffer_[i]);
+                player->display_buffer_[i] = nullptr;
+              }
+              player->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(
+                  64, needed_size, MALLOC_CAP_SPIRAM);
+              if (!player->display_buffer_[i]) {
+                ESP_LOGE(TAG, "Failed to reallocate display buffer %d (%u bytes)", i, needed_size);
+                break;
+              }
+              memset(player->display_buffer_[i], 0, needed_size);
+            }
+            if (player->display_buffer_[0] && player->display_buffer_[1]) {
+              player->display_buffer_size_ = needed_size;
+              player->video_width_ = actual_w;
+              player->video_height_ = actual_h;
+              ESP_LOGI(TAG, "Display buffers reallocated: %ux%u (aligned %ux%u), %u bytes",
+                       actual_w, actual_h, aligned_w, aligned_h, needed_size);
+            } else {
+              ESP_LOGE(TAG, "Buffer reallocation failed, playback may fail");
+            }
+          } else if (actual_w != player->video_width_ || actual_h != player->video_height_) {
+            // Dimensions changed but buffer is large enough
+            player->video_width_ = actual_w;
+            player->video_height_ = actual_h;
+          }
+
+          ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (buffer: %u bytes)",
+                   player->video_width_, player->video_height_,
+                   player->video_fps_, player->display_buffer_size_);
+        }
+      }
+
+      // Detect audio if probe was skipped (USB not mounted at setup time)
+      if (!player->has_audio_ && player->speaker_) {
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        if (anum > 0) {
+          player->has_audio_ = true;
+          ESP_LOGI(TAG, "Audio track detected during playback");
         }
       }
 
