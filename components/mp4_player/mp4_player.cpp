@@ -113,7 +113,6 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
       size_t skip = 2 + marker_size;  // 0xFF 0xFE + size+data
       if (read_pos + skip > size) break;
 
-      ESP_LOGD(TAG, "Stripping COM marker at %zu (%u bytes)", read_pos, marker_size);
       read_pos += skip;
       stripped = true;
       continue;
@@ -146,7 +145,6 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
   }
 
   if (stripped && write_pos < size) {
-    ESP_LOGI(TAG, "COM markers stripped: %zu -> %zu bytes", size, write_pos);
     return write_pos;
   }
   return size;
@@ -672,13 +670,14 @@ void Mp4Player::playback_task_(void *arg) {
               vTaskDelay(pdMS_TO_TICKS(100));
 
               // Start audio output task if ring buffer is available
+              // Pin to core 1 (core 0 is used by WiFi which causes audio stalls)
               if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
                 player->audio_ring_read_ = 0;
                 player->audio_ring_write_ = 0;
                 player->audio_task_running_ = true;
                 xTaskCreatePinnedToCore(
                     audio_output_task_, "audio_out", 4096, player, 15,
-                    &player->audio_task_handle_, 0);
+                    &player->audio_task_handle_, 1);
               }
             } else {
               ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
@@ -1175,10 +1174,21 @@ void Mp4Player::audio_output_task_(void *arg) {
     return;
   }
 
-  ESP_LOGI(TAG, "Audio output task started (priority 15)");
+  ESP_LOGI(TAG, "Audio output task started (priority 15, core 1)");
 
-  // Initial delay to ensure I2S channel is fully enabled
-  vTaskDelay(pdMS_TO_TICKS(50));
+  // Wait for ring buffer to pre-fill before starting output
+  // This gives ~0.5s head start to absorb sensor/WiFi stalls
+  const size_t prefill_target = 96 * 1024;  // 96KB (~0.5s at 48kHz stereo)
+  int prefill_wait = 0;
+  while (player->audio_task_running_ && prefill_wait < 200) {
+    size_t avail = player->audio_ring_available_();
+    if (avail >= prefill_target) {
+      ESP_LOGI(TAG, "Audio pre-filled: %u bytes, starting output", avail);
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    prefill_wait++;
+  }
 
   uint32_t underrun_count = 0;
 
@@ -1195,15 +1205,15 @@ void Mp4Player::audio_output_task_(void *arg) {
       avail = player->audio_ring_available_();
       if (avail == 0) {
         underrun_count++;
-        if (underrun_count == 50) {
+        if (underrun_count == 100) {
           ESP_LOGW(TAG, "Audio underrun detected (ring buffer empty)");
         }
-        vTaskDelay(pdMS_TO_TICKS(2));
+        vTaskDelay(pdMS_TO_TICKS(1));
         continue;
       }
     }
 
-    if (underrun_count >= 50) {
+    if (underrun_count >= 100) {
       ESP_LOGI(TAG, "Audio recovered after %u underrun cycles", underrun_count);
     }
     underrun_count = 0;
