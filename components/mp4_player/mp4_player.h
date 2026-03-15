@@ -190,6 +190,9 @@ class Mp4Player : public Component {
   bool jpeg_hw_error_logged_{false};
   uint32_t jpeg_hw_error_count_{0};
 
+  // Flag set by playback task when dimensions change, consumed by loop() to update UI
+  volatile bool dimensions_changed_{false};
+
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};
 

@@ -17,7 +17,7 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;    //static constexpr siz
 static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache (was 512KB)
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 10;           // 8 blocks of 128KB (was 4)
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 512 * 1024; // 512KB audio ring buffer (~2.7s at 48kHz stereo)
 
 // Read-ahead buffer for file I/O to reduce small read overhead
 // USB storage can handle larger buffers for better throughput
@@ -336,6 +336,41 @@ void Mp4Player::setup() {
 // Loop - update LVGL canvas when a new frame is ready
 // ============================================================================
 void Mp4Player::loop() {
+  // Update UI when video dimensions changed (e.g. after USB probe during playback)
+  if (this->dimensions_changed_) {
+    this->dimensions_changed_ = false;
+    ESP_LOGI(TAG, "Updating UI for new dimensions: %ux%u", this->video_width_, this->video_height_);
+
+    // Update resolution label
+    if (this->resolution_label_) {
+      char res[32];
+      snprintf(res, sizeof(res), "%ux%u", this->video_width_, this->video_height_);
+      lv_label_set_text(this->resolution_label_, res);
+    }
+
+    // Update touch layer size
+    if (this->touch_layer_) {
+      lv_obj_set_size(this->touch_layer_, this->video_width_, this->video_height_);
+    }
+
+    // Update controls container width
+    if (this->controls_container_) {
+      lv_obj_set_size(this->controls_container_, this->video_width_, 120);
+    }
+
+    // Update progress slider width
+    if (this->progress_slider_) {
+      int slider_w = this->video_width_ - 280;
+      if (slider_w < 100) slider_w = 100;
+      lv_obj_set_size(this->progress_slider_, slider_w, 10);
+    }
+
+    // Update time label position
+    if (this->time_label_) {
+      lv_obj_set_pos(this->time_label_, this->video_width_ - 135, 3);
+    }
+  }
+
   if (this->frame_ready_) {
     if (this->canvas_) {
       lv_canvas_set_buffer(this->canvas_,
@@ -417,7 +452,7 @@ void Mp4Player::play() {
   if (!this->playback_task_handle_) {
     xEventGroupClearBits(this->playback_event_group_, EVENT_START | EVENT_STOP | EVENT_TASK_EXIT);
     BaseType_t ret = xTaskCreatePinnedToCore(
-        playback_task_, "mp4_play", 16384, this, 5,
+        playback_task_, "mp4_play", 16384, this, 12,
         &this->playback_task_handle_, 1);
     if (ret != pdPASS) {
       ESP_LOGE(TAG, "Failed to create playback task");
@@ -572,6 +607,7 @@ void Mp4Player::playback_task_(void *arg) {
               player->display_buffer_size_ = needed_size;
               player->video_width_ = actual_w;
               player->video_height_ = actual_h;
+              player->dimensions_changed_ = true;
               ESP_LOGI(TAG, "Display buffers reallocated: %ux%u (aligned %ux%u), %u bytes",
                        actual_w, actual_h, aligned_w, aligned_h, needed_size);
             } else {
@@ -581,6 +617,7 @@ void Mp4Player::playback_task_(void *arg) {
             // Dimensions changed but buffer is large enough
             player->video_width_ = actual_w;
             player->video_height_ = actual_h;
+            player->dimensions_changed_ = true;
           }
 
           ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (buffer: %u bytes)",
@@ -640,7 +677,7 @@ void Mp4Player::playback_task_(void *arg) {
                 player->audio_ring_write_ = 0;
                 player->audio_task_running_ = true;
                 xTaskCreatePinnedToCore(
-                    audio_output_task_, "audio_out", 4096, player, 6,
+                    audio_output_task_, "audio_out", 4096, player, 15,
                     &player->audio_task_handle_, 0);
               }
             } else {
@@ -707,20 +744,19 @@ void Mp4Player::playback_task_(void *arg) {
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
               if (player->audio_ring_buffer_) {
-                // Non-blocking push: try briefly, then drop audio to avoid stalling video
+                // Push decoded audio to ring buffer, wait longer before dropping
+                // With 512KB ring buffer (~2.7s), we can afford to wait
                 size_t pushed = 0;
                 int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 10) {
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 50) {
                   size_t p = player->audio_ring_push_(
                       player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
                   pushed += p;
                   if (pushed < out.decoded_size) {
-                    vTaskDelay(pdMS_TO_TICKS(2));
+                    vTaskDelay(pdMS_TO_TICKS(1));
                     retries++;
                   }
                 }
-                // If buffer is full after brief wait, drop remaining audio
-                // (brief glitch is better than stalling video for seconds)
               } else {
                 player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
                 size_t written = 0;
@@ -1129,8 +1165,8 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  // Use larger chunks to reduce overhead and keep I2S fed
-  const size_t chunk_size = 8192;
+  // Use 16KB chunks to keep I2S DMA fed and reduce context switch overhead
+  const size_t chunk_size = 16384;
   uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
@@ -1139,10 +1175,12 @@ void Mp4Player::audio_output_task_(void *arg) {
     return;
   }
 
-  ESP_LOGI(TAG, "Audio output task started");
+  ESP_LOGI(TAG, "Audio output task started (priority 15)");
 
   // Initial delay to ensure I2S channel is fully enabled
   vTaskDelay(pdMS_TO_TICKS(50));
+
+  uint32_t underrun_count = 0;
 
   while (player->audio_task_running_) {
     if (player->state_ == PlayerState::PAUSED) {
@@ -1152,9 +1190,23 @@ void Mp4Player::audio_output_task_(void *arg) {
 
     size_t avail = player->audio_ring_available_();
     if (avail == 0) {
-      vTaskDelay(pdMS_TO_TICKS(3));
-      continue;
+      // Brief wait then check again - keep polling fast to minimize underrun gap
+      vTaskDelay(pdMS_TO_TICKS(1));
+      avail = player->audio_ring_available_();
+      if (avail == 0) {
+        underrun_count++;
+        if (underrun_count == 50) {
+          ESP_LOGW(TAG, "Audio underrun detected (ring buffer empty)");
+        }
+        vTaskDelay(pdMS_TO_TICKS(2));
+        continue;
+      }
     }
+
+    if (underrun_count >= 50) {
+      ESP_LOGI(TAG, "Audio recovered after %u underrun cycles", underrun_count);
+    }
+    underrun_count = 0;
 
     // Read as much as possible per iteration to drain ring buffer fast
     size_t to_read = avail < chunk_size ? avail : chunk_size;
@@ -1171,8 +1223,8 @@ void Mp4Player::audio_output_task_(void *arg) {
           stall_count = 0;
         } else {
           stall_count++;
-          if (stall_count > 50) break;  // Don't stall forever
-          vTaskDelay(pdMS_TO_TICKS(2));
+          if (stall_count > 100) break;  // Don't stall forever
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
     }
