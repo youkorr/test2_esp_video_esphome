@@ -1164,7 +1164,9 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  const size_t chunk_size = 16384;
+  // Use 4KB chunks to feed speaker_mixer (19KB buffer) smoothly
+  // Larger chunks cause stalls when mixer buffer is nearly full
+  const size_t chunk_size = 4096;
   uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
@@ -1188,33 +1190,38 @@ void Mp4Player::audio_output_task_(void *arg) {
     prefill_wait++;
   }
 
-  // Jitter buffer thresholds to prevent latency accumulation
-  // If ring buffer fills above high_watermark, skip old audio to resync
-  const size_t high_watermark = player->audio_ring_size_ * 3 / 4;  // 384KB = ~2s
-  const size_t target_level = 128 * 1024;  // Target ~0.67s of buffered audio
+  // Jitter buffer thresholds - lower watermark for earlier correction
+  // At 192KB/s (48kHz stereo 16-bit), catch drift before it becomes audible
+  const size_t high_watermark = 256 * 1024;  // 256KB = ~1.3s - trigger correction earlier
+  const size_t target_level = 96 * 1024;     // 96KB = ~0.5s - target after correction
   uint32_t underrun_count = 0;
   uint32_t jitter_corrections = 0;
   bool was_paused = false;
 
+  // Monitoring: log ring buffer level every 30 seconds for diagnostics
+  int64_t last_monitor_time = esp_timer_get_time() / 1000;
+  size_t monitor_min_level = player->audio_ring_size_;
+  size_t monitor_max_level = 0;
+  uint32_t speaker_stall_count = 0;
+
   while (player->audio_task_running_) {
-    // Handle pause: feed silence to keep speaker/I2S alive
+    // Handle pause: DON'T feed silence - let speaker manage its own state
+    // Feeding silence while paused causes I2S descriptor queue issues
     if (player->state_ == PlayerState::PAUSED) {
       if (!was_paused) {
         was_paused = true;
       }
-      // Feed silence to prevent I2S DMA underrun and speaker auto-stop
-      memset(chunk, 0, 1024);
-      player->speaker_->play(chunk, 1024);
-      vTaskDelay(pdMS_TO_TICKS(20));
+      vTaskDelay(pdMS_TO_TICKS(50));
       continue;
     }
 
     // On resume from pause: flush ring buffer to clear stale audio
     if (was_paused) {
       was_paused = false;
-      // Flush the ring buffer - the audio data from before pause is stale
       player->audio_ring_read_ = player->audio_ring_write_;
       underrun_count = 0;
+      monitor_min_level = player->audio_ring_size_;
+      monitor_max_level = 0;
       ESP_LOGI(TAG, "Audio resumed: ring buffer flushed for resync");
       // Wait for fresh audio to fill up
       int refill_wait = 0;
@@ -1223,22 +1230,39 @@ void Mp4Player::audio_output_task_(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(10));
         refill_wait++;
       }
+      last_monitor_time = esp_timer_get_time() / 1000;
       continue;
     }
 
     size_t avail = player->audio_ring_available_();
 
-    // Jitter buffer management: if ring buffer is too full, audio is
-    // accumulating faster than it's being consumed (latency drift).
-    // Skip old audio to resync and prevent progressive degradation.
+    // Track min/max levels for monitoring
+    if (avail < monitor_min_level) monitor_min_level = avail;
+    if (avail > monitor_max_level) monitor_max_level = avail;
+
+    // Periodic monitoring: log ring buffer health every 30 seconds
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - last_monitor_time > 30000) {
+      ESP_LOGI(TAG, "Audio ring: %uKB (min=%uKB max=%uKB) stalls=%u jitter=%u",
+               avail / 1024, monitor_min_level / 1024, monitor_max_level / 1024,
+               speaker_stall_count, jitter_corrections);
+      monitor_min_level = player->audio_ring_size_;
+      monitor_max_level = 0;
+      speaker_stall_count = 0;
+      last_monitor_time = now_ms;
+    }
+
+    // Jitter buffer management: catch latency drift early
     if (avail > high_watermark) {
       size_t skip = avail - target_level;
-      // Advance read pointer to discard old audio
+      // Align skip to sample boundary (4 bytes = one stereo 16-bit sample)
+      skip &= ~3;
       player->audio_ring_read_ = (player->audio_ring_read_ + skip) % player->audio_ring_size_;
       avail = player->audio_ring_available_();
       jitter_corrections++;
-      if (jitter_corrections <= 5) {
-        ESP_LOGW(TAG, "Audio jitter correction: skipped %u bytes to maintain A/V sync", skip);
+      if (jitter_corrections <= 10) {
+        ESP_LOGW(TAG, "Audio jitter correction #%u: skipped %uKB (level was %uKB)",
+                 jitter_corrections, skip / 1024, (avail + skip) / 1024);
       }
     }
 
@@ -1247,19 +1271,20 @@ void Mp4Player::audio_output_task_(void *arg) {
       avail = player->audio_ring_available_();
       if (avail == 0) {
         underrun_count++;
-        if (underrun_count == 100) {
-          ESP_LOGW(TAG, "Audio underrun detected (ring buffer empty)");
+        if (underrun_count == 50) {
+          ESP_LOGW(TAG, "Audio underrun (ring buffer empty for %ums)", underrun_count);
         }
         vTaskDelay(pdMS_TO_TICKS(1));
         continue;
       }
     }
 
-    if (underrun_count >= 100) {
+    if (underrun_count >= 50) {
       ESP_LOGI(TAG, "Audio recovered after %u underrun cycles", underrun_count);
     }
     underrun_count = 0;
 
+    // Feed speaker in small chunks to avoid stalling on mixer's small buffer
     size_t to_read = avail < chunk_size ? avail : chunk_size;
     size_t got = player->audio_ring_pop_(chunk, to_read);
     if (got > 0) {
@@ -1274,7 +1299,8 @@ void Mp4Player::audio_output_task_(void *arg) {
           stall_count = 0;
         } else {
           stall_count++;
-          if (stall_count > 100) break;
+          speaker_stall_count++;
+          if (stall_count > 200) break;  // Don't stall forever
           vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
