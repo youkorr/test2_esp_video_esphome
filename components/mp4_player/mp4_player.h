@@ -15,6 +15,8 @@
 #include "freertos/task.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/audio/audio.h"
+#include <dirent.h>
+#include <sys/stat.h>
 
 // Use esp_extractor API directly (no BSP dependency)
 extern "C" {
@@ -50,6 +52,7 @@ class Mp4Player : public Component {
   void set_auto_play(bool auto_play) { auto_play_ = auto_play; }
   void set_show_controls(bool show) { controls_enabled_ = show; }
   void set_usb_storage(Component *usb_storage) { usb_storage_ = usb_storage; }
+  void add_media_directory(const std::string &dir) { media_directories_.push_back(dir); }
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
@@ -62,8 +65,11 @@ class Mp4Player : public Component {
   void play();
   void pause();
   void stop();
+  void play_file(const std::string &path);
+  void show_file_browser();
   bool is_playing() const { return state_ == PlayerState::PLAYING; }
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
+  bool is_browser_active() const { return browser_active_; }
 
  protected:
   // UI
@@ -100,6 +106,29 @@ class Mp4Player : public Component {
   static int file_seek_cb_(uint32_t position, void *ctx);
   static int file_close_cb_(void *ctx);
   static uint32_t file_size_cb_(void *ctx);
+
+  // File browser
+  void create_file_browser_();
+  void destroy_file_browser_();
+  void scan_media_files_(const std::string &path);
+  bool is_video_file_(const std::string &name);
+  static void file_item_cb_(lv_event_t *e);
+  static void back_btn_cb_(lv_event_t *e);
+  static void refresh_btn_cb_(lv_event_t *e);
+
+  struct FileEntry {
+    std::string full_path;
+    std::string name;
+    size_t size;
+    bool is_directory;
+  };
+  std::vector<FileEntry> file_entries_;
+  std::vector<std::string> media_directories_;
+  std::string current_browse_path_;
+  bool browser_active_{false};
+  lv_obj_t *browser_container_{nullptr};
+  lv_obj_t *browser_list_{nullptr};
+  lv_obj_t *browser_title_{nullptr};
 
   // Configuration
   std::string file_path_;

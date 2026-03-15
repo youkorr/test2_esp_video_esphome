@@ -7,6 +7,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <algorithm>
 
 namespace esphome {
 namespace mp4_player {
@@ -164,6 +165,13 @@ void Mp4Player::setup() {
       return;
     }
     ESP_LOGI(TAG, "USB storage available, file path: %s", this->file_path_.c_str());
+  }
+
+  // If no file_path configured, show file browser
+  if (this->file_path_.empty()) {
+    ESP_LOGI(TAG, "No file_path configured, showing file browser");
+    this->create_file_browser_();
+    return;
   }
 
   this->playback_event_group_ = xEventGroupCreate();
@@ -512,6 +520,11 @@ void Mp4Player::stop() {
 
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
+
+  // Return to file browser if media_directories configured (no fixed file_path)
+  if (!this->media_directories_.empty()) {
+    this->show_file_browser();
+  }
 }
 
 // ============================================================================
@@ -1380,6 +1393,525 @@ void Mp4Player::touch_cb_(lv_event_t *e) {
   if (p->controls_visible_) p->hide_controls_(); else p->show_controls_();
 }
 
+// ============================================================================
+// File Browser - browse USB/SD card for video files
+// ============================================================================
+bool Mp4Player::is_video_file_(const std::string &name) {
+  if (name.size() < 4) return false;
+  std::string lower = name;
+  for (auto &c : lower) c = tolower(c);
+  return lower.rfind(".mp4") == lower.size() - 4 ||
+         lower.rfind(".avi") == lower.size() - 4 ||
+         lower.rfind(".mkv") == lower.size() - 4;
+}
+
+void Mp4Player::scan_media_files_(const std::string &path) {
+  this->file_entries_.clear();
+
+  DIR *dir = opendir(path.c_str());
+  if (!dir) {
+    ESP_LOGW(TAG, "Cannot open directory: %s", path.c_str());
+    return;
+  }
+
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;  // Skip hidden files
+
+    std::string full_path = path + "/" + entry->d_name;
+    struct stat st;
+    if (stat(full_path.c_str(), &st) != 0) continue;
+
+    bool is_dir = S_ISDIR(st.st_mode);
+    if (is_dir || this->is_video_file_(entry->d_name)) {
+      FileEntry fe;
+      fe.full_path = full_path;
+      fe.name = entry->d_name;
+      fe.size = is_dir ? 0 : st.st_size;
+      fe.is_directory = is_dir;
+      this->file_entries_.push_back(fe);
+    }
+  }
+  closedir(dir);
+
+  // Sort: directories first, then files alphabetically
+  std::sort(this->file_entries_.begin(), this->file_entries_.end(),
+    [](const FileEntry &a, const FileEntry &b) {
+      if (a.is_directory != b.is_directory) return a.is_directory > b.is_directory;
+      return a.name < b.name;
+    });
+
+  ESP_LOGI(TAG, "Found %u items in %s", this->file_entries_.size(), path.c_str());
+}
+
+void Mp4Player::create_file_browser_() {
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Main container - full screen dark background
+  this->browser_container_ = lv_obj_create(parent);
+  lv_obj_set_size(this->browser_container_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->browser_container_);
+  lv_obj_set_style_bg_color(this->browser_container_, lv_color_hex(0x1A1A2E), 0);
+  lv_obj_set_style_bg_opa(this->browser_container_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->browser_container_, 0, 0);
+  lv_obj_set_style_pad_all(this->browser_container_, 0, 0);
+  lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Title bar
+  lv_obj_t *title_bar = lv_obj_create(this->browser_container_);
+  lv_obj_set_size(title_bar, LV_PCT(100), 50);
+  lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x16213E), 0);
+  lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(title_bar, 0, 0);
+  lv_obj_set_style_pad_all(title_bar, 0, 0);
+  lv_obj_clear_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Back button
+  lv_obj_t *back_btn = lv_btn_create(title_bar);
+  lv_obj_set_size(back_btn, 50, 40);
+  lv_obj_set_pos(back_btn, 5, 5);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x0F3460), 0);
+  lv_obj_set_style_radius(back_btn, 8, 0);
+  lv_obj_t *back_lbl = lv_label_create(back_btn);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_obj_center(back_lbl);
+  lv_obj_add_event_cb(back_btn, back_btn_cb_, LV_EVENT_CLICKED, this);
+
+  // Title label
+  this->browser_title_ = lv_label_create(title_bar);
+  lv_label_set_text(this->browser_title_, "Media Files");
+  lv_obj_set_pos(this->browser_title_, 65, 12);
+  lv_obj_set_style_text_color(this->browser_title_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->browser_title_, &lv_font_montserrat_18, 0);
+
+  // Refresh button
+  lv_obj_t *refresh_btn = lv_btn_create(title_bar);
+  lv_obj_set_size(refresh_btn, 50, 40);
+  lv_obj_align(refresh_btn, LV_ALIGN_TOP_RIGHT, -5, 5);
+  lv_obj_set_style_bg_color(refresh_btn, lv_color_hex(0x0F3460), 0);
+  lv_obj_set_style_radius(refresh_btn, 8, 0);
+  lv_obj_t *ref_lbl = lv_label_create(refresh_btn);
+  lv_label_set_text(ref_lbl, LV_SYMBOL_REFRESH);
+  lv_obj_center(ref_lbl);
+  lv_obj_add_event_cb(refresh_btn, refresh_btn_cb_, LV_EVENT_CLICKED, this);
+
+  // File list (scrollable)
+  this->browser_list_ = lv_obj_create(this->browser_container_);
+  lv_obj_set_size(this->browser_list_, LV_PCT(100), LV_PCT(100));
+  lv_obj_align(this->browser_list_, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
+  lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->browser_list_, 0, 0);
+  lv_obj_set_style_pad_all(this->browser_list_, 5, 0);
+  lv_obj_set_style_pad_row(this->browser_list_, 4, 0);
+  lv_obj_set_flex_flow(this->browser_list_, LV_FLEX_FLOW_COLUMN);
+
+  this->browser_active_ = true;
+
+  // Show root: list media directories
+  this->current_browse_path_ = "";
+  this->navigate_to_directory_("");
+}
+
+void Mp4Player::navigate_to_directory_(const std::string &path) {
+  if (!this->browser_list_) return;
+
+  // Clear existing items
+  lv_obj_clean(this->browser_list_);
+  this->current_browse_path_ = path;
+
+  if (path.empty()) {
+    // Root level - show available media directories
+    lv_label_set_text(this->browser_title_, "Media Files");
+
+    for (const auto &dir : this->media_directories_) {
+      // Check if directory exists
+      DIR *d = opendir(dir.c_str());
+      bool available = (d != nullptr);
+      if (d) closedir(d);
+
+      lv_obj_t *btn = lv_btn_create(this->browser_list_);
+      lv_obj_set_size(btn, LV_PCT(100), 55);
+      lv_obj_set_style_bg_color(btn, available ? lv_color_hex(0x0F3460) : lv_color_hex(0x333333), 0);
+      lv_obj_set_style_radius(btn, 10, 0);
+      lv_obj_set_style_pad_left(btn, 15, 0);
+      lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_column(btn, 10, 0);
+
+      // Icon
+      lv_obj_t *icon = lv_label_create(btn);
+      bool is_usb = (dir.find("usb") != std::string::npos);
+      lv_label_set_text(icon, is_usb ? LV_SYMBOL_USB : LV_SYMBOL_SD_CARD);
+      lv_obj_set_style_text_color(icon, available ? lv_color_hex(0x00D4FF) : lv_color_hex(0x666666), 0);
+      lv_obj_set_style_text_font(icon, &lv_font_montserrat_18, 0);
+
+      // Label
+      lv_obj_t *lbl = lv_label_create(btn);
+      std::string display_name = is_usb ? "USB Drive" : "SD Card";
+      if (!available) display_name += " (not mounted)";
+      lv_label_set_text(lbl, display_name.c_str());
+      lv_obj_set_style_text_color(lbl, available ? lv_color_white() : lv_color_hex(0x666666), 0);
+      lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+
+      if (available) {
+        // Store directory path as user data for callback
+        // We need to store the string - use a static approach with file_entries_
+        FileEntry fe;
+        fe.full_path = dir;
+        fe.name = display_name;
+        fe.is_directory = true;
+        fe.size = 0;
+        this->file_entries_.push_back(fe);
+
+        size_t idx = this->file_entries_.size() - 1;
+        lv_obj_set_user_data(btn, (void *)(uintptr_t)idx);
+        lv_obj_add_event_cb(btn, file_item_cb_, LV_EVENT_CLICKED, this);
+      }
+    }
+  } else {
+    // Browse a specific directory
+    // Update title with current path
+    std::string title = path;
+    if (title.length() > 30) {
+      title = "..." + title.substr(title.length() - 27);
+    }
+    lv_label_set_text(this->browser_title_, title.c_str());
+
+    this->file_entries_.clear();
+    this->scan_media_files_(path);
+
+    if (this->file_entries_.empty()) {
+      lv_obj_t *empty_lbl = lv_label_create(this->browser_list_);
+      lv_label_set_text(empty_lbl, "No video files found");
+      lv_obj_set_style_text_color(empty_lbl, lv_color_hex(0x888888), 0);
+      lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_16, 0);
+      lv_obj_set_style_pad_top(empty_lbl, 20, 0);
+      return;
+    }
+
+    for (size_t i = 0; i < this->file_entries_.size(); i++) {
+      const auto &fe = this->file_entries_[i];
+
+      lv_obj_t *btn = lv_btn_create(this->browser_list_);
+      lv_obj_set_size(btn, LV_PCT(100), 50);
+      lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
+      lv_obj_set_style_radius(btn, 8, 0);
+      lv_obj_set_style_pad_left(btn, 12, 0);
+      lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_column(btn, 10, 0);
+
+      // Icon
+      lv_obj_t *icon = lv_label_create(btn);
+      if (fe.is_directory) {
+        lv_label_set_text(icon, LV_SYMBOL_DIRECTORY);
+        lv_obj_set_style_text_color(icon, lv_color_hex(0xFFD700), 0);
+      } else {
+        lv_label_set_text(icon, LV_SYMBOL_VIDEO);
+        lv_obj_set_style_text_color(icon, lv_color_hex(0x00FF88), 0);
+      }
+      lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
+
+      // Filename
+      lv_obj_t *name_lbl = lv_label_create(btn);
+      lv_label_set_text(name_lbl, fe.name.c_str());
+      lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
+      lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
+      lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+      lv_obj_set_flex_grow(name_lbl, 1);
+
+      // File size (for files only)
+      if (!fe.is_directory) {
+        lv_obj_t *size_lbl = lv_label_create(btn);
+        char size_buf[16];
+        if (fe.size >= 1024 * 1024) {
+          snprintf(size_buf, sizeof(size_buf), "%.1f MB", fe.size / (1024.0 * 1024.0));
+        } else if (fe.size >= 1024) {
+          snprintf(size_buf, sizeof(size_buf), "%.0f KB", fe.size / 1024.0);
+        } else {
+          snprintf(size_buf, sizeof(size_buf), "%u B", (unsigned)fe.size);
+        }
+        lv_label_set_text(size_lbl, size_buf);
+        lv_obj_set_style_text_color(size_lbl, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_12, 0);
+      }
+
+      lv_obj_set_user_data(btn, (void *)(uintptr_t)i);
+      lv_obj_add_event_cb(btn, file_item_cb_, LV_EVENT_CLICKED, this);
+    }
+  }
+}
+
+void Mp4Player::destroy_file_browser_() {
+  if (this->browser_container_) {
+    lv_obj_del(this->browser_container_);
+    this->browser_container_ = nullptr;
+    this->browser_list_ = nullptr;
+    this->browser_title_ = nullptr;
+  }
+  this->browser_active_ = false;
+  this->file_entries_.clear();
+}
+
+void Mp4Player::show_file_browser() {
+  // Hide player UI elements
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  if (this->browser_container_) {
+    // Browser already exists, just show and refresh
+    lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+    this->navigate_to_directory_(this->current_browse_path_);
+  } else {
+    this->create_file_browser_();
+  }
+  this->browser_active_ = true;
+}
+
+void Mp4Player::play_file(const std::string &path) {
+  ESP_LOGI(TAG, "Playing file: %s", path.c_str());
+
+  // Stop current playback if any
+  if (this->state_ != PlayerState::STOPPED) {
+    // Temporarily clear media_directories_ to prevent stop() from showing browser
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  // Hide browser
+  if (this->browser_container_) {
+    lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  }
+  this->browser_active_ = false;
+
+  // Set file path
+  this->file_path_ = path;
+
+  // Initialize playback resources if needed (first time from browser)
+  if (!this->playback_event_group_) {
+    this->playback_event_group_ = xEventGroupCreate();
+    if (!this->playback_event_group_) {
+      ESP_LOGE(TAG, "Failed to create event group");
+      return;
+    }
+  }
+
+  if (!this->jpeg_buffer_) {
+    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(JPEG_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!this->jpeg_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer");
+      return;
+    }
+  }
+
+  if (!this->jpeg_decoder_) {
+    jpeg_decode_engine_cfg_t cfg = {
+      .intr_priority = 0,
+      .timeout_ms = 1000,
+    };
+    if (jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to init JPEG decoder");
+      return;
+    }
+  }
+
+  // Register extractors
+  esp_mp4_extractor_register();
+  esp_avi_extractor_register();
+
+  // Probe video to get dimensions
+  {
+    esp_extractor_handle_t probe = nullptr;
+    esp_extractor_config_t probe_cfg = {};
+    probe_cfg.open = file_open_cb_;
+    probe_cfg.read = file_read_cb_;
+    probe_cfg.seek = file_seek_cb_;
+    probe_cfg.file_size = file_size_cb_;
+    probe_cfg.close = file_close_cb_;
+    probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
+    probe_cfg.url = (char *)this->file_path_.c_str();
+    probe_cfg.input_ctx = nullptr;
+    probe_cfg.output_pool_size = 256 * 1024;
+    probe_cfg.cache_block_num = 3;
+    probe_cfg.cache_block_size = 256 * 1024 / 3;
+
+    if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
+      if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
+        uint16_t vnum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
+        if (vnum > 0) {
+          extractor_stream_info_t sinfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
+            this->video_width_ = sinfo.stream_info.video_info.width;
+            this->video_height_ = sinfo.stream_info.video_info.height;
+            this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->total_duration_ms_ = sinfo.duration;
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
+                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+          }
+        }
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        this->has_audio_ = (anum > 0);
+        if (this->has_audio_) {
+          extractor_stream_info_t ainfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+            this->audio_format_ = ainfo.stream_info.audio_info.format;
+            this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+            this->audio_channels_ = ainfo.stream_info.audio_info.channel;
+            this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+          }
+        }
+      }
+      esp_extractor_close(probe);
+    }
+    esp_extractor_unregister_all();
+  }
+
+  if (this->video_width_ == 0 || this->video_height_ == 0) {
+    this->video_width_ = 800;
+    this->video_height_ = 480;
+  }
+
+  // Allocate or reallocate display buffers
+  uint32_t aligned_w = (this->video_width_ + 15) & ~15;
+  uint32_t aligned_h = (this->video_height_ + 15) & ~15;
+  uint32_t needed = aligned_w * aligned_h * 2;
+  if (needed > this->display_buffer_size_) {
+    for (int i = 0; i < 2; i++) {
+      if (this->display_buffer_[i]) {
+        heap_caps_free(this->display_buffer_[i]);
+        this->display_buffer_[i] = nullptr;
+      }
+      this->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(64, needed, MALLOC_CAP_SPIRAM);
+      if (!this->display_buffer_[i]) {
+        ESP_LOGE(TAG, "Failed to allocate display buffer %d", i);
+        return;
+      }
+      memset(this->display_buffer_[i], 0, needed);
+    }
+    this->display_buffer_size_ = needed;
+  }
+
+  // Setup audio if needed
+  if (this->has_audio_ && this->speaker_ && !this->audio_pcm_buffer_) {
+    esp_aac_dec_register();
+    esp_mp3_dec_register();
+    esp_flac_dec_register();
+    esp_pcm_dec_register();
+    this->audio_pcm_buffer_size_ = AUDIO_PCM_BUFFER_SIZE;
+    this->audio_pcm_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_pcm_buffer_size_, MALLOC_CAP_SPIRAM);
+    if (this->audio_pcm_buffer_ && !this->audio_ring_buffer_) {
+      this->audio_ring_size_ = AUDIO_RING_BUFFER_SIZE;
+      this->audio_ring_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_ring_size_, MALLOC_CAP_SPIRAM);
+      if (this->audio_ring_buffer_) {
+        this->audio_ring_read_ = 0;
+        this->audio_ring_write_ = 0;
+      }
+    }
+  }
+
+  // Create or update player UI
+  if (!this->canvas_) {
+    this->create_ui_();
+  } else {
+    // Update existing canvas
+    lv_canvas_set_buffer(this->canvas_, this->display_buffer_[0],
+                         this->video_width_, this->video_height_,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_clear_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+    if (this->touch_layer_) {
+      lv_obj_set_size(this->touch_layer_, this->video_width_, this->video_height_);
+      lv_obj_clear_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (this->controls_container_) {
+      lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (this->loading_label_) {
+      lv_label_set_text(this->loading_label_, "Loading...");
+      lv_obj_clear_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Update resolution label
+    if (this->resolution_label_) {
+      char res[32];
+      snprintf(res, sizeof(res), "%ux%u", this->video_width_, this->video_height_);
+      lv_label_set_text(this->resolution_label_, res);
+    }
+    // Update format badge
+    if (this->format_badge_) {
+      const char *ext = strrchr(this->file_path_.c_str(), '.');
+      const char *fmt = "MP4";
+      if (ext) {
+        if (strcasecmp(ext, ".avi") == 0) fmt = "AVI";
+        else if (strcasecmp(ext, ".mkv") == 0) fmt = "MKV";
+      }
+      lv_label_set_text(this->format_badge_, fmt);
+    }
+  }
+
+  // Start playback
+  this->play();
+}
+
+void Mp4Player::file_item_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+
+  if (idx >= player->file_entries_.size()) return;
+
+  const FileEntry &fe = player->file_entries_[idx];
+  if (fe.is_directory) {
+    player->navigate_to_directory_(fe.full_path);
+  } else {
+    player->play_file(fe.full_path);
+  }
+}
+
+void Mp4Player::back_btn_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+
+  if (player->current_browse_path_.empty()) {
+    return;  // Already at root
+  }
+
+  // Go up one level
+  size_t last_slash = player->current_browse_path_.rfind('/');
+  if (last_slash == std::string::npos || last_slash == 0) {
+    // Back to root (media directory list)
+    player->file_entries_.clear();
+    player->navigate_to_directory_("");
+  } else {
+    std::string parent = player->current_browse_path_.substr(0, last_slash);
+    // Check if parent is one of the media directories (go to root if so)
+    bool is_media_root = false;
+    for (const auto &dir : player->media_directories_) {
+      if (parent == dir || parent.length() < dir.length()) {
+        is_media_root = true;
+        break;
+      }
+    }
+    if (is_media_root) {
+      player->file_entries_.clear();
+      player->navigate_to_directory_("");
+    } else {
+      player->navigate_to_directory_(parent);
+    }
+  }
+}
+
+void Mp4Player::refresh_btn_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  player->file_entries_.clear();
+  player->navigate_to_directory_(player->current_browse_path_);
+}
+
 }  // namespace mp4_player
 }  // namespace esphome
 
@@ -1393,6 +1925,8 @@ void Mp4Player::dump_config() {}
 void Mp4Player::play() {}
 void Mp4Player::pause() {}
 void Mp4Player::stop() {}
+void Mp4Player::play_file(const std::string &path) {}
+void Mp4Player::show_file_browser() {}
 }  // namespace mp4_player
 }  // namespace esphome
 
