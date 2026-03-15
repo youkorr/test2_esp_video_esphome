@@ -28,20 +28,19 @@ static const char *TAG = "usb_media_storage";
 #ifdef USE_ESP_IDF
 static const size_t FILE_PATH_MAX = ESP_VFS_PATH_MAX + 256;
 
-static SemaphoreHandle_t s_device_connect_sem = NULL;
-static uint8_t s_device_address = 0;
+// Singleton pointer for callback access
+static UsbMediaStorage *s_instance = nullptr;
 
 static void msc_event_callback(const msc_host_event_t *event, void *arg) {
+  if (!s_instance) return;
   switch (event->event) {
     case msc_host_event_t::MSC_DEVICE_CONNECTED:
       ESP_LOGI(TAG, "MSC device connected, address: %d", event->device.address);
-      s_device_address = event->device.address;
-      if (s_device_connect_sem) {
-        xSemaphoreGive(s_device_connect_sem);
-      }
+      s_instance->on_device_connected(event->device.address);
       break;
     case msc_host_event_t::MSC_DEVICE_DISCONNECTED:
       ESP_LOGW(TAG, "MSC device disconnected");
+      s_instance->on_device_disconnected();
       break;
     default:
       break;
@@ -59,18 +58,31 @@ std::string UsbMediaStorage::build_path(const char *path) const {
 }
 
 void UsbMediaStorage::loop() {
-  // USB host library events are handled by the dedicated usb_host_task
-  // No additional servicing needed here
+#ifdef USE_ESP_IDF
+  // Handle pending connect
+  if (this->pending_connect_) {
+    this->pending_connect_ = false;
+    this->handle_mount_();
+  }
+  // Handle pending disconnect
+  if (this->pending_disconnect_) {
+    this->pending_disconnect_ = false;
+    this->handle_unmount_();
+  }
+#endif
 }
 
 void UsbMediaStorage::dump_config() {
   ESP_LOGCONFIG(TAG, "USB Media Storage");
   ESP_LOGCONFIG(TAG, "  Mount Point: %s", MOUNT_POINT.c_str());
+  ESP_LOGCONFIG(TAG, "  Hot-plug: enabled");
 
   if (this->mounted_) {
     ESP_LOGCONFIG(TAG, "  Status: Mounted");
+  } else if (this->device_connected_) {
+    ESP_LOGCONFIG(TAG, "  Status: Device connected (not mounted)");
   } else {
-    ESP_LOGCONFIG(TAG, "  Status: Not mounted");
+    ESP_LOGCONFIG(TAG, "  Status: Waiting for USB device");
   }
 
 #ifdef USE_SENSOR
@@ -116,18 +128,12 @@ static void usb_host_task(void *arg) {
 }
 
 void UsbMediaStorage::setup() {
-  ESP_LOGI(TAG, "Initializing USB Media Storage...");
+  ESP_LOGI(TAG, "Initializing USB Media Storage (hot-plug enabled)...");
 
-  // Step 1: Create semaphore BEFORE installing drivers (avoid race condition)
-  s_device_connect_sem = xSemaphoreCreateBinary();
-  if (!s_device_connect_sem) {
-    ESP_LOGE(TAG, "Failed to create semaphore");
-    this->init_error_ = ErrorCode::ERR_NO_DEVICE;
-    mark_failed();
-    return;
-  }
+  // Store singleton for callback
+  s_instance = this;
 
-  // Step 2: Install USB Host Library
+  // Step 1: Install USB Host Library
   const usb_host_config_t host_config = {
     .skip_phy_setup = false,
     .intr_flags = ESP_INTR_FLAG_LEVEL1,
@@ -136,8 +142,6 @@ void UsbMediaStorage::setup() {
   esp_err_t ret = usb_host_install(&host_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install USB Host Library: %s", esp_err_to_name(ret));
-    vSemaphoreDelete(s_device_connect_sem);
-    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
     mark_failed();
     return;
@@ -146,7 +150,7 @@ void UsbMediaStorage::setup() {
 
   ESP_LOGI(TAG, "USB Host Library installed");
 
-  // Step 3: Create USB host task for event handling
+  // Step 2: Create USB host task for event handling
   BaseType_t task_created = xTaskCreatePinnedToCore(
     usb_host_task,
     "usb_host_task",
@@ -159,8 +163,6 @@ void UsbMediaStorage::setup() {
 
   if (task_created != pdTRUE) {
     ESP_LOGE(TAG, "Failed to create USB host task");
-    vSemaphoreDelete(s_device_connect_sem);
-    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_USB_HOST_INIT;
     mark_failed();
     return;
@@ -169,7 +171,7 @@ void UsbMediaStorage::setup() {
   // Small delay to let USB host task start processing events
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // Step 4: Install MSC Host driver
+  // Step 3: Install MSC Host driver
   const msc_host_driver_config_t msc_config = {
     .create_backround_task = true,
     .task_priority = 5,
@@ -180,60 +182,69 @@ void UsbMediaStorage::setup() {
   ret = msc_host_install(&msc_config);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to install MSC Host driver: %s", esp_err_to_name(ret));
-    vSemaphoreDelete(s_device_connect_sem);
-    s_device_connect_sem = NULL;
     this->init_error_ = ErrorCode::ERR_MSC_INIT;
     mark_failed();
     return;
   }
 
   ESP_LOGI(TAG, "MSC Host driver installed");
+  ESP_LOGI(TAG, "USB ready - plug in a USB flash drive at any time");
 
-  // Step 5: Wait for USB device connection via callback
-  ESP_LOGI(TAG, "Waiting for USB device to be connected (up to 15s)...");
-  ESP_LOGI(TAG, "Please ensure USB flash drive is plugged into USB HS Type-C port");
-  msc_host_device_handle_t msc_device = NULL;
+#ifdef USE_TEXT_SENSOR
+  if (this->usb_status_text_sensor_ != nullptr) {
+    this->usb_status_text_sensor_->publish_state("Waiting for device");
+  }
+#endif
+}
 
-  if (xSemaphoreTake(s_device_connect_sem, pdMS_TO_TICKS(15000)) == pdTRUE) {
-    ESP_LOGI(TAG, "USB device detected at address %d, installing device...", s_device_address);
-    ret = msc_host_install_device(s_device_address, &msc_device);
-    if (ret != ESP_OK) {
-      ESP_LOGE(TAG, "Failed to install MSC device: %s", esp_err_to_name(ret));
-      vSemaphoreDelete(s_device_connect_sem);
-      s_device_connect_sem = NULL;
-      this->init_error_ = ErrorCode::ERR_NO_DEVICE;
-      mark_failed();
-      return;
-    }
-    this->device_connected_ = true;
-    ESP_LOGI(TAG, "USB device found and connected!");
-  } else {
-    ESP_LOGE(TAG, "No USB storage device found within 15 seconds");
-    ESP_LOGE(TAG, "Check: 1) USB drive plugged into USB HS (not JTAG) port");
-    ESP_LOGE(TAG, "Check: 2) Use USB-C to USB-A adapter if drive is USB-A");
-    ESP_LOGE(TAG, "Check: 3) USB drive must be FAT32 formatted");
-    vSemaphoreDelete(s_device_connect_sem);
-    s_device_connect_sem = NULL;
-    this->init_error_ = ErrorCode::ERR_NO_DEVICE;
-    mark_failed();
+void UsbMediaStorage::on_device_connected(uint8_t address) {
+  this->pending_device_address_ = address;
+  this->pending_connect_ = true;
+}
+
+void UsbMediaStorage::on_device_disconnected() {
+  this->pending_disconnect_ = true;
+}
+
+void UsbMediaStorage::handle_mount_() {
+  if (this->mounted_) {
+    ESP_LOGW(TAG, "Device already mounted, ignoring connect event");
     return;
   }
 
-  vSemaphoreDelete(s_device_connect_sem);
-  s_device_connect_sem = NULL;
+  ESP_LOGI(TAG, "USB device detected at address %d, installing device...", this->pending_device_address_);
 
-  // Step 6: Mount the USB device filesystem via VFS
+  esp_err_t ret = msc_host_install_device(this->pending_device_address_, &this->msc_device_);
+  if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to install MSC device: %s", esp_err_to_name(ret));
+#ifdef USE_TEXT_SENSOR
+    if (this->usb_status_text_sensor_ != nullptr) {
+      this->usb_status_text_sensor_->publish_state("Device error");
+    }
+#endif
+    return;
+  }
+  this->device_connected_ = true;
+  ESP_LOGI(TAG, "USB device connected!");
+
+  // Mount the USB device filesystem via VFS
   const esp_vfs_fat_mount_config_t mount_config = {
     .format_if_mount_failed = false,
     .max_files = 64,
-    .allocation_unit_size = 0,  // Use default
+    .allocation_unit_size = 0,
   };
 
-  ret = msc_host_vfs_register(msc_device, MOUNT_POINT.c_str(), &mount_config, NULL);
+  ret = msc_host_vfs_register(this->msc_device_, MOUNT_POINT.c_str(), &mount_config, NULL);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to mount USB filesystem: %s", esp_err_to_name(ret));
-    this->init_error_ = ErrorCode::ERR_MOUNT;
-    mark_failed();
+    msc_host_uninstall_device(this->msc_device_);
+    this->msc_device_ = NULL;
+    this->device_connected_ = false;
+#ifdef USE_TEXT_SENSOR
+    if (this->usb_status_text_sensor_ != nullptr) {
+      this->usb_status_text_sensor_->publish_state("Mount failed");
+    }
+#endif
     return;
   }
 
@@ -256,6 +267,53 @@ void UsbMediaStorage::setup() {
 #endif
 
   update_sensors();
+}
+
+void UsbMediaStorage::handle_unmount_() {
+  if (!this->device_connected_ && !this->mounted_) {
+    ESP_LOGW(TAG, "No device to disconnect");
+    return;
+  }
+
+  ESP_LOGW(TAG, "USB device removed - unmounting...");
+
+  if (this->mounted_) {
+    esp_err_t ret = msc_host_vfs_unregister(this->msc_device_);
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to unregister VFS: %s", esp_err_to_name(ret));
+    }
+    this->mounted_ = false;
+  }
+
+  if (this->device_connected_) {
+    esp_err_t ret = msc_host_uninstall_device(this->msc_device_);
+    if (ret != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to uninstall MSC device: %s", esp_err_to_name(ret));
+    }
+    this->msc_device_ = NULL;
+    this->device_connected_ = false;
+  }
+
+  ESP_LOGI(TAG, "USB device unmounted - plug in a USB drive to reconnect");
+
+#ifdef USE_TEXT_SENSOR
+  if (this->usb_status_text_sensor_ != nullptr) {
+    this->usb_status_text_sensor_->publish_state("Disconnected");
+  }
+#endif
+
+#ifdef USE_SENSOR
+  if (this->used_space_sensor_ != nullptr)
+    this->used_space_sensor_->publish_state(NAN);
+  if (this->total_space_sensor_ != nullptr)
+    this->total_space_sensor_->publish_state(NAN);
+  if (this->free_space_sensor_ != nullptr)
+    this->free_space_sensor_->publish_state(NAN);
+  for (auto &sensor : this->file_size_sensors_) {
+    if (sensor.sensor != nullptr)
+      sensor.sensor->publish_state(NAN);
+  }
+#endif
 }
 
 // === File Write Operations ===

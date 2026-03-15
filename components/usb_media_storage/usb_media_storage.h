@@ -12,6 +12,10 @@
 #include <string>
 #include <functional>
 
+#ifdef USE_ESP_IDF
+#include "usb/msc_host.h"
+#endif
+
 namespace esphome {
 namespace usb_media_storage {
 
@@ -81,6 +85,10 @@ class UsbMediaStorage : public Component {
   // Mount point access (for other components like simple_video_player)
   const std::string &get_mount_point() const { return MOUNT_POINT; }
 
+  // Hot-plug callbacks (called from ISR context via MSC event callback)
+  void on_device_connected(uint8_t address);
+  void on_device_disconnected();
+
 #ifdef USE_SENSOR
   void add_file_size_sensor(sensor::Sensor *sensor, std::string const &path);
 #endif
@@ -90,6 +98,17 @@ class UsbMediaStorage : public Component {
   bool mounted_{false};
   bool device_connected_{false};
   bool install_attempted_{false};
+
+  // Hot-plug state
+  volatile bool pending_connect_{false};
+  volatile bool pending_disconnect_{false};
+  uint8_t pending_device_address_{0};
+#ifdef USE_ESP_IDF
+  msc_host_device_handle_t msc_device_{NULL};
+#endif
+
+  void handle_mount_();
+  void handle_unmount_();
 
   static const std::string MOUNT_POINT;
 
