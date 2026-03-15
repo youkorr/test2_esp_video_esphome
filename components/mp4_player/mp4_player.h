@@ -110,6 +110,7 @@ class Mp4Player : public Component {
   // File browser
   void create_file_browser_();
   void destroy_file_browser_();
+  void navigate_to_directory_(const std::string &path);
   void scan_media_files_(const std::string &path);
   bool is_video_file_(const std::string &name);
   static void file_item_cb_(lv_event_t *e);

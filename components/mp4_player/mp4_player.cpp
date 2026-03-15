@@ -1483,7 +1483,7 @@ void Mp4Player::create_file_browser_() {
   lv_label_set_text(this->browser_title_, "Media Files");
   lv_obj_set_pos(this->browser_title_, 65, 12);
   lv_obj_set_style_text_color(this->browser_title_, lv_color_white(), 0);
-  lv_obj_set_style_text_font(this->browser_title_, &lv_font_montserrat_18, 0);
+  lv_obj_set_style_text_font(this->browser_title_, &lv_font_montserrat_16, 0);
 
   // Refresh button
   lv_obj_t *refresh_btn = lv_btn_create(title_bar);
@@ -1546,7 +1546,7 @@ void Mp4Player::navigate_to_directory_(const std::string &path) {
       bool is_usb = (dir.find("usb") != std::string::npos);
       lv_label_set_text(icon, is_usb ? LV_SYMBOL_USB : LV_SYMBOL_SD_CARD);
       lv_obj_set_style_text_color(icon, available ? lv_color_hex(0x00D4FF) : lv_color_hex(0x666666), 0);
-      lv_obj_set_style_text_font(icon, &lv_font_montserrat_18, 0);
+      lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
 
       // Label
       lv_obj_t *lbl = lv_label_create(btn);
@@ -1862,7 +1862,7 @@ void Mp4Player::play_file(const std::string &path) {
 
 void Mp4Player::file_item_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(lv_event_get_target(e));
+  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(static_cast<lv_obj_t *>(lv_event_get_target(e)));
 
   if (idx >= player->file_entries_.size()) return;
 
