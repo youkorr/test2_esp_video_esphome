@@ -1637,7 +1637,7 @@ void Mp4Player::navigate_to_directory_(const std::string &path) {
         }
         lv_label_set_text(size_lbl, size_buf);
         lv_obj_set_style_text_color(size_lbl, lv_color_hex(0x888888), 0);
-        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_14, 0);
       }
 
       lv_obj_set_user_data(btn, (void *)(uintptr_t)i);
