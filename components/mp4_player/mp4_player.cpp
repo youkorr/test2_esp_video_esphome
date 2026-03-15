@@ -1523,8 +1523,8 @@ void Mp4Player::create_file_browser_() {
   lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
   lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(this->browser_list_, 0, 0);
-  lv_obj_set_style_pad_all(this->browser_list_, 5, 0);
-  lv_obj_set_style_pad_row(this->browser_list_, 4, 0);
+  lv_obj_set_style_pad_all(this->browser_list_, 8, 0);
+  lv_obj_set_style_pad_row(this->browser_list_, 8, 0);
   lv_obj_set_flex_flow(this->browser_list_, LV_FLEX_FLOW_COLUMN);
 
   this->browser_active_ = true;
@@ -1536,6 +1536,9 @@ void Mp4Player::create_file_browser_() {
 
 void Mp4Player::navigate_to_directory_(std::string path) {
   if (!this->browser_list_) return;
+
+  // Defer LVGL layout updates until all items are added (reduces lag)
+  lv_obj_add_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
 
   // Clear existing items
   lv_obj_clean(this->browser_list_);
@@ -1555,14 +1558,14 @@ void Mp4Player::navigate_to_directory_(std::string path) {
       if (d) closedir(d);
 
       lv_obj_t *btn = lv_btn_create(this->browser_list_);
-      lv_obj_set_size(btn, LV_PCT(100), 55);
+      lv_obj_set_size(btn, LV_PCT(100), 65);
       lv_obj_set_style_bg_color(btn, available ? lv_color_hex(0x0F3460) : lv_color_hex(0x333333), 0);
       lv_obj_set_style_radius(btn, 10, 0);
       lv_obj_set_style_pad_left(btn, 15, 0);
       lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
       lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
       lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-      lv_obj_set_style_pad_column(btn, 10, 0);
+      lv_obj_set_style_pad_column(btn, 12, 0);
 
       // Icon
       lv_obj_t *icon = lv_label_create(btn);
@@ -1612,6 +1615,7 @@ void Mp4Player::navigate_to_directory_(std::string path) {
       lv_obj_set_style_text_color(empty_lbl, lv_color_hex(0x888888), 0);
       lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_16, 0);
       lv_obj_set_style_pad_top(empty_lbl, 20, 0);
+      lv_obj_clear_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
       return;
     }
 
@@ -1619,14 +1623,14 @@ void Mp4Player::navigate_to_directory_(std::string path) {
       const auto &fe = this->file_entries_[i];
 
       lv_obj_t *btn = lv_btn_create(this->browser_list_);
-      lv_obj_set_size(btn, LV_PCT(100), 50);
+      lv_obj_set_size(btn, LV_PCT(100), 70);
       lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
-      lv_obj_set_style_radius(btn, 8, 0);
-      lv_obj_set_style_pad_left(btn, 12, 0);
+      lv_obj_set_style_radius(btn, 10, 0);
+      lv_obj_set_style_pad_left(btn, 15, 0);
       lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
       lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
       lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-      lv_obj_set_style_pad_column(btn, 10, 0);
+      lv_obj_set_style_pad_column(btn, 12, 0);
 
       // Icon
       lv_obj_t *icon = lv_label_create(btn);
@@ -1643,7 +1647,7 @@ void Mp4Player::navigate_to_directory_(std::string path) {
       lv_obj_t *name_lbl = lv_label_create(btn);
       lv_label_set_text(name_lbl, fe.name.c_str());
       lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
-      lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_14, 0);
+      lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
       lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
       lv_obj_set_flex_grow(name_lbl, 1);
 
@@ -1660,13 +1664,16 @@ void Mp4Player::navigate_to_directory_(std::string path) {
         }
         lv_label_set_text(size_lbl, size_buf);
         lv_obj_set_style_text_color(size_lbl, lv_color_hex(0x888888), 0);
-        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_16, 0);
       }
 
       lv_obj_set_user_data(btn, (void *)(uintptr_t)i);
       lv_obj_add_event_cb(btn, file_item_cb_, LV_EVENT_CLICKED, this);
     }
   }
+
+  // Show list now that all items are added (single redraw)
+  lv_obj_clear_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void Mp4Player::destroy_file_browser_() {
