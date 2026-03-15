@@ -1164,7 +1164,6 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  // Use 16KB chunks to keep I2S DMA fed and reduce context switch overhead
   const size_t chunk_size = 16384;
   uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
   if (!chunk) {
@@ -1177,7 +1176,6 @@ void Mp4Player::audio_output_task_(void *arg) {
   ESP_LOGI(TAG, "Audio output task started (priority 15, core 1)");
 
   // Wait for ring buffer to pre-fill before starting output
-  // This gives ~0.5s head start to absorb sensor/WiFi stalls
   const size_t prefill_target = 96 * 1024;  // 96KB (~0.5s at 48kHz stereo)
   int prefill_wait = 0;
   while (player->audio_task_running_ && prefill_wait < 200) {
@@ -1190,17 +1188,61 @@ void Mp4Player::audio_output_task_(void *arg) {
     prefill_wait++;
   }
 
+  // Jitter buffer thresholds to prevent latency accumulation
+  // If ring buffer fills above high_watermark, skip old audio to resync
+  const size_t high_watermark = player->audio_ring_size_ * 3 / 4;  // 384KB = ~2s
+  const size_t target_level = 128 * 1024;  // Target ~0.67s of buffered audio
   uint32_t underrun_count = 0;
+  uint32_t jitter_corrections = 0;
+  bool was_paused = false;
 
   while (player->audio_task_running_) {
+    // Handle pause: feed silence to keep speaker/I2S alive
     if (player->state_ == PlayerState::PAUSED) {
+      if (!was_paused) {
+        was_paused = true;
+      }
+      // Feed silence to prevent I2S DMA underrun and speaker auto-stop
+      memset(chunk, 0, 1024);
+      player->speaker_->play(chunk, 1024);
       vTaskDelay(pdMS_TO_TICKS(20));
       continue;
     }
 
+    // On resume from pause: flush ring buffer to clear stale audio
+    if (was_paused) {
+      was_paused = false;
+      // Flush the ring buffer - the audio data from before pause is stale
+      player->audio_ring_read_ = player->audio_ring_write_;
+      underrun_count = 0;
+      ESP_LOGI(TAG, "Audio resumed: ring buffer flushed for resync");
+      // Wait for fresh audio to fill up
+      int refill_wait = 0;
+      while (player->audio_task_running_ && refill_wait < 100) {
+        if (player->audio_ring_available_() >= prefill_target) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+        refill_wait++;
+      }
+      continue;
+    }
+
     size_t avail = player->audio_ring_available_();
+
+    // Jitter buffer management: if ring buffer is too full, audio is
+    // accumulating faster than it's being consumed (latency drift).
+    // Skip old audio to resync and prevent progressive degradation.
+    if (avail > high_watermark) {
+      size_t skip = avail - target_level;
+      // Advance read pointer to discard old audio
+      player->audio_ring_read_ = (player->audio_ring_read_ + skip) % player->audio_ring_size_;
+      avail = player->audio_ring_available_();
+      jitter_corrections++;
+      if (jitter_corrections <= 5) {
+        ESP_LOGW(TAG, "Audio jitter correction: skipped %u bytes to maintain A/V sync", skip);
+      }
+    }
+
     if (avail == 0) {
-      // Brief wait then check again - keep polling fast to minimize underrun gap
       vTaskDelay(pdMS_TO_TICKS(1));
       avail = player->audio_ring_available_();
       if (avail == 0) {
@@ -1218,7 +1260,6 @@ void Mp4Player::audio_output_task_(void *arg) {
     }
     underrun_count = 0;
 
-    // Read as much as possible per iteration to drain ring buffer fast
     size_t to_read = avail < chunk_size ? avail : chunk_size;
     size_t got = player->audio_ring_pop_(chunk, to_read);
     if (got > 0) {
@@ -1233,7 +1274,7 @@ void Mp4Player::audio_output_task_(void *arg) {
           stall_count = 0;
         } else {
           stall_count++;
-          if (stall_count > 100) break;  // Don't stall forever
+          if (stall_count > 100) break;
           vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
@@ -1241,7 +1282,11 @@ void Mp4Player::audio_output_task_(void *arg) {
   }
 
   free(chunk);
-  ESP_LOGI(TAG, "Audio output task exiting");
+  if (jitter_corrections > 0) {
+    ESP_LOGI(TAG, "Audio output task exiting (jitter corrections: %u)", jitter_corrections);
+  } else {
+    ESP_LOGI(TAG, "Audio output task exiting");
+  }
   vTaskDelete(nullptr);
 }
 
