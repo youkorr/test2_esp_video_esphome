@@ -1419,17 +1419,37 @@ void Mp4Player::scan_media_files_(const std::string &path) {
     if (entry->d_name[0] == '.') continue;  // Skip hidden files
 
     std::string full_path = path + "/" + entry->d_name;
-    struct stat st;
-    if (stat(full_path.c_str(), &st) != 0) continue;
 
-    bool is_dir = S_ISDIR(st.st_mode);
+    // Use d_type for directory detection (more reliable on ESP32 FATFS than stat)
+    bool is_dir = (entry->d_type == DT_DIR);
+
+    // If d_type is unknown, fall back to stat
+    if (entry->d_type == DT_UNKNOWN) {
+      struct stat st;
+      if (stat(full_path.c_str(), &st) != 0) {
+        ESP_LOGW(TAG, "Cannot stat: %s", full_path.c_str());
+        continue;
+      }
+      is_dir = S_ISDIR(st.st_mode);
+    }
+
     if (is_dir || this->is_video_file_(entry->d_name)) {
       FileEntry fe;
       fe.full_path = full_path;
       fe.name = entry->d_name;
-      fe.size = is_dir ? 0 : st.st_size;
       fe.is_directory = is_dir;
+      fe.size = 0;
+
+      // Get file size only for non-directory entries
+      if (!is_dir) {
+        struct stat st;
+        if (stat(full_path.c_str(), &st) == 0) {
+          fe.size = st.st_size;
+        }
+      }
+
       this->file_entries_.push_back(fe);
+      ESP_LOGD(TAG, "  Found: %s [%s]", entry->d_name, is_dir ? "DIR" : "FILE");
     }
   }
   closedir(dir);
@@ -1523,7 +1543,10 @@ void Mp4Player::navigate_to_directory_(const std::string &path) {
 
   if (path.empty()) {
     // Root level - show available media directories
+    this->file_entries_.clear();
     lv_label_set_text(this->browser_title_, "Media Files");
+
+    ESP_LOGI(TAG, "Showing root: %u media directories configured", this->media_directories_.size());
 
     for (const auto &dir : this->media_directories_) {
       // Check if directory exists
