@@ -14,6 +14,7 @@
 
 #ifdef USE_ESP_IDF
 #include "usb/msc_host.h"
+#include "usb/msc_host_vfs.h"
 #endif
 
 namespace esphome {
@@ -105,6 +106,7 @@ class UsbMediaStorage : public Component {
   uint8_t pending_device_address_{0};
 #ifdef USE_ESP_IDF
   msc_host_device_handle_t msc_device_{NULL};
+  msc_host_vfs_handle_t vfs_handle_{NULL};
 #endif
 
   void handle_mount_();

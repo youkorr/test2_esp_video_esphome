@@ -234,7 +234,7 @@ void UsbMediaStorage::handle_mount_() {
     .allocation_unit_size = 0,
   };
 
-  ret = msc_host_vfs_register(this->msc_device_, MOUNT_POINT.c_str(), &mount_config, NULL);
+  ret = msc_host_vfs_register(this->msc_device_, MOUNT_POINT.c_str(), &mount_config, &this->vfs_handle_);
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to mount USB filesystem: %s", esp_err_to_name(ret));
     msc_host_uninstall_device(this->msc_device_);
@@ -278,10 +278,11 @@ void UsbMediaStorage::handle_unmount_() {
   ESP_LOGW(TAG, "USB device removed - unmounting...");
 
   if (this->mounted_) {
-    esp_err_t ret = msc_host_vfs_unregister(this->msc_device_);
+    esp_err_t ret = msc_host_vfs_unregister(this->vfs_handle_);
     if (ret != ESP_OK) {
       ESP_LOGE(TAG, "Failed to unregister VFS: %s", esp_err_to_name(ret));
     }
+    this->vfs_handle_ = NULL;
     this->mounted_ = false;
   }
 
