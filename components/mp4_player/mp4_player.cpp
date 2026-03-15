@@ -1534,7 +1534,7 @@ void Mp4Player::create_file_browser_() {
   this->navigate_to_directory_("");
 }
 
-void Mp4Player::navigate_to_directory_(const std::string &path) {
+void Mp4Player::navigate_to_directory_(std::string path) {
   if (!this->browser_list_) return;
 
   // Clear existing items
