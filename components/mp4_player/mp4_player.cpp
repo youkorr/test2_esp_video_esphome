@@ -169,6 +169,11 @@ static void *lvgl_fs_open(lv_fs_drv_t * /*drv*/, const char *path, lv_fs_mode_t 
   if (mode == LV_FS_MODE_WR) flags = "wb";
   else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "r+b";
   FILE *f = fopen(path, flags);
+  if (!f) {
+    ESP_LOGW("lvgl_fs", "Failed to open: %s (mode=%s)", path, flags);
+  } else {
+    ESP_LOGD("lvgl_fs", "Opened: %s", path);
+  }
   return (void *)f;
 }
 
@@ -179,7 +184,7 @@ static lv_fs_res_t lvgl_fs_close(lv_fs_drv_t * /*drv*/, void *file) {
 
 static lv_fs_res_t lvgl_fs_read(lv_fs_drv_t * /*drv*/, void *file, void *buf, uint32_t btr, uint32_t *br) {
   *br = fread(buf, 1, btr, (FILE *)file);
-  return (*br > 0 || btr == 0) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+  return LV_FS_RES_OK;
 }
 
 static lv_fs_res_t lvgl_fs_write(lv_fs_drv_t * /*drv*/, void *file, const void *buf, uint32_t btw, uint32_t *bw) {
@@ -840,16 +845,18 @@ void Mp4Player::playback_task_(void *arg) {
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
               if (player->audio_ring_buffer_) {
-                // Push decoded audio to ring buffer, wait longer before dropping
-                // With 512KB ring buffer (~2.7s), we can afford to wait
+                // Push decoded audio to ring buffer
+                // For audio-only: wait indefinitely (no video to sync with)
+                // For video+audio: limited retries to avoid blocking video decode
+                int max_retries = player->audio_only_mode_ ? 500 : 50;
                 size_t pushed = 0;
                 int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 50) {
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < max_retries) {
                   size_t p = player->audio_ring_push_(
                       player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
                   pushed += p;
                   if (pushed < out.decoded_size) {
-                    vTaskDelay(pdMS_TO_TICKS(1));
+                    vTaskDelay(pdMS_TO_TICKS(2));
                     retries++;
                   }
                 }
@@ -1287,9 +1294,10 @@ void Mp4Player::audio_output_task_(void *arg) {
     prefill_wait++;
   }
 
-  // Jitter buffer thresholds - lower watermark for earlier correction
-  // At 192KB/s (48kHz stereo 16-bit), catch drift before it becomes audible
-  const size_t high_watermark = 256 * 1024;  // 256KB = ~1.3s - trigger correction earlier
+  // Jitter buffer thresholds
+  // For video+audio mode: correct when buffer gets too full (drift from video timing)
+  // audio_only_mode_ is checked dynamically since it may be set after task starts
+  const size_t video_high_watermark = 256 * 1024;  // 256KB for video+audio
   const size_t target_level = 96 * 1024;     // 96KB = ~0.5s - target after correction
   uint32_t underrun_count = 0;
   uint32_t jitter_corrections = 0;
@@ -1350,7 +1358,8 @@ void Mp4Player::audio_output_task_(void *arg) {
     }
 
     // Jitter buffer management: catch latency drift early
-    if (avail > high_watermark) {
+    // Skip entirely for audio-only mode (no A/V sync needed, producer backpressures naturally)
+    if (!player->audio_only_mode_ && avail > video_high_watermark) {
       size_t skip = avail - target_level;
       // Align skip to sample boundary (4 bytes = one stereo 16-bit sample)
       skip &= ~3;
@@ -2052,7 +2061,10 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
-      // Show spectrum analyzer and play audio
+      // Start playback FIRST (play_file calls stop() which resets audio_only_mode_)
+      this->play_file(path);
+
+      // NOW set audio-only mode and create spectrum UI (after stop() has run)
       this->audio_only_mode_ = true;
       this->create_spectrum_ui_();
 
@@ -2065,8 +2077,6 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
         const char *fname = strrchr(path.c_str(), '/');
         lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : path.c_str());
       }
-
-      this->play_file(path);
 
       // Set format info after play_file has probed
       if (this->spectrum_artist_label_) {
