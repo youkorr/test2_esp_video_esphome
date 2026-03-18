@@ -99,6 +99,15 @@ class Mp4Player : public Component {
   // Volume
   void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);
 
+  // Spectrum analyzer
+  static constexpr int SPECTRUM_BANDS = 16;
+  static constexpr int FFT_SIZE = 512;
+  void create_spectrum_ui_();
+  void destroy_spectrum_ui_();
+  void update_spectrum_();
+  void compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_count);
+  static void fft_simple_(float *real, float *imag, int n);
+
   // Static callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
@@ -147,6 +156,17 @@ class Mp4Player : public Component {
   lv_obj_t *browser_title_{nullptr};
   lv_obj_t *image_viewer_{nullptr};
   std::string image_viewer_path_;
+
+  // Spectrum analyzer UI
+  lv_obj_t *spectrum_container_{nullptr};
+  lv_obj_t *spectrum_bars_[SPECTRUM_BANDS]{};
+  lv_obj_t *spectrum_title_label_{nullptr};
+  lv_obj_t *spectrum_artist_label_{nullptr};
+  float spectrum_magnitudes_[SPECTRUM_BANDS]{};
+  float spectrum_peaks_[SPECTRUM_BANDS]{};
+  float spectrum_smooth_[SPECTRUM_BANDS]{};
+  bool audio_only_mode_{false};
+  uint32_t spectrum_last_update_{0};
 
   // Configuration
   std::string file_path_;

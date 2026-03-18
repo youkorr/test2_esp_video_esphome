@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <algorithm>
+#include <cmath>
 
 // LVGL extensions for media display
 #if __has_include("lvgl/src/libs/lottie/lv_lottie.h")
@@ -405,6 +406,11 @@ void Mp4Player::loop() {
   if (this->state_ == PlayerState::PLAYING && this->controls_visible_) {
     this->update_progress_();
   }
+
+  // Update spectrum analyzer for audio-only mode
+  if (this->audio_only_mode_) {
+    this->update_spectrum_();
+  }
 }
 
 // ============================================================================
@@ -525,6 +531,11 @@ void Mp4Player::stop() {
   // Show controls when stopped (user needs them visible)
   this->show_controls_();
   if (this->hide_timer_) lv_timer_pause(this->hide_timer_);
+
+  // Clean up spectrum analyzer if in audio-only mode
+  if (this->audio_only_mode_) {
+    this->destroy_spectrum_ui_();
+  }
 
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
@@ -1974,8 +1985,31 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
-      // For now, play audio files as video (uses same extractor pipeline)
+      // Show spectrum analyzer and play audio
+      this->audio_only_mode_ = true;
+      this->create_spectrum_ui_();
+
+      // Hide browser
+      if (this->browser_container_)
+        lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+
+      // Set title from filename
+      if (this->spectrum_title_label_) {
+        const char *fname = strrchr(path.c_str(), '/');
+        lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : path.c_str());
+      }
+
       this->play_file(path);
+
+      // Set format info after play_file has probed
+      if (this->spectrum_artist_label_) {
+        char info[64];
+        snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+                 this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100,
+                 this->audio_channels_ > 1 ? "Stereo" : "Mono",
+                 this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+        lv_label_set_text(this->spectrum_artist_label_, info);
+      }
       break;
 
     default:
@@ -2099,6 +2133,249 @@ void Mp4Player::destroy_image_viewer_() {
     this->image_viewer_ = nullptr;
   }
   this->image_viewer_path_.clear();
+}
+
+// ============================================================================
+// Spectrum Analyzer
+// ============================================================================
+
+// Simple radix-2 FFT (in-place, Cooley-Tukey)
+void Mp4Player::fft_simple_(float *real, float *imag, int n) {
+  // Bit-reversal permutation
+  for (int i = 1, j = 0; i < n; i++) {
+    int bit = n >> 1;
+    for (; j & bit; bit >>= 1) {
+      j ^= bit;
+    }
+    j ^= bit;
+    if (i < j) {
+      std::swap(real[i], real[j]);
+      std::swap(imag[i], imag[j]);
+    }
+  }
+
+  // FFT butterfly
+  for (int len = 2; len <= n; len <<= 1) {
+    float angle = -2.0f * M_PI / len;
+    float w_real = cosf(angle);
+    float w_imag = sinf(angle);
+    for (int i = 0; i < n; i += len) {
+      float cur_real = 1.0f, cur_imag = 0.0f;
+      for (int j = 0; j < len / 2; j++) {
+        float t_real = cur_real * real[i + j + len / 2] - cur_imag * imag[i + j + len / 2];
+        float t_imag = cur_real * imag[i + j + len / 2] + cur_imag * real[i + j + len / 2];
+        real[i + j + len / 2] = real[i + j] - t_real;
+        imag[i + j + len / 2] = imag[i + j] - t_imag;
+        real[i + j] += t_real;
+        imag[i + j] += t_imag;
+        float new_real = cur_real * w_real - cur_imag * w_imag;
+        cur_imag = cur_real * w_imag + cur_imag * w_real;
+        cur_real = new_real;
+      }
+    }
+  }
+}
+
+void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_count) {
+  if (sample_count < (size_t)FFT_SIZE) return;
+
+  float real[FFT_SIZE];
+  float imag[FFT_SIZE];
+
+  // Fill FFT input with windowed samples (Hanning window)
+  // If stereo, take only left channel (every other sample)
+  int step = (this->audio_channels_ > 1) ? 2 : 1;
+  for (int i = 0; i < FFT_SIZE; i++) {
+    float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
+    real[i] = (float)pcm[i * step] * window / 32768.0f;
+    imag[i] = 0.0f;
+  }
+
+  fft_simple_(real, imag, FFT_SIZE);
+
+  // Map FFT bins to spectrum bands (logarithmic distribution)
+  int half = FFT_SIZE / 2;
+  for (int band = 0; band < SPECTRUM_BANDS; band++) {
+    // Logarithmic band mapping: each band covers a wider frequency range
+    float frac_lo = (float)band / SPECTRUM_BANDS;
+    float frac_hi = (float)(band + 1) / SPECTRUM_BANDS;
+    // Exponential mapping for more musical distribution
+    int bin_lo = (int)(powf(frac_lo, 2.0f) * half);
+    int bin_hi = (int)(powf(frac_hi, 2.0f) * half);
+    if (bin_lo < 1) bin_lo = 1;
+    if (bin_hi <= bin_lo) bin_hi = bin_lo + 1;
+    if (bin_hi > half) bin_hi = half;
+
+    float sum = 0.0f;
+    for (int b = bin_lo; b < bin_hi; b++) {
+      float mag = sqrtf(real[b] * real[b] + imag[b] * imag[b]);
+      if (mag > sum) sum = mag;  // Use peak within band
+    }
+
+    // Convert to dB-like scale (0-100)
+    float db = 20.0f * log10f(sum + 1e-6f);
+    float normalized = (db + 40.0f) / 40.0f;  // -40dB to 0dB -> 0 to 1
+    if (normalized < 0.0f) normalized = 0.0f;
+    if (normalized > 1.0f) normalized = 1.0f;
+
+    this->spectrum_magnitudes_[band] = normalized * 100.0f;
+  }
+}
+
+void Mp4Player::create_spectrum_ui_() {
+  this->destroy_spectrum_ui_();
+
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Full-screen container
+  this->spectrum_container_ = lv_obj_create(parent);
+  lv_obj_set_size(this->spectrum_container_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->spectrum_container_);
+  lv_obj_set_style_bg_color(this->spectrum_container_, lv_color_hex(0x0A0A1A), 0);
+  lv_obj_set_style_bg_opa(this->spectrum_container_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->spectrum_container_, 0, 0);
+  lv_obj_set_style_pad_all(this->spectrum_container_, 0, 0);
+  lv_obj_clear_flag(this->spectrum_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Music icon + title at top
+  lv_obj_t *title_area = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(title_area, LV_PCT(100), 80);
+  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_bg_opa(title_area, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(title_area, 0, 0);
+  lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Music icon
+  lv_obj_t *music_icon = lv_label_create(title_area);
+  lv_label_set_text(music_icon, LV_SYMBOL_AUDIO);
+  lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_text_font(music_icon, &lv_font_montserrat_16, 0);
+  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 20, -10);
+
+  // Song title (filename)
+  this->spectrum_title_label_ = lv_label_create(title_area);
+  lv_label_set_text(this->spectrum_title_label_, "");
+  lv_obj_set_style_text_color(this->spectrum_title_label_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->spectrum_title_label_, &lv_font_montserrat_16, 0);
+  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(80));
+  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 50, -10);
+
+  // Format info
+  this->spectrum_artist_label_ = lv_label_create(title_area);
+  lv_label_set_text(this->spectrum_artist_label_, "");
+  lv_obj_set_style_text_color(this->spectrum_artist_label_, lv_color_hex(0x888888), 0);
+  lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
+  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 50, 12);
+
+  // Spectrum bars area
+  lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(bars_area, LV_PCT(90), LV_PCT(55));
+  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_set_style_bg_opa(bars_area, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(bars_area, 0, 0);
+  lv_obj_set_style_pad_all(bars_area, 0, 0);
+  lv_obj_clear_flag(bars_area, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(bars_area, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(bars_area, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+
+  // Create bars with gradient colors
+  for (int i = 0; i < SPECTRUM_BANDS; i++) {
+    lv_obj_t *bar = lv_obj_create(bars_area);
+    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);  // Start small
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Color gradient from cyan to magenta across bands
+    uint8_t r = (uint8_t)(i * 255 / SPECTRUM_BANDS);
+    uint8_t g = (uint8_t)(100 + (SPECTRUM_BANDS - i) * 100 / SPECTRUM_BANDS);
+    uint8_t b = (uint8_t)(200 + i * 55 / SPECTRUM_BANDS);
+    lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+
+    // Gradient from bottom (darker) to top (brighter)
+    lv_obj_set_style_bg_grad_color(bar, lv_color_make(r / 3, g / 3, b / 3), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+
+    this->spectrum_bars_[i] = bar;
+    this->spectrum_smooth_[i] = 0;
+    this->spectrum_peaks_[i] = 0;
+  }
+
+  this->spectrum_last_update_ = 0;
+  ESP_LOGI(TAG, "Spectrum analyzer UI created");
+}
+
+void Mp4Player::destroy_spectrum_ui_() {
+  if (this->spectrum_container_) {
+    lv_obj_del(this->spectrum_container_);
+    this->spectrum_container_ = nullptr;
+    this->spectrum_title_label_ = nullptr;
+    this->spectrum_artist_label_ = nullptr;
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      this->spectrum_bars_[i] = nullptr;
+      this->spectrum_smooth_[i] = 0;
+      this->spectrum_peaks_[i] = 0;
+    }
+  }
+  this->audio_only_mode_ = false;
+}
+
+void Mp4Player::update_spectrum_() {
+  if (!this->spectrum_container_ || !this->audio_only_mode_) return;
+  if (this->state_ != PlayerState::PLAYING) return;
+
+  // Throttle to ~30fps
+  uint32_t now = lv_tick_get();
+  if (now - this->spectrum_last_update_ < 33) return;
+  this->spectrum_last_update_ = now;
+
+  // Sample PCM data from the ring buffer (peek, don't consume)
+  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * (this->audio_channels_ > 1 ? 2 : 1))) {
+    // Read a snapshot from current ring buffer position without consuming
+    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * (this->audio_channels_ > 1 ? 2 : 1);
+    int16_t *samples = (int16_t *)malloc(bytes_needed);
+    if (samples) {
+      // Peek at ring buffer data (read from current read position without advancing)
+      size_t read_pos = this->audio_ring_read_;
+      for (size_t i = 0; i < bytes_needed; i++) {
+        ((uint8_t *)samples)[i] = this->audio_ring_buffer_[(read_pos + i) % this->audio_ring_size_];
+      }
+      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * (this->audio_channels_ > 1 ? 2 : 1));
+      free(samples);
+    }
+  }
+
+  // Get max bar height from parent
+  lv_obj_t *bars_parent = lv_obj_get_parent(this->spectrum_bars_[0]);
+  if (!bars_parent) return;
+  int max_h = lv_obj_get_content_height(bars_parent);
+
+  for (int i = 0; i < SPECTRUM_BANDS; i++) {
+    if (!this->spectrum_bars_[i]) continue;
+
+    // Smooth animation (fast attack, slow decay)
+    float target = this->spectrum_magnitudes_[i];
+    if (target > this->spectrum_smooth_[i]) {
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.4f;  // Fast attack
+    } else {
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.15f;  // Slow decay
+    }
+
+    // Peak hold with slow fall
+    if (this->spectrum_smooth_[i] > this->spectrum_peaks_[i]) {
+      this->spectrum_peaks_[i] = this->spectrum_smooth_[i];
+    } else {
+      this->spectrum_peaks_[i] *= 0.97f;  // Slow peak decay
+    }
+
+    int bar_h = (int)(this->spectrum_smooth_[i] * max_h / 100.0f);
+    if (bar_h < 4) bar_h = 4;
+    if (bar_h > max_h) bar_h = max_h;
+
+    lv_obj_set_height(this->spectrum_bars_[i], bar_h);
+  }
 }
 
 void Mp4Player::back_btn_cb_(lv_event_t *e) {
