@@ -15,6 +15,8 @@
 #include "freertos/task.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/audio/audio.h"
+#include <dirent.h>
+#include <sys/stat.h>
 
 // Use esp_extractor API directly (no BSP dependency)
 extern "C" {
@@ -22,6 +24,8 @@ extern "C" {
 #include "esp_extractor_reg.h"
 #include "esp_mp4_extractor.h"
 #include "esp_avi_extractor.h"
+#include "esp_audio_es_extractor.h"
+#include "esp_wav_extractor.h"
 #include "mem_pool.h"
 #include "esp_audio_simple_dec.h"
 #include "esp_audio_simple_dec_reg.h"
@@ -40,6 +44,16 @@ enum class PlayerState {
   PAUSED
 };
 
+enum class FileType {
+  UNKNOWN,
+  DIRECTORY,
+  VIDEO,
+  IMAGE,
+  AUDIO,
+  LOTTIE,
+  SVG
+};
+
 class Mp4Player : public Component {
  public:
   void set_file_path(const std::string &path) { file_path_ = path; }
@@ -49,6 +63,8 @@ class Mp4Player : public Component {
   void set_loop(bool loop) { loop_ = loop; }
   void set_auto_play(bool auto_play) { auto_play_ = auto_play; }
   void set_show_controls(bool show) { controls_enabled_ = show; }
+  void set_usb_storage(Component *usb_storage) { usb_storage_ = usb_storage; }
+  void add_media_directory(const std::string &dir) { media_directories_.push_back(dir); }
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
@@ -61,8 +77,11 @@ class Mp4Player : public Component {
   void play();
   void pause();
   void stop();
+  void play_file(const std::string &path);
+  void show_file_browser();
   bool is_playing() const { return state_ == PlayerState::PLAYING; }
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
+  bool is_browser_active() const { return browser_active_; }
 
  protected:
   // UI
@@ -82,6 +101,15 @@ class Mp4Player : public Component {
   // Volume
   void apply_volume_to_pcm_(uint8_t *pcm_data, size_t size);
 
+  // Spectrum analyzer
+  static constexpr int SPECTRUM_BANDS = 16;
+  static constexpr int FFT_SIZE = 512;
+  void create_spectrum_ui_();
+  void destroy_spectrum_ui_();
+  void update_spectrum_();
+  void compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_count);
+  static void fft_simple_(float *real, float *imag, int n);
+
   // Static callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
@@ -100,12 +128,57 @@ class Mp4Player : public Component {
   static int file_close_cb_(void *ctx);
   static uint32_t file_size_cb_(void *ctx);
 
+  // File browser
+  void create_file_browser_();
+  void destroy_file_browser_();
+  void navigate_to_directory_(std::string path);
+  void scan_media_files_(const std::string &path);
+  static FileType get_file_type_(const std::string &name);
+  void open_media_file_(const std::string &path, FileType type);
+  void show_image_viewer_(const std::string &path);
+  void destroy_image_viewer_();
+  static void image_close_cb_(lv_event_t *e);
+  static void file_item_cb_(lv_event_t *e);
+  static void back_btn_cb_(lv_event_t *e);
+  static void refresh_btn_cb_(lv_event_t *e);
+
+  struct FileEntry {
+    std::string full_path;
+    std::string name;
+    size_t size;
+    bool is_directory;
+    FileType file_type;
+  };
+  std::vector<FileEntry> file_entries_;
+  std::vector<std::string> media_directories_;
+  std::string current_browse_path_;
+  bool browser_active_{false};
+  lv_obj_t *browser_container_{nullptr};
+  lv_obj_t *browser_list_{nullptr};
+  lv_obj_t *browser_title_{nullptr};
+  lv_obj_t *image_viewer_{nullptr};
+  std::string image_viewer_path_;
+
+  // Spectrum analyzer UI
+  lv_obj_t *spectrum_container_{nullptr};
+  lv_obj_t *spectrum_bars_[SPECTRUM_BANDS]{};
+  lv_obj_t *spectrum_title_label_{nullptr};
+  lv_obj_t *spectrum_artist_label_{nullptr};
+  float spectrum_magnitudes_[SPECTRUM_BANDS]{};
+  float spectrum_peaks_[SPECTRUM_BANDS]{};
+  float spectrum_smooth_[SPECTRUM_BANDS]{};
+  bool audio_only_mode_{false};
+  uint32_t spectrum_last_update_{0};
+
   // Configuration
   std::string file_path_;
   bool loop_{true};
   bool auto_play_{true};
   bool controls_enabled_{true};
   uint8_t volume_level_{60};
+
+  // USB storage (optional - when set, ensures USB is mounted before file access)
+  Component *usb_storage_{nullptr};
 
   // State
   PlayerState state_{PlayerState::STOPPED};
@@ -185,6 +258,9 @@ class Mp4Player : public Component {
   // JPEG error tracking
   bool jpeg_hw_error_logged_{false};
   uint32_t jpeg_hw_error_count_{0};
+
+  // Flag set by playback task when dimensions change, consumed by loop() to update UI
+  volatile bool dimensions_changed_{false};
 
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};

@@ -1,0 +1,64 @@
+# USB Media Storage - Example Configuration
+#
+# Ce composant permet d'utiliser une clé USB comme stockage media
+# pour les vidéos, images et autres fichiers.
+#
+# Avantages par rapport à la carte SD:
+# - USB 2.0: débit théorique ~480 Mbps (vs ~52 MHz x 4 bits pour SD)
+# - Lecture vidéo plus fluide, pas besoin de pause/play
+# - Compatible avec toutes les clés USB formatées en FAT32
+#
+# Note: La clé USB doit être formatée en FAT32
+# Les fichiers sont accessibles via le point de montage /usb
+# Exemple: /usb/videos/ma_video.mp4
+
+esphome:
+  name: esp32p4-usb-media
+  friendly_name: "ESP32-P4 USB Media Player"
+
+esp32:
+  board: esp32-p4-function-ev-board
+  framework:
+    type: esp-idf
+    version: "5.4.0"
+    platform_version: 0.0.0
+
+# Composant USB Media Storage
+usb_media_storage:
+  id: usb_storage
+
+# Capteurs d'espace disque USB
+sensor:
+  - platform: usb_media_storage
+    type: total_space
+    name: "USB Total Space"
+    id: usb_total
+
+  - platform: usb_media_storage
+    type: used_space
+    name: "USB Used Space"
+    id: usb_used
+
+  - platform: usb_media_storage
+    type: free_space
+    name: "USB Free Space"
+    id: usb_free
+
+# Capteur de statut USB
+text_sensor:
+  - platform: usb_media_storage
+    usb_status:
+      name: "USB Status"
+
+# Exemple d'utilisation avec le lecteur vidéo simple
+# (décommenter si simple_video_player est configuré)
+#
+# simple_video_player:
+#   id: my_player
+#   file_path: "/usb/videos/ma_video.mp4"
+#
+# Note: Le chemin du fichier doit commencer par /usb/
+# car c'est le point de montage de la clé USB
+
+logger:
+  level: INFO

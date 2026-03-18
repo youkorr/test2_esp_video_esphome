@@ -7,6 +7,16 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cmath>
+
+// LVGL extensions for media display
+#if __has_include("lvgl/src/libs/lottie/lv_lottie.h")
+#define HAS_LV_LOTTIE 1
+#include "lvgl/src/libs/lottie/lv_lottie.h"
+#else
+#define HAS_LV_LOTTIE 0
+#endif
 
 namespace esphome {
 namespace mp4_player {
@@ -17,10 +27,12 @@ static constexpr size_t JPEG_BUFFER_SIZE = 256 * 1024;    //static constexpr siz
 static constexpr size_t EXTRACTOR_POOL_SIZE = 1024 * 1024;  // 1MB for extractor cache (was 512KB)
 static constexpr size_t EXTRACTOR_POOL_BLOCKS = 10;           // 8 blocks of 128KB (was 4)
 static constexpr size_t AUDIO_PCM_BUFFER_SIZE = 32 * 1024;  // 32KB for decoded PCM
-static constexpr size_t AUDIO_RING_BUFFER_SIZE = 256 * 1024; // 256KB audio ring buffer (~1.3s at 48kHz stereo)
+static constexpr size_t AUDIO_RING_BUFFER_SIZE = 512 * 1024; // 512KB audio ring buffer (~2.7s at 48kHz stereo)
 
-// Read-ahead buffer for SD card I/O to reduce small read overhead
-static constexpr size_t FILE_READ_AHEAD_SIZE = 64 * 1024;  // 64KB read-ahead buffer
+// Read-ahead buffer for file I/O to reduce small read overhead
+// USB storage can handle larger buffers for better throughput
+static constexpr size_t FILE_READ_AHEAD_SIZE_SD = 64 * 1024;   // 64KB for SD card
+static constexpr size_t FILE_READ_AHEAD_SIZE_USB = 128 * 1024; // 128KB for USB (faster bus)
 
 // ============================================================================
 // File I/O wrappers for esp_extractor
@@ -33,12 +45,15 @@ void *Mp4Player::file_open_cb_(char *url, void *ctx) {
     ESP_LOGE(TAG, "Failed to open: %s", url);
     return nullptr;
   }
-  // Set a large read-ahead buffer to reduce SD card transactions
-  // This is critical for sustained read performance on SDMMC
-  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(FILE_READ_AHEAD_SIZE, MALLOC_CAP_SPIRAM);
+  // Use larger read-ahead buffer for USB (128KB) vs SD card (64KB)
+  // USB 2.0 has higher throughput and benefits from larger sequential reads
+  bool is_usb = (strncmp(url, "/usb", 4) == 0);
+  size_t buf_size = is_usb ? FILE_READ_AHEAD_SIZE_USB : FILE_READ_AHEAD_SIZE_SD;
+
+  uint8_t *io_buf = (uint8_t *)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
   if (io_buf) {
-    setvbuf(fp, (char *)io_buf, _IOFBF, FILE_READ_AHEAD_SIZE);
-    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead", FILE_READ_AHEAD_SIZE / 1024);
+    setvbuf(fp, (char *)io_buf, _IOFBF, buf_size);
+    ESP_LOGI(TAG, "File I/O buffer: %uKB read-ahead (%s)", buf_size / 1024, is_usb ? "USB" : "SD");
   } else {
     ESP_LOGW(TAG, "Failed to allocate I/O buffer, using default");
   }
@@ -108,7 +123,6 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
       size_t skip = 2 + marker_size;  // 0xFF 0xFE + size+data
       if (read_pos + skip > size) break;
 
-      ESP_LOGD(TAG, "Stripping COM marker at %zu (%u bytes)", read_pos, marker_size);
       read_pos += skip;
       stripped = true;
       continue;
@@ -141,10 +155,72 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
   }
 
   if (stripped && write_pos < size) {
-    ESP_LOGI(TAG, "COM markers stripped: %zu -> %zu bytes", size, write_pos);
     return write_pos;
   }
   return size;
+}
+
+// ============================================================================
+// LVGL Filesystem Driver (POSIX-based, drive letter 'S')
+// Allows lv_image_set_src("S:/sdcard/image.png") to work
+// ============================================================================
+static void *lvgl_fs_open(lv_fs_drv_t * /*drv*/, const char *path, lv_fs_mode_t mode) {
+  const char *flags = "rb";
+  if (mode == LV_FS_MODE_WR) flags = "wb";
+  else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "r+b";
+  FILE *f = fopen(path, flags);
+  if (!f) {
+    ESP_LOGW("lvgl_fs", "Failed to open: %s (mode=%s)", path, flags);
+  } else {
+    ESP_LOGD("lvgl_fs", "Opened: %s", path);
+  }
+  return (void *)f;
+}
+
+static lv_fs_res_t lvgl_fs_close(lv_fs_drv_t * /*drv*/, void *file) {
+  fclose((FILE *)file);
+  return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t lvgl_fs_read(lv_fs_drv_t * /*drv*/, void *file, void *buf, uint32_t btr, uint32_t *br) {
+  *br = fread(buf, 1, btr, (FILE *)file);
+  return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t lvgl_fs_write(lv_fs_drv_t * /*drv*/, void *file, const void *buf, uint32_t btw, uint32_t *bw) {
+  *bw = fwrite(buf, 1, btw, (FILE *)file);
+  return (*bw == btw) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t lvgl_fs_seek(lv_fs_drv_t * /*drv*/, void *file, uint32_t pos, lv_fs_whence_t whence) {
+  int w = SEEK_SET;
+  if (whence == LV_FS_SEEK_CUR) w = SEEK_CUR;
+  else if (whence == LV_FS_SEEK_END) w = SEEK_END;
+  fseek((FILE *)file, (long)pos, w);
+  return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t lvgl_fs_tell(lv_fs_drv_t * /*drv*/, void *file, uint32_t *pos) {
+  *pos = (uint32_t)ftell((FILE *)file);
+  return LV_FS_RES_OK;
+}
+
+static bool lvgl_fs_driver_registered = false;
+
+static void register_lvgl_fs_driver() {
+  if (lvgl_fs_driver_registered) return;
+  static lv_fs_drv_t drv;
+  lv_fs_drv_init(&drv);
+  drv.letter = 'S';
+  drv.open_cb = lvgl_fs_open;
+  drv.close_cb = lvgl_fs_close;
+  drv.read_cb = lvgl_fs_read;
+  drv.write_cb = lvgl_fs_write;
+  drv.seek_cb = lvgl_fs_seek;
+  drv.tell_cb = lvgl_fs_tell;
+  lv_fs_drv_register(&drv);
+  lvgl_fs_driver_registered = true;
+  ESP_LOGI("mp4_player", "LVGL filesystem driver 'S:' registered");
 }
 
 // ============================================================================
@@ -152,6 +228,26 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
 // ============================================================================
 void Mp4Player::setup() {
   ESP_LOGI(TAG, "Setting up MP4 Player...");
+
+  // Register LVGL filesystem driver for image loading (S: drive letter)
+  register_lvgl_fs_driver();
+
+  // If USB storage is configured, verify it's ready before accessing files
+  if (this->usb_storage_ != nullptr) {
+    if (this->usb_storage_->is_failed()) {
+      ESP_LOGE(TAG, "USB storage component failed to initialize - cannot access media files");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "USB storage available, file path: %s", this->file_path_.c_str());
+  }
+
+  // If no file_path configured, show file browser
+  if (this->file_path_.empty()) {
+    ESP_LOGI(TAG, "No file_path configured, showing file browser");
+    this->create_file_browser_();
+    return;
+  }
 
   this->playback_event_group_ = xEventGroupCreate();
   if (!this->playback_event_group_) {
@@ -179,64 +275,80 @@ void Mp4Player::setup() {
     return;
   }
 
-  // Register extractors
+  // Register extractors (video + audio elementary streams)
   esp_mp4_extractor_register();
   esp_avi_extractor_register();
+  esp_audio_es_extractor_register();
+  esp_wav_extractor_register();
 
   // Probe video file to get resolution/fps/duration
-  ESP_LOGI(TAG, "Probing: %s", this->file_path_.c_str());
-
-  esp_extractor_handle_t probe = nullptr;
-  esp_extractor_config_t probe_cfg = {};
-  probe_cfg.open = file_open_cb_;
-  probe_cfg.read = file_read_cb_;
-  probe_cfg.seek = file_seek_cb_;
-  probe_cfg.file_size = file_size_cb_;
-  probe_cfg.close = file_close_cb_;
-  probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
-  probe_cfg.url = (char *)this->file_path_.c_str();
-  probe_cfg.input_ctx = nullptr;
-  probe_cfg.output_pool_size = 256 * 1024;
-  probe_cfg.cache_block_num = 3;
-  probe_cfg.cache_block_size = 256 * 1024 / 3;
-
-  if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
-    if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
-      // Video info
-      uint16_t vnum = 0;
-      esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
-      if (vnum > 0) {
-        extractor_stream_info_t sinfo = {};
-        if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
-          this->video_width_ = sinfo.stream_info.video_info.width;
-          this->video_height_ = sinfo.stream_info.video_info.height;
-          this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
-          this->total_duration_ms_ = sinfo.duration;
-          ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                   this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
-        }
-      }
-      // Audio info
-      uint16_t anum = 0;
-      esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
-      this->has_audio_ = (anum > 0);
-      if (this->has_audio_) {
-        extractor_stream_info_t ainfo = {};
-        if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
-          this->audio_format_ = ainfo.stream_info.audio_info.format;
-          this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
-          this->audio_channels_ = ainfo.stream_info.audio_info.channel;
-          this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
-          ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
-                   this->audio_format_, this->audio_sample_rate_,
-                   this->audio_channels_, this->audio_bits_per_sample_);
-        }
-      }
+  // Skip probe if file is not accessible yet (e.g. USB drive not mounted)
+  bool probe_skipped = false;
+  {
+    FILE *test_fp = fopen(this->file_path_.c_str(), "rb");
+    if (test_fp) {
+      fclose(test_fp);
+    } else {
+      ESP_LOGI(TAG, "File not accessible yet, skipping probe (will detect at playback)");
+      probe_skipped = true;
     }
-    esp_extractor_close(probe);
   }
 
-  esp_extractor_unregister_all();
+  if (!probe_skipped) {
+    ESP_LOGI(TAG, "Probing: %s", this->file_path_.c_str());
+
+    esp_extractor_handle_t probe = nullptr;
+    esp_extractor_config_t probe_cfg = {};
+    probe_cfg.open = file_open_cb_;
+    probe_cfg.read = file_read_cb_;
+    probe_cfg.seek = file_seek_cb_;
+    probe_cfg.file_size = file_size_cb_;
+    probe_cfg.close = file_close_cb_;
+    probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
+    probe_cfg.url = (char *)this->file_path_.c_str();
+    probe_cfg.input_ctx = nullptr;
+    probe_cfg.output_pool_size = 256 * 1024;
+    probe_cfg.cache_block_num = 3;
+    probe_cfg.cache_block_size = 256 * 1024 / 3;
+
+    if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
+      if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
+        // Video info
+        uint16_t vnum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
+        if (vnum > 0) {
+          extractor_stream_info_t sinfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
+            this->video_width_ = sinfo.stream_info.video_info.width;
+            this->video_height_ = sinfo.stream_info.video_info.height;
+            this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->total_duration_ms_ = sinfo.duration;
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
+                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+          }
+        }
+        // Audio info
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        this->has_audio_ = (anum > 0);
+        if (this->has_audio_) {
+          extractor_stream_info_t ainfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+            this->audio_format_ = ainfo.stream_info.audio_info.format;
+            this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+            this->audio_channels_ = ainfo.stream_info.audio_info.channel;
+            this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
+                     this->audio_format_, this->audio_sample_rate_,
+                     this->audio_channels_, this->audio_bits_per_sample_);
+          }
+        }
+      }
+      esp_extractor_close(probe);
+    }
+
+    esp_extractor_unregister_all();
+  }
 
   if (this->video_width_ == 0 || this->video_height_ == 0) {
     ESP_LOGW(TAG, "Could not probe video, using 800x480");
@@ -262,8 +374,8 @@ void Mp4Player::setup() {
     memset(this->display_buffer_[i], 0, this->display_buffer_size_);
   }
 
-  // Setup audio decoder if audio track found and speaker configured
-  if (this->has_audio_ && this->speaker_) {
+  // Setup audio decoder if audio track found (or probe skipped) and speaker configured
+  if ((this->has_audio_ || probe_skipped) && this->speaker_) {
     // Register individual audio decoders (AAC, MP3, FLAC, PCM)
     esp_aac_dec_register();
     esp_mp3_dec_register();
@@ -307,6 +419,41 @@ void Mp4Player::setup() {
 // Loop - update LVGL canvas when a new frame is ready
 // ============================================================================
 void Mp4Player::loop() {
+  // Update UI when video dimensions changed (e.g. after USB probe during playback)
+  if (this->dimensions_changed_) {
+    this->dimensions_changed_ = false;
+    ESP_LOGI(TAG, "Updating UI for new dimensions: %ux%u", this->video_width_, this->video_height_);
+
+    // Update resolution label
+    if (this->resolution_label_) {
+      char res[32];
+      snprintf(res, sizeof(res), "%ux%u", this->video_width_, this->video_height_);
+      lv_label_set_text(this->resolution_label_, res);
+    }
+
+    // Update touch layer size
+    if (this->touch_layer_) {
+      lv_obj_set_size(this->touch_layer_, this->video_width_, this->video_height_);
+    }
+
+    // Update controls container width
+    if (this->controls_container_) {
+      lv_obj_set_size(this->controls_container_, this->video_width_, 120);
+    }
+
+    // Update progress slider width
+    if (this->progress_slider_) {
+      int slider_w = this->video_width_ - 280;
+      if (slider_w < 100) slider_w = 100;
+      lv_obj_set_size(this->progress_slider_, slider_w, 10);
+    }
+
+    // Update time label position
+    if (this->time_label_) {
+      lv_obj_set_pos(this->time_label_, this->video_width_ - 135, 3);
+    }
+  }
+
   if (this->frame_ready_) {
     if (this->canvas_) {
       lv_canvas_set_buffer(this->canvas_,
@@ -327,6 +474,11 @@ void Mp4Player::loop() {
   if (this->state_ == PlayerState::PLAYING && this->controls_visible_) {
     this->update_progress_();
   }
+
+  // Update spectrum analyzer for audio-only mode
+  if (this->audio_only_mode_) {
+    this->update_spectrum_();
+  }
 }
 
 // ============================================================================
@@ -335,6 +487,7 @@ void Mp4Player::loop() {
 void Mp4Player::dump_config() {
   ESP_LOGCONFIG(TAG, "MP4 Player:");
   ESP_LOGCONFIG(TAG, "  File: %s", this->file_path_.c_str());
+  ESP_LOGCONFIG(TAG, "  Storage: %s", this->usb_storage_ != nullptr ? "USB" : "SD Card");
   ESP_LOGCONFIG(TAG, "  Resolution: %ux%u", this->video_width_, this->video_height_);
   ESP_LOGCONFIG(TAG, "  FPS: %u", this->video_fps_);
   ESP_LOGCONFIG(TAG, "  Volume: %u%%", this->volume_level_);
@@ -387,7 +540,7 @@ void Mp4Player::play() {
   if (!this->playback_task_handle_) {
     xEventGroupClearBits(this->playback_event_group_, EVENT_START | EVENT_STOP | EVENT_TASK_EXIT);
     BaseType_t ret = xTaskCreatePinnedToCore(
-        playback_task_, "mp4_play", 16384, this, 5,
+        playback_task_, "mp4_play", 16384, this, 12,
         &this->playback_task_handle_, 1);
     if (ret != pdPASS) {
       ESP_LOGE(TAG, "Failed to create playback task");
@@ -447,8 +600,18 @@ void Mp4Player::stop() {
   this->show_controls_();
   if (this->hide_timer_) lv_timer_pause(this->hide_timer_);
 
+  // Clean up spectrum analyzer if in audio-only mode
+  if (this->audio_only_mode_) {
+    this->destroy_spectrum_ui_();
+  }
+
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
+
+  // Return to file browser if media_directories configured (no fixed file_path)
+  if (!this->media_directories_.empty()) {
+    this->show_file_browser();
+  }
 }
 
 // ============================================================================
@@ -465,9 +628,11 @@ void Mp4Player::playback_task_(void *arg) {
     if (bits & EVENT_STOP) break;
     if (!(bits & EVENT_START)) continue;
 
-    // Register extractors
+    // Register extractors (video + audio elementary streams)
     esp_mp4_extractor_register();
     esp_avi_extractor_register();
+    esp_audio_es_extractor_register();
+    esp_wav_extractor_register();
 
     bool do_loop = true;
     while (do_loop && !player->stop_requested_) {
@@ -482,7 +647,8 @@ void Mp4Player::playback_task_(void *arg) {
       ext_cfg.file_size = file_size_cb_;
       ext_cfg.close = file_close_cb_;
       // Extract both audio and video if speaker is available
-      ext_cfg.extract_mask = (player->has_audio_ && player->speaker_)
+      // Always extract AV when speaker exists (probe may have been skipped for USB)
+      ext_cfg.extract_mask = player->speaker_
                               ? ESP_EXTRACT_MASK_AV : ESP_EXTRACT_MASK_VIDEO;
       ext_cfg.url = (char *)player->file_path_.c_str();
       ext_cfg.input_ctx = nullptr;
@@ -503,8 +669,7 @@ void Mp4Player::playback_task_(void *arg) {
         break;
       }
 
-      // Get video info (only update fps/duration - dimensions are set during probe/setup
-      // and must not change because display buffers are already allocated to that size)
+      // Get video info and reallocate display buffers if dimensions changed
       uint16_t vnum = 0;
       esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
       if (vnum > 0) {
@@ -513,9 +678,61 @@ void Mp4Player::playback_task_(void *arg) {
           uint32_t fps = sinfo.stream_info.video_info.fps;
           player->video_fps_ = fps > 0 ? fps : 25;
           player->total_duration_ms_ = sinfo.duration;
-          ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (display: %ux%u)",
-                   sinfo.stream_info.video_info.width, sinfo.stream_info.video_info.height,
-                   player->video_fps_, player->video_width_, player->video_height_);
+
+          uint32_t actual_w = sinfo.stream_info.video_info.width;
+          uint32_t actual_h = sinfo.stream_info.video_info.height;
+
+          // Check if display buffers need reallocation (e.g. probe failed at setup)
+          uint32_t aligned_w = (actual_w + 15) & ~15;
+          uint32_t aligned_h = (actual_h + 15) & ~15;
+          uint32_t needed_size = aligned_w * aligned_h * 2;
+
+          if (needed_size > player->display_buffer_size_) {
+            ESP_LOGW(TAG, "Video %ux%u needs %u bytes but buffer is %u, reallocating",
+                     actual_w, actual_h, needed_size, player->display_buffer_size_);
+            for (int i = 0; i < 2; i++) {
+              if (player->display_buffer_[i]) {
+                heap_caps_free(player->display_buffer_[i]);
+                player->display_buffer_[i] = nullptr;
+              }
+              player->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(
+                  64, needed_size, MALLOC_CAP_SPIRAM);
+              if (!player->display_buffer_[i]) {
+                ESP_LOGE(TAG, "Failed to reallocate display buffer %d (%u bytes)", i, needed_size);
+                break;
+              }
+              memset(player->display_buffer_[i], 0, needed_size);
+            }
+            if (player->display_buffer_[0] && player->display_buffer_[1]) {
+              player->display_buffer_size_ = needed_size;
+              player->video_width_ = actual_w;
+              player->video_height_ = actual_h;
+              player->dimensions_changed_ = true;
+              ESP_LOGI(TAG, "Display buffers reallocated: %ux%u (aligned %ux%u), %u bytes",
+                       actual_w, actual_h, aligned_w, aligned_h, needed_size);
+            } else {
+              ESP_LOGE(TAG, "Buffer reallocation failed, playback may fail");
+            }
+          } else if (actual_w != player->video_width_ || actual_h != player->video_height_) {
+            // Dimensions changed but buffer is large enough
+            player->video_width_ = actual_w;
+            player->video_height_ = actual_h;
+            player->dimensions_changed_ = true;
+          }
+
+          ESP_LOGI(TAG, "Playback video: %ux%u @ %u fps (buffer: %u bytes)",
+                   player->video_width_, player->video_height_,
+                   player->video_fps_, player->display_buffer_size_);
+        }
+      }
+
+      // Detect audio if probe was skipped (USB not mounted at setup time)
+      if (!player->has_audio_ && player->speaker_) {
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        if (anum > 0) {
+          player->has_audio_ = true;
+          ESP_LOGI(TAG, "Audio track detected during playback");
         }
       }
 
@@ -555,13 +772,14 @@ void Mp4Player::playback_task_(void *arg) {
               vTaskDelay(pdMS_TO_TICKS(100));
 
               // Start audio output task if ring buffer is available
+              // Pin to core 1 (core 0 is used by WiFi which causes audio stalls)
               if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
                 player->audio_ring_read_ = 0;
                 player->audio_ring_write_ = 0;
                 player->audio_task_running_ = true;
                 xTaskCreatePinnedToCore(
-                    audio_output_task_, "audio_out", 4096, player, 6,
-                    &player->audio_task_handle_, 0);
+                    audio_output_task_, "audio_out", 4096, player, 15,
+                    &player->audio_task_handle_, 1);
               }
             } else {
               ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
@@ -627,10 +845,13 @@ void Mp4Player::playback_task_(void *arg) {
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
               if (player->audio_ring_buffer_) {
-                // Non-blocking push: try briefly, then drop audio to avoid stalling video
+                // Push decoded audio to ring buffer
+                // For audio-only: wait indefinitely (no video to sync with)
+                // For video+audio: limited retries to avoid blocking video decode
+                int max_retries = player->audio_only_mode_ ? 500 : 50;
                 size_t pushed = 0;
                 int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < 10) {
+                while (pushed < out.decoded_size && !player->stop_requested_ && retries < max_retries) {
                   size_t p = player->audio_ring_push_(
                       player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
                   pushed += p;
@@ -639,8 +860,6 @@ void Mp4Player::playback_task_(void *arg) {
                     retries++;
                   }
                 }
-                // If buffer is full after brief wait, drop remaining audio
-                // (brief glitch is better than stalling video for seconds)
               } else {
                 player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
                 size_t written = 0;
@@ -1049,8 +1268,9 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
   Mp4Player *player = static_cast<Mp4Player *>(arg);
-  // Use larger chunks to reduce overhead and keep I2S fed
-  const size_t chunk_size = 8192;
+  // Use 4KB chunks to feed speaker_mixer (19KB buffer) smoothly
+  // Larger chunks cause stalls when mixer buffer is nearly full
+  const size_t chunk_size = 4096;
   uint8_t *chunk = (uint8_t *)heap_caps_malloc(chunk_size, MALLOC_CAP_SPIRAM);
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
@@ -1059,24 +1279,118 @@ void Mp4Player::audio_output_task_(void *arg) {
     return;
   }
 
-  ESP_LOGI(TAG, "Audio output task started");
+  ESP_LOGI(TAG, "Audio output task started (priority 15, core 1)");
 
-  // Initial delay to ensure I2S channel is fully enabled
-  vTaskDelay(pdMS_TO_TICKS(50));
+  // Wait for ring buffer to pre-fill before starting output
+  const size_t prefill_target = 96 * 1024;  // 96KB (~0.5s at 48kHz stereo)
+  int prefill_wait = 0;
+  while (player->audio_task_running_ && prefill_wait < 200) {
+    size_t avail = player->audio_ring_available_();
+    if (avail >= prefill_target) {
+      ESP_LOGI(TAG, "Audio pre-filled: %u bytes, starting output", avail);
+      break;
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+    prefill_wait++;
+  }
+
+  // Jitter buffer thresholds
+  // For video+audio mode: correct when buffer gets too full (drift from video timing)
+  // audio_only_mode_ is checked dynamically since it may be set after task starts
+  const size_t video_high_watermark = 256 * 1024;  // 256KB for video+audio
+  const size_t target_level = 96 * 1024;     // 96KB = ~0.5s - target after correction
+  uint32_t underrun_count = 0;
+  uint32_t jitter_corrections = 0;
+  bool was_paused = false;
+
+  // Monitoring: log ring buffer level every 30 seconds for diagnostics
+  int64_t last_monitor_time = esp_timer_get_time() / 1000;
+  size_t monitor_min_level = player->audio_ring_size_;
+  size_t monitor_max_level = 0;
+  uint32_t speaker_stall_count = 0;
 
   while (player->audio_task_running_) {
+    // Handle pause: DON'T feed silence - let speaker manage its own state
+    // Feeding silence while paused causes I2S descriptor queue issues
     if (player->state_ == PlayerState::PAUSED) {
-      vTaskDelay(pdMS_TO_TICKS(20));
+      if (!was_paused) {
+        was_paused = true;
+      }
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
+    // On resume from pause: flush ring buffer to clear stale audio
+    if (was_paused) {
+      was_paused = false;
+      player->audio_ring_read_ = player->audio_ring_write_;
+      underrun_count = 0;
+      monitor_min_level = player->audio_ring_size_;
+      monitor_max_level = 0;
+      ESP_LOGI(TAG, "Audio resumed: ring buffer flushed for resync");
+      // Wait for fresh audio to fill up
+      int refill_wait = 0;
+      while (player->audio_task_running_ && refill_wait < 100) {
+        if (player->audio_ring_available_() >= prefill_target) break;
+        vTaskDelay(pdMS_TO_TICKS(10));
+        refill_wait++;
+      }
+      last_monitor_time = esp_timer_get_time() / 1000;
       continue;
     }
 
     size_t avail = player->audio_ring_available_();
-    if (avail == 0) {
-      vTaskDelay(pdMS_TO_TICKS(3));
-      continue;
+
+    // Track min/max levels for monitoring
+    if (avail < monitor_min_level) monitor_min_level = avail;
+    if (avail > monitor_max_level) monitor_max_level = avail;
+
+    // Periodic monitoring: log ring buffer health every 30 seconds
+    int64_t now_ms = esp_timer_get_time() / 1000;
+    if (now_ms - last_monitor_time > 30000) {
+      ESP_LOGI(TAG, "Audio ring: %uKB (min=%uKB max=%uKB) stalls=%u jitter=%u",
+               avail / 1024, monitor_min_level / 1024, monitor_max_level / 1024,
+               speaker_stall_count, jitter_corrections);
+      monitor_min_level = player->audio_ring_size_;
+      monitor_max_level = 0;
+      speaker_stall_count = 0;
+      last_monitor_time = now_ms;
     }
 
-    // Read as much as possible per iteration to drain ring buffer fast
+    // Jitter buffer management: catch latency drift early
+    // Skip entirely for audio-only mode (no A/V sync needed, producer backpressures naturally)
+    if (!player->audio_only_mode_ && avail > video_high_watermark) {
+      size_t skip = avail - target_level;
+      // Align skip to sample boundary (4 bytes = one stereo 16-bit sample)
+      skip &= ~3;
+      player->audio_ring_read_ = (player->audio_ring_read_ + skip) % player->audio_ring_size_;
+      avail = player->audio_ring_available_();
+      jitter_corrections++;
+      if (jitter_corrections <= 10) {
+        ESP_LOGW(TAG, "Audio jitter correction #%u: skipped %uKB (level was %uKB)",
+                 jitter_corrections, skip / 1024, (avail + skip) / 1024);
+      }
+    }
+
+    if (avail == 0) {
+      vTaskDelay(pdMS_TO_TICKS(1));
+      avail = player->audio_ring_available_();
+      if (avail == 0) {
+        underrun_count++;
+        if (underrun_count == 50) {
+          ESP_LOGW(TAG, "Audio underrun (ring buffer empty for %ums)", underrun_count);
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+        continue;
+      }
+    }
+
+    if (underrun_count >= 50) {
+      ESP_LOGI(TAG, "Audio recovered after %u underrun cycles", underrun_count);
+    }
+    underrun_count = 0;
+
+    // Feed speaker in small chunks to avoid stalling on mixer's small buffer
     size_t to_read = avail < chunk_size ? avail : chunk_size;
     size_t got = player->audio_ring_pop_(chunk, to_read);
     if (got > 0) {
@@ -1091,15 +1405,20 @@ void Mp4Player::audio_output_task_(void *arg) {
           stall_count = 0;
         } else {
           stall_count++;
-          if (stall_count > 50) break;  // Don't stall forever
-          vTaskDelay(pdMS_TO_TICKS(2));
+          speaker_stall_count++;
+          if (stall_count > 200) break;  // Don't stall forever
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
     }
   }
 
   free(chunk);
-  ESP_LOGI(TAG, "Audio output task exiting");
+  if (jitter_corrections > 0) {
+    ESP_LOGI(TAG, "Audio output task exiting (jitter corrections: %u)", jitter_corrections);
+  } else {
+    ESP_LOGI(TAG, "Audio output task exiting");
+  }
   vTaskDelete(nullptr);
 }
 
@@ -1167,6 +1486,1013 @@ void Mp4Player::touch_cb_(lv_event_t *e) {
   if (p->controls_visible_) p->hide_controls_(); else p->show_controls_();
 }
 
+// ============================================================================
+// File Browser - browse USB/SD card for video files
+// ============================================================================
+FileType Mp4Player::get_file_type_(const std::string &name) {
+  size_t dot = name.rfind('.');
+  if (dot == std::string::npos || dot == name.size() - 1) return FileType::UNKNOWN;
+
+  std::string ext = name.substr(dot);
+  for (auto &c : ext) c = tolower(c);
+
+  // Video
+  if (ext == ".mp4" || ext == ".avi" || ext == ".mkv") return FileType::VIDEO;
+  // Images
+  if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") return FileType::IMAGE;
+  // Audio
+  if (ext == ".mp3" || ext == ".wav" || ext == ".flac" || ext == ".aac" || ext == ".pcm") return FileType::AUDIO;
+  // Lottie animation
+  if (ext == ".json") return FileType::LOTTIE;
+  // SVG
+  if (ext == ".svg") return FileType::SVG;
+
+  return FileType::UNKNOWN;
+}
+
+void Mp4Player::scan_media_files_(const std::string &path) {
+  this->file_entries_.clear();
+
+  DIR *dir = opendir(path.c_str());
+  if (!dir) {
+    ESP_LOGW(TAG, "Cannot open directory: %s", path.c_str());
+    return;
+  }
+
+  struct dirent *entry;
+  while ((entry = readdir(dir)) != nullptr) {
+    if (entry->d_name[0] == '.') continue;  // Skip hidden files
+
+    std::string full_path = path + "/" + entry->d_name;
+
+    // Use d_type for directory detection (more reliable on ESP32 FATFS than stat)
+    bool is_dir = (entry->d_type == DT_DIR);
+
+    // If d_type is unknown, fall back to stat
+    if (entry->d_type == DT_UNKNOWN) {
+      struct stat st;
+      if (stat(full_path.c_str(), &st) != 0) {
+        ESP_LOGW(TAG, "Cannot stat: %s", full_path.c_str());
+        continue;
+      }
+      is_dir = S_ISDIR(st.st_mode);
+    }
+
+    FileType ftype = is_dir ? FileType::DIRECTORY : get_file_type_(entry->d_name);
+    if (ftype != FileType::UNKNOWN) {
+      FileEntry fe;
+      fe.full_path = full_path;
+      fe.name = entry->d_name;
+      fe.is_directory = is_dir;
+      fe.file_type = ftype;
+      fe.size = 0;
+
+      // Get file size only for non-directory entries
+      if (!is_dir) {
+        struct stat st;
+        if (stat(full_path.c_str(), &st) == 0) {
+          fe.size = st.st_size;
+        }
+      }
+
+      this->file_entries_.push_back(fe);
+      ESP_LOGD(TAG, "  Found: %s [%s]", entry->d_name,
+               ftype == FileType::DIRECTORY ? "DIR" :
+               ftype == FileType::VIDEO ? "VIDEO" :
+               ftype == FileType::IMAGE ? "IMAGE" :
+               ftype == FileType::AUDIO ? "AUDIO" :
+               ftype == FileType::LOTTIE ? "LOTTIE" :
+               ftype == FileType::SVG ? "SVG" : "?");
+    }
+  }
+  closedir(dir);
+
+  // Sort: directories first, then files alphabetically
+  std::sort(this->file_entries_.begin(), this->file_entries_.end(),
+    [](const FileEntry &a, const FileEntry &b) {
+      if (a.is_directory != b.is_directory) return a.is_directory > b.is_directory;
+      return a.name < b.name;
+    });
+
+  ESP_LOGI(TAG, "Found %u items in %s", this->file_entries_.size(), path.c_str());
+}
+
+void Mp4Player::create_file_browser_() {
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Main container - full screen dark background
+  this->browser_container_ = lv_obj_create(parent);
+  lv_obj_set_size(this->browser_container_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->browser_container_);
+  lv_obj_set_style_bg_color(this->browser_container_, lv_color_hex(0x1A1A2E), 0);
+  lv_obj_set_style_bg_opa(this->browser_container_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->browser_container_, 0, 0);
+  lv_obj_set_style_pad_all(this->browser_container_, 0, 0);
+  lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Title bar
+  lv_obj_t *title_bar = lv_obj_create(this->browser_container_);
+  lv_obj_set_size(title_bar, LV_PCT(100), 50);
+  lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x16213E), 0);
+  lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(title_bar, 0, 0);
+  lv_obj_set_style_pad_all(title_bar, 0, 0);
+  lv_obj_clear_flag(title_bar, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Back button
+  lv_obj_t *back_btn = lv_btn_create(title_bar);
+  lv_obj_set_size(back_btn, 50, 40);
+  lv_obj_set_pos(back_btn, 5, 5);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x0F3460), 0);
+  lv_obj_set_style_radius(back_btn, 8, 0);
+  lv_obj_t *back_lbl = lv_label_create(back_btn);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_obj_center(back_lbl);
+  lv_obj_add_event_cb(back_btn, back_btn_cb_, LV_EVENT_CLICKED, this);
+
+  // Title label
+  this->browser_title_ = lv_label_create(title_bar);
+  lv_label_set_text(this->browser_title_, "Media Files");
+  lv_obj_set_pos(this->browser_title_, 65, 12);
+  lv_obj_set_style_text_color(this->browser_title_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->browser_title_, &lv_font_montserrat_16, 0);
+
+  // Refresh button
+  lv_obj_t *refresh_btn = lv_btn_create(title_bar);
+  lv_obj_set_size(refresh_btn, 50, 40);
+  lv_obj_align(refresh_btn, LV_ALIGN_TOP_RIGHT, -5, 5);
+  lv_obj_set_style_bg_color(refresh_btn, lv_color_hex(0x0F3460), 0);
+  lv_obj_set_style_radius(refresh_btn, 8, 0);
+  lv_obj_t *ref_lbl = lv_label_create(refresh_btn);
+  lv_label_set_text(ref_lbl, LV_SYMBOL_REFRESH);
+  lv_obj_center(ref_lbl);
+  lv_obj_add_event_cb(refresh_btn, refresh_btn_cb_, LV_EVENT_CLICKED, this);
+
+  // File list (scrollable)
+  this->browser_list_ = lv_obj_create(this->browser_container_);
+  lv_obj_set_size(this->browser_list_, LV_PCT(100), LV_PCT(100));
+  lv_obj_align(this->browser_list_, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
+  lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->browser_list_, 0, 0);
+  lv_obj_set_style_pad_all(this->browser_list_, 8, 0);
+  lv_obj_set_style_pad_row(this->browser_list_, 8, 0);
+  lv_obj_set_flex_flow(this->browser_list_, LV_FLEX_FLOW_COLUMN);
+
+  this->browser_active_ = true;
+
+  // Show root: list media directories
+  this->current_browse_path_ = "";
+  this->navigate_to_directory_("");
+}
+
+void Mp4Player::navigate_to_directory_(std::string path) {
+  if (!this->browser_list_) return;
+
+  // Defer LVGL layout updates until all items are added (reduces lag)
+  lv_obj_add_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
+
+  // Clear existing items
+  lv_obj_clean(this->browser_list_);
+  this->current_browse_path_ = path;
+
+  if (path.empty()) {
+    // Root level - show available media directories
+    this->file_entries_.clear();
+    lv_label_set_text(this->browser_title_, "Media Files");
+
+    ESP_LOGI(TAG, "Showing root: %u media directories configured", this->media_directories_.size());
+
+    for (const auto &dir : this->media_directories_) {
+      // Check if directory exists
+      DIR *d = opendir(dir.c_str());
+      bool available = (d != nullptr);
+      if (d) closedir(d);
+
+      lv_obj_t *btn = lv_btn_create(this->browser_list_);
+      lv_obj_set_size(btn, LV_PCT(100), 65);
+      lv_obj_set_style_bg_color(btn, available ? lv_color_hex(0x0F3460) : lv_color_hex(0x333333), 0);
+      lv_obj_set_style_radius(btn, 10, 0);
+      lv_obj_set_style_pad_left(btn, 15, 0);
+      lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_column(btn, 12, 0);
+
+      // Icon
+      lv_obj_t *icon = lv_label_create(btn);
+      bool is_usb = (dir.find("usb") != std::string::npos);
+      lv_label_set_text(icon, is_usb ? LV_SYMBOL_USB : LV_SYMBOL_SD_CARD);
+      lv_obj_set_style_text_color(icon, available ? lv_color_hex(0x00D4FF) : lv_color_hex(0x666666), 0);
+      lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
+
+      // Label
+      lv_obj_t *lbl = lv_label_create(btn);
+      std::string display_name = is_usb ? "USB Drive" : "SD Card";
+      if (!available) display_name += " (not mounted)";
+      lv_label_set_text(lbl, display_name.c_str());
+      lv_obj_set_style_text_color(lbl, available ? lv_color_white() : lv_color_hex(0x666666), 0);
+      lv_obj_set_style_text_font(lbl, &lv_font_montserrat_16, 0);
+
+      if (available) {
+        // Store directory path as user data for callback
+        // We need to store the string - use a static approach with file_entries_
+        FileEntry fe;
+        fe.full_path = dir;
+        fe.name = display_name;
+        fe.is_directory = true;
+        fe.file_type = FileType::DIRECTORY;
+        fe.size = 0;
+        this->file_entries_.push_back(fe);
+
+        size_t idx = this->file_entries_.size() - 1;
+        lv_obj_set_user_data(btn, (void *)(uintptr_t)idx);
+        lv_obj_add_event_cb(btn, file_item_cb_, LV_EVENT_CLICKED, this);
+      }
+    }
+  } else {
+    // Browse a specific directory
+    // Update title with current path
+    std::string title = path;
+    if (title.length() > 30) {
+      title = "..." + title.substr(title.length() - 27);
+    }
+    lv_label_set_text(this->browser_title_, title.c_str());
+
+    this->file_entries_.clear();
+    this->scan_media_files_(path);
+
+    if (this->file_entries_.empty()) {
+      lv_obj_t *empty_lbl = lv_label_create(this->browser_list_);
+      lv_label_set_text(empty_lbl, "No video files found");
+      lv_obj_set_style_text_color(empty_lbl, lv_color_hex(0x888888), 0);
+      lv_obj_set_style_text_font(empty_lbl, &lv_font_montserrat_16, 0);
+      lv_obj_set_style_pad_top(empty_lbl, 20, 0);
+      lv_obj_clear_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
+      return;
+    }
+
+    for (size_t i = 0; i < this->file_entries_.size(); i++) {
+      const auto &fe = this->file_entries_[i];
+
+      lv_obj_t *btn = lv_btn_create(this->browser_list_);
+      lv_obj_set_size(btn, LV_PCT(100), 70);
+      lv_obj_set_style_bg_color(btn, lv_color_hex(0x0F3460), 0);
+      lv_obj_set_style_radius(btn, 10, 0);
+      lv_obj_set_style_pad_left(btn, 15, 0);
+      lv_obj_clear_flag(btn, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_set_flex_flow(btn, LV_FLEX_FLOW_ROW);
+      lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+      lv_obj_set_style_pad_column(btn, 12, 0);
+
+      // Icon - type-specific
+      lv_obj_t *icon = lv_label_create(btn);
+      switch (fe.file_type) {
+        case FileType::DIRECTORY:
+          lv_label_set_text(icon, LV_SYMBOL_DIRECTORY);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFFD700), 0);  // Gold
+          break;
+        case FileType::VIDEO:
+          lv_label_set_text(icon, LV_SYMBOL_VIDEO);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x00FF88), 0);  // Green
+          break;
+        case FileType::IMAGE:
+          lv_label_set_text(icon, LV_SYMBOL_IMAGE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x00D4FF), 0);  // Cyan
+          break;
+        case FileType::AUDIO:
+          lv_label_set_text(icon, LV_SYMBOL_AUDIO);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFF6B9D), 0);  // Pink
+          break;
+        case FileType::LOTTIE:
+          lv_label_set_text(icon, LV_SYMBOL_LOOP);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xBB86FC), 0);  // Purple
+          break;
+        case FileType::SVG:
+          lv_label_set_text(icon, LV_SYMBOL_FILE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFF9800), 0);  // Orange
+          break;
+        default:
+          lv_label_set_text(icon, LV_SYMBOL_FILE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x888888), 0);
+          break;
+      }
+      lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
+
+      // Filename
+      lv_obj_t *name_lbl = lv_label_create(btn);
+      lv_label_set_text(name_lbl, fe.name.c_str());
+      lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
+      lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+      lv_label_set_long_mode(name_lbl, LV_LABEL_LONG_DOT);
+      lv_obj_set_flex_grow(name_lbl, 1);
+
+      // File size (for files only)
+      if (!fe.is_directory) {
+        lv_obj_t *size_lbl = lv_label_create(btn);
+        char size_buf[16];
+        if (fe.size >= 1024 * 1024) {
+          snprintf(size_buf, sizeof(size_buf), "%.1f MB", fe.size / (1024.0 * 1024.0));
+        } else if (fe.size >= 1024) {
+          snprintf(size_buf, sizeof(size_buf), "%.0f KB", fe.size / 1024.0);
+        } else {
+          snprintf(size_buf, sizeof(size_buf), "%u B", (unsigned)fe.size);
+        }
+        lv_label_set_text(size_lbl, size_buf);
+        lv_obj_set_style_text_color(size_lbl, lv_color_hex(0x888888), 0);
+        lv_obj_set_style_text_font(size_lbl, &lv_font_montserrat_16, 0);
+      }
+
+      lv_obj_set_user_data(btn, (void *)(uintptr_t)i);
+      lv_obj_add_event_cb(btn, file_item_cb_, LV_EVENT_CLICKED, this);
+    }
+  }
+
+  // Show list now that all items are added (single redraw)
+  lv_obj_clear_flag(this->browser_list_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Mp4Player::destroy_file_browser_() {
+  if (this->browser_container_) {
+    lv_obj_del(this->browser_container_);
+    this->browser_container_ = nullptr;
+    this->browser_list_ = nullptr;
+    this->browser_title_ = nullptr;
+  }
+  this->browser_active_ = false;
+  this->file_entries_.clear();
+}
+
+void Mp4Player::show_file_browser() {
+  // Hide player UI elements
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  if (this->browser_container_) {
+    // Browser already exists, just show and refresh
+    lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+    this->navigate_to_directory_(this->current_browse_path_);
+  } else {
+    this->create_file_browser_();
+  }
+  this->browser_active_ = true;
+}
+
+void Mp4Player::play_file(const std::string &path) {
+  ESP_LOGI(TAG, "Playing file: %s", path.c_str());
+
+  // Stop current playback if any
+  if (this->state_ != PlayerState::STOPPED) {
+    // Temporarily clear media_directories_ to prevent stop() from showing browser
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  // Hide browser
+  if (this->browser_container_) {
+    lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  }
+  this->browser_active_ = false;
+
+  // Set file path
+  this->file_path_ = path;
+
+  // Initialize playback resources if needed (first time from browser)
+  if (!this->playback_event_group_) {
+    this->playback_event_group_ = xEventGroupCreate();
+    if (!this->playback_event_group_) {
+      ESP_LOGE(TAG, "Failed to create event group");
+      return;
+    }
+  }
+
+  if (!this->jpeg_buffer_) {
+    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(JPEG_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!this->jpeg_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer");
+      return;
+    }
+  }
+
+  if (!this->jpeg_decoder_) {
+    jpeg_decode_engine_cfg_t cfg = {
+      .intr_priority = 0,
+      .timeout_ms = 1000,
+    };
+    if (jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to init JPEG decoder");
+      return;
+    }
+  }
+
+  // Register extractors (video + audio elementary streams)
+  esp_mp4_extractor_register();
+  esp_avi_extractor_register();
+  esp_audio_es_extractor_register();
+  esp_wav_extractor_register();
+
+  // Probe video to get dimensions
+  {
+    esp_extractor_handle_t probe = nullptr;
+    esp_extractor_config_t probe_cfg = {};
+    probe_cfg.open = file_open_cb_;
+    probe_cfg.read = file_read_cb_;
+    probe_cfg.seek = file_seek_cb_;
+    probe_cfg.file_size = file_size_cb_;
+    probe_cfg.close = file_close_cb_;
+    probe_cfg.extract_mask = ESP_EXTRACT_MASK_VIDEO | ESP_EXTRACT_MASK_AUDIO;
+    probe_cfg.url = (char *)this->file_path_.c_str();
+    probe_cfg.input_ctx = nullptr;
+    probe_cfg.output_pool_size = 256 * 1024;
+    probe_cfg.cache_block_num = 3;
+    probe_cfg.cache_block_size = 256 * 1024 / 3;
+
+    if (esp_extractor_open(&probe_cfg, &probe) == ESP_OK) {
+      if (esp_extractor_parse_stream_info(probe) == ESP_OK) {
+        uint16_t vnum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum);
+        if (vnum > 0) {
+          extractor_stream_info_t sinfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_VIDEO, 0, &sinfo) == ESP_OK) {
+            this->video_width_ = sinfo.stream_info.video_info.width;
+            this->video_height_ = sinfo.stream_info.video_info.height;
+            this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->total_duration_ms_ = sinfo.duration;
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
+                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+          }
+        }
+        uint16_t anum = 0;
+        esp_extractor_get_stream_num(probe, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
+        this->has_audio_ = (anum > 0);
+        if (this->has_audio_) {
+          extractor_stream_info_t ainfo = {};
+          if (esp_extractor_get_stream_info(probe, EXTRACTOR_STREAM_TYPE_AUDIO, 0, &ainfo) == ESP_OK) {
+            this->audio_format_ = ainfo.stream_info.audio_info.format;
+            this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
+            this->audio_channels_ = ainfo.stream_info.audio_info.channel;
+            this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
+          }
+        }
+      }
+      esp_extractor_close(probe);
+    }
+    esp_extractor_unregister_all();
+  }
+
+  if (this->video_width_ == 0 || this->video_height_ == 0) {
+    this->video_width_ = 800;
+    this->video_height_ = 480;
+  }
+
+  // Allocate or reallocate display buffers
+  uint32_t aligned_w = (this->video_width_ + 15) & ~15;
+  uint32_t aligned_h = (this->video_height_ + 15) & ~15;
+  uint32_t needed = aligned_w * aligned_h * 2;
+  if (needed > this->display_buffer_size_) {
+    for (int i = 0; i < 2; i++) {
+      if (this->display_buffer_[i]) {
+        heap_caps_free(this->display_buffer_[i]);
+        this->display_buffer_[i] = nullptr;
+      }
+      this->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(64, needed, MALLOC_CAP_SPIRAM);
+      if (!this->display_buffer_[i]) {
+        ESP_LOGE(TAG, "Failed to allocate display buffer %d", i);
+        return;
+      }
+      memset(this->display_buffer_[i], 0, needed);
+    }
+    this->display_buffer_size_ = needed;
+  }
+
+  // Setup audio if needed
+  if (this->has_audio_ && this->speaker_ && !this->audio_pcm_buffer_) {
+    esp_aac_dec_register();
+    esp_mp3_dec_register();
+    esp_flac_dec_register();
+    esp_pcm_dec_register();
+    this->audio_pcm_buffer_size_ = AUDIO_PCM_BUFFER_SIZE;
+    this->audio_pcm_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_pcm_buffer_size_, MALLOC_CAP_SPIRAM);
+    if (this->audio_pcm_buffer_ && !this->audio_ring_buffer_) {
+      this->audio_ring_size_ = AUDIO_RING_BUFFER_SIZE;
+      this->audio_ring_buffer_ = (uint8_t *)heap_caps_malloc(this->audio_ring_size_, MALLOC_CAP_SPIRAM);
+      if (this->audio_ring_buffer_) {
+        this->audio_ring_read_ = 0;
+        this->audio_ring_write_ = 0;
+      }
+    }
+  }
+
+  // Create or update player UI
+  if (!this->canvas_) {
+    this->create_ui_();
+  } else {
+    // Update existing canvas
+    lv_canvas_set_buffer(this->canvas_, this->display_buffer_[0],
+                         this->video_width_, this->video_height_,
+                         LV_COLOR_FORMAT_RGB565);
+    lv_obj_clear_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+    if (this->touch_layer_) {
+      lv_obj_set_size(this->touch_layer_, this->video_width_, this->video_height_);
+      lv_obj_clear_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (this->controls_container_) {
+      lv_obj_clear_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (this->loading_label_) {
+      lv_label_set_text(this->loading_label_, "Loading...");
+      lv_obj_clear_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    // Update resolution label
+    if (this->resolution_label_) {
+      char res[32];
+      snprintf(res, sizeof(res), "%ux%u", this->video_width_, this->video_height_);
+      lv_label_set_text(this->resolution_label_, res);
+    }
+    // Update format badge
+    if (this->format_badge_) {
+      const char *ext = strrchr(this->file_path_.c_str(), '.');
+      const char *fmt = "MP4";
+      if (ext) {
+        if (strcasecmp(ext, ".avi") == 0) fmt = "AVI";
+        else if (strcasecmp(ext, ".mkv") == 0) fmt = "MKV";
+      }
+      lv_label_set_text(this->format_badge_, fmt);
+    }
+  }
+
+  // Start playback
+  this->play();
+}
+
+void Mp4Player::file_item_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+
+  if (idx >= player->file_entries_.size()) return;
+
+  // Copy values before navigate may clear file_entries_
+  std::string path = player->file_entries_[idx].full_path;
+  FileType type = player->file_entries_[idx].file_type;
+
+  if (type == FileType::DIRECTORY) {
+    player->navigate_to_directory_(path);
+  } else {
+    player->open_media_file_(path, type);
+  }
+}
+
+void Mp4Player::open_media_file_(const std::string &path, FileType type) {
+  ESP_LOGI(TAG, "Opening media file: %s (type=%d)", path.c_str(), (int)type);
+
+  switch (type) {
+    case FileType::VIDEO:
+      this->play_file(path);
+      break;
+
+    case FileType::IMAGE:
+    case FileType::SVG:
+    case FileType::LOTTIE:
+      this->show_image_viewer_(path);
+      break;
+
+    case FileType::AUDIO:
+      // Start playback FIRST (play_file calls stop() which resets audio_only_mode_)
+      this->play_file(path);
+
+      // NOW set audio-only mode and create spectrum UI (after stop() has run)
+      this->audio_only_mode_ = true;
+      this->create_spectrum_ui_();
+
+      // Hide browser
+      if (this->browser_container_)
+        lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+
+      // Set title from filename
+      if (this->spectrum_title_label_) {
+        const char *fname = strrchr(path.c_str(), '/');
+        lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : path.c_str());
+      }
+
+      // Set format info after play_file has probed
+      if (this->spectrum_artist_label_) {
+        char info[64];
+        snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+                 this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100,
+                 this->audio_channels_ > 1 ? "Stereo" : "Mono",
+                 this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+        lv_label_set_text(this->spectrum_artist_label_, info);
+      }
+      break;
+
+    default:
+      ESP_LOGW(TAG, "Unsupported file type for: %s", path.c_str());
+      break;
+  }
+}
+
+void Mp4Player::show_image_viewer_(const std::string &path) {
+  // Destroy previous viewer if any
+  this->destroy_image_viewer_();
+
+  // Hide browser
+  if (this->browser_container_)
+    lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Full-screen container with black background
+  this->image_viewer_ = lv_obj_create(parent);
+  lv_obj_set_size(this->image_viewer_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->image_viewer_);
+  lv_obj_set_style_bg_color(this->image_viewer_, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(this->image_viewer_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->image_viewer_, 0, 0);
+  lv_obj_set_style_pad_all(this->image_viewer_, 0, 0);
+  lv_obj_clear_flag(this->image_viewer_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Store path for LVGL file prefix
+  this->image_viewer_path_ = path;
+
+  // Determine file type for appropriate LVGL widget
+  FileType type = get_file_type_(path);
+  std::string lvgl_path;
+
+#if HAS_LV_LOTTIE
+  if (type == FileType::LOTTIE) {
+    // LVGL Lottie animation (ThorVG)
+    lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
+    if (lottie) {
+      // Read file into memory for lottie
+      FILE *f = fopen(path.c_str(), "r");
+      if (f) {
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *json_buf = (char *)malloc(fsize + 1);
+        if (json_buf) {
+          fread(json_buf, 1, fsize, f);
+          json_buf[fsize] = '\0';
+          lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
+          lv_obj_set_size(lottie, LV_PCT(80), LV_PCT(80));
+          lv_obj_center(lottie);
+          // json_buf must remain valid - store for cleanup
+          lv_obj_set_user_data(lottie, json_buf);
+        }
+        fclose(f);
+      }
+    }
+  } else
+#endif
+  {
+    // Image (PNG, JPG, BMP) or SVG - use lv_image with file path
+    // LVGL uses "S:" prefix for filesystem access or direct path
+    lv_obj_t *img = lv_image_create(this->image_viewer_);
+    lvgl_path = std::string("S:") + path;
+    lv_image_set_src(img, lvgl_path.c_str());
+    lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_center(img);
+    // Scale to fit screen
+    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+  }
+
+  // Close button (top-right)
+  lv_obj_t *close_btn = lv_btn_create(this->image_viewer_);
+  lv_obj_set_size(close_btn, 50, 50);
+  lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+  lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xE74C3C), 0);
+  lv_obj_set_style_radius(close_btn, 25, 0);
+  lv_obj_set_style_bg_opa(close_btn, LV_OPA_70, 0);
+  lv_obj_t *close_lbl = lv_label_create(close_btn);
+  lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE);
+  lv_obj_set_style_text_color(close_lbl, lv_color_white(), 0);
+  lv_obj_center(close_lbl);
+  lv_obj_add_event_cb(close_btn, image_close_cb_, LV_EVENT_CLICKED, this);
+
+  // Filename at bottom
+  lv_obj_t *name_lbl = lv_label_create(this->image_viewer_);
+  const char *fname = strrchr(path.c_str(), '/');
+  lv_label_set_text(name_lbl, fname ? fname + 1 : path.c_str());
+  lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
+  lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+  lv_obj_align(name_lbl, LV_ALIGN_BOTTOM_MID, 0, -15);
+  lv_obj_set_style_bg_color(name_lbl, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(name_lbl, LV_OPA_50, 0);
+  lv_obj_set_style_pad_all(name_lbl, 5, 0);
+}
+
+void Mp4Player::image_close_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  player->destroy_image_viewer_();
+
+  // Show browser again
+  if (player->browser_container_)
+    lv_obj_clear_flag(player->browser_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Mp4Player::destroy_image_viewer_() {
+  if (this->image_viewer_) {
+    // Free lottie JSON buffer if any (stored in lottie obj's user_data)
+    uint32_t child_cnt = lv_obj_get_child_count(this->image_viewer_);
+    for (uint32_t i = 0; i < child_cnt; i++) {
+      lv_obj_t *child = lv_obj_get_child(this->image_viewer_, i);
+      void *ud = lv_obj_get_user_data(child);
+      if (ud) {
+        free(ud);
+        lv_obj_set_user_data(child, nullptr);
+      }
+    }
+    lv_obj_del(this->image_viewer_);
+    this->image_viewer_ = nullptr;
+  }
+  this->image_viewer_path_.clear();
+}
+
+// ============================================================================
+// Spectrum Analyzer
+// ============================================================================
+
+// Simple radix-2 FFT (in-place, Cooley-Tukey)
+void Mp4Player::fft_simple_(float *real, float *imag, int n) {
+  // Bit-reversal permutation
+  for (int i = 1, j = 0; i < n; i++) {
+    int bit = n >> 1;
+    for (; j & bit; bit >>= 1) {
+      j ^= bit;
+    }
+    j ^= bit;
+    if (i < j) {
+      std::swap(real[i], real[j]);
+      std::swap(imag[i], imag[j]);
+    }
+  }
+
+  // FFT butterfly
+  for (int len = 2; len <= n; len <<= 1) {
+    float angle = -2.0f * M_PI / len;
+    float w_real = cosf(angle);
+    float w_imag = sinf(angle);
+    for (int i = 0; i < n; i += len) {
+      float cur_real = 1.0f, cur_imag = 0.0f;
+      for (int j = 0; j < len / 2; j++) {
+        float t_real = cur_real * real[i + j + len / 2] - cur_imag * imag[i + j + len / 2];
+        float t_imag = cur_real * imag[i + j + len / 2] + cur_imag * real[i + j + len / 2];
+        real[i + j + len / 2] = real[i + j] - t_real;
+        imag[i + j + len / 2] = imag[i + j] - t_imag;
+        real[i + j] += t_real;
+        imag[i + j] += t_imag;
+        float new_real = cur_real * w_real - cur_imag * w_imag;
+        cur_imag = cur_real * w_imag + cur_imag * w_real;
+        cur_real = new_real;
+      }
+    }
+  }
+}
+
+void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_count) {
+  if (sample_count < (size_t)FFT_SIZE) return;
+
+  float real[FFT_SIZE];
+  float imag[FFT_SIZE];
+
+  // Fill FFT input with windowed samples (Hanning window)
+  // If stereo, take only left channel (every other sample)
+  int step = (this->audio_channels_ > 1) ? 2 : 1;
+  for (int i = 0; i < FFT_SIZE; i++) {
+    float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
+    real[i] = (float)pcm[i * step] * window / 32768.0f;
+    imag[i] = 0.0f;
+  }
+
+  fft_simple_(real, imag, FFT_SIZE);
+
+  // Map FFT bins to spectrum bands (logarithmic distribution)
+  int half = FFT_SIZE / 2;
+  for (int band = 0; band < SPECTRUM_BANDS; band++) {
+    // Logarithmic band mapping: each band covers a wider frequency range
+    float frac_lo = (float)band / SPECTRUM_BANDS;
+    float frac_hi = (float)(band + 1) / SPECTRUM_BANDS;
+    // Exponential mapping for more musical distribution
+    int bin_lo = (int)(powf(frac_lo, 2.0f) * half);
+    int bin_hi = (int)(powf(frac_hi, 2.0f) * half);
+    if (bin_lo < 1) bin_lo = 1;
+    if (bin_hi <= bin_lo) bin_hi = bin_lo + 1;
+    if (bin_hi > half) bin_hi = half;
+
+    float sum = 0.0f;
+    for (int b = bin_lo; b < bin_hi; b++) {
+      float mag = sqrtf(real[b] * real[b] + imag[b] * imag[b]);
+      if (mag > sum) sum = mag;  // Use peak within band
+    }
+
+    // Convert to dB-like scale (0-100)
+    float db = 20.0f * log10f(sum + 1e-6f);
+    float normalized = (db + 40.0f) / 40.0f;  // -40dB to 0dB -> 0 to 1
+    if (normalized < 0.0f) normalized = 0.0f;
+    if (normalized > 1.0f) normalized = 1.0f;
+
+    this->spectrum_magnitudes_[band] = normalized * 100.0f;
+  }
+}
+
+void Mp4Player::create_spectrum_ui_() {
+  this->destroy_spectrum_ui_();
+
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Full-screen container
+  this->spectrum_container_ = lv_obj_create(parent);
+  lv_obj_set_size(this->spectrum_container_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->spectrum_container_);
+  lv_obj_set_style_bg_color(this->spectrum_container_, lv_color_hex(0x0A0A1A), 0);
+  lv_obj_set_style_bg_opa(this->spectrum_container_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->spectrum_container_, 0, 0);
+  lv_obj_set_style_pad_all(this->spectrum_container_, 0, 0);
+  lv_obj_clear_flag(this->spectrum_container_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Music icon + title at top
+  lv_obj_t *title_area = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(title_area, LV_PCT(100), 80);
+  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_style_bg_opa(title_area, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(title_area, 0, 0);
+  lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Music icon
+  lv_obj_t *music_icon = lv_label_create(title_area);
+  lv_label_set_text(music_icon, LV_SYMBOL_AUDIO);
+  lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_text_font(music_icon, &lv_font_montserrat_16, 0);
+  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 20, -10);
+
+  // Song title (filename)
+  this->spectrum_title_label_ = lv_label_create(title_area);
+  lv_label_set_text(this->spectrum_title_label_, "");
+  lv_obj_set_style_text_color(this->spectrum_title_label_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->spectrum_title_label_, &lv_font_montserrat_16, 0);
+  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_DOT);
+  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(80));
+  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 50, -10);
+
+  // Format info
+  this->spectrum_artist_label_ = lv_label_create(title_area);
+  lv_label_set_text(this->spectrum_artist_label_, "");
+  lv_obj_set_style_text_color(this->spectrum_artist_label_, lv_color_hex(0x888888), 0);
+  lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
+  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 50, 12);
+
+  // Spectrum bars area
+  lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(bars_area, LV_PCT(90), LV_PCT(55));
+  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_set_style_bg_opa(bars_area, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(bars_area, 0, 0);
+  lv_obj_set_style_pad_all(bars_area, 0, 0);
+  lv_obj_clear_flag(bars_area, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_flex_flow(bars_area, LV_FLEX_FLOW_ROW);
+  lv_obj_set_flex_align(bars_area, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+
+  // Create bars with gradient colors
+  for (int i = 0; i < SPECTRUM_BANDS; i++) {
+    lv_obj_t *bar = lv_obj_create(bars_area);
+    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);  // Start small
+    lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Color gradient from cyan to magenta across bands
+    uint8_t r = (uint8_t)(i * 255 / SPECTRUM_BANDS);
+    uint8_t g = (uint8_t)(100 + (SPECTRUM_BANDS - i) * 100 / SPECTRUM_BANDS);
+    uint8_t b = (uint8_t)(200 + i * 55 / SPECTRUM_BANDS);
+    lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+
+    // Gradient from bottom (darker) to top (brighter)
+    lv_obj_set_style_bg_grad_color(bar, lv_color_make(r / 3, g / 3, b / 3), 0);
+    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+
+    this->spectrum_bars_[i] = bar;
+    this->spectrum_smooth_[i] = 0;
+    this->spectrum_peaks_[i] = 0;
+  }
+
+  this->spectrum_last_update_ = 0;
+  ESP_LOGI(TAG, "Spectrum analyzer UI created");
+}
+
+void Mp4Player::destroy_spectrum_ui_() {
+  if (this->spectrum_container_) {
+    lv_obj_del(this->spectrum_container_);
+    this->spectrum_container_ = nullptr;
+    this->spectrum_title_label_ = nullptr;
+    this->spectrum_artist_label_ = nullptr;
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      this->spectrum_bars_[i] = nullptr;
+      this->spectrum_smooth_[i] = 0;
+      this->spectrum_peaks_[i] = 0;
+    }
+  }
+  this->audio_only_mode_ = false;
+}
+
+void Mp4Player::update_spectrum_() {
+  if (!this->spectrum_container_ || !this->audio_only_mode_) return;
+  if (this->state_ != PlayerState::PLAYING) return;
+
+  // Throttle to ~30fps
+  uint32_t now = lv_tick_get();
+  if (now - this->spectrum_last_update_ < 33) return;
+  this->spectrum_last_update_ = now;
+
+  // Sample PCM data from the ring buffer (peek, don't consume)
+  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * (this->audio_channels_ > 1 ? 2 : 1))) {
+    // Read a snapshot from current ring buffer position without consuming
+    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * (this->audio_channels_ > 1 ? 2 : 1);
+    int16_t *samples = (int16_t *)malloc(bytes_needed);
+    if (samples) {
+      // Peek at ring buffer data (read from current read position without advancing)
+      size_t read_pos = this->audio_ring_read_;
+      for (size_t i = 0; i < bytes_needed; i++) {
+        ((uint8_t *)samples)[i] = this->audio_ring_buffer_[(read_pos + i) % this->audio_ring_size_];
+      }
+      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * (this->audio_channels_ > 1 ? 2 : 1));
+      free(samples);
+    }
+  }
+
+  // Get max bar height from parent
+  lv_obj_t *bars_parent = lv_obj_get_parent(this->spectrum_bars_[0]);
+  if (!bars_parent) return;
+  int max_h = lv_obj_get_content_height(bars_parent);
+
+  for (int i = 0; i < SPECTRUM_BANDS; i++) {
+    if (!this->spectrum_bars_[i]) continue;
+
+    // Smooth animation (fast attack, slow decay)
+    float target = this->spectrum_magnitudes_[i];
+    if (target > this->spectrum_smooth_[i]) {
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.4f;  // Fast attack
+    } else {
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.15f;  // Slow decay
+    }
+
+    // Peak hold with slow fall
+    if (this->spectrum_smooth_[i] > this->spectrum_peaks_[i]) {
+      this->spectrum_peaks_[i] = this->spectrum_smooth_[i];
+    } else {
+      this->spectrum_peaks_[i] *= 0.97f;  // Slow peak decay
+    }
+
+    int bar_h = (int)(this->spectrum_smooth_[i] * max_h / 100.0f);
+    if (bar_h < 4) bar_h = 4;
+    if (bar_h > max_h) bar_h = max_h;
+
+    lv_obj_set_height(this->spectrum_bars_[i], bar_h);
+  }
+}
+
+void Mp4Player::back_btn_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+
+  if (player->current_browse_path_.empty()) {
+    return;  // Already at root
+  }
+
+  // Go up one level
+  size_t last_slash = player->current_browse_path_.rfind('/');
+  if (last_slash == std::string::npos || last_slash == 0) {
+    // Back to root (media directory list)
+    player->file_entries_.clear();
+    player->navigate_to_directory_("");
+  } else {
+    std::string parent = player->current_browse_path_.substr(0, last_slash);
+    // Check if parent is one of the media directories (go to root if so)
+    bool is_media_root = false;
+    for (const auto &dir : player->media_directories_) {
+      if (parent == dir || parent.length() < dir.length()) {
+        is_media_root = true;
+        break;
+      }
+    }
+    if (is_media_root) {
+      player->file_entries_.clear();
+      player->navigate_to_directory_("");
+    } else {
+      player->navigate_to_directory_(parent);
+    }
+  }
+}
+
+void Mp4Player::refresh_btn_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  player->file_entries_.clear();
+  player->navigate_to_directory_(player->current_browse_path_);
+}
+
 }  // namespace mp4_player
 }  // namespace esphome
 
@@ -1180,6 +2506,8 @@ void Mp4Player::dump_config() {}
 void Mp4Player::play() {}
 void Mp4Player::pause() {}
 void Mp4Player::stop() {}
+void Mp4Player::play_file(const std::string &path) {}
+void Mp4Player::show_file_browser() {}
 }  // namespace mp4_player
 }  // namespace esphome
 

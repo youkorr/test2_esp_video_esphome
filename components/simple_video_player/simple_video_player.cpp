@@ -4948,6 +4948,23 @@ void SimpleVideoPlayer::stop() {
   this->current_audio_sample_ = 0;
   this->audio_samples_.clear();
 
+  // Free file cache buffer (CRITICAL - up to 32MB PSRAM!)
+  if (this->file_cache_buffer_ != nullptr) {
+    total_freed += this->file_size_;
+    heap_caps_free(this->file_cache_buffer_);
+    this->file_cache_buffer_ = nullptr;
+    this->file_cache_loaded_ = false;
+    this->file_cache_pos_ = 0;
+    ESP_LOGD(TAG, "  Freed file_cache_buffer_: %zu bytes", this->file_size_);
+  }
+
+  // Close JPEG decoder hardware resource
+  if (this->jpeg_decoder_ != nullptr) {
+    jpeg_del_decoder_engine(this->jpeg_decoder_);
+    this->jpeg_decoder_ = nullptr;
+    ESP_LOGD(TAG, "  Deleted JPEG decoder engine");
+  }
+
   // Close H.264 decoder (CRITICAL for SPIRAM release!)
   if (this->h264_decoder_ != nullptr) {
     ESP_LOGI(TAG, "Closing H.264 decoder to free internal SPIRAM buffers...");
