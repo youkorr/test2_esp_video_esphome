@@ -499,7 +499,7 @@ external_components:
 
   - source:
       type: git
-      url: https://github.com/youkorr/lvgl_9.4
+      url: https://github.com/youkorr/lvgl_9.5
       ref: main
     components: [lvgl, image]
     refresh: always
@@ -2345,24 +2345,13 @@ image:
     type: rgb565
   images:
 
-                
-  #- file: http://192.168.1.158:8080/iryQdAwo/cheon.jpg                             
-    #id: testone
-    #resize: 1280x720
-
-  #- file: "/img/anuvious.jpg"    
-    #id: test
-    #resize: 1280x720
-    
-  #- file:
-      #source: sd_card
-      #path: "img/anuvious.jpg"
-    #id: test
-    #resize: 1280x720
-
-  #- file: http://192.168.1.158:8080/ZAPTjwuz/simulation.jpg                  
-    #id: wallpaper
-    #resize: 1280x720    
+  # Pour les images locales, placer les fichiers dans /config/esphome/images/
+  # et utiliser un chemin relatif comme: images/win.png
+  # ou un chemin absolu comme: /config/esphome/images/win.png
+  # Exemple:
+  # - file: images/win.png
+  #   id: test
+  #   resize: 1024x600
 
   - file: ${error_illustration_file}
     id: casita_error
