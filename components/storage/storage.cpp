@@ -291,6 +291,12 @@ void SdImageComponent::draw_to_canvas(lv_obj_t *canvas, int x, int y) {
     return;
   }
 
+  // WebP raw data cannot be drawn pixel-by-pixel to canvas
+  if (this->format_ == ImageFormat::WEBP) {
+    ESP_LOGW(TAG_IMAGE, "WebP images must be displayed via LVGL lv_image widget, not canvas");
+    return;
+  }
+
   // Get canvas dimensions for bounds checking
   lv_coord_t canvas_w = lv_obj_get_width(canvas);
   lv_coord_t canvas_h = lv_obj_get_height(canvas);
@@ -462,11 +468,17 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
     return;
   }
-  
-  ESP_LOGD(TAG_IMAGE, "Drawing SD image %dx%d at position %d,%d (Base: W:%d H:%d Data:%p)", 
+
+  // WebP raw data cannot be drawn as pixels - use LVGL lv_image widget instead
+  if (this->format_ == ImageFormat::WEBP) {
+    ESP_LOGW(TAG_IMAGE, "WebP images must be displayed via LVGL lv_image widget, not draw()");
+    return;
+  }
+
+  ESP_LOGD(TAG_IMAGE, "Drawing SD image %dx%d at position %d,%d (Base: W:%d H:%d Data:%p)",
            this->get_current_width(), this->get_current_height(), x, y,
            this->width_, this->height_, this->data_start_);
-  
+
   // Si les données de base sont correctes, utiliser la méthode optimisée d'ESPHome
   if (this->data_start_ && this->width_ > 0 && this->height_ > 0) {
     ESP_LOGD(TAG_IMAGE, "Using ESPHome base image draw method");
@@ -618,10 +630,10 @@ void SdImageComponent::update_base_image_properties() {
   this->width_ = this->get_current_width();
   this->height_ = this->get_current_height();
   this->type_ = this->get_esphome_image_type();
-  
+
   if (!this->image_buffer_.empty()) {
     this->data_start_ = this->image_buffer_.data();
-    
+
     // Calculer bpp selon le code source ESPHome
     switch (this->type_) {
       case image::IMAGE_TYPE_BINARY:
@@ -640,6 +652,24 @@ void SdImageComponent::update_base_image_properties() {
         this->bpp_ = 16;
         break;
     }
+
+#ifdef USE_LVGL
+    // For WebP format: pre-configure lv_image_dsc_t with LV_COLOR_FORMAT_RAW
+    // so LVGL's decoder pipeline (ThorVG) will decode the raw WebP data.
+    // We set dsc_.data = data_start_ so that get_lv_image_dsc() won't overwrite
+    // our configuration (it only rebuilds when dsc_.data != data_start_).
+    if (this->format_ == ImageFormat::WEBP) {
+      this->dsc_.data = this->data_start_;
+      this->dsc_.header.w = this->width_;
+      this->dsc_.header.h = this->height_;
+      this->dsc_.header.stride = 0;
+      this->dsc_.header.reserved_2 = 0;
+      this->dsc_.header.cf = LV_COLOR_FORMAT_RAW;
+      this->dsc_.data_size = this->image_buffer_.size();
+      ESP_LOGI(TAG_IMAGE, "WebP LVGL dsc configured: %dx%d, %zu bytes, cf=RAW (ThorVG decoder)",
+               this->width_, this->height_, this->image_buffer_.size());
+    }
+#endif
   } else {
     this->data_start_ = nullptr;
     this->bpp_ = 0;
