@@ -7,6 +7,8 @@ from esphome.components import speaker
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
+CONF_USB_MEDIA_STORAGE_ID = "usb_media_storage_id"
+
 mp4_player_ns = cg.esphome_ns.namespace("mp4_player")
 Mp4Player = mp4_player_ns.class_("Mp4Player", cg.Component)
 
@@ -28,10 +30,12 @@ CONF_AUTO_PLAY = "auto_play"
 CONF_SHOW_CONTROLS = "show_controls"
 CONF_ON_PLAY = "on_play"
 CONF_ON_STOP = "on_stop"
+CONF_MEDIA_DIRECTORIES = "media_directories"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
-    cv.Required(CONF_FILE_PATH): cv.string,
+    cv.Optional(CONF_FILE_PATH): cv.string,
+    cv.Optional(CONF_USB_MEDIA_STORAGE_ID): cv.use_id(cg.Component),
     cv.Optional(CONF_PARENT_ID): cv.use_id(cg.void),
     cv.Optional(CONF_SPEAKER): cv.use_id(speaker.Speaker),
     cv.Optional(CONF_VOLUME, default=80): cv.int_range(min=0, max=100),
@@ -44,6 +48,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_ON_STOP): automation.validate_automation(
         {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(StopTrigger)}, single=True
     ),
+    cv.Optional(CONF_MEDIA_DIRECTORIES, default=["/usb", "/sdcard"]): cv.ensure_list(cv.string),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -51,11 +56,21 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    cg.add(var.set_file_path(config[CONF_FILE_PATH]))
+    if CONF_FILE_PATH in config:
+        cg.add(var.set_file_path(config[CONF_FILE_PATH]))
+
+    # Media directories for file browser
+    for directory in config[CONF_MEDIA_DIRECTORIES]:
+        cg.add(var.add_media_directory(directory))
+
     cg.add(var.set_volume(config[CONF_VOLUME]))
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+
+    if CONF_USB_MEDIA_STORAGE_ID in config:
+        usb_storage = await cg.get_variable(config[CONF_USB_MEDIA_STORAGE_ID])
+        cg.add(var.set_usb_storage(usb_storage))
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])

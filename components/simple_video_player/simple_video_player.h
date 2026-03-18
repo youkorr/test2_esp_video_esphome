@@ -95,6 +95,8 @@ struct MkvSample {
 
 class SimpleVideoPlayer : public Component {
  public:
+  ~SimpleVideoPlayer() { stop(); }
+
   void set_file_path(const std::string &path) { file_path_ = path; }
   void set_width(int w) { width_ = w; }
   void set_height(int h) { height_ = h; }
