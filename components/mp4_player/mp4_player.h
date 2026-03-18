@@ -24,6 +24,8 @@ extern "C" {
 #include "esp_extractor_reg.h"
 #include "esp_mp4_extractor.h"
 #include "esp_avi_extractor.h"
+#include "esp_audio_es_extractor.h"
+#include "esp_wav_extractor.h"
 #include "mem_pool.h"
 #include "esp_audio_simple_dec.h"
 #include "esp_audio_simple_dec_reg.h"

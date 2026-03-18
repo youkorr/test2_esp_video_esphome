@@ -161,10 +161,71 @@ size_t Mp4Player::strip_jpeg_com_markers_(uint8_t *data, size_t size) {
 }
 
 // ============================================================================
+// LVGL Filesystem Driver (POSIX-based, drive letter 'S')
+// Allows lv_image_set_src("S:/sdcard/image.png") to work
+// ============================================================================
+static void *lvgl_fs_open(lv_fs_drv_t * /*drv*/, const char *path, lv_fs_mode_t mode) {
+  const char *flags = "rb";
+  if (mode == LV_FS_MODE_WR) flags = "wb";
+  else if (mode == (LV_FS_MODE_WR | LV_FS_MODE_RD)) flags = "r+b";
+  FILE *f = fopen(path, flags);
+  return (void *)f;
+}
+
+static lv_fs_res_t lvgl_fs_close(lv_fs_drv_t * /*drv*/, void *file) {
+  fclose((FILE *)file);
+  return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t lvgl_fs_read(lv_fs_drv_t * /*drv*/, void *file, void *buf, uint32_t btr, uint32_t *br) {
+  *br = fread(buf, 1, btr, (FILE *)file);
+  return (*br > 0 || btr == 0) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t lvgl_fs_write(lv_fs_drv_t * /*drv*/, void *file, const void *buf, uint32_t btw, uint32_t *bw) {
+  *bw = fwrite(buf, 1, btw, (FILE *)file);
+  return (*bw == btw) ? LV_FS_RES_OK : LV_FS_RES_UNKNOWN;
+}
+
+static lv_fs_res_t lvgl_fs_seek(lv_fs_drv_t * /*drv*/, void *file, uint32_t pos, lv_fs_whence_t whence) {
+  int w = SEEK_SET;
+  if (whence == LV_FS_SEEK_CUR) w = SEEK_CUR;
+  else if (whence == LV_FS_SEEK_END) w = SEEK_END;
+  fseek((FILE *)file, (long)pos, w);
+  return LV_FS_RES_OK;
+}
+
+static lv_fs_res_t lvgl_fs_tell(lv_fs_drv_t * /*drv*/, void *file, uint32_t *pos) {
+  *pos = (uint32_t)ftell((FILE *)file);
+  return LV_FS_RES_OK;
+}
+
+static bool lvgl_fs_driver_registered = false;
+
+static void register_lvgl_fs_driver() {
+  if (lvgl_fs_driver_registered) return;
+  static lv_fs_drv_t drv;
+  lv_fs_drv_init(&drv);
+  drv.letter = 'S';
+  drv.open_cb = lvgl_fs_open;
+  drv.close_cb = lvgl_fs_close;
+  drv.read_cb = lvgl_fs_read;
+  drv.write_cb = lvgl_fs_write;
+  drv.seek_cb = lvgl_fs_seek;
+  drv.tell_cb = lvgl_fs_tell;
+  lv_fs_drv_register(&drv);
+  lvgl_fs_driver_registered = true;
+  ESP_LOGI("mp4_player", "LVGL filesystem driver 'S:' registered");
+}
+
+// ============================================================================
 // Setup
 // ============================================================================
 void Mp4Player::setup() {
   ESP_LOGI(TAG, "Setting up MP4 Player...");
+
+  // Register LVGL filesystem driver for image loading (S: drive letter)
+  register_lvgl_fs_driver();
 
   // If USB storage is configured, verify it's ready before accessing files
   if (this->usb_storage_ != nullptr) {
@@ -209,9 +270,11 @@ void Mp4Player::setup() {
     return;
   }
 
-  // Register extractors
+  // Register extractors (video + audio elementary streams)
   esp_mp4_extractor_register();
   esp_avi_extractor_register();
+  esp_audio_es_extractor_register();
+  esp_wav_extractor_register();
 
   // Probe video file to get resolution/fps/duration
   // Skip probe if file is not accessible yet (e.g. USB drive not mounted)
@@ -560,9 +623,11 @@ void Mp4Player::playback_task_(void *arg) {
     if (bits & EVENT_STOP) break;
     if (!(bits & EVENT_START)) continue;
 
-    // Register extractors
+    // Register extractors (video + audio elementary streams)
     esp_mp4_extractor_register();
     esp_avi_extractor_register();
+    esp_audio_es_extractor_register();
+    esp_wav_extractor_register();
 
     bool do_loop = true;
     while (do_loop && !player->stop_requested_) {
@@ -1815,9 +1880,11 @@ void Mp4Player::play_file(const std::string &path) {
     }
   }
 
-  // Register extractors
+  // Register extractors (video + audio elementary streams)
   esp_mp4_extractor_register();
   esp_avi_extractor_register();
+  esp_audio_es_extractor_register();
+  esp_wav_extractor_register();
 
   // Probe video to get dimensions
   {
