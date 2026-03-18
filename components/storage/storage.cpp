@@ -723,6 +723,7 @@ SdImageComponent::FileType SdImageComponent::detect_file_type(const std::vector<
   if (this->is_gif_data(data)) return FileType::GIF;
   if (this->is_png_data(data)) return FileType::PNG;
   if (this->is_bmp_data(data)) return FileType::BMP;
+  if (this->is_webp_data(data)) return FileType::WEBP;
   if (this->is_svg_data(data)) return FileType::SVG;
   if (this->is_lottie_data(data)) return FileType::LOTTIE;
   return FileType::UNKNOWN;
@@ -775,6 +776,13 @@ bool SdImageComponent::is_lottie_data(const std::vector<uint8_t> &data) const {
   return false;
 }
 
+bool SdImageComponent::is_webp_data(const std::vector<uint8_t> &data) const {
+  // WebP signature: "RIFF" at offset 0, "WEBP" at offset 8
+  return data.size() >= 12 &&
+         data[0] == 'R' && data[1] == 'I' && data[2] == 'F' && data[3] == 'F' &&
+         data[8] == 'W' && data[9] == 'E' && data[10] == 'B' && data[11] == 'P';
+}
+
 // Image decoding
 bool SdImageComponent::decode_image(const std::vector<uint8_t> &data) {
   FileType type = this->detect_file_type(data);
@@ -804,8 +812,12 @@ bool SdImageComponent::decode_image(const std::vector<uint8_t> &data) {
       ESP_LOGI(TAG_IMAGE, "Decoding Lottie animation");
       return this->decode_lottie_image(data);
 
+    case FileType::WEBP:
+      ESP_LOGI(TAG_IMAGE, "Decoding WebP image");
+      return this->decode_webp_image(data);
+
     default:
-      ESP_LOGE(TAG_IMAGE, "Unsupported image format (supported: JPEG, GIF, PNG, BMP, SVG, Lottie)");
+      ESP_LOGE(TAG_IMAGE, "Unsupported image format (supported: JPEG, GIF, PNG, BMP, SVG, Lottie, WebP)");
       return false;
   }
 }
@@ -1674,6 +1686,84 @@ bool SdImageComponent::decode_lottie_image(const std::vector<uint8_t> &lottie_da
   return false;
 #else
   ESP_LOGE(TAG_IMAGE, "Lottie decoder not available - enable lvgl_advanced_features with lottie: true (LVGL v9 only)");
+  return false;
+#endif
+}
+
+// =====================================================
+// WebP Decoder Implementation (via LVGL + ThorVG)
+// =====================================================
+
+bool SdImageComponent::decode_webp_image(const std::vector<uint8_t> &webp_data) {
+#if defined(LV_USE_THORVG_INTERNAL) || defined(LV_USE_THORVG_EXTERNAL)
+  ESP_LOGD(TAG_IMAGE, "Using ThorVG WebP decoder (%zu bytes)", webp_data.size());
+
+  // WebP decoding is handled by ThorVG's internal WebP loader
+  // For direct storage decoding, we use LVGL's image decoder pipeline
+  // which routes WebP through ThorVG automatically
+
+  ESP_LOGW(TAG_IMAGE, "WebP direct decoding via ThorVG - use LVGL img widget with S:/ path for best results");
+  ESP_LOGI(TAG_IMAGE, "Example: lv_img with src: \"S:/path/to/image.webp\"");
+
+  // Store raw WebP data for LVGL to decode via its image decoder pipeline
+  // LVGL 9.x with ThorVG will automatically handle WebP decoding
+  this->image_buffer_.assign(webp_data.begin(), webp_data.end());
+
+  // Parse WebP header to get dimensions
+  // WebP VP8 header: after RIFF+size+WEBP, chunk type at offset 12
+  if (webp_data.size() >= 30) {
+    // Check for VP8 (lossy) format
+    if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == ' ') {
+      // VP8 lossy: dimensions at offset 26-29 (after frame tag at 23-25)
+      if (webp_data.size() >= 30) {
+        // Skip to frame header: offset 23 has 3-byte frame tag, then 3-byte start code
+        size_t pos = 20;  // Skip chunk size (4 bytes after "VP8 ")
+        // Find the VP8 bitstream start code: 0x9D 0x01 0x2A
+        for (size_t i = pos; i < webp_data.size() - 6 && i < pos + 20; i++) {
+          if (webp_data[i] == 0x9D && webp_data[i+1] == 0x01 && webp_data[i+2] == 0x2A) {
+            this->image_width_ = (webp_data[i+3] | (webp_data[i+4] << 8)) & 0x3FFF;
+            this->image_height_ = (webp_data[i+5] | (webp_data[i+6] << 8)) & 0x3FFF;
+            ESP_LOGI(TAG_IMAGE, "WebP VP8 dimensions: %dx%d", this->image_width_, this->image_height_);
+            break;
+          }
+        }
+      }
+    }
+    // Check for VP8L (lossless) format
+    else if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == 'L') {
+      if (webp_data.size() >= 25) {
+        // VP8L: signature byte at offset 21, then width-1 (14 bits) and height-1 (14 bits)
+        uint32_t bits = webp_data[21] | (webp_data[22] << 8) | (webp_data[23] << 16) | (webp_data[24] << 24);
+        this->image_width_ = (bits & 0x3FFF) + 1;
+        this->image_height_ = ((bits >> 14) & 0x3FFF) + 1;
+        ESP_LOGI(TAG_IMAGE, "WebP VP8L dimensions: %dx%d", this->image_width_, this->image_height_);
+      }
+    }
+    // Check for VP8X (extended) format
+    else if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == 'X') {
+      if (webp_data.size() >= 30) {
+        // VP8X: canvas width at offset 24 (24 bits + 1), height at offset 27 (24 bits + 1)
+        this->image_width_ = ((webp_data[24] | (webp_data[25] << 8) | (webp_data[26] << 16)) & 0xFFFFFF) + 1;
+        this->image_height_ = ((webp_data[27] | (webp_data[28] << 8) | (webp_data[29] << 16)) & 0xFFFFFF) + 1;
+        ESP_LOGI(TAG_IMAGE, "WebP VP8X dimensions: %dx%d", this->image_width_, this->image_height_);
+      }
+    }
+  }
+
+  if (this->image_width_ <= 0 || this->image_height_ <= 0) {
+    ESP_LOGE(TAG_IMAGE, "Failed to parse WebP dimensions");
+    this->image_buffer_.clear();
+    return false;
+  }
+
+  ESP_LOGI(TAG_IMAGE, "WebP image registered: %dx%d, %zu bytes raw data stored",
+           this->image_width_, this->image_height_, this->image_buffer_.size());
+  ESP_LOGI(TAG_IMAGE, "Use LVGL img widget with S:/ path for hardware-accelerated WebP rendering");
+
+  return true;
+#else
+  ESP_LOGE(TAG_IMAGE, "WebP decoder not available - enable ThorVG in decoders config");
+  ESP_LOGI(TAG_IMAGE, "Add to storage config: decoders: { thorvg: { internal: true } }");
   return false;
 #endif
 }

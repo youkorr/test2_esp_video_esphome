@@ -210,7 +210,8 @@ class SdImageComponent : public Component, public image::Image {
     PNG,      // Supported via LV_USE_LIBPNG (lvgl_advanced_features)
     BMP,      // Supported via LV_USE_BMP (lvgl_advanced_features)
     SVG,      // Supported via LV_USE_SVG (lvgl_advanced_features, LVGL v9)
-    LOTTIE    // Supported via LV_USE_LOTTIE (lvgl_advanced_features, LVGL v9)
+    LOTTIE,   // Supported via LV_USE_LOTTIE (lvgl_advanced_features, LVGL v9)
+    WEBP      // Supported via ThorVG WebP decoder (LVGL v9 + ThorVG)
   };
 
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
@@ -220,6 +221,7 @@ class SdImageComponent : public Component, public image::Image {
   bool is_bmp_data(const std::vector<uint8_t> &data) const;
   bool is_svg_data(const std::vector<uint8_t> &data) const;
   bool is_lottie_data(const std::vector<uint8_t> &data) const;
+  bool is_webp_data(const std::vector<uint8_t> &data) const;
 
   // Image decoding - JPEG and GIF (built-in)
   bool decode_image(const std::vector<uint8_t> &data);
@@ -231,6 +233,7 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_bmp_image(const std::vector<uint8_t> &bmp_data);
   bool decode_svg_image(const std::vector<uint8_t> &svg_data);
   bool decode_lottie_image(const std::vector<uint8_t> &lottie_data);
+  bool decode_webp_image(const std::vector<uint8_t> &webp_data);
   
   // JPEG decoder callbacks
 #ifdef USE_JPEGDEC

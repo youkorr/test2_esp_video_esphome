@@ -56,6 +56,7 @@ CONF_GIF = "gif"
 CONF_BMP = "bmp"
 CONF_QRCODE = "qrcode"
 CONF_BARCODE = "barcode"
+CONF_WEBP = "webp"
 CONF_IME_PINYIN = "ime_pinyin"
 CONF_DRAW_SW_COMPLEX = "draw_sw_complex"
 CONF_DRAW_SW_ASM = "draw_sw_asm"
@@ -120,6 +121,7 @@ CONFIG_SCHEMA = cv.Schema(
             cv.Optional(CONF_LIBJPEG_TURBO, default=False): cv.boolean,
             cv.Optional(CONF_GIF, default=False): cv.boolean,
             cv.Optional(CONF_BMP, default=False): cv.boolean,
+            cv.Optional(CONF_WEBP, default=False): cv.boolean,
 
             # Widgets
             cv.Optional(CONF_QRCODE, default=False): cv.boolean,
@@ -251,6 +253,15 @@ async def to_code(config):
         if decoders_cfg.get(CONF_BMP, False):
             cg.add_build_flag("-DLV_USE_BMP=1")
             _LOGGER.info("  BMP: ENABLED (compatible v8+v9)")
+
+        if decoders_cfg.get(CONF_WEBP, False):
+            # WebP is decoded via ThorVG's internal WebP loader (not libwebp)
+            # ThorVG must be enabled for WebP support
+            if CONF_THORVG in decoders_cfg and decoders_cfg[CONF_THORVG].get(CONF_THORVG_INTERNAL, False):
+                _LOGGER.info("  WebP: ENABLED (via ThorVG internal WebP decoder)")
+            else:
+                _LOGGER.warning("  WebP: ThorVG internal must be enabled for WebP support!")
+                _LOGGER.warning("  Add: thorvg: { internal: true } to decoders config")
 
         # Widgets
         if decoders_cfg.get(CONF_QRCODE, False):
