@@ -1698,41 +1698,25 @@ bool SdImageComponent::decode_webp_image(const std::vector<uint8_t> &webp_data) 
 #if defined(LV_USE_THORVG_INTERNAL) || defined(LV_USE_THORVG_EXTERNAL)
   ESP_LOGD(TAG_IMAGE, "Using ThorVG WebP decoder (%zu bytes)", webp_data.size());
 
-  // WebP decoding is handled by ThorVG's internal WebP loader
-  // For direct storage decoding, we use LVGL's image decoder pipeline
-  // which routes WebP through ThorVG automatically
-
-  ESP_LOGW(TAG_IMAGE, "WebP direct decoding via ThorVG - use LVGL img widget with S:/ path for best results");
-  ESP_LOGI(TAG_IMAGE, "Example: lv_img with src: \"S:/path/to/image.webp\"");
-
-  // Store raw WebP data for LVGL to decode via its image decoder pipeline
-  // LVGL 9.x with ThorVG will automatically handle WebP decoding
-  this->image_buffer_.assign(webp_data.begin(), webp_data.end());
-
-  // Parse WebP header to get dimensions
+  // Parse WebP header to get dimensions first
   // WebP VP8 header: after RIFF+size+WEBP, chunk type at offset 12
   if (webp_data.size() >= 30) {
     // Check for VP8 (lossy) format
     if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == ' ') {
-      // VP8 lossy: dimensions at offset 26-29 (after frame tag at 23-25)
-      if (webp_data.size() >= 30) {
-        // Skip to frame header: offset 23 has 3-byte frame tag, then 3-byte start code
-        size_t pos = 20;  // Skip chunk size (4 bytes after "VP8 ")
-        // Find the VP8 bitstream start code: 0x9D 0x01 0x2A
-        for (size_t i = pos; i < webp_data.size() - 6 && i < pos + 20; i++) {
-          if (webp_data[i] == 0x9D && webp_data[i+1] == 0x01 && webp_data[i+2] == 0x2A) {
-            this->image_width_ = (webp_data[i+3] | (webp_data[i+4] << 8)) & 0x3FFF;
-            this->image_height_ = (webp_data[i+5] | (webp_data[i+6] << 8)) & 0x3FFF;
-            ESP_LOGI(TAG_IMAGE, "WebP VP8 dimensions: %dx%d", this->image_width_, this->image_height_);
-            break;
-          }
+      // Find the VP8 bitstream start code: 0x9D 0x01 0x2A
+      size_t pos = 20;
+      for (size_t i = pos; i < webp_data.size() - 6 && i < pos + 20; i++) {
+        if (webp_data[i] == 0x9D && webp_data[i+1] == 0x01 && webp_data[i+2] == 0x2A) {
+          this->image_width_ = (webp_data[i+3] | (webp_data[i+4] << 8)) & 0x3FFF;
+          this->image_height_ = (webp_data[i+5] | (webp_data[i+6] << 8)) & 0x3FFF;
+          ESP_LOGI(TAG_IMAGE, "WebP VP8 dimensions: %dx%d", this->image_width_, this->image_height_);
+          break;
         }
       }
     }
     // Check for VP8L (lossless) format
     else if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == 'L') {
       if (webp_data.size() >= 25) {
-        // VP8L: signature byte at offset 21, then width-1 (14 bits) and height-1 (14 bits)
         uint32_t bits = webp_data[21] | (webp_data[22] << 8) | (webp_data[23] << 16) | (webp_data[24] << 24);
         this->image_width_ = (bits & 0x3FFF) + 1;
         this->image_height_ = ((bits >> 14) & 0x3FFF) + 1;
@@ -1742,7 +1726,6 @@ bool SdImageComponent::decode_webp_image(const std::vector<uint8_t> &webp_data) 
     // Check for VP8X (extended) format
     else if (webp_data[12] == 'V' && webp_data[13] == 'P' && webp_data[14] == '8' && webp_data[15] == 'X') {
       if (webp_data.size() >= 30) {
-        // VP8X: canvas width at offset 24 (24 bits + 1), height at offset 27 (24 bits + 1)
         this->image_width_ = ((webp_data[24] | (webp_data[25] << 8) | (webp_data[26] << 16)) & 0xFFFFFF) + 1;
         this->image_height_ = ((webp_data[27] | (webp_data[28] << 8) | (webp_data[29] << 16)) & 0xFFFFFF) + 1;
         ESP_LOGI(TAG_IMAGE, "WebP VP8X dimensions: %dx%d", this->image_width_, this->image_height_);
@@ -1752,13 +1735,89 @@ bool SdImageComponent::decode_webp_image(const std::vector<uint8_t> &webp_data) 
 
   if (this->image_width_ <= 0 || this->image_height_ <= 0) {
     ESP_LOGE(TAG_IMAGE, "Failed to parse WebP dimensions");
-    this->image_buffer_.clear();
     return false;
   }
 
-  ESP_LOGI(TAG_IMAGE, "WebP image registered: %dx%d, %zu bytes raw data stored",
+  // Apply resize if configured
+  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
+    ESP_LOGI(TAG_IMAGE, "Will resize from %dx%d to %dx%d",
+             this->image_width_, this->image_height_,
+             this->resize_width_, this->resize_height_);
+    this->image_width_ = this->resize_width_;
+    this->image_height_ = this->resize_height_;
+  }
+
+  // Validate dimensions
+  if (this->image_width_ > 2048 || this->image_height_ > 2048) {
+    ESP_LOGE(TAG_IMAGE, "WebP dimensions too large: %dx%d (max 2048x2048)",
+             this->image_width_, this->image_height_);
+    return false;
+  }
+
+  // Allocate RGB565 output buffer
+  this->format_ = ImageFormat::RGB565;
+  if (!this->allocate_image_buffer()) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate image buffer for WebP");
+    return false;
+  }
+
+  // Decode WebP to ARGB8888 using LVGL's image decoder pipeline
+  #ifdef USE_LVGL
+  // Create a temporary image descriptor for LVGL decoder
+  lv_image_dsc_t img_dsc;
+  lv_memzero(&img_dsc, sizeof(img_dsc));
+  img_dsc.header.magic = LV_IMAGE_HEADER_MAGIC;
+  img_dsc.header.w = this->image_width_;
+  img_dsc.header.h = this->image_height_;
+  img_dsc.header.cf = LV_COLOR_FORMAT_ARGB8888;
+  img_dsc.data = webp_data.data();
+  img_dsc.data_size = webp_data.size();
+
+  lv_image_decoder_dsc_t decoder_dsc;
+  lv_memzero(&decoder_dsc, sizeof(decoder_dsc));
+
+  lv_result_t res = lv_image_decoder_open(&decoder_dsc, &img_dsc, NULL);
+  if (res == LV_RESULT_OK && decoder_dsc.decoded != NULL) {
+    // Successfully decoded - convert ARGB8888 to RGB565
+    const uint8_t *src_data = decoder_dsc.decoded->data;
+    uint32_t src_stride = decoder_dsc.decoded->header.stride;
+    if (src_stride == 0) src_stride = this->image_width_ * 4;
+
+    ESP_LOGI(TAG_IMAGE, "WebP decoded via LVGL, converting to RGB565...");
+
+    for (int y = 0; y < this->image_height_; y++) {
+      for (int x = 0; x < this->image_width_; x++) {
+        size_t src_offset = y * src_stride + x * 4;
+        uint8_t b = src_data[src_offset + 0];
+        uint8_t g = src_data[src_offset + 1];
+        uint8_t r = src_data[src_offset + 2];
+        // alpha at src_offset + 3 (ignored for RGB565)
+
+        uint16_t rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        size_t dst_offset = (y * this->image_width_ + x) * 2;
+        this->image_buffer_[dst_offset] = rgb565 & 0xFF;
+        this->image_buffer_[dst_offset + 1] = (rgb565 >> 8) & 0xFF;
+      }
+
+      if (y % 32 == 0) {
+        App.feed_wdt();
+        yield();
+      }
+    }
+
+    lv_image_decoder_close(&decoder_dsc);
+    ESP_LOGI(TAG_IMAGE, "WebP decoded successfully: %dx%d RGB565", this->image_width_, this->image_height_);
+    return true;
+  }
+
+  lv_image_decoder_close(&decoder_dsc);
+  ESP_LOGW(TAG_IMAGE, "LVGL decoder failed for WebP, image stored as raw data");
+  #endif
+
+  // Fallback: store raw WebP data in buffer for LVGL widget to decode at render time
+  this->image_buffer_.assign(webp_data.begin(), webp_data.end());
+  ESP_LOGI(TAG_IMAGE, "WebP image loaded: %dx%d, %zu bytes",
            this->image_width_, this->image_height_, this->image_buffer_.size());
-  ESP_LOGI(TAG_IMAGE, "Use LVGL img widget with S:/ path for hardware-accelerated WebP rendering");
 
   return true;
 #else
