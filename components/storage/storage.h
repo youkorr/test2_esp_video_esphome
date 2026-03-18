@@ -35,7 +35,8 @@ class SdImageComponent;
 enum class ImageFormat {
   RGB565,
   RGB888,
-  RGBA
+  RGBA,
+  WEBP     // Raw WebP format - decoded by LVGL/ThorVG at render time
 };
 
 enum class SdByteOrder {

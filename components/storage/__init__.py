@@ -66,8 +66,9 @@ CONF_IMG_CACHE_SIZE = "img_cache_size"
 # FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
     "RGB565": "RGB565",
-    "RGB888": "RGB888", 
+    "RGB888": "RGB888",
     "RGBA": "RGBA",
+    "WEBP": "WEBP",
 }
 
 CONF_BYTE_ORDERS = {
