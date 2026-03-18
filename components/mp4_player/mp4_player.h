@@ -42,6 +42,16 @@ enum class PlayerState {
   PAUSED
 };
 
+enum class FileType {
+  UNKNOWN,
+  DIRECTORY,
+  VIDEO,
+  IMAGE,
+  AUDIO,
+  LOTTIE,
+  SVG
+};
+
 class Mp4Player : public Component {
  public:
   void set_file_path(const std::string &path) { file_path_ = path; }
@@ -112,7 +122,11 @@ class Mp4Player : public Component {
   void destroy_file_browser_();
   void navigate_to_directory_(std::string path);
   void scan_media_files_(const std::string &path);
-  bool is_video_file_(const std::string &name);
+  static FileType get_file_type_(const std::string &name);
+  void open_media_file_(const std::string &path, FileType type);
+  void show_image_viewer_(const std::string &path);
+  void destroy_image_viewer_();
+  static void image_close_cb_(lv_event_t *e);
   static void file_item_cb_(lv_event_t *e);
   static void back_btn_cb_(lv_event_t *e);
   static void refresh_btn_cb_(lv_event_t *e);
@@ -122,6 +136,7 @@ class Mp4Player : public Component {
     std::string name;
     size_t size;
     bool is_directory;
+    FileType file_type;
   };
   std::vector<FileEntry> file_entries_;
   std::vector<std::string> media_directories_;
@@ -130,6 +145,8 @@ class Mp4Player : public Component {
   lv_obj_t *browser_container_{nullptr};
   lv_obj_t *browser_list_{nullptr};
   lv_obj_t *browser_title_{nullptr};
+  lv_obj_t *image_viewer_{nullptr};
+  std::string image_viewer_path_;
 
   // Configuration
   std::string file_path_;

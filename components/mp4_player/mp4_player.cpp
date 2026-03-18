@@ -9,6 +9,14 @@
 #include <unistd.h>
 #include <algorithm>
 
+// LVGL extensions for media display
+#if __has_include("lvgl/src/libs/lottie/lv_lottie.h")
+#define HAS_LV_LOTTIE 1
+#include "lvgl/src/libs/lottie/lv_lottie.h"
+#else
+#define HAS_LV_LOTTIE 0
+#endif
+
 namespace esphome {
 namespace mp4_player {
 
@@ -1396,13 +1404,25 @@ void Mp4Player::touch_cb_(lv_event_t *e) {
 // ============================================================================
 // File Browser - browse USB/SD card for video files
 // ============================================================================
-bool Mp4Player::is_video_file_(const std::string &name) {
-  if (name.size() < 4) return false;
-  std::string lower = name;
-  for (auto &c : lower) c = tolower(c);
-  return lower.rfind(".mp4") == lower.size() - 4 ||
-         lower.rfind(".avi") == lower.size() - 4 ||
-         lower.rfind(".mkv") == lower.size() - 4;
+FileType Mp4Player::get_file_type_(const std::string &name) {
+  size_t dot = name.rfind('.');
+  if (dot == std::string::npos || dot == name.size() - 1) return FileType::UNKNOWN;
+
+  std::string ext = name.substr(dot);
+  for (auto &c : ext) c = tolower(c);
+
+  // Video
+  if (ext == ".mp4" || ext == ".avi" || ext == ".mkv") return FileType::VIDEO;
+  // Images
+  if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") return FileType::IMAGE;
+  // Audio
+  if (ext == ".mp3" || ext == ".wav" || ext == ".flac" || ext == ".aac" || ext == ".pcm") return FileType::AUDIO;
+  // Lottie animation
+  if (ext == ".json") return FileType::LOTTIE;
+  // SVG
+  if (ext == ".svg") return FileType::SVG;
+
+  return FileType::UNKNOWN;
 }
 
 void Mp4Player::scan_media_files_(const std::string &path) {
@@ -1433,11 +1453,13 @@ void Mp4Player::scan_media_files_(const std::string &path) {
       is_dir = S_ISDIR(st.st_mode);
     }
 
-    if (is_dir || this->is_video_file_(entry->d_name)) {
+    FileType ftype = is_dir ? FileType::DIRECTORY : get_file_type_(entry->d_name);
+    if (ftype != FileType::UNKNOWN) {
       FileEntry fe;
       fe.full_path = full_path;
       fe.name = entry->d_name;
       fe.is_directory = is_dir;
+      fe.file_type = ftype;
       fe.size = 0;
 
       // Get file size only for non-directory entries
@@ -1449,7 +1471,13 @@ void Mp4Player::scan_media_files_(const std::string &path) {
       }
 
       this->file_entries_.push_back(fe);
-      ESP_LOGD(TAG, "  Found: %s [%s]", entry->d_name, is_dir ? "DIR" : "FILE");
+      ESP_LOGD(TAG, "  Found: %s [%s]", entry->d_name,
+               ftype == FileType::DIRECTORY ? "DIR" :
+               ftype == FileType::VIDEO ? "VIDEO" :
+               ftype == FileType::IMAGE ? "IMAGE" :
+               ftype == FileType::AUDIO ? "AUDIO" :
+               ftype == FileType::LOTTIE ? "LOTTIE" :
+               ftype == FileType::SVG ? "SVG" : "?");
     }
   }
   closedir(dir);
@@ -1589,6 +1617,7 @@ void Mp4Player::navigate_to_directory_(std::string path) {
         fe.full_path = dir;
         fe.name = display_name;
         fe.is_directory = true;
+        fe.file_type = FileType::DIRECTORY;
         fe.size = 0;
         this->file_entries_.push_back(fe);
 
@@ -1632,14 +1661,37 @@ void Mp4Player::navigate_to_directory_(std::string path) {
       lv_obj_set_flex_align(btn, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
       lv_obj_set_style_pad_column(btn, 12, 0);
 
-      // Icon
+      // Icon - type-specific
       lv_obj_t *icon = lv_label_create(btn);
-      if (fe.is_directory) {
-        lv_label_set_text(icon, LV_SYMBOL_DIRECTORY);
-        lv_obj_set_style_text_color(icon, lv_color_hex(0xFFD700), 0);
-      } else {
-        lv_label_set_text(icon, LV_SYMBOL_VIDEO);
-        lv_obj_set_style_text_color(icon, lv_color_hex(0x00FF88), 0);
+      switch (fe.file_type) {
+        case FileType::DIRECTORY:
+          lv_label_set_text(icon, LV_SYMBOL_DIRECTORY);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFFD700), 0);  // Gold
+          break;
+        case FileType::VIDEO:
+          lv_label_set_text(icon, LV_SYMBOL_VIDEO);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x00FF88), 0);  // Green
+          break;
+        case FileType::IMAGE:
+          lv_label_set_text(icon, LV_SYMBOL_IMAGE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x00D4FF), 0);  // Cyan
+          break;
+        case FileType::AUDIO:
+          lv_label_set_text(icon, LV_SYMBOL_AUDIO);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFF6B9D), 0);  // Pink
+          break;
+        case FileType::LOTTIE:
+          lv_label_set_text(icon, LV_SYMBOL_LOOP);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xBB86FC), 0);  // Purple
+          break;
+        case FileType::SVG:
+          lv_label_set_text(icon, LV_SYMBOL_FILE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0xFF9800), 0);  // Orange
+          break;
+        default:
+          lv_label_set_text(icon, LV_SYMBOL_FILE);
+          lv_obj_set_style_text_color(icon, lv_color_hex(0x888888), 0);
+          break;
       }
       lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
 
@@ -1896,12 +1948,157 @@ void Mp4Player::file_item_cb_(lv_event_t *e) {
 
   if (idx >= player->file_entries_.size()) return;
 
-  const FileEntry &fe = player->file_entries_[idx];
-  if (fe.is_directory) {
-    player->navigate_to_directory_(fe.full_path);
+  // Copy values before navigate may clear file_entries_
+  std::string path = player->file_entries_[idx].full_path;
+  FileType type = player->file_entries_[idx].file_type;
+
+  if (type == FileType::DIRECTORY) {
+    player->navigate_to_directory_(path);
   } else {
-    player->play_file(fe.full_path);
+    player->open_media_file_(path, type);
   }
+}
+
+void Mp4Player::open_media_file_(const std::string &path, FileType type) {
+  ESP_LOGI(TAG, "Opening media file: %s (type=%d)", path.c_str(), (int)type);
+
+  switch (type) {
+    case FileType::VIDEO:
+      this->play_file(path);
+      break;
+
+    case FileType::IMAGE:
+    case FileType::SVG:
+    case FileType::LOTTIE:
+      this->show_image_viewer_(path);
+      break;
+
+    case FileType::AUDIO:
+      // For now, play audio files as video (uses same extractor pipeline)
+      this->play_file(path);
+      break;
+
+    default:
+      ESP_LOGW(TAG, "Unsupported file type for: %s", path.c_str());
+      break;
+  }
+}
+
+void Mp4Player::show_image_viewer_(const std::string &path) {
+  // Destroy previous viewer if any
+  this->destroy_image_viewer_();
+
+  // Hide browser
+  if (this->browser_container_)
+    lv_obj_add_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+
+  lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
+
+  // Full-screen container with black background
+  this->image_viewer_ = lv_obj_create(parent);
+  lv_obj_set_size(this->image_viewer_, LV_PCT(100), LV_PCT(100));
+  lv_obj_center(this->image_viewer_);
+  lv_obj_set_style_bg_color(this->image_viewer_, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(this->image_viewer_, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(this->image_viewer_, 0, 0);
+  lv_obj_set_style_pad_all(this->image_viewer_, 0, 0);
+  lv_obj_clear_flag(this->image_viewer_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Store path for LVGL file prefix
+  this->image_viewer_path_ = path;
+
+  // Determine file type for appropriate LVGL widget
+  FileType type = get_file_type_(path);
+  std::string lvgl_path;
+
+#if HAS_LV_LOTTIE
+  if (type == FileType::LOTTIE) {
+    // LVGL Lottie animation (ThorVG)
+    lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
+    if (lottie) {
+      // Read file into memory for lottie
+      FILE *f = fopen(path.c_str(), "r");
+      if (f) {
+        fseek(f, 0, SEEK_END);
+        long fsize = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *json_buf = (char *)malloc(fsize + 1);
+        if (json_buf) {
+          fread(json_buf, 1, fsize, f);
+          json_buf[fsize] = '\0';
+          lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
+          lv_obj_set_size(lottie, LV_PCT(80), LV_PCT(80));
+          lv_obj_center(lottie);
+          // json_buf must remain valid - store for cleanup
+          lv_obj_set_user_data(lottie, json_buf);
+        }
+        fclose(f);
+      }
+    }
+  } else
+#endif
+  {
+    // Image (PNG, JPG, BMP) or SVG - use lv_image with file path
+    // LVGL uses "S:" prefix for filesystem access or direct path
+    lv_obj_t *img = lv_image_create(this->image_viewer_);
+    lvgl_path = std::string("S:") + path;
+    lv_image_set_src(img, lvgl_path.c_str());
+    lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_center(img);
+    // Scale to fit screen
+    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+  }
+
+  // Close button (top-right)
+  lv_obj_t *close_btn = lv_btn_create(this->image_viewer_);
+  lv_obj_set_size(close_btn, 50, 50);
+  lv_obj_align(close_btn, LV_ALIGN_TOP_RIGHT, -10, 10);
+  lv_obj_set_style_bg_color(close_btn, lv_color_hex(0xE74C3C), 0);
+  lv_obj_set_style_radius(close_btn, 25, 0);
+  lv_obj_set_style_bg_opa(close_btn, LV_OPA_70, 0);
+  lv_obj_t *close_lbl = lv_label_create(close_btn);
+  lv_label_set_text(close_lbl, LV_SYMBOL_CLOSE);
+  lv_obj_set_style_text_color(close_lbl, lv_color_white(), 0);
+  lv_obj_center(close_lbl);
+  lv_obj_add_event_cb(close_btn, image_close_cb_, LV_EVENT_CLICKED, this);
+
+  // Filename at bottom
+  lv_obj_t *name_lbl = lv_label_create(this->image_viewer_);
+  const char *fname = strrchr(path.c_str(), '/');
+  lv_label_set_text(name_lbl, fname ? fname + 1 : path.c_str());
+  lv_obj_set_style_text_color(name_lbl, lv_color_white(), 0);
+  lv_obj_set_style_text_font(name_lbl, &lv_font_montserrat_16, 0);
+  lv_obj_align(name_lbl, LV_ALIGN_BOTTOM_MID, 0, -15);
+  lv_obj_set_style_bg_color(name_lbl, lv_color_black(), 0);
+  lv_obj_set_style_bg_opa(name_lbl, LV_OPA_50, 0);
+  lv_obj_set_style_pad_all(name_lbl, 5, 0);
+}
+
+void Mp4Player::image_close_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  player->destroy_image_viewer_();
+
+  // Show browser again
+  if (player->browser_container_)
+    lv_obj_clear_flag(player->browser_container_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void Mp4Player::destroy_image_viewer_() {
+  if (this->image_viewer_) {
+    // Free lottie JSON buffer if any (stored in lottie obj's user_data)
+    uint32_t child_cnt = lv_obj_get_child_count(this->image_viewer_);
+    for (uint32_t i = 0; i < child_cnt; i++) {
+      lv_obj_t *child = lv_obj_get_child(this->image_viewer_, i);
+      void *ud = lv_obj_get_user_data(child);
+      if (ud) {
+        free(ud);
+        lv_obj_set_user_data(child, nullptr);
+      }
+    }
+    lv_obj_del(this->image_viewer_);
+    this->image_viewer_ = nullptr;
+  }
+  this->image_viewer_path_.clear();
 }
 
 void Mp4Player::back_btn_cb_(lv_event_t *e) {
