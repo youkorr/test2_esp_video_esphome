@@ -2249,13 +2249,15 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
   long fsize = ftell(f);
   fseek(f, 0, SEEK_SET);
 
-  if (fsize <= 0 || fsize > (long)JPEG_BUFFER_SIZE) {
-    ESP_LOGE(TAG, "Image too large: %ld bytes (max %u)", fsize, JPEG_BUFFER_SIZE);
+  // Image files can be much larger than video MJPEG frames (up to 4MB)
+  static constexpr size_t MAX_IMAGE_FILE_SIZE = 4 * 1024 * 1024;
+  if (fsize <= 0 || fsize > (long)MAX_IMAGE_FILE_SIZE) {
+    ESP_LOGE(TAG, "Image too large: %ld bytes (max %u)", fsize, MAX_IMAGE_FILE_SIZE);
     fclose(f);
     return false;
   }
 
-  // Ensure JPEG decoder and buffer are available
+  // Ensure JPEG decoder is available
   if (!this->jpeg_decoder_) {
     jpeg_decode_engine_cfg_t cfg = {
       .timeout_ms = 1000,
@@ -2267,33 +2269,50 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
     }
   }
 
-  if (!this->jpeg_buffer_) {
-    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(JPEG_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
-    if (!this->jpeg_buffer_) {
-      ESP_LOGE(TAG, "Failed to allocate JPEG buffer");
-      fclose(f);
-      return false;
-    }
+  // Allocate temporary buffer for the JPEG file data (separate from video's jpeg_buffer_)
+  uint8_t *img_jpeg_buf = (uint8_t *)heap_caps_malloc(fsize, MALLOC_CAP_SPIRAM);
+  if (!img_jpeg_buf) {
+    ESP_LOGE(TAG, "Failed to allocate image buffer (%ld bytes)", fsize);
+    fclose(f);
+    return false;
   }
 
-  size_t read_size = fread(this->jpeg_buffer_, 1, fsize, f);
+  size_t read_size = fread(img_jpeg_buf, 1, fsize, f);
   fclose(f);
 
   if ((long)read_size != fsize) {
     ESP_LOGE(TAG, "Read error: got %zu of %ld bytes", read_size, fsize);
+    heap_caps_free(img_jpeg_buf);
     return false;
   }
 
   // Strip COM markers that crash ESP32-P4 JPEG hardware decoder
-  size_t jpeg_size = strip_jpeg_com_markers_(this->jpeg_buffer_, read_size);
+  size_t jpeg_size = strip_jpeg_com_markers_(img_jpeg_buf, read_size);
 
-  // Allocate decode output buffer (max 1920x1080 RGB565 = ~4MB)
-  // Use a temporary buffer for the decoded image
-  static constexpr size_t MAX_IMAGE_PIXELS = 1920 * 1080;
-  size_t decode_buf_size = MAX_IMAGE_PIXELS * 2;  // RGB565
+  // Parse JPEG SOF0/SOF2 marker to get dimensions before decoding
+  uint32_t img_w = 0, img_h = 0;
+  for (size_t i = 0; i < jpeg_size - 8; i++) {
+    if (img_jpeg_buf[i] == 0xFF && (img_jpeg_buf[i+1] == 0xC0 || img_jpeg_buf[i+1] == 0xC2)) {
+      img_h = (img_jpeg_buf[i+5] << 8) | img_jpeg_buf[i+6];
+      img_w = (img_jpeg_buf[i+7] << 8) | img_jpeg_buf[i+8];
+      break;
+    }
+  }
+
+  if (img_w == 0 || img_h == 0) {
+    ESP_LOGE(TAG, "Cannot determine image dimensions");
+    heap_caps_free(img_jpeg_buf);
+    return false;
+  }
+
+  // Allocate decode output buffer (RGB565, aligned for HW decoder)
+  uint32_t aligned_w = (img_w + 15) & ~15;
+  uint32_t aligned_h = (img_h + 15) & ~15;
+  size_t decode_buf_size = aligned_w * aligned_h * 2;
   uint8_t *decode_buf = (uint8_t *)heap_caps_aligned_alloc(64, decode_buf_size, MALLOC_CAP_SPIRAM);
   if (!decode_buf) {
-    ESP_LOGE(TAG, "Failed to allocate image decode buffer (%u bytes)", decode_buf_size);
+    ESP_LOGE(TAG, "Failed to allocate decode buffer (%u x %u = %u bytes)", aligned_w, aligned_h, decode_buf_size);
+    heap_caps_free(img_jpeg_buf);
     return false;
   }
 
@@ -2306,32 +2325,17 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
   uint32_t decoded_size = 0;
   esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_,
                                         &decode_cfg,
-                                        this->jpeg_buffer_,
+                                        img_jpeg_buf,
                                         jpeg_size,
                                         decode_buf,
                                         decode_buf_size,
                                         &decoded_size);
 
+  // Free JPEG source buffer immediately (no longer needed)
+  heap_caps_free(img_jpeg_buf);
+
   if (ret != ESP_OK || decoded_size == 0) {
     ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
-    heap_caps_free(decode_buf);
-    return false;
-  }
-
-  // Calculate image dimensions from decoded size (RGB565 = 2 bytes per pixel)
-  // JPEG decoder doesn't directly give us dimensions, but we can get them from header
-  // Parse JPEG SOF0 marker to get dimensions
-  uint32_t img_w = 0, img_h = 0;
-  for (size_t i = 0; i < jpeg_size - 8; i++) {
-    if (this->jpeg_buffer_[i] == 0xFF && (this->jpeg_buffer_[i+1] == 0xC0 || this->jpeg_buffer_[i+1] == 0xC2)) {
-      img_h = (this->jpeg_buffer_[i+5] << 8) | this->jpeg_buffer_[i+6];
-      img_w = (this->jpeg_buffer_[i+7] << 8) | this->jpeg_buffer_[i+8];
-      break;
-    }
-  }
-
-  if (img_w == 0 || img_h == 0) {
-    ESP_LOGE(TAG, "Cannot determine image dimensions");
     heap_caps_free(decode_buf);
     return false;
   }
@@ -2340,8 +2344,6 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
 
   // Display image using lv_canvas
   lv_obj_t *canvas = lv_canvas_create(this->image_viewer_);
-  // JPEG HW decoder aligns to 16 pixels
-  uint32_t aligned_w = (img_w + 15) & ~15;
   lv_canvas_set_buffer(canvas, decode_buf, aligned_w, img_h, LV_COLOR_FORMAT_RGB565);
   lv_obj_center(canvas);
 
