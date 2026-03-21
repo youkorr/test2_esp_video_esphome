@@ -129,14 +129,14 @@ storage:
   # DÉCODEURS D'IMAGES AVANCÉS
   # ──────────────────────────────────────────
   decoders:
-    # ThorVG (moteur vectoriel pour SVG/Lottie)
-    thorvg:
-      internal: true   # ThorVG intégré dans LVGL (recommandé)
-      external: false  # ThorVG externe (nécessite lib)
+    # ThorVG disabled: causes stack overflow crashes on ESP32 (even small 27KB files)
+    # thorvg:
+    #   internal: true
+    #   external: false
 
     # Formats supportés
     svg: true          # Support SVG (icônes vectorielles)
-    lottie: true       # Support Lottie (animations vectorielles)
+    # lottie: true     # DISABLED: ThorVG stack overflow on ESP32 loopTask
     gif: true          # Support GIF animés
     png: true          # Support PNG (via libpng)
     bmp: true          # Support BMP
