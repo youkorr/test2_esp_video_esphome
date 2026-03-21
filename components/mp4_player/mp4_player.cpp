@@ -479,6 +479,15 @@ void Mp4Player::loop() {
   if (this->audio_only_mode_) {
     this->update_spectrum_();
   }
+
+  // Deferred image viewer cleanup (safe to delete LVGL objects outside event handler)
+  if (this->image_viewer_close_pending_) {
+    this->image_viewer_close_pending_ = false;
+    this->destroy_image_viewer_();
+    // Show browser again
+    if (this->browser_container_)
+      lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 // ============================================================================
@@ -2146,12 +2155,11 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
   FileType type = get_file_type_(path);
   bool image_loaded = false;
 
-#if HAS_LV_LOTTIE
   if (type == FileType::LOTTIE) {
+#if HAS_LV_LOTTIE
     // LVGL Lottie animation (ThorVG)
     lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
     if (lottie) {
-      // Read file into memory for lottie
       FILE *f = fopen(path.c_str(), "r");
       if (f) {
         fseek(f, 0, SEEK_END);
@@ -2164,16 +2172,17 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
           lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
           lv_obj_set_size(lottie, LV_PCT(80), LV_PCT(80));
           lv_obj_center(lottie);
-          // json_buf must remain valid - store for cleanup
           lv_obj_set_user_data(lottie, json_buf);
           image_loaded = true;
         }
         fclose(f);
       }
     }
-  } else
+#else
+    // ThorVG/Lottie not available in this LVGL build
+    ESP_LOGW(TAG, "Lottie animations require ThorVG (not available)");
 #endif
-  if (type == FileType::IMAGE) {
+  } else if (type == FileType::IMAGE) {
     // Check file extension for JPEG vs PNG/BMP
     std::string ext = path;
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -2355,11 +2364,8 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
 
 void Mp4Player::image_close_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  player->destroy_image_viewer_();
-
-  // Show browser again
-  if (player->browser_container_)
-    lv_obj_clear_flag(player->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  // Defer deletion to next loop iteration to avoid deleting objects during event
+  player->image_viewer_close_pending_ = true;
 }
 
 void Mp4Player::destroy_image_viewer_() {
@@ -2367,18 +2373,22 @@ void Mp4Player::destroy_image_viewer_() {
     // Free allocated buffers stored in children's user_data
     // (lottie JSON via malloc, JPEG decode buffer via heap_caps_aligned_alloc)
     uint32_t child_cnt = lv_obj_get_child_count(this->image_viewer_);
+    uint32_t freed_count = 0;
     for (uint32_t i = 0; i < child_cnt; i++) {
       lv_obj_t *child = lv_obj_get_child(this->image_viewer_, i);
       if (!child) continue;
       void *ud = lv_obj_get_user_data(child);
       if (ud) {
-        // Use heap_caps_free which handles both aligned and regular allocations
         heap_caps_free(ud);
         lv_obj_set_user_data(child, nullptr);
+        freed_count++;
       }
     }
     lv_obj_del(this->image_viewer_);
     this->image_viewer_ = nullptr;
+
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Image viewer closed (freed %u buffers, PSRAM free: %u KB)", freed_count, free_psram / 1024);
   }
   this->image_viewer_path_.clear();
 }

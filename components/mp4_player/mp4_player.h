@@ -159,6 +159,7 @@ class Mp4Player : public Component {
   lv_obj_t *browser_title_{nullptr};
   lv_obj_t *image_viewer_{nullptr};
   std::string image_viewer_path_;
+  bool image_viewer_close_pending_{false};
 
   // Spectrum analyzer UI
   lv_obj_t *spectrum_container_{nullptr};
