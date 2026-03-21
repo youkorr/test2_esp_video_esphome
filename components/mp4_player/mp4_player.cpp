@@ -10,6 +10,14 @@
 #include <algorithm>
 #include <cmath>
 
+// USB storage - for is_mounted() check in file browser
+#if __has_include("esphome/components/usb_media_storage/usb_media_storage.h")
+#include "esphome/components/usb_media_storage/usb_media_storage.h"
+#define HAS_USB_MEDIA_STORAGE 1
+#else
+#define HAS_USB_MEDIA_STORAGE 0
+#endif
+
 // LVGL Lottie support: detected via LV_USE_LOTTIE build flag (set when ThorVG is enabled)
 // lvgl.h (included via mp4_player.h) pulls in lv_lottie.h automatically when LV_USE_LOTTIE is defined
 #ifdef LV_USE_LOTTIE
@@ -1673,11 +1681,33 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
     ESP_LOGI(TAG, "Showing root: %u media directories configured", this->media_directories_.size());
 
+    // Get USB storage component for reliable mount check
+#if HAS_USB_MEDIA_STORAGE
+    usb_media_storage::UsbMediaStorage *usb_comp = nullptr;
+    if (this->usb_storage_) {
+      usb_comp = static_cast<usb_media_storage::UsbMediaStorage *>(this->usb_storage_);
+    }
+#endif
+
     for (const auto &dir : this->media_directories_) {
-      // Check if directory exists
-      DIR *d = opendir(dir.c_str());
-      bool available = (d != nullptr);
-      if (d) closedir(d);
+      bool is_usb = (dir.find("usb") != std::string::npos);
+
+      // Check availability: use USB component status if available, otherwise opendir
+      bool available = false;
+#if HAS_USB_MEDIA_STORAGE
+      if (is_usb && usb_comp) {
+        available = usb_comp->is_mounted();
+        ESP_LOGI(TAG, "USB mount check via component: mounted=%s, connected=%s",
+                 available ? "yes" : "no",
+                 usb_comp->is_device_connected() ? "yes" : "no");
+      } else
+#endif
+      {
+        DIR *d = opendir(dir.c_str());
+        available = (d != nullptr);
+        if (d) closedir(d);
+      }
+      ESP_LOGI(TAG, "Directory '%s': %s", dir.c_str(), available ? "available" : "not mounted");
 
       lv_obj_t *btn = lv_btn_create(this->browser_list_);
       lv_obj_set_size(btn, LV_PCT(100), 65);
@@ -1691,7 +1721,6 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
       // Icon
       lv_obj_t *icon = lv_label_create(btn);
-      bool is_usb = (dir.find("usb") != std::string::npos);
       lv_label_set_text(icon, is_usb ? LV_SYMBOL_USB : LV_SYMBOL_SD_CARD);
       lv_obj_set_style_text_color(icon, available ? lv_color_hex(0x00D4FF) : lv_color_hex(0x666666), 0);
       lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
@@ -1706,7 +1735,6 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
       if (available) {
         // Store directory path as user data for callback
-        // We need to store the string - use a static approach with file_entries_
         FileEntry fe;
         fe.full_path = dir;
         fe.name = display_name;
