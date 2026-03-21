@@ -2031,17 +2031,41 @@ void Mp4Player::play_file(const std::string &path) {
 
 void Mp4Player::file_item_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+  if (!player) return;
 
-  if (idx >= player->file_entries_.size()) return;
+  lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_target(e));
+  if (!target) return;
+
+  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(target);
+
+  if (idx >= player->file_entries_.size()) {
+    ESP_LOGW(TAG, "Invalid file entry index: %u (max %u)", idx, player->file_entries_.size());
+    return;
+  }
 
   // Copy values before navigate may clear file_entries_
   std::string path = player->file_entries_[idx].full_path;
   FileType type = player->file_entries_[idx].file_type;
 
+  // Verify the path is accessible before navigating
   if (type == FileType::DIRECTORY) {
+    DIR *d = opendir(path.c_str());
+    if (!d) {
+      ESP_LOGW(TAG, "Directory not accessible: %s", path.c_str());
+      // Refresh the view to update status
+      player->file_entries_.clear();
+      player->navigate_to_directory_("");
+      return;
+    }
+    closedir(d);
     player->navigate_to_directory_(path);
   } else {
+    // Verify file exists before opening
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+      ESP_LOGW(TAG, "File not accessible: %s", path.c_str());
+      return;
+    }
     player->open_media_file_(path, type);
   }
 }
@@ -2120,7 +2144,7 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
 
   // Determine file type for appropriate LVGL widget
   FileType type = get_file_type_(path);
-  std::string lvgl_path;
+  bool image_loaded = false;
 
 #if HAS_LV_LOTTIE
   if (type == FileType::LOTTIE) {
@@ -2142,22 +2166,49 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
           lv_obj_center(lottie);
           // json_buf must remain valid - store for cleanup
           lv_obj_set_user_data(lottie, json_buf);
+          image_loaded = true;
         }
         fclose(f);
       }
     }
   } else
 #endif
-  {
-    // Image (PNG, JPG, BMP) or SVG - use lv_image with file path
-    // LVGL uses "S:" prefix for filesystem access or direct path
+  if (type == FileType::IMAGE) {
+    // Check file extension for JPEG vs PNG/BMP
+    std::string ext = path;
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    bool is_jpeg = (ext.rfind(".jpg") != std::string::npos || ext.rfind(".jpeg") != std::string::npos);
+
+    if (is_jpeg) {
+      // Use ESP32-P4 hardware JPEG decoder for JPEG files
+      image_loaded = this->show_jpeg_image_(path);
+    } else {
+      // PNG/BMP: Try LVGL file-based decoder (requires LV_USE_LODEPNG or LV_USE_BMP)
+      std::string lvgl_path = std::string("S:") + path;
+      lv_obj_t *img = lv_image_create(this->image_viewer_);
+      lv_image_set_src(img, lvgl_path.c_str());
+      lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+      lv_obj_center(img);
+      image_loaded = true;
+      ESP_LOGI(TAG, "Loading image via LVGL decoder: %s", lvgl_path.c_str());
+    }
+  } else {
+    // SVG: Try LVGL file-based decoder
+    std::string lvgl_path = std::string("S:") + path;
     lv_obj_t *img = lv_image_create(this->image_viewer_);
-    lvgl_path = std::string("S:") + path;
     lv_image_set_src(img, lvgl_path.c_str());
     lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(img);
-    // Scale to fit screen
-    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+    image_loaded = true;
+  }
+
+  // Show error message if image failed to load
+  if (!image_loaded) {
+    lv_obj_t *err_lbl = lv_label_create(this->image_viewer_);
+    lv_label_set_text(err_lbl, "Cannot display this image format");
+    lv_obj_set_style_text_color(err_lbl, lv_color_hex(0xFF6666), 0);
+    lv_obj_set_style_text_font(err_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_center(err_lbl);
   }
 
   // Close button (top-right)
@@ -2185,6 +2236,121 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
   lv_obj_set_style_pad_all(name_lbl, 5, 0);
 }
 
+// Decode JPEG file using ESP32-P4 hardware JPEG decoder and display on canvas
+bool Mp4Player::show_jpeg_image_(const std::string &path) {
+  // Read JPEG file into memory
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) {
+    ESP_LOGE(TAG, "Cannot open image: %s", path.c_str());
+    return false;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  if (fsize <= 0 || fsize > (long)JPEG_BUFFER_SIZE) {
+    ESP_LOGE(TAG, "Image too large: %ld bytes (max %u)", fsize, JPEG_BUFFER_SIZE);
+    fclose(f);
+    return false;
+  }
+
+  // Ensure JPEG decoder and buffer are available
+  if (!this->jpeg_decoder_) {
+    jpeg_decode_engine_cfg_t cfg = {
+      .timeout_ms = 1000,
+    };
+    if (jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to create JPEG decoder for image");
+      fclose(f);
+      return false;
+    }
+  }
+
+  if (!this->jpeg_buffer_) {
+    this->jpeg_buffer_ = (uint8_t *)heap_caps_malloc(JPEG_BUFFER_SIZE, MALLOC_CAP_SPIRAM);
+    if (!this->jpeg_buffer_) {
+      ESP_LOGE(TAG, "Failed to allocate JPEG buffer");
+      fclose(f);
+      return false;
+    }
+  }
+
+  size_t read_size = fread(this->jpeg_buffer_, 1, fsize, f);
+  fclose(f);
+
+  if ((long)read_size != fsize) {
+    ESP_LOGE(TAG, "Read error: got %zu of %ld bytes", read_size, fsize);
+    return false;
+  }
+
+  // Strip COM markers that crash ESP32-P4 JPEG hardware decoder
+  size_t jpeg_size = strip_jpeg_com_markers_(this->jpeg_buffer_, read_size);
+
+  // Allocate decode output buffer (max 1920x1080 RGB565 = ~4MB)
+  // Use a temporary buffer for the decoded image
+  static constexpr size_t MAX_IMAGE_PIXELS = 1920 * 1080;
+  size_t decode_buf_size = MAX_IMAGE_PIXELS * 2;  // RGB565
+  uint8_t *decode_buf = (uint8_t *)heap_caps_aligned_alloc(64, decode_buf_size, MALLOC_CAP_SPIRAM);
+  if (!decode_buf) {
+    ESP_LOGE(TAG, "Failed to allocate image decode buffer (%u bytes)", decode_buf_size);
+    return false;
+  }
+
+  jpeg_decode_cfg_t decode_cfg = {
+    .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+    .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+    .conv_std = JPEG_YUV_RGB_CONV_STD_BT601,
+  };
+
+  uint32_t decoded_size = 0;
+  esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_,
+                                        &decode_cfg,
+                                        this->jpeg_buffer_,
+                                        jpeg_size,
+                                        decode_buf,
+                                        decode_buf_size,
+                                        &decoded_size);
+
+  if (ret != ESP_OK || decoded_size == 0) {
+    ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    heap_caps_free(decode_buf);
+    return false;
+  }
+
+  // Calculate image dimensions from decoded size (RGB565 = 2 bytes per pixel)
+  // JPEG decoder doesn't directly give us dimensions, but we can get them from header
+  // Parse JPEG SOF0 marker to get dimensions
+  uint32_t img_w = 0, img_h = 0;
+  for (size_t i = 0; i < jpeg_size - 8; i++) {
+    if (this->jpeg_buffer_[i] == 0xFF && (this->jpeg_buffer_[i+1] == 0xC0 || this->jpeg_buffer_[i+1] == 0xC2)) {
+      img_h = (this->jpeg_buffer_[i+5] << 8) | this->jpeg_buffer_[i+6];
+      img_w = (this->jpeg_buffer_[i+7] << 8) | this->jpeg_buffer_[i+8];
+      break;
+    }
+  }
+
+  if (img_w == 0 || img_h == 0) {
+    ESP_LOGE(TAG, "Cannot determine image dimensions");
+    heap_caps_free(decode_buf);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "Image decoded: %ux%u (%u bytes)", img_w, img_h, decoded_size);
+
+  // Display image using lv_canvas
+  lv_obj_t *canvas = lv_canvas_create(this->image_viewer_);
+  // JPEG HW decoder aligns to 16 pixels
+  uint32_t aligned_w = (img_w + 15) & ~15;
+  lv_canvas_set_buffer(canvas, decode_buf, aligned_w, img_h, LV_COLOR_FORMAT_RGB565);
+  lv_obj_center(canvas);
+
+  // Store decode buffer pointer for cleanup (via user_data on canvas)
+  lv_obj_set_user_data(canvas, decode_buf);
+
+  return true;
+}
+
 void Mp4Player::image_close_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
   player->destroy_image_viewer_();
@@ -2196,13 +2362,16 @@ void Mp4Player::image_close_cb_(lv_event_t *e) {
 
 void Mp4Player::destroy_image_viewer_() {
   if (this->image_viewer_) {
-    // Free lottie JSON buffer if any (stored in lottie obj's user_data)
+    // Free allocated buffers stored in children's user_data
+    // (lottie JSON via malloc, JPEG decode buffer via heap_caps_aligned_alloc)
     uint32_t child_cnt = lv_obj_get_child_count(this->image_viewer_);
     for (uint32_t i = 0; i < child_cnt; i++) {
       lv_obj_t *child = lv_obj_get_child(this->image_viewer_, i);
+      if (!child) continue;
       void *ud = lv_obj_get_user_data(child);
       if (ud) {
-        free(ud);
+        // Use heap_caps_free which handles both aligned and regular allocations
+        heap_caps_free(ud);
         lv_obj_set_user_data(child, nullptr);
       }
     }

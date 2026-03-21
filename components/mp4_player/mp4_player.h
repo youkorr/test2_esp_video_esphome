@@ -136,6 +136,7 @@ class Mp4Player : public Component {
   static FileType get_file_type_(const std::string &name);
   void open_media_file_(const std::string &path, FileType type);
   void show_image_viewer_(const std::string &path);
+  bool show_jpeg_image_(const std::string &path);
   void destroy_image_viewer_();
   static void image_close_cb_(lv_event_t *e);
   static void file_item_cb_(lv_event_t *e);
