@@ -342,9 +342,10 @@ void Mp4Player::setup() {
             this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
             this->audio_channels_ = ainfo.stream_info.audio_info.channel;
             this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
-            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
+            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit%s",
                      this->audio_format_, this->audio_sample_rate_,
-                     this->audio_channels_, this->audio_bits_per_sample_);
+                     this->audio_channels_, this->audio_bits_per_sample_,
+                     (this->output_mono_ && this->audio_channels_ > 1) ? " (will downmix to mono)" : "");
           }
         }
       }
@@ -506,6 +507,7 @@ void Mp4Player::dump_config() {
   ESP_LOGCONFIG(TAG, "  Volume: %u%%", this->volume_level_);
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Audio: %s", this->has_audio_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Audio output: %s", this->output_mono_ ? "mono (downmix)" : "stereo");
 }
 
 // ============================================================================
@@ -775,11 +777,20 @@ void Mp4Player::playback_task_(void *arg) {
               uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
               uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
               uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
-              audio::AudioStreamInfo stream_info(bps, ch, sr);
+
+              // If output is mono and source is stereo, tell speaker we're sending mono
+              // (downmix happens before data reaches the speaker)
+              uint8_t output_ch = ch;
+              if (player->output_mono_ && ch > 1) {
+                output_ch = 1;
+                ESP_LOGI(TAG, "Audio: source is %uch, downmixing to mono for output", ch);
+              }
+
+              audio::AudioStreamInfo stream_info(bps, output_ch, sr);
               player->speaker_->set_audio_stream_info(stream_info);
               player->speaker_->start();
               speaker_started = true;
-              ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
+              ESP_LOGI(TAG, "Speaker started: %uHz, %uch->%uch, %ubit", sr, ch, output_ch, bps);
 
               // Wait for I2S channel to fully initialize before sending audio data
               vTaskDelay(pdMS_TO_TICKS(100));
@@ -857,6 +868,13 @@ void Mp4Player::playback_task_(void *arg) {
 
             esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
             if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+              size_t pcm_size = out.decoded_size;
+
+              // Downmix stereo to mono if source is stereo and output is mono
+              if (player->output_mono_ && player->audio_channels_ > 1) {
+                pcm_size = player->downmix_stereo_to_mono_(player->audio_pcm_buffer_, pcm_size);
+              }
+
               if (player->audio_ring_buffer_) {
                 // Push decoded audio to ring buffer
                 // For audio-only: wait indefinitely (no video to sync with)
@@ -864,21 +882,21 @@ void Mp4Player::playback_task_(void *arg) {
                 int max_retries = player->audio_only_mode_ ? 500 : 50;
                 size_t pushed = 0;
                 int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < max_retries) {
+                while (pushed < pcm_size && !player->stop_requested_ && retries < max_retries) {
                   size_t p = player->audio_ring_push_(
-                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
+                      player->audio_pcm_buffer_ + pushed, pcm_size - pushed);
                   pushed += p;
-                  if (pushed < out.decoded_size) {
+                  if (pushed < pcm_size) {
                     vTaskDelay(pdMS_TO_TICKS(2));
                     retries++;
                   }
                 }
               } else {
-                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
+                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, pcm_size);
                 size_t written = 0;
-                while (written < out.decoded_size && !player->stop_requested_) {
+                while (written < pcm_size && !player->stop_requested_) {
                   size_t w = player->speaker_->play(
-                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
+                      player->audio_pcm_buffer_ + written, pcm_size - written);
                   if (w > 0) {
                     written += w;
                   } else {
@@ -1229,6 +1247,21 @@ void Mp4Player::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
 }
 
 // ============================================================================
+// Stereo to mono downmix (in-place)
+// Averages L+R channels to produce mono output. Returns new data size (halved).
+// ============================================================================
+size_t Mp4Player::downmix_stereo_to_mono_(uint8_t *pcm_data, size_t size) {
+  int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
+  size_t num_stereo_frames = size / 4;  // 4 bytes per stereo frame (2x 16-bit)
+  for (size_t i = 0; i < num_stereo_frames; i++) {
+    int32_t left = samples[i * 2];
+    int32_t right = samples[i * 2 + 1];
+    samples[i] = (int16_t)((left + right) / 2);
+  }
+  return num_stereo_frames * 2;  // mono: 2 bytes per frame
+}
+
+// ============================================================================
 // Audio ring buffer - lock-free single producer / single consumer
 // ============================================================================
 size_t Mp4Player::audio_ring_available_() const {
@@ -1374,8 +1407,10 @@ void Mp4Player::audio_output_task_(void *arg) {
     // Skip entirely for audio-only mode (no A/V sync needed, producer backpressures naturally)
     if (!player->audio_only_mode_ && avail > video_high_watermark) {
       size_t skip = avail - target_level;
-      // Align skip to sample boundary (4 bytes = one stereo 16-bit sample)
-      skip &= ~3;
+      // Align skip to sample frame boundary
+      // Mono 16-bit = 2 bytes, Stereo 16-bit = 4 bytes
+      size_t frame_size = (player->output_mono_ || player->audio_channels_ <= 1) ? 2 : 4;
+      skip = (skip / frame_size) * frame_size;
       player->audio_ring_read_ = (player->audio_ring_read_ + skip) % player->audio_ring_size_;
       avail = player->audio_ring_available_();
       jitter_corrections++;
@@ -2138,9 +2173,14 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       // Set format info after play_file has probed
       if (this->spectrum_artist_label_) {
         char info[64];
+        const char *ch_str = "Mono";
+        if (this->audio_channels_ > 1 && !this->output_mono_)
+          ch_str = "Stereo";
+        else if (this->audio_channels_ > 1 && this->output_mono_)
+          ch_str = "Mono (downmix)";
         snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
                  this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100,
-                 this->audio_channels_ > 1 ? "Stereo" : "Mono",
+                 ch_str,
                  this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
         lv_label_set_text(this->spectrum_artist_label_, info);
       }
@@ -2458,8 +2498,8 @@ void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_cou
   float imag[FFT_SIZE];
 
   // Fill FFT input with windowed samples (Hanning window)
-  // If stereo, take only left channel (every other sample)
-  int step = (this->audio_channels_ > 1) ? 2 : 1;
+  // After downmix, ring buffer data is always mono if output_mono_ is set
+  int step = (!this->output_mono_ && this->audio_channels_ > 1) ? 2 : 1;
   for (int i = 0; i < FFT_SIZE; i++) {
     float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
     real[i] = (float)pcm[i * step] * window / 32768.0f;
@@ -2607,9 +2647,11 @@ void Mp4Player::update_spectrum_() {
   this->spectrum_last_update_ = now;
 
   // Sample PCM data from the ring buffer (peek, don't consume)
-  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * (this->audio_channels_ > 1 ? 2 : 1))) {
+  // After downmix, ring buffer contains mono data if output_mono_ is set
+  int ring_ch = (!this->output_mono_ && this->audio_channels_ > 1) ? 2 : 1;
+  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * ring_ch)) {
     // Read a snapshot from current ring buffer position without consuming
-    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * (this->audio_channels_ > 1 ? 2 : 1);
+    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * ring_ch;
     int16_t *samples = (int16_t *)malloc(bytes_needed);
     if (samples) {
       // Peek at ring buffer data (read from current read position without advancing)
@@ -2617,7 +2659,7 @@ void Mp4Player::update_spectrum_() {
       for (size_t i = 0; i < bytes_needed; i++) {
         ((uint8_t *)samples)[i] = this->audio_ring_buffer_[(read_pos + i) % this->audio_ring_size_];
       }
-      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * (this->audio_channels_ > 1 ? 2 : 1));
+      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * ring_ch);
       free(samples);
     }
   }

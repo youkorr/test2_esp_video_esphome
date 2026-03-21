@@ -241,6 +241,10 @@ class Mp4Player : public Component {
   uint8_t audio_channels_{0};
   uint8_t audio_bits_per_sample_{0};
   bool audio_decoder_ready_{false};
+  bool output_mono_{true};  // ESP32-P4 board has single speaker - downmix to mono
+
+  // Downmix stereo PCM to mono (in-place, returns new size = half)
+  size_t downmix_stereo_to_mono_(uint8_t *pcm_data, size_t size);
 
   // Audio ring buffer for decoupling decode from speaker output
   uint8_t *audio_ring_buffer_{nullptr};
