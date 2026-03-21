@@ -929,13 +929,19 @@ void Mp4Player::playback_task_(void *arg) {
           }
 
           // Frame rate control - only delay for video frames to maintain fps
+          // BUT: if audio ring buffer is low, skip the delay to let audio catch up
           int64_t now = esp_timer_get_time() / 1000;
           int64_t target = last_frame_time + frame_interval_ms;
-          if (now < target) {
+          bool audio_starving = player->audio_ring_buffer_ &&
+                                player->audio_ring_available_() < (128 * 1024);
+          if (!audio_starving && now < target) {
             uint32_t delay = target - now;
             if (delay > 0 && delay < 1000) {
               vTaskDelay(pdMS_TO_TICKS(delay));
             }
+          } else if (audio_starving) {
+            // Yield minimally to avoid watchdog but don't wait for frame timing
+            taskYIELD();
           }
           last_frame_time = esp_timer_get_time() / 1000;
 
@@ -1349,6 +1355,12 @@ void Mp4Player::audio_output_task_(void *arg) {
   uint32_t jitter_corrections = 0;
   bool was_paused = false;
 
+  // Grace period: skip jitter corrections for the first 2 seconds after startup
+  // This prevents false corrections when audio_only_mode_ hasn't been set yet
+  // (e.g. for MP3 files where the main thread sets it after play_file returns)
+  int64_t task_start_time = esp_timer_get_time() / 1000;
+  const int64_t jitter_grace_period_ms = 2000;
+
   // Monitoring: log ring buffer level every 30 seconds for diagnostics
   int64_t last_monitor_time = esp_timer_get_time() / 1000;
   size_t monitor_min_level = player->audio_ring_size_;
@@ -1405,7 +1417,9 @@ void Mp4Player::audio_output_task_(void *arg) {
 
     // Jitter buffer management: catch latency drift early
     // Skip entirely for audio-only mode (no A/V sync needed, producer backpressures naturally)
-    if (!player->audio_only_mode_ && avail > video_high_watermark) {
+    // Also skip during grace period to let audio_only_mode_ be set by main thread
+    bool in_grace_period = (now_ms - task_start_time) < jitter_grace_period_ms;
+    if (!player->audio_only_mode_ && !in_grace_period && avail > video_high_watermark) {
       size_t skip = avail - target_level;
       // Align skip to sample frame boundary
       // Mono 16-bit = 2 bytes, Stereo 16-bit = 4 bytes
@@ -1501,6 +1515,27 @@ void Mp4Player::play_btn_cb_(lv_event_t *e) {
 void Mp4Player::stop_btn_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
   p->stop();
+}
+
+void Mp4Player::spectrum_stop_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->stop();  // stop() destroys spectrum UI and returns to browser
+}
+
+void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  if (p->state_ == PlayerState::PLAYING) {
+    p->pause();
+    // Update button icon to play
+    lv_obj_t *btn = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
+  } else if (p->state_ == PlayerState::PAUSED) {
+    p->play();
+    lv_obj_t *btn = static_cast<lv_obj_t *>(lv_event_get_target(e));
+    lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+  }
 }
 
 void Mp4Player::progress_slider_cb_(lv_event_t *e) {
@@ -2153,10 +2188,12 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
-      // Start playback FIRST (play_file calls stop() which resets audio_only_mode_)
+      // play_file() calls stop() internally which resets audio_only_mode_ via destroy_spectrum_ui_
+      // So we must set audio_only_mode_ AFTER play_file() returns but BEFORE the audio output
+      // task starts checking it. We do this by setting it immediately after play_file.
       this->play_file(path);
-
-      // NOW set audio-only mode and create spectrum UI (after stop() has run)
+      // Set audio-only mode NOW - the audio output task is pre-filling its buffer
+      // and won't check jitter until after prefill completes (~1-2s)
       this->audio_only_mode_ = true;
       this->create_spectrum_ui_();
 
@@ -2552,7 +2589,7 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_style_pad_all(this->spectrum_container_, 0, 0);
   lv_obj_clear_flag(this->spectrum_container_, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Music icon + title at top
+  // Top bar with back button and controls
   lv_obj_t *title_area = lv_obj_create(this->spectrum_container_);
   lv_obj_set_size(title_area, LV_PCT(100), 80);
   lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
@@ -2560,12 +2597,34 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_style_border_width(title_area, 0, 0);
   lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Back button (stop and return to browser)
+  lv_obj_t *back_btn = lv_btn_create(title_area);
+  lv_obj_set_size(back_btn, 40, 36);
+  lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 5, 0);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333355), 0);
+  lv_obj_set_style_radius(back_btn, 8, 0);
+  lv_obj_t *back_lbl = lv_label_create(back_btn);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_obj_center(back_lbl);
+  lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
+
+  // Play/Pause button
+  lv_obj_t *play_btn = lv_btn_create(title_area);
+  lv_obj_set_size(play_btn, 40, 36);
+  lv_obj_align(play_btn, LV_ALIGN_RIGHT_MID, -5, 0);
+  lv_obj_set_style_bg_color(play_btn, lv_color_hex(0x333355), 0);
+  lv_obj_set_style_radius(play_btn, 8, 0);
+  lv_obj_t *play_lbl = lv_label_create(play_btn);
+  lv_label_set_text(play_lbl, LV_SYMBOL_PAUSE);
+  lv_obj_center(play_lbl);
+  lv_obj_add_event_cb(play_btn, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
+
   // Music icon
   lv_obj_t *music_icon = lv_label_create(title_area);
   lv_label_set_text(music_icon, LV_SYMBOL_AUDIO);
   lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00D4FF), 0);
   lv_obj_set_style_text_font(music_icon, &lv_font_montserrat_16, 0);
-  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 20, -10);
+  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 55, -10);
 
   // Song title (filename)
   this->spectrum_title_label_ = lv_label_create(title_area);
@@ -2573,15 +2632,15 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_style_text_color(this->spectrum_title_label_, lv_color_white(), 0);
   lv_obj_set_style_text_font(this->spectrum_title_label_, &lv_font_montserrat_16, 0);
   lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(80));
-  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 50, -10);
+  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(60));
+  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 80, -10);
 
   // Format info
   this->spectrum_artist_label_ = lv_label_create(title_area);
   lv_label_set_text(this->spectrum_artist_label_, "");
   lv_obj_set_style_text_color(this->spectrum_artist_label_, lv_color_hex(0x888888), 0);
   lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
-  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 50, 12);
+  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 80, 12);
 
   // Spectrum bars area
   lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);

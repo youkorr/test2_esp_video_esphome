@@ -113,6 +113,8 @@ class Mp4Player : public Component {
   // Static callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
+  static void spectrum_stop_cb_(lv_event_t *e);
+  static void spectrum_playpause_cb_(lv_event_t *e);
   static void progress_slider_cb_(lv_event_t *e);
   static void volume_slider_cb_(lv_event_t *e);
   static void hide_timer_cb_(lv_timer_t *timer);
@@ -170,7 +172,7 @@ class Mp4Player : public Component {
   float spectrum_magnitudes_[SPECTRUM_BANDS]{};
   float spectrum_peaks_[SPECTRUM_BANDS]{};
   float spectrum_smooth_[SPECTRUM_BANDS]{};
-  bool audio_only_mode_{false};
+  volatile bool audio_only_mode_{false};
   uint32_t spectrum_last_update_{0};
 
   // Configuration
