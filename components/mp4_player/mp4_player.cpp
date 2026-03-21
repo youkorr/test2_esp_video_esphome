@@ -18,13 +18,9 @@
 #define HAS_USB_MEDIA_STORAGE 0
 #endif
 
-// LVGL Lottie support: detected via LV_USE_LOTTIE build flag (set when ThorVG is enabled)
-// lvgl.h (included via mp4_player.h) pulls in lv_lottie.h automatically when LV_USE_LOTTIE is defined
-#ifdef LV_USE_LOTTIE
-#define HAS_LV_LOTTIE 1
-#else
-#define HAS_LV_LOTTIE 0
-#endif
+// Lottie/ThorVG support is disabled: ThorVG rendering uses deep stack recursion
+// that overflows the ESP32 loopTask stack, causing Guru Meditation crashes
+// even with small files (27KB). All .json files are excluded from the browser.
 
 namespace esphome {
 namespace mp4_player {
@@ -1519,8 +1515,8 @@ FileType Mp4Player::get_file_type_(const std::string &name) {
   if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") return FileType::IMAGE;
   // Audio
   if (ext == ".mp3" || ext == ".wav" || ext == ".flac" || ext == ".aac" || ext == ".pcm") return FileType::AUDIO;
-  // Lottie animation
-  if (ext == ".json") return FileType::LOTTIE;
+  // Lottie animation - disabled: ThorVG overflows loopTask stack on ESP32
+  // if (ext == ".json") return FileType::LOTTIE;
   // SVG
   if (ext == ".svg") return FileType::SVG;
 
@@ -2184,78 +2180,19 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
   bool image_loaded = false;
 
   if (type == FileType::LOTTIE) {
-#if HAS_LV_LOTTIE
-    ESP_LOGI(TAG, "Lottie: LV_USE_LOTTIE is enabled, creating animation");
+    // Lottie/ThorVG rendering requires very deep stack recursion that overflows
+    // the ESP32 loopTask stack (even files as small as 27KB crash).
+    // Disabled to prevent Guru Meditation crashes.
+    ESP_LOGW(TAG, "Lottie files not supported: ThorVG rendering overflows loopTask stack");
+    ESP_LOGW(TAG, "Skipping file: %s", path.c_str());
 
-    // Lottie/ThorVG JSON parsing is deeply recursive and can overflow the
-    // main loop task stack with large files. Limit to a safe size.
-    static const size_t LOTTIE_MAX_FILE_SIZE = 256 * 1024;  // 256KB max
-
-    // LVGL 9.x Lottie requires a draw buffer for ThorVG rendering
-    // Use a reasonable render size (e.g. 200x200 pixels)
-    static const int LOTTIE_RENDER_W = 200;
-    static const int LOTTIE_RENDER_H = 200;
-
-    // Check file size first before allocating anything
-    FILE *f = fopen(path.c_str(), "r");
-    if (f) {
-      fseek(f, 0, SEEK_END);
-      long fsize = ftell(f);
-      fseek(f, 0, SEEK_SET);
-      ESP_LOGI(TAG, "Lottie: file size = %ld bytes", fsize);
-
-      if (fsize <= 0) {
-        ESP_LOGE(TAG, "Lottie: invalid file size");
-        fclose(f);
-      } else if ((size_t)fsize > LOTTIE_MAX_FILE_SIZE) {
-        ESP_LOGW(TAG, "Lottie: file too large (%ld bytes, max %u bytes) - would overflow stack",
-                 fsize, (unsigned)LOTTIE_MAX_FILE_SIZE);
-        fclose(f);
-      } else {
-        // File size is safe, proceed with loading
-        lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
-        if (lottie) {
-          this->lottie_draw_buf_ = lv_draw_buf_create(LOTTIE_RENDER_W, LOTTIE_RENDER_H,
-                                                        LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO);
-          if (this->lottie_draw_buf_) {
-            lv_lottie_set_draw_buf(lottie, this->lottie_draw_buf_);
-
-            char *json_buf = (char *)heap_caps_malloc(fsize + 1, MALLOC_CAP_SPIRAM);
-            if (json_buf) {
-              fread(json_buf, 1, fsize, f);
-              json_buf[fsize] = '\0';
-              lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
-              lv_obj_set_size(lottie, LOTTIE_RENDER_W, LOTTIE_RENDER_H);
-              lv_obj_center(lottie);
-              lv_obj_set_user_data(lottie, json_buf);
-              image_loaded = true;
-              ESP_LOGI(TAG, "Lottie animation loaded successfully: %s", path.c_str());
-            } else {
-              ESP_LOGE(TAG, "Lottie: failed to allocate %ld bytes for JSON", fsize + 1);
-            }
-
-            if (!image_loaded) {
-              lv_draw_buf_destroy(this->lottie_draw_buf_);
-              this->lottie_draw_buf_ = nullptr;
-            }
-          } else {
-            ESP_LOGE(TAG, "Lottie: failed to create draw buffer (%dx%d)", LOTTIE_RENDER_W, LOTTIE_RENDER_H);
-          }
-
-          if (!image_loaded) {
-            lv_obj_del(lottie);
-          }
-        }
-        fclose(f);
-      }
-    } else {
-      ESP_LOGE(TAG, "Lottie: failed to open file: %s", path.c_str());
-    }
-#else
-    // ThorVG/Lottie not available in this LVGL build
-    ESP_LOGW(TAG, "Lottie: HAS_LV_LOTTIE=0 - LV_USE_LOTTIE not defined at compile time");
-    ESP_LOGW(TAG, "Lottie: ensure your LVGL config has ThorVG and Lottie enabled");
-#endif
+    // Show message on screen
+    lv_obj_t *msg = lv_label_create(this->image_viewer_);
+    lv_label_set_text(msg, "Lottie format not supported\non this device");
+    lv_obj_set_style_text_color(msg, lv_color_hex(0xFF8800), 0);
+    lv_obj_set_style_text_font(msg, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(msg);
   } else if (type == FileType::IMAGE) {
     // Check file extension for JPEG vs PNG/BMP
     std::string ext = path;
