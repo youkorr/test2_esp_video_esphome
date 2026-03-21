@@ -11,7 +11,8 @@
 #include <cmath>
 
 // LVGL Lottie support: detected via LV_USE_LOTTIE build flag (set when ThorVG is enabled)
-#if defined(LV_USE_LOTTIE) && LV_USE_LOTTIE
+// lvgl.h (included via mp4_player.h) pulls in lv_lottie.h automatically when LV_USE_LOTTIE is defined
+#ifdef LV_USE_LOTTIE
 #define HAS_LV_LOTTIE 1
 #else
 #define HAS_LV_LOTTIE 0
@@ -2156,30 +2157,61 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
 
   if (type == FileType::LOTTIE) {
 #if HAS_LV_LOTTIE
-    // LVGL Lottie animation (ThorVG)
+    ESP_LOGI(TAG, "Lottie: LV_USE_LOTTIE is enabled, creating animation");
+    // LVGL 9.x Lottie requires a draw buffer for ThorVG rendering
+    // Use a reasonable render size (e.g. 200x200 pixels)
+    static const int LOTTIE_RENDER_W = 200;
+    static const int LOTTIE_RENDER_H = 200;
+
     lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
     if (lottie) {
-      FILE *f = fopen(path.c_str(), "r");
-      if (f) {
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        char *json_buf = (char *)malloc(fsize + 1);
-        if (json_buf) {
-          fread(json_buf, 1, fsize, f);
-          json_buf[fsize] = '\0';
-          lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
-          lv_obj_set_size(lottie, LV_PCT(80), LV_PCT(80));
-          lv_obj_center(lottie);
-          lv_obj_set_user_data(lottie, json_buf);
-          image_loaded = true;
+      // Allocate draw buffer in PSRAM for ThorVG to render into
+      this->lottie_draw_buf_ = lv_draw_buf_create(LOTTIE_RENDER_W, LOTTIE_RENDER_H,
+                                                    LV_COLOR_FORMAT_ARGB8888, LV_STRIDE_AUTO);
+      if (this->lottie_draw_buf_) {
+        lv_lottie_set_draw_buf(lottie, this->lottie_draw_buf_);
+
+        FILE *f = fopen(path.c_str(), "r");
+        if (f) {
+          fseek(f, 0, SEEK_END);
+          long fsize = ftell(f);
+          fseek(f, 0, SEEK_SET);
+          ESP_LOGI(TAG, "Lottie: file size = %ld bytes", fsize);
+          char *json_buf = (char *)heap_caps_malloc(fsize + 1, MALLOC_CAP_SPIRAM);
+          if (json_buf) {
+            fread(json_buf, 1, fsize, f);
+            json_buf[fsize] = '\0';
+            lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
+            lv_obj_set_size(lottie, LOTTIE_RENDER_W, LOTTIE_RENDER_H);
+            lv_obj_center(lottie);
+            // Store json_buf for cleanup; draw_buf is managed by LVGL
+            lv_obj_set_user_data(lottie, json_buf);
+            image_loaded = true;
+            ESP_LOGI(TAG, "Lottie animation loaded successfully: %s", path.c_str());
+          } else {
+            ESP_LOGE(TAG, "Lottie: failed to allocate %ld bytes for JSON", fsize + 1);
+          }
+          fclose(f);
+        } else {
+          ESP_LOGE(TAG, "Lottie: failed to open file: %s", path.c_str());
         }
-        fclose(f);
+
+        if (!image_loaded) {
+          lv_draw_buf_destroy(this->lottie_draw_buf_);
+          this->lottie_draw_buf_ = nullptr;
+        }
+      } else {
+        ESP_LOGE(TAG, "Lottie: failed to create draw buffer (%dx%d)", LOTTIE_RENDER_W, LOTTIE_RENDER_H);
+      }
+
+      if (!image_loaded) {
+        lv_obj_del(lottie);
       }
     }
 #else
     // ThorVG/Lottie not available in this LVGL build
-    ESP_LOGW(TAG, "Lottie animations require ThorVG (not available)");
+    ESP_LOGW(TAG, "Lottie: HAS_LV_LOTTIE=0 - LV_USE_LOTTIE not defined at compile time");
+    ESP_LOGW(TAG, "Lottie: ensure your LVGL config has ThorVG and Lottie enabled");
 #endif
   } else if (type == FileType::IMAGE) {
     // Check file extension for JPEG vs PNG/BMP
@@ -2385,6 +2417,12 @@ void Mp4Player::destroy_image_viewer_() {
     }
     lv_obj_del(this->image_viewer_);
     this->image_viewer_ = nullptr;
+
+    // Free Lottie draw buffer (not freed automatically by LVGL)
+    if (this->lottie_draw_buf_) {
+      lv_draw_buf_destroy(this->lottie_draw_buf_);
+      this->lottie_draw_buf_ = nullptr;
+    }
 
     size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     ESP_LOGI(TAG, "Image viewer closed (freed %u buffers, PSRAM free: %u KB)", freed_count, free_psram / 1024);

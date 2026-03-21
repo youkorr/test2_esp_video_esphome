@@ -160,6 +160,7 @@ class Mp4Player : public Component {
   lv_obj_t *image_viewer_{nullptr};
   std::string image_viewer_path_;
   bool image_viewer_close_pending_{false};
+  lv_draw_buf_t *lottie_draw_buf_{nullptr};  // Draw buffer for Lottie rendering
 
   // Spectrum analyzer UI
   lv_obj_t *spectrum_container_{nullptr};
