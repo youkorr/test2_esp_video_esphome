@@ -10,10 +10,9 @@
 #include <algorithm>
 #include <cmath>
 
-// LVGL extensions for media display
-#if __has_include("lvgl/src/libs/lottie/lv_lottie.h")
+// LVGL Lottie support: detected via LV_USE_LOTTIE build flag (set when ThorVG is enabled)
+#if defined(LV_USE_LOTTIE) && LV_USE_LOTTIE
 #define HAS_LV_LOTTIE 1
-#include "lvgl/src/libs/lottie/lv_lottie.h"
 #else
 #define HAS_LV_LOTTIE 0
 #endif
