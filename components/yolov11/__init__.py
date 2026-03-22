@@ -95,6 +95,7 @@ YOLOV11_INFERENCE_ACTION_SCHEMA = cv.Schema(
     "yolov11.inference",
     YOLOV11InferenceAction,
     YOLOV11_INFERENCE_ACTION_SCHEMA,
+    synchronous=True,
 )
 async def yolov11_inference_action_to_code(
     config, action_id, template_arg, args
