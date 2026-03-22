@@ -11,6 +11,23 @@ CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_CLASS_LABELS = "class_labels"
 
+# 80 classes COCO par défaut
+DEFAULT_COCO_LABELS = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep",
+    "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+    "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard",
+    "sports ball", "kite", "baseball bat", "baseball glove", "skateboard",
+    "surfboard", "tennis racket", "bottle", "wine glass", "cup", "fork",
+    "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange",
+    "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair",
+    "couch", "potted plant", "bed", "dining table", "toilet", "tv",
+    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave",
+    "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase",
+    "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
 yolov11_ns = cg.esphome_ns.namespace("yolov11")
 YOLOV11Component = yolov11_ns.class_("YOLOV11Component", cg.Component)
 YOLOV11InferenceAction = yolov11_ns.class_(
@@ -59,7 +76,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(
                 min=0.0, max=1.0
             ),
-            cv.Required(CONF_CLASS_LABELS): cv.ensure_list(cv.string),
+            cv.Optional(CONF_CLASS_LABELS, default=DEFAULT_COCO_LABELS): cv.ensure_list(cv.string),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     validate_camera_config,
