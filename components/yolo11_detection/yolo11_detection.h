@@ -6,8 +6,17 @@
 #include <vector>
 #include <list>
 
-// ESP-DL forward declaration
-class YOLO11Detect;
+// ESP-DL forward declarations
+namespace dl {
+class Model;
+namespace image {
+class ImagePreprocessor;
+}
+namespace detect {
+class yolo11PostProcessor;
+struct result_t;
+}
+}
 
 namespace esphome {
 namespace yolo11_detection {
@@ -15,7 +24,7 @@ namespace yolo11_detection {
 struct DetectionBox {
   int x1, y1, x2, y2;
   float score;
-  int category;  // Object class/category
+  int category;
 };
 
 class YOLO11DetectionComponent : public Component {
@@ -23,7 +32,7 @@ class YOLO11DetectionComponent : public Component {
   void setup() override;
   void loop() override;
   void dump_config() override;
-  float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
+  float get_setup_priority() const override { return -200.0f; }
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
@@ -53,7 +62,11 @@ class YOLO11DetectionComponent : public Component {
 
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
-  YOLO11Detect *object_detector_{nullptr};
+
+  // ESP-DL objects (direct, no wrapper)
+  dl::Model *dl_model_{nullptr};
+  dl::image::ImagePreprocessor *preprocessor_{nullptr};
+  dl::detect::yolo11PostProcessor *postprocessor_{nullptr};
 
   // Configuration
   std::string canvas_id_{};
@@ -65,6 +78,7 @@ class YOLO11DetectionComponent : public Component {
 
   // State
   uint32_t frame_counter_{0};
+  bool detector_initialized_{false};
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
 

@@ -2,11 +2,14 @@
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
-// ESP-DL detection components (only for YOLO11 model)
-#ifdef ESP_DL_MODEL_YOLO11
-#include "yolo11_detect.hpp"
+// ESP-DL headers (direct usage, no wrapper)
+#include "dl_model_base.hpp"
+#include "dl_image_preprocessor.hpp"
+#include "dl_detect_yolo11_postprocessor.hpp"
 #include "dl_image.hpp"
-#endif
+
+// Model data - embedded in flash rodata by build script
+extern const uint8_t yolo11_detect_espdl[] asm("_binary_yolo11_detect_espdl_start");
 
 namespace esphome {
 namespace yolo11_detection {
@@ -22,7 +25,6 @@ void YOLO11DetectionComponent::setup() {
     return;
   }
 
-  // Create mutex for thread-safe access to cached results
   this->detections_mutex_ = xSemaphoreCreateMutex();
   if (this->detections_mutex_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create detections mutex");
@@ -30,53 +32,60 @@ void YOLO11DetectionComponent::setup() {
     return;
   }
 
-#ifndef ESP_DL_MODEL_YOLO11
-  ESP_LOGE(TAG, "YOLO11 Detection component requires ESP_DL_MODEL_YOLO11 flag");
-  ESP_LOGE(TAG, "YOLO11 model is not available or not compiled");
-  ESP_LOGE(TAG, "Please ensure a YOLO11 model file (.espdl) is available and properly configured");
-  this->mark_failed();
-  return;
-#else
-  // Initialize YOLO11 object detector
-  ESP_LOGI(TAG, "Initializing YOLO11 object detector...");
+  // Load model directly from flash rodata
+  ESP_LOGI(TAG, "Loading YOLO11 model from flash...");
 
-#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
-  if (this->sdcard_model_path_ != nullptr) {
-    ESP_LOGI(TAG, "Waiting for SD card to mount (6 seconds)...");
-    delay(6000);  // Wait for SD card to be mounted
-    ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
-    this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
-  } else {
-    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
+  const char *model_data = (const char *)yolo11_detect_espdl;
+  if (model_data == nullptr) {
+    ESP_LOGE(TAG, "Model data is null");
     this->mark_failed();
     return;
   }
-#else
-  ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata");
-  this->object_detector_ = new YOLO11Detect();
-#endif
 
-  if (this->object_detector_ != nullptr) {
-    this->object_detector_->set_score_thr(this->score_threshold_);
-    this->object_detector_->set_nms_thr(this->nms_threshold_);
-    ESP_LOGI(TAG, "YOLO11 detector initialized (score_thr=%.2f, nms_thr=%.2f)",
-             this->score_threshold_, this->nms_threshold_);
-  } else {
-    ESP_LOGE(TAG, "Failed to initialize YOLO11 detector");
+  this->dl_model_ = new dl::Model(
+      model_data,
+      "yolo11_detect_s8_v1.espdl",
+      fbs::MODEL_LOCATION_IN_FLASH_RODATA,
+      0,
+      dl::MEMORY_MANAGER_GREEDY,
+      nullptr,
+      true);
+
+  if (this->dl_model_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to create dl::Model");
     this->mark_failed();
     return;
   }
+
+  ESP_LOGI(TAG, "Model loaded, creating preprocessor...");
+
+  this->preprocessor_ = new dl::image::ImagePreprocessor(
+      this->dl_model_, {0, 0, 0}, {1, 1, 1});
+
+  ESP_LOGI(TAG, "Creating YOLO11 postprocessor...");
+
+  this->postprocessor_ = new dl::detect::yolo11PostProcessor(
+      this->dl_model_,
+      this->preprocessor_,
+      this->score_threshold_,
+      this->nms_threshold_,
+      10,
+      {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+
+  this->detector_initialized_ = true;
 
   ESP_LOGI(TAG, "YOLO11 Object Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGI(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGI(TAG, "  Draw boxes: %s", this->draw_enabled_ ? "YES" : "NO");
-#endif
 }
 
 void YOLO11DetectionComponent::loop() {
-  // Check if camera is streaming
+  if (!this->detector_initialized_) {
+    return;
+  }
+
   if (this->camera_ == nullptr || !this->camera_->is_streaming()) {
     return;
   }
@@ -87,20 +96,18 @@ void YOLO11DetectionComponent::loop() {
 void YOLO11DetectionComponent::process_frame_() {
   this->frame_counter_++;
 
-  // Only run detection every N frames
   if (this->frame_counter_ < this->detection_interval_) {
     return;
   }
 
   this->frame_counter_ = 0;
 
-  // Acquire buffer from camera
   esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
   if (buffer == nullptr) {
     return;
   }
 
-  uint8_t* img_data = this->camera_->get_buffer_data(buffer);
+  uint8_t *img_data = this->camera_->get_buffer_data(buffer);
   uint16_t width = this->camera_->get_image_width();
   uint16_t height = this->camera_->get_image_height();
 
@@ -108,32 +115,34 @@ void YOLO11DetectionComponent::process_frame_() {
     this->detect_objects_(img_data, width, height);
   }
 
-  // Release buffer
   this->camera_->release_buffer(buffer);
 }
 
 void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height) {
-#ifdef ESP_DL_MODEL_YOLO11
-  if (this->object_detector_ == nullptr) {
+  if (this->dl_model_ == nullptr || this->postprocessor_ == nullptr) {
     return;
   }
 
   // Create image structure for ESP-DL
-  dl::image::img_t img = {
-    .data = img_data,
-    .width = width,
-    .height = height,
-    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
-  };
+  dl::image::img_t img;
+  img.data = img_data;
+  img.width = width;
+  img.height = height;
+  img.pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565;
 
-  // Run YOLO11 object detection
-  std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
+  // Run inference pipeline
+  this->preprocessor_->preprocess(img);
+  this->dl_model_->run();
+
+  this->postprocessor_->clear_result();
+  this->postprocessor_->postprocess();
+  auto &results = this->postprocessor_->get_result(width, height);
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
 
-    for (auto &result : detection_results) {
+    for (auto &result : results) {
       DetectionBox box;
       box.x1 = result.box[0];
       box.y1 = result.box[1];
@@ -141,7 +150,6 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
       box.y2 = result.box[3];
       box.score = result.score;
       box.category = result.category;
-
       this->cached_detections_.push_back(box);
     }
 
@@ -149,12 +157,13 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
   }
 
   // Trigger callbacks
-  if (detection_results.size() > 0) {
+  if (!results.empty()) {
+    int count = results.size();
+    ESP_LOGD(TAG, "Detected %d object(s)", count);
     for (auto &callback : this->on_object_detected_callbacks_) {
-      callback(detection_results.size());
+      callback(count);
     }
   }
-#endif
 }
 
 void YOLO11DetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
@@ -165,92 +174,71 @@ void YOLO11DetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, 
 }
 
 void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
-#ifdef ESP_DL_MODEL_YOLO11
   if (img_data == nullptr || this->detections_mutex_ == nullptr) {
     return;
   }
 
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    // RGB565 colors for different detection categories
-    // Format: RGB565 in little-endian (LSB, MSB)
-    const uint16_t COLOR_RED    = 0xF800;  // Person (category 0)
-    const uint16_t COLOR_GREEN  = 0x07E0;  // Car (category 2)
-    const uint16_t COLOR_BLUE   = 0x001F;  // Dog (category 16)
+    const uint16_t COLOR_RED    = 0xF800;  // Person
+    const uint16_t COLOR_GREEN  = 0x07E0;  // Car
+    const uint16_t COLOR_BLUE   = 0x001F;  // Dog
     const uint16_t COLOR_YELLOW = 0xFFE0;  // Default
+    const uint16_t COLOR_CYAN   = 0x07FF;
+    const uint16_t COLOR_MAGENTA = 0xF81F;
 
     for (auto &box : this->cached_detections_) {
-      // Clamp bounding box coordinates to valid range
       int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
       int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
       int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
       int y2 = std::max(y1 + 10, std::min((int)box.y2, (int)height - 3));
 
-      // Choose color based on category
       uint16_t color;
       switch (box.category) {
-        case 0:  color = COLOR_RED; break;    // Person
-        case 2:  color = COLOR_GREEN; break;  // Car
-        case 16: color = COLOR_BLUE; break;   // Dog
+        case 0:  color = COLOR_RED; break;      // person
+        case 1:  color = COLOR_GREEN; break;    // bicycle
+        case 2:  color = COLOR_CYAN; break;     // car
+        case 14: color = COLOR_MAGENTA; break;  // bird
+        case 15: color = COLOR_BLUE; break;     // cat
+        case 16: color = COLOR_GREEN; break;    // dog
         default: color = COLOR_YELLOW; break;
       }
 
-      // Draw 2-pixel thick rectangle
       const int line_width = 2;
       uint16_t *buffer = (uint16_t *)img_data;
 
-      // Draw top and bottom horizontal lines
       for (int x = x1; x <= x2; x++) {
         for (int t = 0; t < line_width; t++) {
-          // Top line
-          int top_offset = (y1 + t) * width + x;
-          if (top_offset >= 0 && top_offset < width * height) {
-            buffer[top_offset] = color;
-          }
-          // Bottom line
-          int bottom_offset = (y2 - t) * width + x;
-          if (bottom_offset >= 0 && bottom_offset < width * height) {
-            buffer[bottom_offset] = color;
-          }
+          int top = (y1 + t) * width + x;
+          if (top >= 0 && top < width * height) buffer[top] = color;
+          int bot = (y2 - t) * width + x;
+          if (bot >= 0 && bot < width * height) buffer[bot] = color;
         }
       }
-
-      // Draw left and right vertical lines
       for (int y = y1; y <= y2; y++) {
         for (int t = 0; t < line_width; t++) {
-          // Left line
-          int left_offset = y * width + (x1 + t);
-          if (left_offset >= 0 && left_offset < width * height) {
-            buffer[left_offset] = color;
-          }
-          // Right line
-          int right_offset = y * width + (x2 - t);
-          if (right_offset >= 0 && right_offset < width * height) {
-            buffer[right_offset] = color;
-          }
+          int left = y * width + (x1 + t);
+          if (left >= 0 && left < width * height) buffer[left] = color;
+          int right = y * width + (x2 - t);
+          if (right >= 0 && right < width * height) buffer[right] = color;
         }
       }
     }
 
-    ESP_LOGD(TAG, "Drew %d detection boxes on frame", this->cached_detections_.size());
+    if (!this->cached_detections_.empty()) {
+      ESP_LOGD(TAG, "Drew %d detection boxes", (int)this->cached_detections_.size());
+    }
     xSemaphoreGive(this->detections_mutex_);
   }
-#endif
 }
 
 void YOLO11DetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLO11 Object Detection:");
-#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
-  ESP_LOGCONFIG(TAG, "  Model location: SD card");
-  if (this->sdcard_model_path_ != nullptr) {
-    ESP_LOGCONFIG(TAG, "  Model path: %s", this->sdcard_model_path_);
-  }
-#else
-  ESP_LOGCONFIG(TAG, "  Model location: Flash rodata");
-#endif
+  ESP_LOGCONFIG(TAG, "  Model: direct ESP-DL (flash rodata)");
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);
   ESP_LOGCONFIG(TAG, "  Draw enabled: %s", this->draw_enabled_ ? "YES" : "NO");
+  ESP_LOGCONFIG(TAG, "  Initialized: %s", this->detector_initialized_ ? "YES" : "NO");
 }
 
 int YOLO11DetectionComponent::get_detected_count() {
