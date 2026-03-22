@@ -1762,10 +1762,13 @@ void Mp4Player::create_file_browser_() {
   lv_obj_set_style_pad_all(this->browser_container_, 0, 0);
   lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Use flex layout on container so title bar and list share space properly
+  lv_obj_set_flex_flow(this->browser_container_, LV_FLEX_FLOW_COLUMN);
+
   // Title bar
   lv_obj_t *title_bar = lv_obj_create(this->browser_container_);
   lv_obj_set_size(title_bar, LV_PCT(100), 50);
-  lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_flex_grow(title_bar, 0, 0);
   lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x16213E), 0);
   lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(title_bar, 0, 0);
@@ -1801,11 +1804,11 @@ void Mp4Player::create_file_browser_() {
   lv_obj_center(ref_lbl);
   lv_obj_add_event_cb(refresh_btn, refresh_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // File list (scrollable) - height = parent height minus title bar (50px)
+  // File list (scrollable) - fills remaining space below title bar
   this->browser_list_ = lv_obj_create(this->browser_container_);
   lv_obj_set_width(this->browser_list_, LV_PCT(100));
-  lv_obj_set_height(this->browser_list_, lv_obj_get_height(this->browser_container_) - 50);
-  lv_obj_align(this->browser_list_, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_set_height(this->browser_list_, 0);
+  lv_obj_set_style_flex_grow(this->browser_list_, 1, 0);
   lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
   lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(this->browser_list_, 0, 0);
