@@ -49,6 +49,12 @@ void YOLOV11Component::setup() {
   }
 #endif
 
+#ifdef USE_YOLOV11_MIPI_CAMERA
+  if (this->mipi_camera_ != nullptr) {
+    ESP_LOGI(TAG, "Registered with MIPI camera (esp_cam_sensor)");
+  }
+#endif
+
   ESP_LOGI(TAG, "YOLOV11 ready (score_thr=%.2f, nms_thr=%.2f)",
            this->score_threshold_, this->nms_threshold_);
 }
@@ -70,16 +76,13 @@ void YOLOV11Component::init_detector_() {
 
   ESP_LOGI(TAG, "Loading model (%u bytes)...", (unsigned)model_size);
 
-  // Create dl::Model from raw data pointer
-  // When location is MODEL_LOCATION_IN_FLASH_RODATA, the first parameter
-  // is treated as a memory address pointing to the model data
   this->dl_model_ = new dl::Model(
       (const char *)model_data,
       fbs::MODEL_LOCATION_IN_FLASH_RODATA,
-      0,                          // max_internal_size
+      0,
       dl::MEMORY_MANAGER_GREEDY,
-      nullptr,                    // key (not encrypted)
-      true                        // param_copy to PSRAM
+      nullptr,
+      true
   );
 
   if (this->dl_model_ == nullptr) {
@@ -88,18 +91,15 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  // Create image preprocessor (RGB565 input, no mean/std normalization)
   this->preprocessor_ = new dl::image::ImagePreprocessor(
       this->dl_model_, {0, 0, 0}, {1, 1, 1});
 
-  // Create YOLO11 postprocessor
-  // 3 detection stages with strides 8, 16, 32
   this->postprocessor_ = new dl::detect::yolo11PostProcessor(
       this->dl_model_,
       this->preprocessor_,
       this->score_threshold_,
       this->nms_threshold_,
-      10,  // top_k
+      10,
       {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
 
   this->detector_initialized_ = true;
@@ -108,14 +108,16 @@ void YOLOV11Component::init_detector_() {
 }
 
 void YOLOV11Component::loop() {
+  if (!this->detector_initialized_ || !this->inference_requested_) {
+    return;
+  }
+
 #ifdef USE_YOLOV11_MIPI_CAMERA
-  // For MIPI camera, we don't auto-process in loop
-  // Inference is triggered by the action
-  // But if no action setup, we could auto-process here
-  if (this->mipi_camera_ != nullptr && this->inference_requested_) {
+  if (this->mipi_camera_ != nullptr) {
     this->run_inference();
   }
 #endif
+  // For ESP32 camera, inference is handled via on_esp32_camera_image_ callback
 }
 
 void YOLOV11Component::run_inference() {
@@ -126,11 +128,13 @@ void YOLOV11Component::run_inference() {
 #ifdef USE_YOLOV11_MIPI_CAMERA
   if (this->mipi_camera_ != nullptr) {
     if (!this->mipi_camera_->is_streaming()) {
+      ESP_LOGW(TAG, "MIPI camera not streaming");
       return;
     }
 
     auto *buffer = this->mipi_camera_->acquire_buffer();
     if (buffer == nullptr) {
+      ESP_LOGW(TAG, "Failed to acquire MIPI camera buffer");
       return;
     }
 
@@ -143,7 +147,14 @@ void YOLOV11Component::run_inference() {
     }
 
     this->mipi_camera_->release_buffer(buffer);
+    this->inference_requested_ = false;
+    return;
   }
+#endif
+
+#ifdef USE_YOLOV11_ESP32_CAMERA
+  // ESP32 camera: inference is triggered via on_esp32_camera_image_ callback
+  // request_inference() sets the flag, and the callback handles it
 #endif
 }
 
@@ -163,34 +174,21 @@ void YOLOV11Component::on_esp32_camera_image_(
     return;
   }
 
-  // ESP32 camera typically provides RGB565 when pixel_format is RGB565
-  // For JPEG format, decoding would be needed (not supported in this version)
-  // Assume RGB565 format for detection
-  // The width/height must match the camera resolution
-  // For 320x240 RGB565: len = 320 * 240 * 2 = 153600
-  uint16_t width = 320;
-  uint16_t height = 240;
-
   // Try to determine dimensions from data length (RGB565 = 2 bytes per pixel)
-  size_t expected_rgb565 = (size_t)width * height * 2;
-  if (len == expected_rgb565) {
-    this->detect_objects_(data, width, height);
-  } else {
-    // Try common resolutions
-    const uint16_t resolutions[][2] = {
-        {320, 240}, {640, 480}, {160, 120}, {800, 600}, {1024, 768},
-    };
-    bool found = false;
-    for (auto &res : resolutions) {
-      if (len == (size_t)res[0] * res[1] * 2) {
-        this->detect_objects_(data, res[0], res[1]);
-        found = true;
-        break;
-      }
+  const uint16_t resolutions[][2] = {
+      {320, 240}, {640, 480}, {160, 120}, {800, 600}, {1024, 768},
+  };
+
+  bool found = false;
+  for (auto &res : resolutions) {
+    if (len == (size_t)res[0] * res[1] * 2) {
+      this->detect_objects_(data, res[0], res[1]);
+      found = true;
+      break;
     }
-    if (!found) {
-      ESP_LOGW(TAG, "Unsupported image size: %u bytes (need RGB565 format)", (unsigned)len);
-    }
+  }
+  if (!found) {
+    ESP_LOGW(TAG, "Unsupported image size: %u bytes (need RGB565 format)", (unsigned)len);
   }
 }
 #endif
@@ -202,25 +200,19 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     return;
   }
 
-  // Create image structure for ESP-DL
   dl::image::img_t img;
   img.data = rgb565_data;
   img.width = width;
   img.height = height;
   img.pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565;
 
-  // Run preprocessing (resize + normalize)
   this->preprocessor_->preprocess(img);
-
-  // Run model inference
   this->dl_model_->run();
 
-  // Run postprocessing (decode boxes + NMS)
   this->postprocessor_->clear_result();
   this->postprocessor_->postprocess();
   auto &results = this->postprocessor_->get_result(width, height);
 
-  // Cache results
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
 
@@ -238,7 +230,6 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     xSemaphoreGive(this->detections_mutex_);
   }
 
-  // Build detection strings and notify callbacks
   std::string class_str = this->get_detection_class_string();
   std::string bb_str = this->get_detection_bb_string();
 
@@ -262,7 +253,7 @@ void YOLOV11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  Camera: ESP32 Camera");
 #endif
 #ifdef USE_YOLOV11_MIPI_CAMERA
-  ESP_LOGCONFIG(TAG, "  Camera: MIPI DSI Camera");
+  ESP_LOGCONFIG(TAG, "  Camera: MIPI DSI Camera (esp_cam_sensor)");
 #endif
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);

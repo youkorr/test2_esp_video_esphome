@@ -69,17 +69,11 @@ class YOLOV11Component : public Component {
     return "unknown";
   }
 
-  // Run inference (called by action or internally)
+  // Run inference
   void run_inference();
 
-  // Request inference on next frame (for ESP32 camera async mode)
-  void request_inference() {
-#ifdef USE_YOLOV11_ESP32_CAMERA
-    this->inference_requested_ = true;
-#else
-    this->run_inference();
-#endif
-  }
+  // Request inference on next frame
+  void request_inference() { this->inference_requested_ = true; }
 
   // Results access
   int get_detected_count();
@@ -102,12 +96,14 @@ class YOLOV11Component : public Component {
 #ifdef USE_YOLOV11_ESP32_CAMERA
   void on_esp32_camera_image_(std::shared_ptr<esp32_camera::CameraImage> image);
   esp32_camera::ESP32Camera *esp32_camera_{nullptr};
-  bool inference_requested_{false};
 #endif
 
 #ifdef USE_YOLOV11_MIPI_CAMERA
   esp_cam_sensor::MipiDSICamComponent *mipi_camera_{nullptr};
 #endif
+
+  // Inference request flag (shared by both camera types)
+  bool inference_requested_{false};
 
   // Model
   file_component::FileData *model_file_{nullptr};
