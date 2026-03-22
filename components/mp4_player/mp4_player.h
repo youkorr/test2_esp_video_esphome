@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/audio/audio.h"
 #include <dirent.h>
@@ -247,6 +248,19 @@ class Mp4Player : public Component {
 
   // Downmix stereo PCM to mono (in-place, returns new size = half)
   size_t downmix_stereo_to_mono_(uint8_t *pcm_data, size_t size);
+
+  // Audio frame queue: decouples audio decode from video decode (like Waveshare)
+  // Playback task puts encoded audio frames on the queue
+  // Audio decode task reads from queue, decodes, downmixes, pushes to ring buffer
+  struct AudioFrameItem {
+    uint8_t *data;
+    size_t size;
+  };
+  static constexpr int AUDIO_FRAME_QUEUE_SIZE = 12;
+  QueueHandle_t audio_frame_queue_{nullptr};
+  static void audio_decode_task_(void *arg);
+  TaskHandle_t audio_decode_task_handle_{nullptr};
+  volatile bool audio_decode_task_running_{false};
 
   // Audio ring buffer for decoupling decode from speaker output
   uint8_t *audio_ring_buffer_{nullptr};

@@ -752,9 +752,9 @@ void Mp4Player::playback_task_(void *arg) {
       }
 
       // Open audio decoder if audio is available
-      esp_audio_simple_dec_handle_t audio_dec = nullptr;
       bool speaker_started = false;
-      if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
+      bool audio_queue_active = false;
+      if (player->has_audio_ && player->speaker_) {
         uint16_t anum = 0;
         esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
         if (anum > 0) {
@@ -765,51 +765,60 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_channels_ = ainfo.stream_info.audio_info.channel;
             player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
           }
-          esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
-          if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
-            esp_audio_simple_dec_cfg_t dec_cfg = {};
-            dec_cfg.dec_type = dec_type;
-            if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
-              player->audio_decoder_ready_ = true;
-              ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
 
-              // Configure speaker with correct audio stream parameters
-              uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
-              uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
-              uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
+          // Detect audio-only mode from within the task (no race condition)
+          uint16_t vnum_check = 0;
+          esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum_check);
+          if (vnum_check == 0) {
+            player->audio_only_mode_ = true;
+            ESP_LOGI(TAG, "Audio-only mode detected (no video streams)");
+          }
 
-              // If output is mono and source is stereo, tell speaker we're sending mono
-              // (downmix happens before data reaches the speaker)
-              uint8_t output_ch = ch;
-              if (player->output_mono_ && ch > 1) {
-                output_ch = 1;
-                ESP_LOGI(TAG, "Audio: source is %uch, downmixing to mono for output", ch);
-              }
+          // Configure speaker with correct audio stream parameters
+          uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
+          uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
+          uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
 
-              audio::AudioStreamInfo stream_info(bps, output_ch, sr);
-              player->speaker_->set_audio_stream_info(stream_info);
-              player->speaker_->start();
-              speaker_started = true;
-              ESP_LOGI(TAG, "Speaker started: %uHz, %uch->%uch, %ubit", sr, ch, output_ch, bps);
+          // If output is mono and source is stereo, tell speaker we're sending mono
+          uint8_t output_ch = ch;
+          if (player->output_mono_ && ch > 1) {
+            output_ch = 1;
+            ESP_LOGI(TAG, "Audio: source is %uch, downmixing to mono for output", ch);
+          }
 
-              // Wait for I2S channel to fully initialize before sending audio data
-              vTaskDelay(pdMS_TO_TICKS(100));
+          audio::AudioStreamInfo stream_info(bps, output_ch, sr);
+          player->speaker_->set_audio_stream_info(stream_info);
+          player->speaker_->start();
+          speaker_started = true;
+          ESP_LOGI(TAG, "Speaker started: %uHz, %uch->%uch, %ubit", sr, ch, output_ch, bps);
 
-              // Start audio output task if ring buffer is available
-              // Pin to core 1 (core 0 is used by WiFi which causes audio stalls)
-              if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
-                player->audio_ring_read_ = 0;
-                player->audio_ring_write_ = 0;
-                player->audio_task_running_ = true;
-                xTaskCreatePinnedToCore(
-                    audio_output_task_, "audio_out", 4096, player, 15,
-                    &player->audio_task_handle_, 1);
-              }
-            } else {
-              ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
-            }
+          // Wait for I2S channel to fully initialize
+          vTaskDelay(pdMS_TO_TICKS(100));
+
+          // Start audio output task (ring buffer → speaker)
+          if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
+            player->audio_ring_read_ = 0;
+            player->audio_ring_write_ = 0;
+            player->audio_task_running_ = true;
+            xTaskCreatePinnedToCore(
+                audio_output_task_, "audio_out", 4096, player, 15,
+                &player->audio_task_handle_, 1);
+          }
+
+          // Create audio frame queue and decode task
+          // This decouples audio decode from video decode (Waveshare approach)
+          // Audio decode runs on core 0 at priority 13 (above playback at 12)
+          player->audio_frame_queue_ = xQueueCreate(AUDIO_FRAME_QUEUE_SIZE, sizeof(AudioFrameItem));
+          if (player->audio_frame_queue_) {
+            player->audio_decoder_ready_ = true;
+            player->audio_decode_task_running_ = true;
+            xTaskCreatePinnedToCore(
+                audio_decode_task_, "audio_dec", 8192, player, 13,
+                &player->audio_decode_task_handle_, 0);
+            audio_queue_active = true;
+            ESP_LOGI(TAG, "Audio decode task started (queue=%d frames)", AUDIO_FRAME_QUEUE_SIZE);
           } else {
-            ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
+            ESP_LOGE(TAG, "Failed to create audio frame queue");
           }
         }
       }
@@ -849,69 +858,25 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Process audio frames FIRST (priority over video timing)
+        // Dispatch audio frames to decode task via queue (non-blocking on this thread)
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
-            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
-          esp_audio_simple_dec_raw_t raw = {};
-          raw.buffer = frame.frame_buffer;
-          raw.len = frame.frame_size;
-          raw.eos = false;
-          raw.consumed = 0;
-          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
-
-          while (raw.consumed < raw.len && !player->stop_requested_) {
-            esp_audio_simple_dec_out_t out = {};
-            out.buffer = player->audio_pcm_buffer_;
-            out.len = player->audio_pcm_buffer_size_;
-            out.decoded_size = 0;
-
-            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
-            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-              size_t pcm_size = out.decoded_size;
-
-              // Downmix stereo to mono if source is stereo and output is mono
-              if (player->output_mono_ && player->audio_channels_ > 1) {
-                pcm_size = player->downmix_stereo_to_mono_(player->audio_pcm_buffer_, pcm_size);
-              }
-
-              if (player->audio_ring_buffer_) {
-                // Push decoded audio to ring buffer
-                // For audio-only: wait indefinitely (no video to sync with)
-                // For video+audio: limited retries to avoid blocking video decode
-                int max_retries = player->audio_only_mode_ ? 500 : 50;
-                size_t pushed = 0;
-                int retries = 0;
-                while (pushed < pcm_size && !player->stop_requested_ && retries < max_retries) {
-                  size_t p = player->audio_ring_push_(
-                      player->audio_pcm_buffer_ + pushed, pcm_size - pushed);
-                  pushed += p;
-                  if (pushed < pcm_size) {
-                    vTaskDelay(pdMS_TO_TICKS(2));
-                    retries++;
-                  }
-                }
-              } else {
-                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, pcm_size);
-                size_t written = 0;
-                while (written < pcm_size && !player->stop_requested_) {
-                  size_t w = player->speaker_->play(
-                      player->audio_pcm_buffer_ + written, pcm_size - written);
-                  if (w > 0) {
-                    written += w;
-                  } else {
-                    vTaskDelay(pdMS_TO_TICKS(5));
-                  }
-                }
-              }
-            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-              break;
-            } else {
-              break;
+            audio_queue_active && player->audio_frame_queue_) {
+          // Copy frame data and send to decode task
+          AudioFrameItem item;
+          item.size = frame.frame_size;
+          item.data = (uint8_t *)malloc(frame.frame_size);
+          if (item.data) {
+            memcpy(item.data, frame.frame_buffer, frame.frame_size);
+            // For video mode: short timeout to avoid blocking video decode
+            // For audio-only: longer timeout since there's no video to sync
+            TickType_t timeout = player->audio_only_mode_ ? pdMS_TO_TICKS(500) : pdMS_TO_TICKS(50);
+            if (xQueueSend(player->audio_frame_queue_, &item, timeout) != pdTRUE) {
+              free(item.data);  // Queue full, drop frame
             }
           }
 
-          // Release audio frame and continue reading immediately
+          // Release extractor buffer immediately
           if (frame.frame_buffer) {
             mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
           }
@@ -928,20 +893,15 @@ void Mp4Player::playback_task_(void *arg) {
                      frame.frame_size, JPEG_BUFFER_SIZE, player->display_buffer_size_);
           }
 
-          // Frame rate control - only delay for video frames to maintain fps
-          // BUT: if audio ring buffer is low, skip the delay to let audio catch up
+          // Frame rate control - delay for video frames to maintain fps
+          // Audio decode is now on a separate task so it won't be blocked by this delay
           int64_t now = esp_timer_get_time() / 1000;
           int64_t target = last_frame_time + frame_interval_ms;
-          bool audio_starving = player->audio_ring_buffer_ &&
-                                player->audio_ring_available_() < (128 * 1024);
-          if (!audio_starving && now < target) {
+          if (now < target) {
             uint32_t delay = target - now;
             if (delay > 0 && delay < 1000) {
               vTaskDelay(pdMS_TO_TICKS(delay));
             }
-          } else if (audio_starving) {
-            // Yield minimally to avoid watchdog but don't wait for frame timing
-            taskYIELD();
           }
           last_frame_time = esp_timer_get_time() / 1000;
 
@@ -999,19 +959,33 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Stop audio output task first
+      // Stop audio decode task first (it produces data for the ring buffer)
+      if (player->audio_decode_task_handle_) {
+        player->audio_decode_task_running_ = false;
+        // Give the decode task time to process its current frame and exit
+        vTaskDelay(pdMS_TO_TICKS(200));
+        player->audio_decode_task_handle_ = nullptr;
+      }
+
+      // Delete audio frame queue (drain any remaining items)
+      if (player->audio_frame_queue_) {
+        AudioFrameItem item;
+        while (xQueueReceive(player->audio_frame_queue_, &item, 0) == pdTRUE) {
+          free(item.data);
+        }
+        vQueueDelete(player->audio_frame_queue_);
+        player->audio_frame_queue_ = nullptr;
+      }
+      audio_queue_active = false;
+
+      // Stop audio output task (it consumes from ring buffer → speaker)
       if (player->audio_task_handle_) {
         player->audio_task_running_ = false;
         vTaskDelay(pdMS_TO_TICKS(50));  // Let audio task drain and exit
         player->audio_task_handle_ = nullptr;
       }
 
-      // Close audio decoder and stop speaker
-      if (audio_dec) {
-        esp_audio_simple_dec_close(audio_dec);
-        audio_dec = nullptr;
-        player->audio_decoder_ready_ = false;
-      }
+      player->audio_decoder_ready_ = false;
       if (speaker_started) {
         player->speaker_->finish();
         speaker_started = false;
@@ -1313,6 +1287,110 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
   }
   this->audio_ring_read_ = (r + len) % this->audio_ring_size_;
   return len;
+}
+
+// ============================================================================
+// Audio decode task - receives encoded audio frames from queue, decodes,
+// downmixes (stereo→mono), and pushes PCM to ring buffer.
+// Runs on its own task to decouple audio from video (like Waveshare approach).
+// ============================================================================
+void Mp4Player::audio_decode_task_(void *arg) {
+  Mp4Player *player = static_cast<Mp4Player *>(arg);
+  ESP_LOGI(TAG, "Audio decode task started (priority 13, core 0)");
+
+  // Open audio decoder
+  esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
+  esp_audio_simple_dec_handle_t audio_dec = nullptr;
+  if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+    esp_audio_simple_dec_cfg_t dec_cfg = {};
+    dec_cfg.dec_type = dec_type;
+    if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) != ESP_AUDIO_ERR_OK) {
+      ESP_LOGE(TAG, "Audio decode task: failed to open decoder");
+      player->audio_decode_task_running_ = false;
+      vTaskDelete(nullptr);
+      return;
+    }
+  } else {
+    ESP_LOGE(TAG, "Audio decode task: unsupported format %d", player->audio_format_);
+    player->audio_decode_task_running_ = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  // Allocate PCM decode buffer (separate from main thread's buffer)
+  const size_t pcm_buf_size = AUDIO_PCM_BUFFER_SIZE;
+  uint8_t *pcm_buf = (uint8_t *)heap_caps_malloc(pcm_buf_size, MALLOC_CAP_SPIRAM);
+  if (!pcm_buf) {
+    ESP_LOGE(TAG, "Audio decode task: failed to allocate PCM buffer");
+    esp_audio_simple_dec_close(audio_dec);
+    player->audio_decode_task_running_ = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  AudioFrameItem item;
+  while (player->audio_decode_task_running_) {
+    // Wait for encoded audio frame from queue
+    if (xQueueReceive(player->audio_frame_queue_, &item, pdMS_TO_TICKS(50)) != pdTRUE) {
+      continue;  // Timeout, check running flag and retry
+    }
+
+    // Decode the frame
+    esp_audio_simple_dec_raw_t raw = {};
+    raw.buffer = item.data;
+    raw.len = item.size;
+    raw.eos = false;
+    raw.consumed = 0;
+    raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+    while (raw.consumed < raw.len && !player->stop_requested_) {
+      esp_audio_simple_dec_out_t out = {};
+      out.buffer = pcm_buf;
+      out.len = pcm_buf_size;
+      out.decoded_size = 0;
+
+      esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+      if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+        size_t pcm_size = out.decoded_size;
+
+        // Downmix stereo to mono if needed
+        if (player->output_mono_ && player->audio_channels_ > 1) {
+          pcm_size = player->downmix_stereo_to_mono_(pcm_buf, pcm_size);
+        }
+
+        // Push to ring buffer (wait for space)
+        size_t pushed = 0;
+        int retries = 0;
+        int max_retries = player->audio_only_mode_ ? 500 : 200;
+        while (pushed < pcm_size && !player->stop_requested_ && retries < max_retries) {
+          size_t p = player->audio_ring_push_(pcm_buf + pushed, pcm_size - pushed);
+          pushed += p;
+          if (pushed < pcm_size) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            retries++;
+          }
+        }
+      } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+        break;
+      } else {
+        break;
+      }
+    }
+
+    // Free the copied frame data
+    free(item.data);
+  }
+
+  // Drain remaining items from queue
+  while (xQueueReceive(player->audio_frame_queue_, &item, 0) == pdTRUE) {
+    free(item.data);
+  }
+
+  free(pcm_buf);
+  esp_audio_simple_dec_close(audio_dec);
+  ESP_LOGI(TAG, "Audio decode task exiting");
+  player->audio_decode_task_running_ = false;
+  vTaskDelete(nullptr);
 }
 
 // ============================================================================
@@ -2188,14 +2266,23 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
-      // play_file() calls stop() internally which resets audio_only_mode_ via destroy_spectrum_ui_
-      // So we must set audio_only_mode_ AFTER play_file() returns but BEFORE the audio output
-      // task starts checking it. We do this by setting it immediately after play_file.
       this->play_file(path);
-      // Set audio-only mode NOW - the audio output task is pre-filling its buffer
-      // and won't check jitter until after prefill completes (~1-2s)
-      this->audio_only_mode_ = true;
+
+      // play_file() shows video UI elements (touch_layer_, canvas_, controls_)
+      // Hide them for audio-only mode
+      if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+      if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+      if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+      if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+      // create_spectrum_ui_ calls destroy_spectrum_ui_ which resets audio_only_mode_
+      // So we MUST set audio_only_mode_ AFTER create_spectrum_ui_
       this->create_spectrum_ui_();
+      this->audio_only_mode_ = true;
+
+      // Ensure spectrum is on top of all siblings
+      if (this->spectrum_container_)
+        lv_obj_move_foreground(this->spectrum_container_);
 
       // Hide browser
       if (this->browser_container_)
