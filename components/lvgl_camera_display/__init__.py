@@ -11,6 +11,10 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FACE_DETECTION_ID = "face_detection_id"
 CONF_YOLO11_DETECTION_ID = "yolo11_detection_id"
 CONF_PEDESTRIAN_DETECTION_ID = "pedestrian_detection_id"
+CONF_YOLOV11_ID = "yolov11_id"
+
+yolov11_ns = cg.esphome_ns.namespace("yolov11")
+YOLOV11Component = yolov11_ns.class_("YOLOV11Component", cg.Component)
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -35,6 +39,7 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_FACE_DETECTION_ID): cv.use_id(FaceDetectionComponent),
     cv.Optional(CONF_YOLO11_DETECTION_ID): cv.use_id(YOLO11DetectionComponent),
     cv.Optional(CONF_PEDESTRIAN_DETECTION_ID): cv.use_id(PedestrianDetectionComponent),
+    cv.Optional(CONF_YOLOV11_ID): cv.use_id(YOLOV11Component),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -64,4 +69,9 @@ async def to_code(config):
         cg.add_define("USE_PEDESTRIAN_DETECTION")
         ped_detect = await cg.get_variable(config[CONF_PEDESTRIAN_DETECTION_ID])
         cg.add(var.set_pedestrian_detection(ped_detect))
+
+    if CONF_YOLOV11_ID in config:
+        cg.add_define("USE_YOLOV11")
+        yolov11 = await cg.get_variable(config[CONF_YOLOV11_ID])
+        cg.add(var.set_yolov11(yolov11))
 

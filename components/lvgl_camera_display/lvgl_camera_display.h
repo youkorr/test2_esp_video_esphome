@@ -15,6 +15,9 @@ class YOLO11DetectionComponent;
 namespace pedestrian_detection {
 class PedestrianDetectionComponent;
 }
+namespace yolov11 {
+class YOLOV11Component;
+}
 }
 
 namespace esphome {
@@ -38,6 +41,9 @@ class LVGLCameraDisplay : public Component {
 #endif
 #ifdef USE_PEDESTRIAN_DETECTION
   void set_pedestrian_detection(pedestrian_detection::PedestrianDetectionComponent *ped_detect) { this->pedestrian_detection_ = ped_detect; }
+#endif
+#ifdef USE_YOLOV11
+  void set_yolov11(yolov11::YOLOV11Component *yolov11) { this->yolov11_ = yolov11; }
 #endif
 
   void configure_canvas(lv_obj_t *canvas);
@@ -63,6 +69,9 @@ class LVGLCameraDisplay : public Component {
 #endif
 #ifdef USE_PEDESTRIAN_DETECTION
   pedestrian_detection::PedestrianDetectionComponent *pedestrian_detection_{nullptr};  // Optional
+#endif
+#ifdef USE_YOLOV11
+  yolov11::YOLOV11Component *yolov11_{nullptr};  // Optional
 #endif
   lv_obj_t *canvas_obj_{nullptr};
   std::string canvas_id_{};

@@ -10,6 +10,9 @@ CONF_MODEL_ID = "model_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_CLASS_LABELS = "class_labels"
+CONF_DETECT_CLASSES = "detect_classes"
+CONF_DETECTION_INTERVAL = "detection_interval"
+CONF_DRAW_ENABLED = "draw_enabled"
 
 # 80 classes COCO par défaut
 DEFAULT_COCO_LABELS = [
@@ -77,6 +80,9 @@ CONFIG_SCHEMA = cv.All(
                 min=0.0, max=1.0
             ),
             cv.Optional(CONF_CLASS_LABELS, default=DEFAULT_COCO_LABELS): cv.ensure_list(cv.string),
+            cv.Optional(CONF_DETECT_CLASSES): cv.ensure_list(cv.positive_int),
+            cv.Optional(CONF_DETECTION_INTERVAL, default=1): cv.positive_int,
+            cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
         }
     ).extend(cv.COMPONENT_SCHEMA),
     validate_camera_config,
@@ -131,6 +137,15 @@ async def to_code(config):
     # Set class labels
     for label in config[CONF_CLASS_LABELS]:
         cg.add(var.add_class_label(label))
+
+    # Set class filter (only detect these COCO class indices)
+    if CONF_DETECT_CLASSES in config:
+        for class_id in config[CONF_DETECT_CLASSES]:
+            cg.add(var.add_detect_class(class_id))
+
+    # Detection interval and draw settings
+    cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
+    cg.add(var.set_draw_enabled(config[CONF_DRAW_ENABLED]))
 
     # Build flags for ESP-DL
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")

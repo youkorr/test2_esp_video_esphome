@@ -3,6 +3,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/file/file_component.h"
+#include <set>
 
 #ifdef USE_YOLOV11_MIPI_CAMERA
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
@@ -59,6 +60,11 @@ class YOLOV11Component : public Component {
   void add_class_label(const std::string &label) {
     this->class_labels_.push_back(label);
   }
+  void add_detect_class(int class_id) {
+    this->detect_classes_.insert(class_id);
+  }
+  void set_detection_interval(int interval) { this->detection_interval_ = interval; }
+  void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
 
   const char *get_class_name(int category) const {
     if (category >= 0 && category < (int)this->class_labels_.size())
@@ -78,6 +84,9 @@ class YOLOV11Component : public Component {
   std::string get_detection_class_string();
   std::string get_detection_bb_string();
 
+  // Drawing (called by lvgl_camera_display if configured)
+  void draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height);
+
   // Callbacks for text sensor updates
   void add_on_detection_class_callback(std::function<void(std::string)> callback) {
     this->detection_class_callbacks_.push_back(std::move(callback));
@@ -89,6 +98,8 @@ class YOLOV11Component : public Component {
  protected:
   void init_detector_();
   void detect_objects_(uint8_t *rgb565_data, uint16_t width, uint16_t height);
+  void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
+  bool is_class_allowed_(int category) const;
 
 #ifdef USE_YOLOV11_ESP32_CAMERA
   void on_esp32_camera_image_(std::shared_ptr<esp32_camera::CameraImage> image);
@@ -107,6 +118,9 @@ class YOLOV11Component : public Component {
   float score_threshold_{0.3f};
   float nms_threshold_{0.5f};
   std::vector<std::string> class_labels_;
+  std::set<int> detect_classes_;  // Empty = all classes, non-empty = filter
+  int detection_interval_{1};
+  bool draw_enabled_{true};
 
   // ESP-DL objects
 #ifdef ESP_DL_MODEL_YOLO11

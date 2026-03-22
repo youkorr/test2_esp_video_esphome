@@ -13,6 +13,9 @@
 #ifdef USE_PEDESTRIAN_DETECTION
 #include "esphome/components/pedestrian_detection/pedestrian_detection.h"
 #endif
+#ifdef USE_YOLOV11
+#include "esphome/components/yolov11/yolov11_component.h"
+#endif
 
 namespace esphome {
 namespace lvgl_camera_display {
@@ -256,6 +259,11 @@ void LVGLCameraDisplay::update_canvas_() {
 #ifdef USE_PEDESTRIAN_DETECTION
   if (this->pedestrian_detection_ != nullptr) {
     this->pedestrian_detection_->draw_on_frame(img_data, width, height);
+  }
+#endif
+#ifdef USE_YOLOV11
+  if (this->yolov11_ != nullptr) {
+    this->yolov11_->draw_on_frame(img_data, width, height);
   }
 #endif
 

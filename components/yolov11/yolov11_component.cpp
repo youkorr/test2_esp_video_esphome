@@ -208,6 +208,10 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     this->cached_detections_.clear();
 
     for (auto &result : results) {
+      // Runtime class filtering
+      if (!this->is_class_allowed_(result.category)) {
+        continue;
+      }
       DetectionResult det;
       det.category = result.category;
       det.score = result.score;
@@ -238,6 +242,79 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
 #endif
 }
 
+bool YOLOV11Component::is_class_allowed_(int category) const {
+  // Empty set = all classes allowed
+  if (this->detect_classes_.empty()) {
+    return true;
+  }
+  return this->detect_classes_.count(category) > 0;
+}
+
+void YOLOV11Component::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
+  if (!this->draw_enabled_) {
+    return;
+  }
+  this->draw_results_(img_data, width, height);
+}
+
+void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t height) {
+  if (img_data == nullptr || this->detections_mutex_ == nullptr) {
+    return;
+  }
+
+  if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    const uint16_t COLOR_RED    = 0xF800;
+    const uint16_t COLOR_GREEN  = 0x07E0;
+    const uint16_t COLOR_BLUE   = 0x001F;
+    const uint16_t COLOR_YELLOW = 0xFFE0;
+    const uint16_t COLOR_CYAN   = 0x07FF;
+    const uint16_t COLOR_MAGENTA = 0xF81F;
+
+    for (auto &det : this->cached_detections_) {
+      int x1 = std::max(2, std::min(det.x1, (int)width - 3));
+      int y1 = std::max(2, std::min(det.y1, (int)height - 3));
+      int x2 = std::max(x1 + 10, std::min(det.x2, (int)width - 3));
+      int y2 = std::max(y1 + 10, std::min(det.y2, (int)height - 3));
+
+      // Color by category
+      uint16_t color;
+      switch (det.category) {
+        case 0:  color = COLOR_RED; break;      // person
+        case 1:  color = COLOR_GREEN; break;    // bicycle
+        case 2:  color = COLOR_CYAN; break;     // car
+        case 14: color = COLOR_MAGENTA; break;  // bird
+        case 15: color = COLOR_BLUE; break;     // cat
+        case 16: color = COLOR_GREEN; break;    // dog
+        default: color = COLOR_YELLOW; break;
+      }
+
+      const int line_width = 2;
+      uint16_t *buffer = (uint16_t *)img_data;
+
+      // Top and bottom lines
+      for (int x = x1; x <= x2; x++) {
+        for (int t = 0; t < line_width; t++) {
+          int top = (y1 + t) * width + x;
+          if (top >= 0 && top < width * height) buffer[top] = color;
+          int bot = (y2 - t) * width + x;
+          if (bot >= 0 && bot < width * height) buffer[bot] = color;
+        }
+      }
+      // Left and right lines
+      for (int y = y1; y <= y2; y++) {
+        for (int t = 0; t < line_width; t++) {
+          int left = y * width + (x1 + t);
+          if (left >= 0 && left < width * height) buffer[left] = color;
+          int right = y * width + (x2 - t);
+          if (right >= 0 && right < width * height) buffer[right] = color;
+        }
+      }
+    }
+
+    xSemaphoreGive(this->detections_mutex_);
+  }
+}
+
 void YOLOV11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLOV11:");
 #ifdef USE_YOLOV11_ESP32_CAMERA
@@ -252,9 +329,16 @@ void YOLOV11Component::dump_config() {
     ESP_LOGCONFIG(TAG, "  Model size: %u bytes",
                   (unsigned)this->model_file_->get_size());
   }
+  ESP_LOGCONFIG(TAG, "  Detection interval: %d", this->detection_interval_);
+  ESP_LOGCONFIG(TAG, "  Draw enabled: %s", this->draw_enabled_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG, "  Classes: %d", (int)this->class_labels_.size());
-  for (size_t i = 0; i < this->class_labels_.size(); i++) {
-    ESP_LOGCONFIG(TAG, "    [%d] %s", (int)i, this->class_labels_[i].c_str());
+  if (this->detect_classes_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Filter: ALL classes");
+  } else {
+    ESP_LOGCONFIG(TAG, "  Filter: %d class(es)", (int)this->detect_classes_.size());
+    for (int id : this->detect_classes_) {
+      ESP_LOGCONFIG(TAG, "    [%d] %s", id, this->get_class_name(id));
+    }
   }
 }
 
