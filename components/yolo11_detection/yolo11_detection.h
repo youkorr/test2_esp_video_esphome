@@ -21,7 +21,7 @@ struct DetectionBox {
 class YOLO11DetectionComponent : public Component {
  public:
   void setup() override;
-  void loop();
+  void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
 

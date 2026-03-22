@@ -363,40 +363,38 @@ lvgl_camera_display:
   camera_id: tab5_cam
   canvas_id: camera_canvas
   update_interval: 33ms
-  face_detection_id: face_detect
-  #face_detection_id: face_detect       # ~30 FPS
-  #yolo11_detection_id: yolo_detect  
+  #face_detection_id: face_detect      # Désactivé pour tester YOLO
+  yolo11_detection_id: yolo_detect
 
-# Detection de visages + reconnaissance (independant)
-face_detection:
-  id: face_detect
-  camera_id: tab5_cam
-  canvas_id: camera_canvas
-  model_type: face_recognition 
-  score_threshold: 0.3
-  nms_threshold: 0.5
-  detection_interval: 5
-  draw_enabled: true
-  recognition_enabled: true
-  face_db_path: "/sdcard/reconnaisance_faciale/faces.db"
-  recognition_threshold: 0.83
+# Detection de visages + reconnaissance (désactivé temporairement pour YOLO)
+#face_detection:
+#  id: face_detect
+#  camera_id: tab5_cam
+#  canvas_id: camera_canvas
+#  model_type: face_recognition
+#  score_threshold: 0.3
+#  nms_threshold: 0.5
+#  detection_interval: 5
+#  draw_enabled: true
+#  recognition_enabled: true
+#  face_db_path: "/sdcard/reconnaisance_faciale/faces.db"
+#  recognition_threshold: 0.83
 
 
 # ============================================================================
 # yolo11_detection
 # ============================================================================
 
-
-#yolo11_detection:
-  #id: yolo_detect
-  #camera_id: tab5_cam
-  #score_threshold: 0.3
-  #nms_threshold: 0.5
-  #detection_interval: 8
-  #draw_enabled: true
-  #on_object_detected:
-    #- lambda: |-
-        #ESP_LOGI("main", "Objects détectés: %d", object_count);  
+yolo11_detection:
+  id: yolo_detect
+  camera_id: tab5_cam
+  score_threshold: 0.3
+  nms_threshold: 0.5
+  detection_interval: 8
+  draw_enabled: true
+  on_object_detected:
+    - lambda: |-
+        ESP_LOGI("main", "Objects détectés: %d", object_count);  
 
 # ============================================================================
 # simple_video_player 
