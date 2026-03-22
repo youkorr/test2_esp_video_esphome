@@ -1801,9 +1801,10 @@ void Mp4Player::create_file_browser_() {
   lv_obj_center(ref_lbl);
   lv_obj_add_event_cb(refresh_btn, refresh_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // File list (scrollable)
+  // File list (scrollable) - height = parent height minus title bar (50px)
   this->browser_list_ = lv_obj_create(this->browser_container_);
-  lv_obj_set_size(this->browser_list_, LV_PCT(100), LV_PCT(100));
+  lv_obj_set_width(this->browser_list_, LV_PCT(100));
+  lv_obj_set_height(this->browser_list_, lv_obj_get_height(this->browser_container_) - 50);
   lv_obj_align(this->browser_list_, LV_ALIGN_TOP_MID, 0, 50);
   lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
   lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
