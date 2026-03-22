@@ -2656,17 +2656,29 @@ void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_cou
     if (bin_hi <= bin_lo) bin_hi = bin_lo + 1;
     if (bin_hi > half) bin_hi = half;
 
+    // Average magnitude across bins in band (not peak)
     float sum = 0.0f;
+    int count = 0;
     for (int b = bin_lo; b < bin_hi; b++) {
       float mag = sqrtf(real[b] * real[b] + imag[b] * imag[b]);
-      if (mag > sum) sum = mag;  // Use peak within band
+      sum += mag;
+      count++;
     }
+    if (count > 0) sum /= count;
 
-    // Convert to dB-like scale (0-100)
+    // Convert to dB-like scale with wider range
     float db = 20.0f * log10f(sum + 1e-6f);
-    float normalized = (db + 40.0f) / 40.0f;  // -40dB to 0dB -> 0 to 1
+    // Use -60dB to -6dB range for better dynamic range
+    float normalized = (db + 60.0f) / 54.0f;
     if (normalized < 0.0f) normalized = 0.0f;
     if (normalized > 1.0f) normalized = 1.0f;
+
+    // Apply per-band compensation: attenuate bass, boost highs
+    // Low bands (bass) have naturally more energy, reduce them
+    // High bands (treble) have less energy, boost them slightly
+    float band_frac = (float)band / SPECTRUM_BANDS;
+    float compensation = 0.5f + 0.5f * band_frac;  // 0.5x for lowest, 1.0x for highest
+    normalized *= compensation;
 
     this->spectrum_magnitudes_[band] = normalized * 100.0f;
   }
