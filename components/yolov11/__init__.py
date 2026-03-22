@@ -9,6 +9,7 @@ CONF_CAMERA_ID = "camera_id"
 CONF_MODEL_ID = "model_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
+CONF_CLASS_LABELS = "class_labels"
 
 yolov11_ns = cg.esphome_ns.namespace("yolov11")
 YOLOV11Component = yolov11_ns.class_("YOLOV11Component", cg.Component)
@@ -58,6 +59,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(
                 min=0.0, max=1.0
             ),
+            cv.Required(CONF_CLASS_LABELS): cv.ensure_list(cv.string),
         }
     ).extend(cv.COMPONENT_SCHEMA),
     validate_camera_config,
@@ -107,6 +109,10 @@ async def to_code(config):
     # Set thresholds
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
     cg.add(var.set_nms_threshold(config[CONF_NMS_THRESHOLD]))
+
+    # Set class labels
+    for label in config[CONF_CLASS_LABELS]:
+        cg.add(var.add_class_label(label))
 
     # Build flags for ESP-DL
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")

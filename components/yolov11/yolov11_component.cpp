@@ -266,6 +266,10 @@ void YOLOV11Component::dump_config() {
     ESP_LOGCONFIG(TAG, "  Model size: %u bytes",
                   (unsigned)this->model_file_->get_size());
   }
+  ESP_LOGCONFIG(TAG, "  Classes: %d", (int)this->class_labels_.size());
+  for (size_t i = 0; i < this->class_labels_.size(); i++) {
+    ESP_LOGCONFIG(TAG, "    [%d] %s", (int)i, this->class_labels_[i].c_str());
+  }
 }
 
 int YOLOV11Component::get_detected_count() {
@@ -294,8 +298,8 @@ std::string YOLOV11Component::get_detection_string() {
       if (i > 0)
         result += ",";
       char buf[64];
-      snprintf(buf, sizeof(buf), "%s:%.0f%%", det.get_class_name(),
-               det.score * 100.0f);
+      snprintf(buf, sizeof(buf), "%s:%.0f%%",
+               this->get_class_name(det.category), det.score * 100.0f);
       result += buf;
     }
     xSemaphoreGive(this->detections_mutex_);

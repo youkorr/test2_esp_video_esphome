@@ -30,47 +30,10 @@ struct result_t;
 namespace esphome {
 namespace yolov11 {
 
-static const char *const COCO_CLASSES[] = {
-    "person",        "bicycle",       "car",
-    "motorcycle",    "airplane",      "bus",
-    "train",         "truck",         "boat",
-    "traffic light", "fire hydrant",  "stop sign",
-    "parking meter", "bench",         "bird",
-    "cat",           "dog",           "horse",
-    "sheep",         "cow",           "elephant",
-    "bear",          "zebra",         "giraffe",
-    "backpack",      "umbrella",      "handbag",
-    "tie",           "suitcase",      "frisbee",
-    "skis",          "snowboard",     "sports ball",
-    "kite",          "baseball bat",  "baseball glove",
-    "skateboard",    "surfboard",     "tennis racket",
-    "bottle",        "wine glass",    "cup",
-    "fork",          "knife",         "spoon",
-    "bowl",          "banana",        "apple",
-    "sandwich",      "orange",        "broccoli",
-    "carrot",        "hot dog",       "pizza",
-    "donut",         "cake",          "chair",
-    "couch",         "potted plant",  "bed",
-    "dining table",  "toilet",        "tv",
-    "laptop",        "mouse",         "remote",
-    "keyboard",      "cell phone",    "microwave",
-    "oven",          "toaster",       "sink",
-    "refrigerator",  "book",          "clock",
-    "vase",          "scissors",      "teddy bear",
-    "hair drier",    "toothbrush",
-};
-static const int COCO_NUM_CLASSES = 80;
-
 struct DetectionResult {
   int category;
   float score;
   int x1, y1, x2, y2;
-
-  const char *get_class_name() const {
-    if (category >= 0 && category < COCO_NUM_CLASSES)
-      return COCO_CLASSES[category];
-    return "unknown";
-  }
 };
 
 class YOLOV11Component : public Component {
@@ -96,6 +59,15 @@ class YOLOV11Component : public Component {
   void set_model(file_component::FileData *model) { this->model_file_ = model; }
   void set_score_threshold(float thr) { this->score_threshold_ = thr; }
   void set_nms_threshold(float thr) { this->nms_threshold_ = thr; }
+  void add_class_label(const std::string &label) {
+    this->class_labels_.push_back(label);
+  }
+
+  const char *get_class_name(int category) const {
+    if (category >= 0 && category < (int)this->class_labels_.size())
+      return this->class_labels_[category].c_str();
+    return "unknown";
+  }
 
   // Run inference (called by action or internally)
   void run_inference();
@@ -137,6 +109,7 @@ class YOLOV11Component : public Component {
   file_component::FileData *model_file_{nullptr};
   float score_threshold_{0.3f};
   float nms_threshold_{0.5f};
+  std::vector<std::string> class_labels_;
 
   // ESP-DL objects
   dl::Model *dl_model_{nullptr};
