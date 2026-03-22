@@ -2874,14 +2874,10 @@ void Mp4Player::rebuild_spectrum_viz_() {
     this->spectrum_bars_area_ = nullptr;
     this->spectrum_glow_ring_ = nullptr;
     this->spectrum_glow_circle_ = nullptr;
-    this->spectrum_grid_container_ = nullptr;
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
       this->spectrum_bars_[i] = nullptr;
       this->spectrum_peak_indicators_[i] = nullptr;
-      this->spectrum_freq_labels_[i] = nullptr;
     }
-    for (int i = 0; i < 5; i++)
-      this->spectrum_db_labels_[i] = nullptr;
   }
 
   // Create bars area container (larger for 1024x600 screen)
@@ -2897,60 +2893,15 @@ void Mp4Player::rebuild_spectrum_viz_() {
   if (this->spectrum_viz_mode_ == 2) {
     // ===== MODE 2: SOUND SPECTRUM ANALYZER (classic vertical bars EQ) =====
     int bar_gap = 4;
-    int margin_left = 45;   // space for dB labels
+    int margin_left = 10;
     int margin_right = 10;
     int margin_top = 10;
-    int margin_bottom = 22; // space for freq labels
-    int usable_w = 420 - margin_left - margin_right;  // centered area
+    int margin_bottom = 10;
+    int usable_w = 420 - margin_left - margin_right;
     int bar_w = (usable_w - (SPECTRUM_BANDS - 1) * bar_gap) / SPECTRUM_BANDS;
     if (bar_w < 8) bar_w = 8;
     int max_bar_h = area_h - margin_top - margin_bottom;
-    int base_x = (lv_obj_get_width(this->spectrum_bars_area_) - (SPECTRUM_BANDS * (bar_w + bar_gap) - bar_gap + margin_left)) / 2 + margin_left;
-
-    // Background grid container
-    this->spectrum_grid_container_ = lv_obj_create(this->spectrum_bars_area_);
-    lv_obj_set_size(this->spectrum_grid_container_, SPECTRUM_BANDS * (bar_w + bar_gap) - bar_gap + 2, max_bar_h + 2);
-    lv_obj_set_pos(this->spectrum_grid_container_, base_x - 1, margin_top - 1);
-    lv_obj_set_style_bg_color(this->spectrum_grid_container_, lv_color_hex(0x0A0A14), 0);
-    lv_obj_set_style_bg_opa(this->spectrum_grid_container_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(this->spectrum_grid_container_, 1, 0);
-    lv_obj_set_style_border_color(this->spectrum_grid_container_, lv_color_hex(0x1A3A1A), 0);
-    lv_obj_set_style_border_opa(this->spectrum_grid_container_, LV_OPA_80, 0);
-    lv_obj_set_style_radius(this->spectrum_grid_container_, 2, 0);
-    lv_obj_set_style_pad_all(this->spectrum_grid_container_, 0, 0);
-    lv_obj_clear_flag(this->spectrum_grid_container_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_clear_flag(this->spectrum_grid_container_, LV_OBJ_FLAG_CLICKABLE);
-
-    // Horizontal grid lines (5 levels: 0dB, -12dB, -24dB, -36dB, -48dB)
-    static const char *db_labels[] = {"0dB", "-12", "-24", "-36", "-48"};
-    for (int i = 0; i < 5; i++) {
-      int y_line = margin_top + (i * max_bar_h / 4);
-
-      // Grid line inside container
-      lv_obj_t *line = lv_obj_create(this->spectrum_grid_container_);
-      lv_obj_set_size(line, LV_PCT(100), 1);
-      lv_obj_set_pos(line, 0, i * max_bar_h / 4);
-      lv_obj_set_style_bg_color(line, lv_color_hex(0x1A3A1A), 0);
-      lv_obj_set_style_bg_opa(line, LV_OPA_60, 0);
-      lv_obj_set_style_border_width(line, 0, 0);
-      lv_obj_set_style_radius(line, 0, 0);
-      lv_obj_set_style_pad_all(line, 0, 0);
-      lv_obj_clear_flag(line, LV_OBJ_FLAG_SCROLLABLE);
-      lv_obj_clear_flag(line, LV_OBJ_FLAG_CLICKABLE);
-
-      // dB label on left
-      this->spectrum_db_labels_[i] = lv_label_create(this->spectrum_bars_area_);
-      lv_label_set_text(this->spectrum_db_labels_[i], db_labels[i]);
-      lv_obj_set_pos(this->spectrum_db_labels_[i], base_x - 38, y_line - 6);
-      lv_obj_set_style_text_color(this->spectrum_db_labels_[i], lv_color_hex(0x40FF40), 0);
-      lv_obj_set_style_text_font(this->spectrum_db_labels_[i], &lv_font_montserrat_14, 0);
-    }
-
-    // Frequency labels for each band
-    static const char *freq_labels[] = {
-      "31", "62", "125", "250", "500", "1K", "2K", "4K",
-      "8K", "10K", "12K", "14K", "16K", "18K", "20K", "22K"
-    };
+    int base_x = (lv_obj_get_width(this->spectrum_bars_area_) - (SPECTRUM_BANDS * (bar_w + bar_gap) - bar_gap)) / 2;
 
     // Create bars and peak indicators
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
@@ -2994,22 +2945,7 @@ void Mp4Player::rebuild_spectrum_viz_() {
       lv_obj_clear_flag(peak, LV_OBJ_FLAG_SCROLLABLE);
       lv_obj_clear_flag(peak, LV_OBJ_FLAG_CLICKABLE);
       this->spectrum_peak_indicators_[i] = peak;
-
-      // Frequency label at bottom
-      this->spectrum_freq_labels_[i] = lv_label_create(this->spectrum_bars_area_);
-      lv_label_set_text(this->spectrum_freq_labels_[i], freq_labels[i]);
-      lv_obj_set_pos(this->spectrum_freq_labels_[i], x - 2, margin_top + max_bar_h + 4);
-      lv_obj_set_style_text_color(this->spectrum_freq_labels_[i], lv_color_hex(0x40FF40), 0);
-      lv_obj_set_style_text_font(this->spectrum_freq_labels_[i], &lv_font_montserrat_14, 0);
     }
-
-    // Title label "SPECTRUM ANALYZER" at top-right
-    lv_obj_t *title = lv_label_create(this->spectrum_bars_area_);
-    lv_label_set_text(title, "SPECTRUM ANALYZER");
-    lv_obj_set_pos(title, base_x + SPECTRUM_BANDS * (bar_w + bar_gap) - 130, margin_top - 2);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x00FF80), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_opa(title, LV_OPA_60, 0);
 
   } else if (this->spectrum_viz_mode_ == 0) {
     // ===== MODE 0: SPHERICAL DESIGN (bars in arc + ring + core) =====
@@ -3154,17 +3090,13 @@ void Mp4Player::destroy_spectrum_ui_() {
     this->spectrum_glow_ring_ = nullptr;
     this->spectrum_bars_area_ = nullptr;
     this->spectrum_mode_btn_ = nullptr;
-    this->spectrum_grid_container_ = nullptr;
     this->spectrum_color_phase_ = 0;
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
       this->spectrum_bars_[i] = nullptr;
       this->spectrum_peak_indicators_[i] = nullptr;
-      this->spectrum_freq_labels_[i] = nullptr;
       this->spectrum_smooth_[i] = 0;
       this->spectrum_peaks_[i] = 0;
     }
-    for (int i = 0; i < 5; i++)
-      this->spectrum_db_labels_[i] = nullptr;
   }
   this->audio_only_mode_ = false;
 }
