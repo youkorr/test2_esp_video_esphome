@@ -176,7 +176,8 @@ async def to_code(config):
     cv.Schema({
         cv.GenerateID(): cv.use_id(EspCamSensorComponent),
         cv.Required(CONF_FILENAME): cv.templatable(cv.string),
-    })
+    }),
+    synchronous=True,
 )
 async def capture_snapshot_action_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -194,7 +195,8 @@ async def capture_snapshot_action_to_code(config, action_id, template_arg, args)
     StartStreamingAction,
     cv.Schema({
         cv.GenerateID(): cv.use_id(EspCamSensorComponent),
-    })
+    }),
+    synchronous=True,
 )
 async def start_streaming_action_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])
@@ -208,7 +210,8 @@ async def start_streaming_action_to_code(config, action_id, template_arg, args):
     StopStreamingAction,
     cv.Schema({
         cv.GenerateID(): cv.use_id(EspCamSensorComponent),
-    })
+    }),
+    synchronous=True,
 )
 async def stop_streaming_action_to_code(config, action_id, template_arg, args):
     paren = await cg.get_variable(config[CONF_ID])

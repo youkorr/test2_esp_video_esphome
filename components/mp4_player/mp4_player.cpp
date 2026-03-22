@@ -10,13 +10,17 @@
 #include <algorithm>
 #include <cmath>
 
-// LVGL extensions for media display
-#if __has_include("lvgl/src/libs/lottie/lv_lottie.h")
-#define HAS_LV_LOTTIE 1
-#include "lvgl/src/libs/lottie/lv_lottie.h"
+// USB storage - for is_mounted() check in file browser
+#if __has_include("esphome/components/usb_media_storage/usb_media_storage.h")
+#include "esphome/components/usb_media_storage/usb_media_storage.h"
+#define HAS_USB_MEDIA_STORAGE 1
 #else
-#define HAS_LV_LOTTIE 0
+#define HAS_USB_MEDIA_STORAGE 0
 #endif
+
+// Lottie/ThorVG support is disabled: ThorVG rendering uses deep stack recursion
+// that overflows the ESP32 loopTask stack, causing Guru Meditation crashes
+// even with small files (27KB). All .json files are excluded from the browser.
 
 namespace esphome {
 namespace mp4_player {
@@ -338,9 +342,10 @@ void Mp4Player::setup() {
             this->audio_sample_rate_ = ainfo.stream_info.audio_info.sample_rate;
             this->audio_channels_ = ainfo.stream_info.audio_info.channel;
             this->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
-            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit",
+            ESP_LOGI(TAG, "Audio: format=%d, %uHz, %uch, %ubit%s",
                      this->audio_format_, this->audio_sample_rate_,
-                     this->audio_channels_, this->audio_bits_per_sample_);
+                     this->audio_channels_, this->audio_bits_per_sample_,
+                     (this->output_mono_ && this->audio_channels_ > 1) ? " (will downmix to mono)" : "");
           }
         }
       }
@@ -479,6 +484,23 @@ void Mp4Player::loop() {
   if (this->audio_only_mode_) {
     this->update_spectrum_();
   }
+
+  // Auto-next: track finished naturally, advance playlist
+  if (this->track_finished_) {
+    this->track_finished_ = false;
+    this->state_ = PlayerState::STOPPED;
+    this->playback_task_handle_ = nullptr;
+    this->play_next_track_();
+  }
+
+  // Deferred image viewer cleanup (safe to delete LVGL objects outside event handler)
+  if (this->image_viewer_close_pending_) {
+    this->image_viewer_close_pending_ = false;
+    this->destroy_image_viewer_();
+    // Show browser again
+    if (this->browser_container_)
+      lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  }
 }
 
 // ============================================================================
@@ -493,6 +515,7 @@ void Mp4Player::dump_config() {
   ESP_LOGCONFIG(TAG, "  Volume: %u%%", this->volume_level_);
   ESP_LOGCONFIG(TAG, "  Loop: %s", this->loop_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Audio: %s", this->has_audio_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Audio output: %s", this->output_mono_ ? "mono (downmix)" : "stereo");
 }
 
 // ============================================================================
@@ -604,6 +627,11 @@ void Mp4Player::stop() {
   if (this->audio_only_mode_) {
     this->destroy_spectrum_ui_();
   }
+
+  // Clear playlist on manual stop
+  this->playlist_.clear();
+  this->playlist_index_ = -1;
+  this->track_finished_ = false;
 
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
@@ -737,9 +765,9 @@ void Mp4Player::playback_task_(void *arg) {
       }
 
       // Open audio decoder if audio is available
-      esp_audio_simple_dec_handle_t audio_dec = nullptr;
       bool speaker_started = false;
-      if (player->has_audio_ && player->speaker_ && player->audio_pcm_buffer_) {
+      bool audio_queue_active = false;
+      if (player->has_audio_ && player->speaker_) {
         uint16_t anum = 0;
         esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_AUDIO, &anum);
         if (anum > 0) {
@@ -750,42 +778,60 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_channels_ = ainfo.stream_info.audio_info.channel;
             player->audio_bits_per_sample_ = ainfo.stream_info.audio_info.bits_per_sample;
           }
-          esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
-          if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
-            esp_audio_simple_dec_cfg_t dec_cfg = {};
-            dec_cfg.dec_type = dec_type;
-            if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) == ESP_AUDIO_ERR_OK) {
-              player->audio_decoder_ready_ = true;
-              ESP_LOGI(TAG, "Audio decoder opened (format=%d)", player->audio_format_);
 
-              // Configure speaker with correct audio stream parameters
-              uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
-              uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
-              uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
-              audio::AudioStreamInfo stream_info(bps, ch, sr);
-              player->speaker_->set_audio_stream_info(stream_info);
-              player->speaker_->start();
-              speaker_started = true;
-              ESP_LOGI(TAG, "Speaker started: %uHz, %uch, %ubit", sr, ch, bps);
+          // Detect audio-only mode from within the task (no race condition)
+          uint16_t vnum_check = 0;
+          esp_extractor_get_stream_num(ext, EXTRACTOR_STREAM_TYPE_VIDEO, &vnum_check);
+          if (vnum_check == 0) {
+            player->audio_only_mode_ = true;
+            ESP_LOGI(TAG, "Audio-only mode detected (no video streams)");
+          }
 
-              // Wait for I2S channel to fully initialize before sending audio data
-              vTaskDelay(pdMS_TO_TICKS(100));
+          // Configure speaker with correct audio stream parameters
+          uint8_t bps = player->audio_bits_per_sample_ > 0 ? player->audio_bits_per_sample_ : 16;
+          uint8_t ch = player->audio_channels_ > 0 ? player->audio_channels_ : 1;
+          uint32_t sr = player->audio_sample_rate_ > 0 ? player->audio_sample_rate_ : 16000;
 
-              // Start audio output task if ring buffer is available
-              // Pin to core 1 (core 0 is used by WiFi which causes audio stalls)
-              if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
-                player->audio_ring_read_ = 0;
-                player->audio_ring_write_ = 0;
-                player->audio_task_running_ = true;
-                xTaskCreatePinnedToCore(
-                    audio_output_task_, "audio_out", 4096, player, 15,
-                    &player->audio_task_handle_, 1);
-              }
-            } else {
-              ESP_LOGW(TAG, "Failed to open audio decoder for format %d", player->audio_format_);
-            }
+          // If output is mono and source is stereo, tell speaker we're sending mono
+          uint8_t output_ch = ch;
+          if (player->output_mono_ && ch > 1) {
+            output_ch = 1;
+            ESP_LOGI(TAG, "Audio: source is %uch, downmixing to mono for output", ch);
+          }
+
+          audio::AudioStreamInfo stream_info(bps, output_ch, sr);
+          player->speaker_->set_audio_stream_info(stream_info);
+          player->speaker_->start();
+          speaker_started = true;
+          ESP_LOGI(TAG, "Speaker started: %uHz, %uch->%uch, %ubit", sr, ch, output_ch, bps);
+
+          // Wait for I2S channel to fully initialize
+          vTaskDelay(pdMS_TO_TICKS(100));
+
+          // Start audio output task (ring buffer → speaker)
+          if (player->audio_ring_buffer_ && !player->audio_task_handle_) {
+            player->audio_ring_read_ = 0;
+            player->audio_ring_write_ = 0;
+            player->audio_task_running_ = true;
+            xTaskCreatePinnedToCore(
+                audio_output_task_, "audio_out", 4096, player, 15,
+                &player->audio_task_handle_, 1);
+          }
+
+          // Create audio frame queue and decode task
+          // This decouples audio decode from video decode (Waveshare approach)
+          // Audio decode runs on core 0 at priority 13 (above playback at 12)
+          player->audio_frame_queue_ = xQueueCreate(AUDIO_FRAME_QUEUE_SIZE, sizeof(AudioFrameItem));
+          if (player->audio_frame_queue_) {
+            player->audio_decoder_ready_ = true;
+            player->audio_decode_task_running_ = true;
+            xTaskCreatePinnedToCore(
+                audio_decode_task_, "audio_dec", 8192, player, 13,
+                &player->audio_decode_task_handle_, 0);
+            audio_queue_active = true;
+            ESP_LOGI(TAG, "Audio decode task started (queue=%d frames)", AUDIO_FRAME_QUEUE_SIZE);
           } else {
-            ESP_LOGW(TAG, "Unsupported audio format: %d", player->audio_format_);
+            ESP_LOGE(TAG, "Failed to create audio frame queue");
           }
         }
       }
@@ -825,62 +871,25 @@ void Mp4Player::playback_task_(void *arg) {
           break;
         }
 
-        // Process audio frames FIRST (priority over video timing)
+        // Dispatch audio frames to decode task via queue (non-blocking on this thread)
         if (frame.stream_type == EXTRACTOR_STREAM_TYPE_AUDIO &&
             frame.frame_buffer && frame.frame_size > 0 &&
-            audio_dec && player->speaker_ && player->audio_pcm_buffer_) {
-          esp_audio_simple_dec_raw_t raw = {};
-          raw.buffer = frame.frame_buffer;
-          raw.len = frame.frame_size;
-          raw.eos = false;
-          raw.consumed = 0;
-          raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
-
-          while (raw.consumed < raw.len && !player->stop_requested_) {
-            esp_audio_simple_dec_out_t out = {};
-            out.buffer = player->audio_pcm_buffer_;
-            out.len = player->audio_pcm_buffer_size_;
-            out.decoded_size = 0;
-
-            esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
-            if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
-              if (player->audio_ring_buffer_) {
-                // Push decoded audio to ring buffer
-                // For audio-only: wait indefinitely (no video to sync with)
-                // For video+audio: limited retries to avoid blocking video decode
-                int max_retries = player->audio_only_mode_ ? 500 : 50;
-                size_t pushed = 0;
-                int retries = 0;
-                while (pushed < out.decoded_size && !player->stop_requested_ && retries < max_retries) {
-                  size_t p = player->audio_ring_push_(
-                      player->audio_pcm_buffer_ + pushed, out.decoded_size - pushed);
-                  pushed += p;
-                  if (pushed < out.decoded_size) {
-                    vTaskDelay(pdMS_TO_TICKS(2));
-                    retries++;
-                  }
-                }
-              } else {
-                player->apply_volume_to_pcm_(player->audio_pcm_buffer_, out.decoded_size);
-                size_t written = 0;
-                while (written < out.decoded_size && !player->stop_requested_) {
-                  size_t w = player->speaker_->play(
-                      player->audio_pcm_buffer_ + written, out.decoded_size - written);
-                  if (w > 0) {
-                    written += w;
-                  } else {
-                    vTaskDelay(pdMS_TO_TICKS(5));
-                  }
-                }
-              }
-            } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
-              break;
-            } else {
-              break;
+            audio_queue_active && player->audio_frame_queue_) {
+          // Copy frame data and send to decode task
+          AudioFrameItem item;
+          item.size = frame.frame_size;
+          item.data = (uint8_t *)malloc(frame.frame_size);
+          if (item.data) {
+            memcpy(item.data, frame.frame_buffer, frame.frame_size);
+            // For video mode: short timeout to avoid blocking video decode
+            // For audio-only: longer timeout since there's no video to sync
+            TickType_t timeout = player->audio_only_mode_ ? pdMS_TO_TICKS(500) : pdMS_TO_TICKS(50);
+            if (xQueueSend(player->audio_frame_queue_, &item, timeout) != pdTRUE) {
+              free(item.data);  // Queue full, drop frame
             }
           }
 
-          // Release audio frame and continue reading immediately
+          // Release extractor buffer immediately
           if (frame.frame_buffer) {
             mem_pool_free(esp_extractor_get_output_pool(ext), frame.frame_buffer);
           }
@@ -897,7 +906,8 @@ void Mp4Player::playback_task_(void *arg) {
                      frame.frame_size, JPEG_BUFFER_SIZE, player->display_buffer_size_);
           }
 
-          // Frame rate control - only delay for video frames to maintain fps
+          // Frame rate control - delay for video frames to maintain fps
+          // Audio decode is now on a separate task so it won't be blocked by this delay
           int64_t now = esp_timer_get_time() / 1000;
           int64_t target = last_frame_time + frame_interval_ms;
           if (now < target) {
@@ -962,19 +972,33 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Stop audio output task first
+      // Stop audio decode task first (it produces data for the ring buffer)
+      if (player->audio_decode_task_handle_) {
+        player->audio_decode_task_running_ = false;
+        // Give the decode task time to process its current frame and exit
+        vTaskDelay(pdMS_TO_TICKS(200));
+        player->audio_decode_task_handle_ = nullptr;
+      }
+
+      // Delete audio frame queue (drain any remaining items)
+      if (player->audio_frame_queue_) {
+        AudioFrameItem item;
+        while (xQueueReceive(player->audio_frame_queue_, &item, 0) == pdTRUE) {
+          free(item.data);
+        }
+        vQueueDelete(player->audio_frame_queue_);
+        player->audio_frame_queue_ = nullptr;
+      }
+      audio_queue_active = false;
+
+      // Stop audio output task (it consumes from ring buffer → speaker)
       if (player->audio_task_handle_) {
         player->audio_task_running_ = false;
         vTaskDelay(pdMS_TO_TICKS(50));  // Let audio task drain and exit
         player->audio_task_handle_ = nullptr;
       }
 
-      // Close audio decoder and stop speaker
-      if (audio_dec) {
-        esp_audio_simple_dec_close(audio_dec);
-        audio_dec = nullptr;
-        player->audio_decoder_ready_ = false;
-      }
+      player->audio_decoder_ready_ = false;
       if (speaker_started) {
         player->speaker_->finish();
         speaker_started = false;
@@ -996,6 +1020,12 @@ void Mp4Player::playback_task_(void *arg) {
 
     esp_extractor_unregister_all();
     if (player->stop_requested_) break;
+  }
+
+  // Signal track finished naturally (not user-initiated stop)
+  if (!player->stop_requested_ && player->audio_only_mode_ && !player->playlist_.empty()) {
+    ESP_LOGI(TAG, "Track finished, signaling for next track");
+    player->track_finished_ = true;
   }
 
   ESP_LOGI(TAG, "Playback task exiting");
@@ -1216,6 +1246,21 @@ void Mp4Player::apply_volume_to_pcm_(uint8_t *pcm_data, size_t size) {
 }
 
 // ============================================================================
+// Stereo to mono downmix (in-place)
+// Averages L+R channels to produce mono output. Returns new data size (halved).
+// ============================================================================
+size_t Mp4Player::downmix_stereo_to_mono_(uint8_t *pcm_data, size_t size) {
+  int16_t *samples = reinterpret_cast<int16_t *>(pcm_data);
+  size_t num_stereo_frames = size / 4;  // 4 bytes per stereo frame (2x 16-bit)
+  for (size_t i = 0; i < num_stereo_frames; i++) {
+    int32_t left = samples[i * 2];
+    int32_t right = samples[i * 2 + 1];
+    samples[i] = (int16_t)((left + right) / 2);
+  }
+  return num_stereo_frames * 2;  // mono: 2 bytes per frame
+}
+
+// ============================================================================
 // Audio ring buffer - lock-free single producer / single consumer
 // ============================================================================
 size_t Mp4Player::audio_ring_available_() const {
@@ -1264,6 +1309,110 @@ size_t Mp4Player::audio_ring_pop_(uint8_t *data, size_t len) {
 }
 
 // ============================================================================
+// Audio decode task - receives encoded audio frames from queue, decodes,
+// downmixes (stereo→mono), and pushes PCM to ring buffer.
+// Runs on its own task to decouple audio from video (like Waveshare approach).
+// ============================================================================
+void Mp4Player::audio_decode_task_(void *arg) {
+  Mp4Player *player = static_cast<Mp4Player *>(arg);
+  ESP_LOGI(TAG, "Audio decode task started (priority 13, core 0)");
+
+  // Open audio decoder
+  esp_audio_simple_dec_type_t dec_type = map_audio_format_(player->audio_format_);
+  esp_audio_simple_dec_handle_t audio_dec = nullptr;
+  if (dec_type != ESP_AUDIO_SIMPLE_DEC_TYPE_NONE) {
+    esp_audio_simple_dec_cfg_t dec_cfg = {};
+    dec_cfg.dec_type = dec_type;
+    if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) != ESP_AUDIO_ERR_OK) {
+      ESP_LOGE(TAG, "Audio decode task: failed to open decoder");
+      player->audio_decode_task_running_ = false;
+      vTaskDelete(nullptr);
+      return;
+    }
+  } else {
+    ESP_LOGE(TAG, "Audio decode task: unsupported format %d", player->audio_format_);
+    player->audio_decode_task_running_ = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  // Allocate PCM decode buffer (separate from main thread's buffer)
+  const size_t pcm_buf_size = AUDIO_PCM_BUFFER_SIZE;
+  uint8_t *pcm_buf = (uint8_t *)heap_caps_malloc(pcm_buf_size, MALLOC_CAP_SPIRAM);
+  if (!pcm_buf) {
+    ESP_LOGE(TAG, "Audio decode task: failed to allocate PCM buffer");
+    esp_audio_simple_dec_close(audio_dec);
+    player->audio_decode_task_running_ = false;
+    vTaskDelete(nullptr);
+    return;
+  }
+
+  AudioFrameItem item;
+  while (player->audio_decode_task_running_) {
+    // Wait for encoded audio frame from queue
+    if (xQueueReceive(player->audio_frame_queue_, &item, pdMS_TO_TICKS(50)) != pdTRUE) {
+      continue;  // Timeout, check running flag and retry
+    }
+
+    // Decode the frame
+    esp_audio_simple_dec_raw_t raw = {};
+    raw.buffer = item.data;
+    raw.len = item.size;
+    raw.eos = false;
+    raw.consumed = 0;
+    raw.frame_recover = ESP_AUDIO_SIMPLE_DEC_RECOVERY_NONE;
+
+    while (raw.consumed < raw.len && !player->stop_requested_) {
+      esp_audio_simple_dec_out_t out = {};
+      out.buffer = pcm_buf;
+      out.len = pcm_buf_size;
+      out.decoded_size = 0;
+
+      esp_audio_err_t aret = esp_audio_simple_dec_process(audio_dec, &raw, &out);
+      if (aret == ESP_AUDIO_ERR_OK && out.decoded_size > 0) {
+        size_t pcm_size = out.decoded_size;
+
+        // Downmix stereo to mono if needed
+        if (player->output_mono_ && player->audio_channels_ > 1) {
+          pcm_size = player->downmix_stereo_to_mono_(pcm_buf, pcm_size);
+        }
+
+        // Push to ring buffer (wait for space)
+        size_t pushed = 0;
+        int retries = 0;
+        int max_retries = player->audio_only_mode_ ? 500 : 200;
+        while (pushed < pcm_size && !player->stop_requested_ && retries < max_retries) {
+          size_t p = player->audio_ring_push_(pcm_buf + pushed, pcm_size - pushed);
+          pushed += p;
+          if (pushed < pcm_size) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            retries++;
+          }
+        }
+      } else if (aret == ESP_AUDIO_ERR_BUFF_NOT_ENOUGH) {
+        break;
+      } else {
+        break;
+      }
+    }
+
+    // Free the copied frame data
+    free(item.data);
+  }
+
+  // Drain remaining items from queue
+  while (xQueueReceive(player->audio_frame_queue_, &item, 0) == pdTRUE) {
+    free(item.data);
+  }
+
+  free(pcm_buf);
+  esp_audio_simple_dec_close(audio_dec);
+  ESP_LOGI(TAG, "Audio decode task exiting");
+  player->audio_decode_task_running_ = false;
+  vTaskDelete(nullptr);
+}
+
+// ============================================================================
 // Audio output task - drains ring buffer to speaker at steady rate
 // ============================================================================
 void Mp4Player::audio_output_task_(void *arg) {
@@ -1302,6 +1451,12 @@ void Mp4Player::audio_output_task_(void *arg) {
   uint32_t underrun_count = 0;
   uint32_t jitter_corrections = 0;
   bool was_paused = false;
+
+  // Grace period: skip jitter corrections for the first 2 seconds after startup
+  // This prevents false corrections when audio_only_mode_ hasn't been set yet
+  // (e.g. for MP3 files where the main thread sets it after play_file returns)
+  int64_t task_start_time = esp_timer_get_time() / 1000;
+  const int64_t jitter_grace_period_ms = 2000;
 
   // Monitoring: log ring buffer level every 30 seconds for diagnostics
   int64_t last_monitor_time = esp_timer_get_time() / 1000;
@@ -1359,10 +1514,14 @@ void Mp4Player::audio_output_task_(void *arg) {
 
     // Jitter buffer management: catch latency drift early
     // Skip entirely for audio-only mode (no A/V sync needed, producer backpressures naturally)
-    if (!player->audio_only_mode_ && avail > video_high_watermark) {
+    // Also skip during grace period to let audio_only_mode_ be set by main thread
+    bool in_grace_period = (now_ms - task_start_time) < jitter_grace_period_ms;
+    if (!player->audio_only_mode_ && !in_grace_period && avail > video_high_watermark) {
       size_t skip = avail - target_level;
-      // Align skip to sample boundary (4 bytes = one stereo 16-bit sample)
-      skip &= ~3;
+      // Align skip to sample frame boundary
+      // Mono 16-bit = 2 bytes, Stereo 16-bit = 4 bytes
+      size_t frame_size = (player->output_mono_ || player->audio_channels_ <= 1) ? 2 : 4;
+      skip = (skip / frame_size) * frame_size;
       player->audio_ring_read_ = (player->audio_ring_read_ + skip) % player->audio_ring_size_;
       avail = player->audio_ring_available_();
       jitter_corrections++;
@@ -1455,6 +1614,156 @@ void Mp4Player::stop_btn_cb_(lv_event_t *e) {
   p->stop();
 }
 
+void Mp4Player::spectrum_stop_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->stop();  // stop() destroys spectrum UI and returns to browser
+}
+
+void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  if (p->state_ == PlayerState::PLAYING) {
+    p->pause();
+    if (p->spectrum_play_btn_) {
+      lv_obj_t *lbl = lv_obj_get_child(p->spectrum_play_btn_, 0);
+      if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
+    }
+  } else if (p->state_ == PlayerState::PAUSED) {
+    p->play();
+    if (p->spectrum_play_btn_) {
+      lv_obj_t *lbl = lv_obj_get_child(p->spectrum_play_btn_, 0);
+      if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+    }
+  }
+}
+
+void Mp4Player::spectrum_next_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->play_next_track_();
+}
+
+void Mp4Player::spectrum_prev_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->play_prev_track_();
+}
+
+void Mp4Player::play_next_track_() {
+  if (this->playlist_.empty() || this->playlist_index_ < 0) {
+    this->stop();
+    return;
+  }
+  if (this->playlist_index_ + 1 >= (int)this->playlist_.size()) {
+    // End of album - stop and return to browser
+    ESP_LOGI(TAG, "End of playlist, returning to browser");
+    this->playlist_.clear();
+    this->playlist_index_ = -1;
+    this->stop();
+    return;
+  }
+  this->playlist_index_++;
+  std::string next_path = this->playlist_[this->playlist_index_];
+  ESP_LOGI(TAG, "Next track [%d/%d]: %s", this->playlist_index_ + 1, this->playlist_.size(), next_path.c_str());
+
+  // Stop current playback without destroying spectrum UI or returning to browser
+  this->stop_requested_ = true;
+  this->state_ = PlayerState::STOPPED;
+  if (this->playback_task_handle_) {
+    xEventGroupSetBits(this->playback_event_group_, EVENT_STOP);
+    xEventGroupWaitBits(this->playback_event_group_, EVENT_TASK_EXIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(3000));
+    this->playback_task_handle_ = nullptr;
+  }
+  this->current_time_ms_ = 0;
+  this->frame_count_ = 0;
+
+  // Start new track
+  this->play_file(next_path);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  // Update spectrum title
+  if (this->spectrum_title_label_) {
+    const char *fname = strrchr(next_path.c_str(), '/');
+    lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : next_path.c_str());
+  }
+  // Update format info
+  if (this->spectrum_artist_label_) {
+    char info[64];
+    const char *ch_str = "Mono";
+    if (this->audio_channels_ > 1 && !this->output_mono_) ch_str = "Stereo";
+    else if (this->audio_channels_ > 1 && this->output_mono_) ch_str = "Mono (downmix)";
+    snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+             this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100, ch_str,
+             this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+    lv_label_set_text(this->spectrum_artist_label_, info);
+  }
+  // Update play button icon
+  if (this->spectrum_play_btn_) {
+    lv_obj_t *lbl = lv_obj_get_child(this->spectrum_play_btn_, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+  }
+}
+
+void Mp4Player::play_prev_track_() {
+  if (this->playlist_.empty() || this->playlist_index_ < 0) return;
+  if (this->playlist_index_ - 1 < 0) {
+    // Already at first track - restart it
+    this->playlist_index_ = 0;
+  } else {
+    this->playlist_index_--;
+  }
+  std::string prev_path = this->playlist_[this->playlist_index_];
+  ESP_LOGI(TAG, "Prev track [%d/%d]: %s", this->playlist_index_ + 1, this->playlist_.size(), prev_path.c_str());
+
+  // Stop current playback without destroying spectrum UI
+  this->stop_requested_ = true;
+  this->state_ = PlayerState::STOPPED;
+  if (this->playback_task_handle_) {
+    xEventGroupSetBits(this->playback_event_group_, EVENT_STOP);
+    xEventGroupWaitBits(this->playback_event_group_, EVENT_TASK_EXIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(3000));
+    this->playback_task_handle_ = nullptr;
+  }
+  this->current_time_ms_ = 0;
+  this->frame_count_ = 0;
+
+  // Start new track
+  this->play_file(prev_path);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  // Update spectrum title
+  if (this->spectrum_title_label_) {
+    const char *fname = strrchr(prev_path.c_str(), '/');
+    lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : prev_path.c_str());
+  }
+  if (this->spectrum_artist_label_) {
+    char info[64];
+    const char *ch_str = "Mono";
+    if (this->audio_channels_ > 1 && !this->output_mono_) ch_str = "Stereo";
+    else if (this->audio_channels_ > 1 && this->output_mono_) ch_str = "Mono (downmix)";
+    snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+             this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100, ch_str,
+             this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+    lv_label_set_text(this->spectrum_artist_label_, info);
+  }
+  if (this->spectrum_play_btn_) {
+    lv_obj_t *lbl = lv_obj_get_child(this->spectrum_play_btn_, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+  }
+}
+
+void Mp4Player::spectrum_volume_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+  p->volume_level_ = (uint8_t)val;
+  // Sync video player volume slider if it exists
+  if (p->volume_slider_) {
+    lv_slider_set_value(p->volume_slider_, val, LV_ANIM_OFF);
+  }
+}
+
 void Mp4Player::progress_slider_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
   int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
@@ -1502,8 +1811,8 @@ FileType Mp4Player::get_file_type_(const std::string &name) {
   if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") return FileType::IMAGE;
   // Audio
   if (ext == ".mp3" || ext == ".wav" || ext == ".flac" || ext == ".aac" || ext == ".pcm") return FileType::AUDIO;
-  // Lottie animation
-  if (ext == ".json") return FileType::LOTTIE;
+  // Lottie animation - disabled: ThorVG overflows loopTask stack on ESP32
+  // if (ext == ".json") return FileType::LOTTIE;
   // SVG
   if (ext == ".svg") return FileType::SVG;
 
@@ -1590,10 +1899,13 @@ void Mp4Player::create_file_browser_() {
   lv_obj_set_style_pad_all(this->browser_container_, 0, 0);
   lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_SCROLLABLE);
 
+  // Use flex layout on container so title bar and list share space properly
+  lv_obj_set_flex_flow(this->browser_container_, LV_FLEX_FLOW_COLUMN);
+
   // Title bar
   lv_obj_t *title_bar = lv_obj_create(this->browser_container_);
   lv_obj_set_size(title_bar, LV_PCT(100), 50);
-  lv_obj_align(title_bar, LV_ALIGN_TOP_MID, 0, 0);
+  lv_obj_set_style_flex_grow(title_bar, 0, 0);
   lv_obj_set_style_bg_color(title_bar, lv_color_hex(0x16213E), 0);
   lv_obj_set_style_bg_opa(title_bar, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(title_bar, 0, 0);
@@ -1629,10 +1941,11 @@ void Mp4Player::create_file_browser_() {
   lv_obj_center(ref_lbl);
   lv_obj_add_event_cb(refresh_btn, refresh_btn_cb_, LV_EVENT_CLICKED, this);
 
-  // File list (scrollable)
+  // File list (scrollable) - fills remaining space below title bar
   this->browser_list_ = lv_obj_create(this->browser_container_);
-  lv_obj_set_size(this->browser_list_, LV_PCT(100), LV_PCT(100));
-  lv_obj_align(this->browser_list_, LV_ALIGN_TOP_MID, 0, 50);
+  lv_obj_set_width(this->browser_list_, LV_PCT(100));
+  lv_obj_set_height(this->browser_list_, 0);
+  lv_obj_set_style_flex_grow(this->browser_list_, 1, 0);
   lv_obj_set_style_bg_color(this->browser_list_, lv_color_hex(0x1A1A2E), 0);
   lv_obj_set_style_bg_opa(this->browser_list_, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(this->browser_list_, 0, 0);
@@ -1664,11 +1977,33 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
     ESP_LOGI(TAG, "Showing root: %u media directories configured", this->media_directories_.size());
 
+    // Get USB storage component for reliable mount check
+#if HAS_USB_MEDIA_STORAGE
+    usb_media_storage::UsbMediaStorage *usb_comp = nullptr;
+    if (this->usb_storage_) {
+      usb_comp = static_cast<usb_media_storage::UsbMediaStorage *>(this->usb_storage_);
+    }
+#endif
+
     for (const auto &dir : this->media_directories_) {
-      // Check if directory exists
-      DIR *d = opendir(dir.c_str());
-      bool available = (d != nullptr);
-      if (d) closedir(d);
+      bool is_usb = (dir.find("usb") != std::string::npos);
+
+      // Check availability: use USB component status if available, otherwise opendir
+      bool available = false;
+#if HAS_USB_MEDIA_STORAGE
+      if (is_usb && usb_comp) {
+        available = usb_comp->is_mounted();
+        ESP_LOGI(TAG, "USB mount check via component: mounted=%s, connected=%s",
+                 available ? "yes" : "no",
+                 usb_comp->is_device_connected() ? "yes" : "no");
+      } else
+#endif
+      {
+        DIR *d = opendir(dir.c_str());
+        available = (d != nullptr);
+        if (d) closedir(d);
+      }
+      ESP_LOGI(TAG, "Directory '%s': %s", dir.c_str(), available ? "available" : "not mounted");
 
       lv_obj_t *btn = lv_btn_create(this->browser_list_);
       lv_obj_set_size(btn, LV_PCT(100), 65);
@@ -1682,7 +2017,6 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
       // Icon
       lv_obj_t *icon = lv_label_create(btn);
-      bool is_usb = (dir.find("usb") != std::string::npos);
       lv_label_set_text(icon, is_usb ? LV_SYMBOL_USB : LV_SYMBOL_SD_CARD);
       lv_obj_set_style_text_color(icon, available ? lv_color_hex(0x00D4FF) : lv_color_hex(0x666666), 0);
       lv_obj_set_style_text_font(icon, &lv_font_montserrat_16, 0);
@@ -1697,7 +2031,6 @@ void Mp4Player::navigate_to_directory_(std::string path) {
 
       if (available) {
         // Store directory path as user data for callback
-        // We need to store the string - use a static approach with file_entries_
         FileEntry fe;
         fe.full_path = dir;
         fe.name = display_name;
@@ -2031,17 +2364,41 @@ void Mp4Player::play_file(const std::string &path) {
 
 void Mp4Player::file_item_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+  if (!player) return;
 
-  if (idx >= player->file_entries_.size()) return;
+  lv_obj_t *target = static_cast<lv_obj_t *>(lv_event_get_target(e));
+  if (!target) return;
+
+  size_t idx = (size_t)(uintptr_t)lv_obj_get_user_data(target);
+
+  if (idx >= player->file_entries_.size()) {
+    ESP_LOGW(TAG, "Invalid file entry index: %u (max %u)", idx, player->file_entries_.size());
+    return;
+  }
 
   // Copy values before navigate may clear file_entries_
   std::string path = player->file_entries_[idx].full_path;
   FileType type = player->file_entries_[idx].file_type;
 
+  // Verify the path is accessible before navigating
   if (type == FileType::DIRECTORY) {
+    DIR *d = opendir(path.c_str());
+    if (!d) {
+      ESP_LOGW(TAG, "Directory not accessible: %s", path.c_str());
+      // Refresh the view to update status
+      player->file_entries_.clear();
+      player->navigate_to_directory_("");
+      return;
+    }
+    closedir(d);
     player->navigate_to_directory_(path);
   } else {
+    // Verify file exists before opening
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0) {
+      ESP_LOGW(TAG, "File not accessible: %s", path.c_str());
+      return;
+    }
     player->open_media_file_(path, type);
   }
 }
@@ -2061,12 +2418,36 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
-      // Start playback FIRST (play_file calls stop() which resets audio_only_mode_)
+      // Build playlist from all audio files in current directory
+      this->playlist_.clear();
+      this->playlist_index_ = -1;
+      for (size_t i = 0; i < this->file_entries_.size(); i++) {
+        if (this->file_entries_[i].file_type == FileType::AUDIO) {
+          if (this->file_entries_[i].full_path == path) {
+            this->playlist_index_ = (int)this->playlist_.size();
+          }
+          this->playlist_.push_back(this->file_entries_[i].full_path);
+        }
+      }
+      ESP_LOGI(TAG, "Playlist: %d tracks, starting at index %d", this->playlist_.size(), this->playlist_index_);
+
       this->play_file(path);
 
-      // NOW set audio-only mode and create spectrum UI (after stop() has run)
-      this->audio_only_mode_ = true;
+      // play_file() shows video UI elements (touch_layer_, canvas_, controls_)
+      // Hide them for audio-only mode
+      if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+      if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+      if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+      if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+      // create_spectrum_ui_ calls destroy_spectrum_ui_ which resets audio_only_mode_
+      // So we MUST set audio_only_mode_ AFTER create_spectrum_ui_
       this->create_spectrum_ui_();
+      this->audio_only_mode_ = true;
+
+      // Ensure spectrum is on top of all siblings
+      if (this->spectrum_container_)
+        lv_obj_move_foreground(this->spectrum_container_);
 
       // Hide browser
       if (this->browser_container_)
@@ -2081,9 +2462,14 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       // Set format info after play_file has probed
       if (this->spectrum_artist_label_) {
         char info[64];
+        const char *ch_str = "Mono";
+        if (this->audio_channels_ > 1 && !this->output_mono_)
+          ch_str = "Stereo";
+        else if (this->audio_channels_ > 1 && this->output_mono_)
+          ch_str = "Mono (downmix)";
         snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
                  this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100,
-                 this->audio_channels_ > 1 ? "Stereo" : "Mono",
+                 ch_str,
                  this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
         lv_label_set_text(this->spectrum_artist_label_, info);
       }
@@ -2120,44 +2506,58 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
 
   // Determine file type for appropriate LVGL widget
   FileType type = get_file_type_(path);
-  std::string lvgl_path;
+  bool image_loaded = false;
 
-#if HAS_LV_LOTTIE
   if (type == FileType::LOTTIE) {
-    // LVGL Lottie animation (ThorVG)
-    lv_obj_t *lottie = lv_lottie_create(this->image_viewer_);
-    if (lottie) {
-      // Read file into memory for lottie
-      FILE *f = fopen(path.c_str(), "r");
-      if (f) {
-        fseek(f, 0, SEEK_END);
-        long fsize = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        char *json_buf = (char *)malloc(fsize + 1);
-        if (json_buf) {
-          fread(json_buf, 1, fsize, f);
-          json_buf[fsize] = '\0';
-          lv_lottie_set_src_data(lottie, json_buf, fsize + 1);
-          lv_obj_set_size(lottie, LV_PCT(80), LV_PCT(80));
-          lv_obj_center(lottie);
-          // json_buf must remain valid - store for cleanup
-          lv_obj_set_user_data(lottie, json_buf);
-        }
-        fclose(f);
-      }
+    // Lottie/ThorVG rendering requires very deep stack recursion that overflows
+    // the ESP32 loopTask stack (even files as small as 27KB crash).
+    // Disabled to prevent Guru Meditation crashes.
+    ESP_LOGW(TAG, "Lottie files not supported: ThorVG rendering overflows loopTask stack");
+    ESP_LOGW(TAG, "Skipping file: %s", path.c_str());
+
+    // Show message on screen
+    lv_obj_t *msg = lv_label_create(this->image_viewer_);
+    lv_label_set_text(msg, "Lottie format not supported\non this device");
+    lv_obj_set_style_text_color(msg, lv_color_hex(0xFF8800), 0);
+    lv_obj_set_style_text_font(msg, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(msg, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(msg);
+  } else if (type == FileType::IMAGE) {
+    // Check file extension for JPEG vs PNG/BMP
+    std::string ext = path;
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    bool is_jpeg = (ext.rfind(".jpg") != std::string::npos || ext.rfind(".jpeg") != std::string::npos);
+
+    if (is_jpeg) {
+      // Use ESP32-P4 hardware JPEG decoder for JPEG files
+      image_loaded = this->show_jpeg_image_(path);
+    } else {
+      // PNG/BMP: Try LVGL file-based decoder (requires LV_USE_LODEPNG or LV_USE_BMP)
+      std::string lvgl_path = std::string("S:") + path;
+      lv_obj_t *img = lv_image_create(this->image_viewer_);
+      lv_image_set_src(img, lvgl_path.c_str());
+      lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+      lv_obj_center(img);
+      image_loaded = true;
+      ESP_LOGI(TAG, "Loading image via LVGL decoder: %s", lvgl_path.c_str());
     }
-  } else
-#endif
-  {
-    // Image (PNG, JPG, BMP) or SVG - use lv_image with file path
-    // LVGL uses "S:" prefix for filesystem access or direct path
+  } else {
+    // SVG: Try LVGL file-based decoder
+    std::string lvgl_path = std::string("S:") + path;
     lv_obj_t *img = lv_image_create(this->image_viewer_);
-    lvgl_path = std::string("S:") + path;
     lv_image_set_src(img, lvgl_path.c_str());
     lv_obj_set_size(img, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_center(img);
-    // Scale to fit screen
-    lv_image_set_inner_align(img, LV_IMAGE_ALIGN_CENTER);
+    image_loaded = true;
+  }
+
+  // Show error message if image failed to load
+  if (!image_loaded) {
+    lv_obj_t *err_lbl = lv_label_create(this->image_viewer_);
+    lv_label_set_text(err_lbl, "Cannot display this image format");
+    lv_obj_set_style_text_color(err_lbl, lv_color_hex(0xFF6666), 0);
+    lv_obj_set_style_text_font(err_lbl, &lv_font_montserrat_16, 0);
+    lv_obj_center(err_lbl);
   }
 
   // Close button (top-right)
@@ -2185,29 +2585,156 @@ void Mp4Player::show_image_viewer_(const std::string &path) {
   lv_obj_set_style_pad_all(name_lbl, 5, 0);
 }
 
+// Decode JPEG file using ESP32-P4 hardware JPEG decoder and display on canvas
+bool Mp4Player::show_jpeg_image_(const std::string &path) {
+  // Read JPEG file into memory
+  FILE *f = fopen(path.c_str(), "rb");
+  if (!f) {
+    ESP_LOGE(TAG, "Cannot open image: %s", path.c_str());
+    return false;
+  }
+
+  fseek(f, 0, SEEK_END);
+  long fsize = ftell(f);
+  fseek(f, 0, SEEK_SET);
+
+  // Image files can be much larger than video MJPEG frames (up to 4MB)
+  static constexpr size_t MAX_IMAGE_FILE_SIZE = 4 * 1024 * 1024;
+  if (fsize <= 0 || fsize > (long)MAX_IMAGE_FILE_SIZE) {
+    ESP_LOGE(TAG, "Image too large: %ld bytes (max %u)", fsize, MAX_IMAGE_FILE_SIZE);
+    fclose(f);
+    return false;
+  }
+
+  // Ensure JPEG decoder is available
+  if (!this->jpeg_decoder_) {
+    jpeg_decode_engine_cfg_t cfg = {
+      .timeout_ms = 1000,
+    };
+    if (jpeg_new_decoder_engine(&cfg, &this->jpeg_decoder_) != ESP_OK) {
+      ESP_LOGE(TAG, "Failed to create JPEG decoder for image");
+      fclose(f);
+      return false;
+    }
+  }
+
+  // Allocate temporary buffer for the JPEG file data (separate from video's jpeg_buffer_)
+  uint8_t *img_jpeg_buf = (uint8_t *)heap_caps_malloc(fsize, MALLOC_CAP_SPIRAM);
+  if (!img_jpeg_buf) {
+    ESP_LOGE(TAG, "Failed to allocate image buffer (%ld bytes)", fsize);
+    fclose(f);
+    return false;
+  }
+
+  size_t read_size = fread(img_jpeg_buf, 1, fsize, f);
+  fclose(f);
+
+  if ((long)read_size != fsize) {
+    ESP_LOGE(TAG, "Read error: got %zu of %ld bytes", read_size, fsize);
+    heap_caps_free(img_jpeg_buf);
+    return false;
+  }
+
+  // Strip COM markers that crash ESP32-P4 JPEG hardware decoder
+  size_t jpeg_size = strip_jpeg_com_markers_(img_jpeg_buf, read_size);
+
+  // Parse JPEG SOF0/SOF2 marker to get dimensions before decoding
+  uint32_t img_w = 0, img_h = 0;
+  for (size_t i = 0; i < jpeg_size - 8; i++) {
+    if (img_jpeg_buf[i] == 0xFF && (img_jpeg_buf[i+1] == 0xC0 || img_jpeg_buf[i+1] == 0xC2)) {
+      img_h = (img_jpeg_buf[i+5] << 8) | img_jpeg_buf[i+6];
+      img_w = (img_jpeg_buf[i+7] << 8) | img_jpeg_buf[i+8];
+      break;
+    }
+  }
+
+  if (img_w == 0 || img_h == 0) {
+    ESP_LOGE(TAG, "Cannot determine image dimensions");
+    heap_caps_free(img_jpeg_buf);
+    return false;
+  }
+
+  // Allocate decode output buffer (RGB565, aligned for HW decoder)
+  uint32_t aligned_w = (img_w + 15) & ~15;
+  uint32_t aligned_h = (img_h + 15) & ~15;
+  size_t decode_buf_size = aligned_w * aligned_h * 2;
+  uint8_t *decode_buf = (uint8_t *)heap_caps_aligned_alloc(64, decode_buf_size, MALLOC_CAP_SPIRAM);
+  if (!decode_buf) {
+    ESP_LOGE(TAG, "Failed to allocate decode buffer (%u x %u = %u bytes)", aligned_w, aligned_h, decode_buf_size);
+    heap_caps_free(img_jpeg_buf);
+    return false;
+  }
+
+  jpeg_decode_cfg_t decode_cfg = {
+    .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+    .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+    .conv_std = JPEG_YUV_RGB_CONV_STD_BT601,
+  };
+
+  uint32_t decoded_size = 0;
+  esp_err_t ret = jpeg_decoder_process(this->jpeg_decoder_,
+                                        &decode_cfg,
+                                        img_jpeg_buf,
+                                        jpeg_size,
+                                        decode_buf,
+                                        decode_buf_size,
+                                        &decoded_size);
+
+  // Free JPEG source buffer immediately (no longer needed)
+  heap_caps_free(img_jpeg_buf);
+
+  if (ret != ESP_OK || decoded_size == 0) {
+    ESP_LOGE(TAG, "JPEG decode failed: %s", esp_err_to_name(ret));
+    heap_caps_free(decode_buf);
+    return false;
+  }
+
+  ESP_LOGI(TAG, "Image decoded: %ux%u (%u bytes)", img_w, img_h, decoded_size);
+
+  // Display image using lv_canvas
+  lv_obj_t *canvas = lv_canvas_create(this->image_viewer_);
+  lv_canvas_set_buffer(canvas, decode_buf, aligned_w, img_h, LV_COLOR_FORMAT_RGB565);
+  lv_obj_center(canvas);
+
+  // Store decode buffer pointer for cleanup (via user_data on canvas)
+  lv_obj_set_user_data(canvas, decode_buf);
+
+  return true;
+}
+
 void Mp4Player::image_close_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  player->destroy_image_viewer_();
-
-  // Show browser again
-  if (player->browser_container_)
-    lv_obj_clear_flag(player->browser_container_, LV_OBJ_FLAG_HIDDEN);
+  // Defer deletion to next loop iteration to avoid deleting objects during event
+  player->image_viewer_close_pending_ = true;
 }
 
 void Mp4Player::destroy_image_viewer_() {
   if (this->image_viewer_) {
-    // Free lottie JSON buffer if any (stored in lottie obj's user_data)
+    // Free allocated buffers stored in children's user_data
+    // (lottie JSON via malloc, JPEG decode buffer via heap_caps_aligned_alloc)
     uint32_t child_cnt = lv_obj_get_child_count(this->image_viewer_);
+    uint32_t freed_count = 0;
     for (uint32_t i = 0; i < child_cnt; i++) {
       lv_obj_t *child = lv_obj_get_child(this->image_viewer_, i);
+      if (!child) continue;
       void *ud = lv_obj_get_user_data(child);
       if (ud) {
-        free(ud);
+        heap_caps_free(ud);
         lv_obj_set_user_data(child, nullptr);
+        freed_count++;
       }
     }
     lv_obj_del(this->image_viewer_);
     this->image_viewer_ = nullptr;
+
+    // Free Lottie draw buffer (not freed automatically by LVGL)
+    if (this->lottie_draw_buf_) {
+      lv_draw_buf_destroy(this->lottie_draw_buf_);
+      this->lottie_draw_buf_ = nullptr;
+    }
+
+    size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "Image viewer closed (freed %u buffers, PSRAM free: %u KB)", freed_count, free_psram / 1024);
   }
   this->image_viewer_path_.clear();
 }
@@ -2260,8 +2787,8 @@ void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_cou
   float imag[FFT_SIZE];
 
   // Fill FFT input with windowed samples (Hanning window)
-  // If stereo, take only left channel (every other sample)
-  int step = (this->audio_channels_ > 1) ? 2 : 1;
+  // After downmix, ring buffer data is always mono if output_mono_ is set
+  int step = (!this->output_mono_ && this->audio_channels_ > 1) ? 2 : 1;
   for (int i = 0; i < FFT_SIZE; i++) {
     float window = 0.5f * (1.0f - cosf(2.0f * M_PI * i / (FFT_SIZE - 1)));
     real[i] = (float)pcm[i * step] * window / 32768.0f;
@@ -2283,17 +2810,29 @@ void Mp4Player::compute_spectrum_from_pcm_(const int16_t *pcm, size_t sample_cou
     if (bin_hi <= bin_lo) bin_hi = bin_lo + 1;
     if (bin_hi > half) bin_hi = half;
 
+    // Average magnitude across bins in band (not peak)
     float sum = 0.0f;
+    int count = 0;
     for (int b = bin_lo; b < bin_hi; b++) {
       float mag = sqrtf(real[b] * real[b] + imag[b] * imag[b]);
-      if (mag > sum) sum = mag;  // Use peak within band
+      sum += mag;
+      count++;
     }
+    if (count > 0) sum /= count;
 
-    // Convert to dB-like scale (0-100)
+    // Convert to dB-like scale with wider range
     float db = 20.0f * log10f(sum + 1e-6f);
-    float normalized = (db + 40.0f) / 40.0f;  // -40dB to 0dB -> 0 to 1
+    // Use -60dB to -6dB range for better dynamic range
+    float normalized = (db + 60.0f) / 54.0f;
     if (normalized < 0.0f) normalized = 0.0f;
     if (normalized > 1.0f) normalized = 1.0f;
+
+    // Apply per-band compensation: attenuate bass, boost highs
+    // Low bands (bass) have naturally more energy, reduce them
+    // High bands (treble) have less energy, boost them slightly
+    float band_frac = (float)band / SPECTRUM_BANDS;
+    float compensation = 0.5f + 0.5f * band_frac;  // 0.5x for lowest, 1.0x for highest
+    normalized *= compensation;
 
     this->spectrum_magnitudes_[band] = normalized * 100.0f;
   }
@@ -2304,84 +2843,422 @@ void Mp4Player::create_spectrum_ui_() {
 
   lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
 
-  // Full-screen container
+  // Full-screen container with dark background
   this->spectrum_container_ = lv_obj_create(parent);
   lv_obj_set_size(this->spectrum_container_, LV_PCT(100), LV_PCT(100));
   lv_obj_center(this->spectrum_container_);
-  lv_obj_set_style_bg_color(this->spectrum_container_, lv_color_hex(0x0A0A1A), 0);
+  lv_obj_set_style_bg_color(this->spectrum_container_, lv_color_hex(0x020208), 0);
   lv_obj_set_style_bg_opa(this->spectrum_container_, LV_OPA_COVER, 0);
   lv_obj_set_style_border_width(this->spectrum_container_, 0, 0);
   lv_obj_set_style_pad_all(this->spectrum_container_, 0, 0);
   lv_obj_clear_flag(this->spectrum_container_, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Music icon + title at top
+  // ========== TOP: Title area (music icon + song name + format) ==========
   lv_obj_t *title_area = lv_obj_create(this->spectrum_container_);
-  lv_obj_set_size(title_area, LV_PCT(100), 80);
-  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_size(title_area, LV_PCT(100), 60);
+  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 5);
   lv_obj_set_style_bg_opa(title_area, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(title_area, 0, 0);
+  lv_obj_set_style_pad_all(title_area, 0, 0);
   lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(title_area, LV_OBJ_FLAG_CLICKABLE);
 
-  // Music icon
   lv_obj_t *music_icon = lv_label_create(title_area);
   lv_label_set_text(music_icon, LV_SYMBOL_AUDIO);
-  lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00FFFF), 0);
   lv_obj_set_style_text_font(music_icon, &lv_font_montserrat_16, 0);
-  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 20, -10);
+  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 15, -8);
 
-  // Song title (filename)
   this->spectrum_title_label_ = lv_label_create(title_area);
   lv_label_set_text(this->spectrum_title_label_, "");
   lv_obj_set_style_text_color(this->spectrum_title_label_, lv_color_white(), 0);
   lv_obj_set_style_text_font(this->spectrum_title_label_, &lv_font_montserrat_16, 0);
-  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(80));
-  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 50, -10);
+  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(75));
+  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 45, -8);
 
-  // Format info
   this->spectrum_artist_label_ = lv_label_create(title_area);
   lv_label_set_text(this->spectrum_artist_label_, "");
   lv_obj_set_style_text_color(this->spectrum_artist_label_, lv_color_hex(0x888888), 0);
   lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
-  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 50, 12);
+  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 45, 12);
 
-  // Spectrum bars area
-  lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);
-  lv_obj_set_size(bars_area, LV_PCT(90), LV_PCT(55));
-  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, 10);
-  lv_obj_set_style_bg_opa(bars_area, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(bars_area, 0, 0);
-  lv_obj_set_style_pad_all(bars_area, 0, 0);
-  lv_obj_clear_flag(bars_area, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_flex_flow(bars_area, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(bars_area, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+  // ========== CENTER: Visualization area ==========
+  this->rebuild_spectrum_viz_();
 
-  // Create bars with gradient colors
-  for (int i = 0; i < SPECTRUM_BANDS; i++) {
-    lv_obj_t *bar = lv_obj_create(bars_area);
-    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);  // Start small
-    lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_radius(bar, 3, 0);
-    lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+  this->spectrum_color_phase_ = 0;
 
-    // Color gradient from cyan to magenta across bands
-    uint8_t r = (uint8_t)(i * 255 / SPECTRUM_BANDS);
-    uint8_t g = (uint8_t)(100 + (SPECTRUM_BANDS - i) * 100 / SPECTRUM_BANDS);
-    uint8_t b = (uint8_t)(200 + i * 55 / SPECTRUM_BANDS);
-    lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+  // ========== BOTTOM: Control bar (like video player) ==========
+  lv_obj_t *ctrl_bar = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(ctrl_bar, LV_PCT(100), 100);
+  lv_obj_align(ctrl_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_color(ctrl_bar, lv_color_hex(0x050510), 0);
+  lv_obj_set_style_bg_opa(ctrl_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(ctrl_bar, 0, 0);
+  lv_obj_set_style_pad_all(ctrl_bar, 0, 0);
+  lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_CLICKABLE);
 
-    // Gradient from bottom (darker) to top (brighter)
-    lv_obj_set_style_bg_grad_color(bar, lv_color_make(r / 3, g / 3, b / 3), 0);
-    lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+  // --- Row 1: Back | Prev | Play/Pause | Next | Stop | Mode | Time ---
+  lv_obj_t *back_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(back_btn, 50, 40);
+  lv_obj_set_pos(back_btn, 5, 5);
+  lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x1A0030), 0);
+  lv_obj_set_style_shadow_width(back_btn, 10, 0);
+  lv_obj_set_style_shadow_color(back_btn, lv_color_hex(0x8000FF), 0);
+  lv_obj_set_style_shadow_opa(back_btn, LV_OPA_40, 0);
+  lv_obj_t *back_lbl = lv_label_create(back_btn);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_obj_set_style_text_color(back_lbl, lv_color_hex(0xBF00FF), 0);
+  lv_obj_center(back_lbl);
+  lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
 
-    this->spectrum_bars_[i] = bar;
-    this->spectrum_smooth_[i] = 0;
-    this->spectrum_peaks_[i] = 0;
+  // Previous track button
+  lv_obj_t *prev_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(prev_btn, 50, 40);
+  lv_obj_set_pos(prev_btn, 62, 5);
+  lv_obj_set_style_radius(prev_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x001A30), 0);
+  lv_obj_set_style_shadow_width(prev_btn, 10, 0);
+  lv_obj_set_style_shadow_color(prev_btn, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_shadow_opa(prev_btn, LV_OPA_40, 0);
+  lv_obj_t *prev_lbl = lv_label_create(prev_btn);
+  lv_label_set_text(prev_lbl, LV_SYMBOL_PREV);
+  lv_obj_set_style_text_color(prev_lbl, lv_color_hex(0x00FFFF), 0);
+  lv_obj_center(prev_lbl);
+  lv_obj_add_event_cb(prev_btn, spectrum_prev_cb_, LV_EVENT_CLICKED, this);
+
+  this->spectrum_play_btn_ = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(this->spectrum_play_btn_, 50, 40);
+  lv_obj_set_pos(this->spectrum_play_btn_, 119, 5);
+  lv_obj_set_style_radius(this->spectrum_play_btn_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(this->spectrum_play_btn_, lv_color_hex(0x001A30), 0);
+  lv_obj_set_style_shadow_width(this->spectrum_play_btn_, 10, 0);
+  lv_obj_set_style_shadow_color(this->spectrum_play_btn_, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_shadow_opa(this->spectrum_play_btn_, LV_OPA_40, 0);
+  lv_obj_t *play_lbl = lv_label_create(this->spectrum_play_btn_);
+  lv_label_set_text(play_lbl, LV_SYMBOL_PAUSE);
+  lv_obj_set_style_text_color(play_lbl, lv_color_hex(0x00FFFF), 0);
+  lv_obj_center(play_lbl);
+  lv_obj_add_event_cb(this->spectrum_play_btn_, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
+
+  // Next track button
+  lv_obj_t *next_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(next_btn, 50, 40);
+  lv_obj_set_pos(next_btn, 176, 5);
+  lv_obj_set_style_radius(next_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x001A30), 0);
+  lv_obj_set_style_shadow_width(next_btn, 10, 0);
+  lv_obj_set_style_shadow_color(next_btn, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_shadow_opa(next_btn, LV_OPA_40, 0);
+  lv_obj_t *next_lbl = lv_label_create(next_btn);
+  lv_label_set_text(next_lbl, LV_SYMBOL_NEXT);
+  lv_obj_set_style_text_color(next_lbl, lv_color_hex(0x00FFFF), 0);
+  lv_obj_center(next_lbl);
+  lv_obj_add_event_cb(next_btn, spectrum_next_cb_, LV_EVENT_CLICKED, this);
+
+  lv_obj_t *stop_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(stop_btn, 50, 40);
+  lv_obj_set_pos(stop_btn, 233, 5);
+  lv_obj_set_style_radius(stop_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(stop_btn, lv_color_hex(0x300010), 0);
+  lv_obj_set_style_shadow_width(stop_btn, 10, 0);
+  lv_obj_set_style_shadow_color(stop_btn, lv_color_hex(0xFF0040), 0);
+  lv_obj_set_style_shadow_opa(stop_btn, LV_OPA_40, 0);
+  lv_obj_t *stop_lbl = lv_label_create(stop_btn);
+  lv_label_set_text(stop_lbl, LV_SYMBOL_STOP);
+  lv_obj_set_style_text_color(stop_lbl, lv_color_hex(0xFF0040), 0);
+  lv_obj_center(stop_lbl);
+  lv_obj_add_event_cb(stop_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
+
+  // Mode switch button
+  this->spectrum_mode_btn_ = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(this->spectrum_mode_btn_, 50, 40);
+  lv_obj_set_pos(this->spectrum_mode_btn_, 290, 5);
+  lv_obj_set_style_radius(this->spectrum_mode_btn_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(this->spectrum_mode_btn_, lv_color_hex(0x0A1A0A), 0);
+  lv_obj_set_style_shadow_width(this->spectrum_mode_btn_, 10, 0);
+  lv_obj_set_style_shadow_color(this->spectrum_mode_btn_, lv_color_hex(0x00FF80), 0);
+  lv_obj_set_style_shadow_opa(this->spectrum_mode_btn_, LV_OPA_40, 0);
+  lv_obj_t *mode_lbl = lv_label_create(this->spectrum_mode_btn_);
+  lv_label_set_text(mode_lbl, LV_SYMBOL_EYE_OPEN);
+  lv_obj_set_style_text_color(mode_lbl, lv_color_hex(0x00FF80), 0);
+  lv_obj_center(mode_lbl);
+  lv_obj_add_event_cb(this->spectrum_mode_btn_, spectrum_mode_cb_, LV_EVENT_CLICKED, this);
+
+  // Time label (elapsed)
+  this->spectrum_time_label_ = lv_label_create(ctrl_bar);
+  lv_label_set_text(this->spectrum_time_label_, "00:00");
+  lv_obj_set_pos(this->spectrum_time_label_, 350, 15);
+  lv_obj_set_style_text_color(this->spectrum_time_label_, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_text_font(this->spectrum_time_label_, &lv_font_montserrat_14, 0);
+
+  // --- Row 2: Volume ---
+  lv_obj_t *vol_icon = lv_label_create(ctrl_bar);
+  lv_label_set_text(vol_icon, LV_SYMBOL_VOLUME_MAX);
+  lv_obj_set_pos(vol_icon, 12, 52);
+  lv_obj_set_style_text_color(vol_icon, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_text_font(vol_icon, &lv_font_montserrat_16, 0);
+
+  this->spectrum_volume_slider_ = lv_slider_create(ctrl_bar);
+  lv_obj_set_size(this->spectrum_volume_slider_, 180, 10);
+  lv_obj_set_pos(this->spectrum_volume_slider_, 45, 57);
+  lv_slider_set_range(this->spectrum_volume_slider_, 0, 100);
+  lv_slider_set_value(this->spectrum_volume_slider_, this->volume_level_, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0x1A1A2E), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(this->spectrum_volume_slider_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0xFF00FF), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(this->spectrum_volume_slider_, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0x00FFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->spectrum_volume_slider_, 0, LV_PART_MAIN);
+  lv_obj_add_event_cb(this->spectrum_volume_slider_, spectrum_volume_cb_, LV_EVENT_VALUE_CHANGED, this);
+
+  // --- Row 3: Format badge (neon green) ---
+  lv_obj_t *format_lbl = lv_label_create(ctrl_bar);
+  const char *ext = strrchr(this->file_path_.c_str(), '.');
+  const char *fmt = "AUDIO";
+  if (ext) {
+    if (strcasecmp(ext, ".mp3") == 0) fmt = "MP3";
+    else if (strcasecmp(ext, ".wav") == 0) fmt = "WAV";
+    else if (strcasecmp(ext, ".flac") == 0) fmt = "FLAC";
+    else if (strcasecmp(ext, ".aac") == 0) fmt = "AAC";
+    else if (strcasecmp(ext, ".ogg") == 0) fmt = "OGG";
+    else if (strcasecmp(ext, ".m4a") == 0) fmt = "M4A";
   }
+  lv_label_set_text(format_lbl, fmt);
+  lv_obj_set_pos(format_lbl, 10, 78);
+  lv_obj_set_style_text_color(format_lbl, lv_color_hex(0x00FF00), 0);
+  lv_obj_set_style_text_font(format_lbl, &lv_font_montserrat_14, 0);
 
   this->spectrum_last_update_ = 0;
   ESP_LOGI(TAG, "Spectrum analyzer UI created");
+}
+
+void Mp4Player::spectrum_mode_cb_(lv_event_t *e) {
+  Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  player->spectrum_viz_mode_ = (player->spectrum_viz_mode_ + 1) % 3;
+  player->rebuild_spectrum_viz_();
+  static const char *mode_names[] = {"Spherical VU", "Abstract Sphere", "Spectrum Analyzer"};
+  ESP_LOGI(TAG, "Spectrum viz mode: %d (%s)", player->spectrum_viz_mode_, mode_names[player->spectrum_viz_mode_]);
+}
+
+void Mp4Player::rebuild_spectrum_viz_() {
+  // Neon color palette shared by both modes
+  static const uint32_t neon_colors[SPECTRUM_BANDS] = {
+    0xFF0040, 0xFF0080, 0xFF00BF, 0xFF00FF,
+    0xBF00FF, 0x8000FF, 0x4000FF, 0x0040FF,
+    0x0080FF, 0x00BFFF, 0x00FFFF, 0x00FFB0,
+    0x00FF60, 0x40FF00, 0x80FF00, 0xFFFF00,
+  };
+
+  // Delete old bars area if exists
+  if (this->spectrum_bars_area_) {
+    lv_obj_del(this->spectrum_bars_area_);
+    this->spectrum_bars_area_ = nullptr;
+    this->spectrum_glow_ring_ = nullptr;
+    this->spectrum_glow_circle_ = nullptr;
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      this->spectrum_bars_[i] = nullptr;
+      this->spectrum_peak_indicators_[i] = nullptr;
+    }
+  }
+
+  // Create bars area container (larger for 1024x600 screen)
+  this->spectrum_bars_area_ = lv_obj_create(this->spectrum_container_);
+  int area_h = 240;  // Taller area for bigger viz
+  lv_obj_set_size(this->spectrum_bars_area_, LV_PCT(100), area_h);
+  lv_obj_align(this->spectrum_bars_area_, LV_ALIGN_CENTER, 0, -20);
+  lv_obj_set_style_bg_opa(this->spectrum_bars_area_, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(this->spectrum_bars_area_, 0, 0);
+  lv_obj_set_style_pad_all(this->spectrum_bars_area_, 0, 0);
+  lv_obj_clear_flag(this->spectrum_bars_area_, LV_OBJ_FLAG_SCROLLABLE);
+
+  if (this->spectrum_viz_mode_ == 2) {
+    // ===== MODE 2: SOUND SPECTRUM ANALYZER (classic vertical bars EQ) =====
+    int bar_gap = 4;
+    int margin_left = 10;
+    int margin_right = 10;
+    int margin_top = 10;
+    int margin_bottom = 10;
+    int usable_w = 420 - margin_left - margin_right;
+    int bar_w = (usable_w - (SPECTRUM_BANDS - 1) * bar_gap) / SPECTRUM_BANDS;
+    if (bar_w < 8) bar_w = 8;
+    int max_bar_h = area_h - margin_top - margin_bottom;
+    int base_x = (lv_obj_get_width(this->spectrum_bars_area_) - (SPECTRUM_BANDS * (bar_w + bar_gap) - bar_gap)) / 2;
+
+    // Create bars and peak indicators
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      int x = base_x + i * (bar_w + bar_gap);
+
+      // Main bar (grows upward from bottom)
+      lv_obj_t *bar = lv_obj_create(this->spectrum_bars_area_);
+      lv_obj_set_size(bar, bar_w, 2);  // start at minimum height
+      lv_obj_set_pos(bar, x, margin_top + max_bar_h - 2);
+      lv_obj_set_style_border_width(bar, 0, 0);
+      lv_obj_set_style_radius(bar, 1, 0);
+      lv_obj_set_style_pad_all(bar, 0, 0);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+
+      // Green-to-yellow-to-red gradient (classic analyzer)
+      lv_obj_set_style_bg_color(bar, lv_color_hex(0x00FF00), 0);
+      lv_obj_set_style_bg_opa(bar, LV_OPA_90, 0);
+      lv_obj_set_style_bg_grad_color(bar, lv_color_hex(0xFF0000), 0);
+      lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+      lv_obj_set_style_shadow_width(bar, 6, 0);
+      lv_obj_set_style_shadow_color(bar, lv_color_hex(0x00FF40), 0);
+      lv_obj_set_style_shadow_opa(bar, LV_OPA_40, 0);
+
+      this->spectrum_bars_[i] = bar;
+      this->spectrum_smooth_[i] = 0;
+      this->spectrum_peaks_[i] = 0;
+
+      // Peak indicator (thin line that falls slowly)
+      lv_obj_t *peak = lv_obj_create(this->spectrum_bars_area_);
+      lv_obj_set_size(peak, bar_w, 2);
+      lv_obj_set_pos(peak, x, margin_top + max_bar_h - 2);
+      lv_obj_set_style_bg_color(peak, lv_color_hex(0xFFFFFF), 0);
+      lv_obj_set_style_bg_opa(peak, LV_OPA_COVER, 0);
+      lv_obj_set_style_border_width(peak, 0, 0);
+      lv_obj_set_style_radius(peak, 0, 0);
+      lv_obj_set_style_pad_all(peak, 0, 0);
+      lv_obj_set_style_shadow_width(peak, 4, 0);
+      lv_obj_set_style_shadow_color(peak, lv_color_hex(0xFFFFFF), 0);
+      lv_obj_set_style_shadow_opa(peak, LV_OPA_60, 0);
+      lv_obj_clear_flag(peak, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_clear_flag(peak, LV_OBJ_FLAG_CLICKABLE);
+      this->spectrum_peak_indicators_[i] = peak;
+    }
+
+  } else if (this->spectrum_viz_mode_ == 0) {
+    // ===== MODE 0: SPHERICAL DESIGN (bars in arc + ring + core) =====
+    // Outer glowing ring
+    this->spectrum_glow_ring_ = lv_obj_create(this->spectrum_bars_area_);
+    lv_obj_set_size(this->spectrum_glow_ring_, 208, 208);  // 160*1.3
+    lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_radius(this->spectrum_glow_ring_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(this->spectrum_glow_ring_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(this->spectrum_glow_ring_, 3, 0);
+    lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_border_opa(this->spectrum_glow_ring_, LV_OPA_40, 0);
+    lv_obj_set_style_shadow_width(this->spectrum_glow_ring_, 20, 0);
+    lv_obj_set_style_shadow_color(this->spectrum_glow_ring_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_shadow_opa(this->spectrum_glow_ring_, LV_OPA_30, 0);
+    lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_CLICKABLE);
+
+    // Central pulsating circle (bass core)
+    this->spectrum_glow_circle_ = lv_obj_create(this->spectrum_bars_area_);
+    lv_obj_set_size(this->spectrum_glow_circle_, 65, 65);  // 50*1.3
+    lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_radius(this->spectrum_glow_circle_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_bg_opa(this->spectrum_glow_circle_, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(this->spectrum_glow_circle_, 0, 0);
+    lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, 40, 0);
+    lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_shadow_opa(this->spectrum_glow_circle_, LV_OPA_60, 0);
+    lv_obj_set_style_shadow_spread(this->spectrum_glow_circle_, 6, 0);
+    lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_CLICKABLE);
+
+    // Bars in arc pattern around center (spherical projection)
+    int bar_width = 16;
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      lv_obj_t *bar = lv_obj_create(this->spectrum_bars_area_);
+      lv_obj_set_size(bar, bar_width, 4);
+      lv_obj_set_style_border_width(bar, 0, 0);
+      lv_obj_set_style_radius(bar, 4, 0);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+
+      uint32_t col = neon_colors[i];
+      uint8_t r = (col >> 16) & 0xFF;
+      uint8_t g = (col >> 8) & 0xFF;
+      uint8_t b = col & 0xFF;
+
+      lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
+      lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+      lv_obj_set_style_bg_grad_color(bar, lv_color_make(r/2, g/2, b/2), 0);
+      lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+      lv_obj_set_style_shadow_width(bar, 12, 0);
+      lv_obj_set_style_shadow_color(bar, lv_color_make(r, g, b), 0);
+      lv_obj_set_style_shadow_opa(bar, LV_OPA_60, 0);
+      lv_obj_set_style_shadow_spread(bar, 2, 0);
+
+      this->spectrum_bars_[i] = bar;
+      this->spectrum_smooth_[i] = 0;
+      this->spectrum_peaks_[i] = 0;
+    }
+  } else {
+    // ===== MODE 1: ABSTRACT SPHERE (30% bigger for 1024x600) =====
+    // Outer glowing ring - 30% bigger
+    this->spectrum_glow_ring_ = lv_obj_create(this->spectrum_bars_area_);
+    lv_obj_set_size(this->spectrum_glow_ring_, 208, 208);  // 160*1.3
+    lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_radius(this->spectrum_glow_ring_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(this->spectrum_glow_ring_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(this->spectrum_glow_ring_, 3, 0);
+    lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_border_opa(this->spectrum_glow_ring_, LV_OPA_40, 0);
+    lv_obj_set_style_shadow_width(this->spectrum_glow_ring_, 32, 0);  // 25*1.3
+    lv_obj_set_style_shadow_color(this->spectrum_glow_ring_, lv_color_hex(0x00FFFF), 0);
+    lv_obj_set_style_shadow_opa(this->spectrum_glow_ring_, LV_OPA_30, 0);
+    lv_obj_set_style_shadow_spread(this->spectrum_glow_ring_, 7, 0);
+    lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_CLICKABLE);
+
+    // Central pulsating core - 30% bigger
+    this->spectrum_glow_circle_ = lv_obj_create(this->spectrum_bars_area_);
+    lv_obj_set_size(this->spectrum_glow_circle_, 65, 65);  // 50*1.3
+    lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_radius(this->spectrum_glow_circle_, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_hex(0xFF00FF), 0);
+    lv_obj_set_style_bg_opa(this->spectrum_glow_circle_, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(this->spectrum_glow_circle_, 0, 0);
+    lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, 52, 0);  // 40*1.3
+    lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_hex(0xFF00FF), 0);
+    lv_obj_set_style_shadow_opa(this->spectrum_glow_circle_, LV_OPA_70, 0);
+    lv_obj_set_style_shadow_spread(this->spectrum_glow_circle_, 10, 0);
+    lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_CLICKABLE);
+
+    // Radial particles - 30% bigger
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      lv_obj_t *bar = lv_obj_create(this->spectrum_bars_area_);
+      lv_obj_set_size(bar, 10, 6);  // 30% bigger base
+      lv_obj_set_style_border_width(bar, 0, 0);
+      lv_obj_set_style_radius(bar, 4, 0);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+      lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+
+      uint32_t col = neon_colors[i];
+      uint8_t r = (col >> 16) & 0xFF;
+      uint8_t g = (col >> 8) & 0xFF;
+      uint8_t b = col & 0xFF;
+
+      lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
+      lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+      lv_obj_set_style_shadow_width(bar, 20, 0);
+      lv_obj_set_style_shadow_color(bar, lv_color_make(r, g, b), 0);
+      lv_obj_set_style_shadow_opa(bar, LV_OPA_80, 0);
+      lv_obj_set_style_shadow_spread(bar, 5, 0);
+
+      // Initial position on circle
+      float radius_inner = 59.0f;  // 45*1.3
+      float angle = (float)i / SPECTRUM_BANDS * 2.0f * 3.14159f;
+      int cx = 210;
+      int cy = area_h / 2;
+      int x = cx + (int)(cosf(angle) * radius_inner) - 5;
+      int y = cy + (int)(sinf(angle) * radius_inner) - 3;
+      lv_obj_set_pos(bar, x, y);
+
+      this->spectrum_bars_[i] = bar;
+      this->spectrum_smooth_[i] = 0;
+      this->spectrum_peaks_[i] = 0;
+    }
+  }
 }
 
 void Mp4Player::destroy_spectrum_ui_() {
@@ -2390,8 +3267,17 @@ void Mp4Player::destroy_spectrum_ui_() {
     this->spectrum_container_ = nullptr;
     this->spectrum_title_label_ = nullptr;
     this->spectrum_artist_label_ = nullptr;
+    this->spectrum_play_btn_ = nullptr;
+    this->spectrum_volume_slider_ = nullptr;
+    this->spectrum_time_label_ = nullptr;
+    this->spectrum_glow_circle_ = nullptr;
+    this->spectrum_glow_ring_ = nullptr;
+    this->spectrum_bars_area_ = nullptr;
+    this->spectrum_mode_btn_ = nullptr;
+    this->spectrum_color_phase_ = 0;
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
       this->spectrum_bars_[i] = nullptr;
+      this->spectrum_peak_indicators_[i] = nullptr;
       this->spectrum_smooth_[i] = 0;
       this->spectrum_peaks_[i] = 0;
     }
@@ -2408,10 +3294,26 @@ void Mp4Player::update_spectrum_() {
   if (now - this->spectrum_last_update_ < 33) return;
   this->spectrum_last_update_ = now;
 
+  // Update elapsed time label
+  if (this->spectrum_time_label_ && this->current_time_ms_ > 0) {
+    uint32_t sec = this->current_time_ms_ / 1000;
+    uint32_t total = this->total_duration_ms_ / 1000;
+    char time_str[32];
+    if (total > 0) {
+      snprintf(time_str, sizeof(time_str), "%02u:%02u / %02u:%02u",
+               sec / 60, sec % 60, total / 60, total % 60);
+    } else {
+      snprintf(time_str, sizeof(time_str), "%02u:%02u", sec / 60, sec % 60);
+    }
+    lv_label_set_text(this->spectrum_time_label_, time_str);
+  }
+
   // Sample PCM data from the ring buffer (peek, don't consume)
-  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * (this->audio_channels_ > 1 ? 2 : 1))) {
+  // After downmix, ring buffer contains mono data if output_mono_ is set
+  int ring_ch = (!this->output_mono_ && this->audio_channels_ > 1) ? 2 : 1;
+  if (this->audio_ring_buffer_ && this->audio_ring_available_() >= (size_t)(FFT_SIZE * 2 * ring_ch)) {
     // Read a snapshot from current ring buffer position without consuming
-    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * (this->audio_channels_ > 1 ? 2 : 1);
+    size_t bytes_needed = FFT_SIZE * sizeof(int16_t) * ring_ch;
     int16_t *samples = (int16_t *)malloc(bytes_needed);
     if (samples) {
       // Peek at ring buffer data (read from current read position without advancing)
@@ -2419,39 +3321,308 @@ void Mp4Player::update_spectrum_() {
       for (size_t i = 0; i < bytes_needed; i++) {
         ((uint8_t *)samples)[i] = this->audio_ring_buffer_[(read_pos + i) % this->audio_ring_size_];
       }
-      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * (this->audio_channels_ > 1 ? 2 : 1));
+      this->compute_spectrum_from_pcm_(samples, FFT_SIZE * ring_ch);
       free(samples);
     }
   }
 
-  // Get max bar height from parent
-  lv_obj_t *bars_parent = lv_obj_get_parent(this->spectrum_bars_[0]);
-  if (!bars_parent) return;
-  int max_h = lv_obj_get_content_height(bars_parent);
+  if (!this->spectrum_bars_area_) return;
+  int area_h = lv_obj_get_content_height(this->spectrum_bars_area_);
+  int area_w = lv_obj_get_content_width(this->spectrum_bars_area_);
 
+  static const uint32_t neon_colors[SPECTRUM_BANDS] = {
+    0xFF0040, 0xFF0080, 0xFF00BF, 0xFF00FF,
+    0xBF00FF, 0x8000FF, 0x4000FF, 0x0040FF,
+    0x0080FF, 0x00BFFF, 0x00FFFF, 0x00FFB0,
+    0x00FF60, 0x40FF00, 0x80FF00, 0xFFFF00,
+  };
+
+  // Smooth all bands first (shared between modes)
+  float bass_avg = 0;
+  float total_avg = 0;
   for (int i = 0; i < SPECTRUM_BANDS; i++) {
-    if (!this->spectrum_bars_[i]) continue;
-
-    // Smooth animation (fast attack, slow decay)
     float target = this->spectrum_magnitudes_[i];
     if (target > this->spectrum_smooth_[i]) {
-      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.4f;  // Fast attack
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.5f;
     } else {
-      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.15f;  // Slow decay
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.12f;
     }
-
-    // Peak hold with slow fall
     if (this->spectrum_smooth_[i] > this->spectrum_peaks_[i]) {
       this->spectrum_peaks_[i] = this->spectrum_smooth_[i];
     } else {
-      this->spectrum_peaks_[i] *= 0.97f;  // Slow peak decay
+      this->spectrum_peaks_[i] *= 0.97f;
+    }
+    if (i < 4) bass_avg += this->spectrum_smooth_[i];
+    total_avg += this->spectrum_smooth_[i];
+  }
+  bass_avg /= 4.0f;
+  total_avg /= SPECTRUM_BANDS;
+
+  // Advance color phase
+  this->spectrum_color_phase_ += 2;
+
+  if (this->spectrum_viz_mode_ == 2) {
+    // ===== MODE 2: SOUND SPECTRUM ANALYZER (classic EQ bars) =====
+    int bar_gap = 4;
+    int margin_left = 45;
+    int margin_right = 10;
+    int margin_top = 10;
+    int margin_bottom = 22;
+    int usable_w = 420 - margin_left - margin_right;
+    int bar_w = (usable_w - (SPECTRUM_BANDS - 1) * bar_gap) / SPECTRUM_BANDS;
+    if (bar_w < 8) bar_w = 8;
+    int max_bar_h = area_h - margin_top - margin_bottom;
+    int base_x = (area_w - (SPECTRUM_BANDS * (bar_w + bar_gap) - bar_gap + margin_left)) / 2 + margin_left;
+
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      if (!this->spectrum_bars_[i]) continue;
+
+      float level = this->spectrum_smooth_[i] / 100.0f;
+      if (level > 1.0f) level = 1.0f;
+
+      int bar_h = (int)(level * max_bar_h);
+      if (bar_h < 2) bar_h = 2;
+
+      int x = base_x + i * (bar_w + bar_gap);
+      int y = margin_top + max_bar_h - bar_h;
+
+      lv_obj_set_pos(this->spectrum_bars_[i], x, y);
+      lv_obj_set_size(this->spectrum_bars_[i], bar_w, bar_h);
+
+      // Color transitions: green (bottom) -> yellow (mid) -> red (top)
+      uint8_t r, g, b;
+      if (level < 0.5f) {
+        // Green to yellow
+        float t = level * 2.0f;
+        r = (uint8_t)(t * 255);
+        g = 255;
+        b = 0;
+      } else {
+        // Yellow to red
+        float t = (level - 0.5f) * 2.0f;
+        r = 255;
+        g = (uint8_t)((1.0f - t) * 255);
+        b = 0;
+      }
+      lv_obj_set_style_bg_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+      lv_obj_set_style_bg_grad_color(this->spectrum_bars_[i], lv_color_make(0, g > 128 ? 200 : 100, 0), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+
+      // Dynamic glow based on level
+      int glow = 4 + (int)(level * 10.0f);
+      uint8_t glow_opa = (uint8_t)(30 + level * 120);
+      lv_obj_set_style_shadow_width(this->spectrum_bars_[i], glow, 0);
+      lv_obj_set_style_shadow_opa(this->spectrum_bars_[i], glow_opa, 0);
+
+      // Peak indicator - falls slowly
+      if (this->spectrum_peak_indicators_[i]) {
+        float peak_level = this->spectrum_peaks_[i] / 100.0f;
+        if (peak_level > 1.0f) peak_level = 1.0f;
+        int peak_y = margin_top + max_bar_h - (int)(peak_level * max_bar_h) - 2;
+        if (peak_y < margin_top) peak_y = margin_top;
+        lv_obj_set_pos(this->spectrum_peak_indicators_[i], x, peak_y);
+
+        // Peak color matches level (white when high, green-ish when low)
+        if (peak_level > 0.8f) {
+          lv_obj_set_style_bg_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFF2020), 0);
+          lv_obj_set_style_shadow_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFF2020), 0);
+        } else if (peak_level > 0.5f) {
+          lv_obj_set_style_bg_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFFFF00), 0);
+          lv_obj_set_style_shadow_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFFFF00), 0);
+        } else {
+          lv_obj_set_style_bg_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFFFFFF), 0);
+          lv_obj_set_style_shadow_color(this->spectrum_peak_indicators_[i], lv_color_hex(0xFFFFFF), 0);
+        }
+      }
     }
 
-    int bar_h = (int)(this->spectrum_smooth_[i] * max_h / 100.0f);
-    if (bar_h < 4) bar_h = 4;
-    if (bar_h > max_h) bar_h = max_h;
+  } else if (this->spectrum_viz_mode_ == 0) {
+    // ===== MODE 0: SPHERICAL DESIGN (arc bars + ring + core) =====
+    int center_x = area_w / 2;
+    int center_y = area_h / 2;
+    int max_bar_h = area_h / 2 - 10;
+    int bar_width = 16;
 
-    lv_obj_set_height(this->spectrum_bars_[i], bar_h);
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      if (!this->spectrum_bars_[i]) continue;
+
+      // Spherical bar positioning
+      float frac = (float)i / (SPECTRUM_BANDS - 1);
+      float angle_f = frac - 0.5f;
+      float sphere_curve = cosf(angle_f * 3.14159f);
+
+      float level = this->spectrum_smooth_[i] / 100.0f;
+      int bar_h = (int)(level * max_bar_h * (0.6f + 0.4f * sphere_curve));
+      if (bar_h < 4) bar_h = 4;
+      if (bar_h > max_bar_h) bar_h = max_bar_h;
+
+      // Bars grow upward from curved baseline
+      int x = (int)(15 + frac * (area_w - 30 - bar_width));
+      int base_y = center_y + 65 - (int)(sphere_curve * 32);
+      int y = base_y - bar_h;
+      lv_obj_set_pos(this->spectrum_bars_[i], x, y);
+      lv_obj_set_size(this->spectrum_bars_[i], bar_width, bar_h);
+
+      // Dynamic glow intensity
+      int glow = 8 + (int)(level * 20.0f);
+      uint8_t glow_opa = (uint8_t)(40 + level * 160);
+      if (glow_opa > 220) glow_opa = 220;
+      lv_obj_set_style_shadow_width(this->spectrum_bars_[i], glow, 0);
+      lv_obj_set_style_shadow_opa(this->spectrum_bars_[i], glow_opa, 0);
+
+      // Color cycling per bar
+      float hue_shift = (float)(this->spectrum_color_phase_ % 360);
+      float hue = fmodf(frac * 300.0f + hue_shift, 360.0f);
+      float h6 = hue / 60.0f;
+      int hi = (int)h6 % 6;
+      float f = h6 - (int)h6;
+      uint8_t r, g, b;
+      switch (hi) {
+        case 0: r = 255; g = (uint8_t)(255*f); b = 0; break;
+        case 1: r = (uint8_t)(255*(1-f)); g = 255; b = 0; break;
+        case 2: r = 0; g = 255; b = (uint8_t)(255*f); break;
+        case 3: r = 0; g = (uint8_t)(255*(1-f)); b = 255; break;
+        case 4: r = (uint8_t)(255*f); g = 0; b = 255; break;
+        default: r = 255; g = 0; b = (uint8_t)(255*(1-f)); break;
+      }
+      lv_obj_set_style_bg_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+      lv_obj_set_style_bg_grad_color(this->spectrum_bars_[i], lv_color_make(r/2, g/2, b/2), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+    }
+
+    // Pulsate central circle with bass
+    if (this->spectrum_glow_circle_) {
+      int circle_size = 52 + (int)(bass_avg * 0.5f);  // 40*1.3
+      if (circle_size > 117) circle_size = 117;  // 90*1.3
+      lv_obj_set_size(this->spectrum_glow_circle_, circle_size, circle_size);
+      lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+
+      float center_hue = fmodf((float)(this->spectrum_color_phase_ % 360) + 150.0f, 360.0f);
+      float h6 = center_hue / 60.0f;
+      int hi = (int)h6 % 6;
+      float f = h6 - (int)h6;
+      uint8_t cr, cg, cb;
+      switch (hi) {
+        case 0: cr = 255; cg = (uint8_t)(255*f); cb = 0; break;
+        case 1: cr = (uint8_t)(255*(1-f)); cg = 255; cb = 0; break;
+        case 2: cr = 0; cg = 255; cb = (uint8_t)(255*f); break;
+        case 3: cr = 0; cg = (uint8_t)(255*(1-f)); cb = 255; break;
+        case 4: cr = (uint8_t)(255*f); cg = 0; cb = 255; break;
+        default: cr = 255; cg = 0; cb = (uint8_t)(255*(1-f)); break;
+      }
+      lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_make(cr, cg, cb), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_make(cr, cg, cb), 0);
+      int shadow = 26 + (int)(bass_avg * 0.4f);
+      lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, shadow, 0);
+    }
+
+    // Pulsate outer ring
+    if (this->spectrum_glow_ring_) {
+      int ring_size = 182 + (int)(total_avg * 0.6f);  // 140*1.3
+      if (ring_size > 253) ring_size = 253;  // 195*1.3
+      lv_obj_set_size(this->spectrum_glow_ring_, ring_size, ring_size);
+      lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+
+      uint8_t ring_opa = (uint8_t)(60 + total_avg * 1.5f);
+      if (ring_opa > 200) ring_opa = 200;
+      lv_obj_set_style_border_opa(this->spectrum_glow_ring_, ring_opa, 0);
+
+      float ring_hue = fmodf((float)(this->spectrum_color_phase_ % 360) + 60.0f, 360.0f);
+      float h6 = ring_hue / 60.0f;
+      int hi = (int)h6 % 6;
+      float f = h6 - (int)h6;
+      uint8_t rr, rg, rb;
+      switch (hi) {
+        case 0: rr = 255; rg = (uint8_t)(255*f); rb = 0; break;
+        case 1: rr = (uint8_t)(255*(1-f)); rg = 255; rb = 0; break;
+        case 2: rr = 0; rg = 255; rb = (uint8_t)(255*f); break;
+        case 3: rr = 0; rg = (uint8_t)(255*(1-f)); rb = 255; break;
+        case 4: rr = (uint8_t)(255*f); rg = 0; rb = 255; break;
+        default: rr = 255; rg = 0; rb = (uint8_t)(255*(1-f)); break;
+      }
+      lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_make(rr, rg, rb), 0);
+    }
+
+  } else {
+    // ===== MODE 1: ABSTRACT SPHERE (30% bigger) =====
+    int cx = area_w / 2;
+    int cy = area_h / 2;
+    float radius_inner = 59.0f;   // 45*1.3
+    float radius_max = 104.0f;    // 80*1.3
+
+    float phase_rad = (float)(this->spectrum_color_phase_ % 360) * 3.14159f / 180.0f;
+
+    for (int i = 0; i < SPECTRUM_BANDS; i++) {
+      if (!this->spectrum_bars_[i]) continue;
+
+      float level = this->spectrum_smooth_[i] / 100.0f;
+
+      // Each bar orbits around center, pushed outward by its magnitude
+      float base_angle = (float)i / SPECTRUM_BANDS * 2.0f * 3.14159f;
+      float angle = base_angle + phase_rad * 0.3f;
+
+      float r = radius_inner + level * (radius_max - radius_inner);
+
+      // Bar size grows with level (30% bigger)
+      int bw = 8 + (int)(level * 18);   // was 6+14
+      int bh = 8 + (int)(level * 18);
+
+      int x = cx + (int)(cosf(angle) * r) - bw / 2;
+      int y = cy + (int)(sinf(angle) * r) - bh / 2;
+      lv_obj_set_pos(this->spectrum_bars_[i], x, y);
+      lv_obj_set_size(this->spectrum_bars_[i], bw, bh);
+      lv_obj_set_style_radius(this->spectrum_bars_[i], bw / 2, 0);
+
+      // Dynamic glow (30% bigger)
+      int glow = 13 + (int)(level * 39.0f);
+      uint8_t glow_opa = (uint8_t)(60 + level * 160);
+      if (glow_opa > 240) glow_opa = 240;
+      lv_obj_set_style_shadow_width(this->spectrum_bars_[i], glow, 0);
+      lv_obj_set_style_shadow_opa(this->spectrum_bars_[i], glow_opa, 0);
+      lv_obj_set_style_shadow_spread(this->spectrum_bars_[i], (int)(level * 8), 0);
+
+      // Color shifts with phase
+      uint32_t col_idx = (i + this->spectrum_color_phase_ / 20) % SPECTRUM_BANDS;
+      uint32_t col = neon_colors[col_idx];
+      uint8_t cr = (col >> 16) & 0xFF;
+      uint8_t cg = (col >> 8) & 0xFF;
+      uint8_t cb = col & 0xFF;
+      lv_obj_set_style_bg_color(this->spectrum_bars_[i], lv_color_make(cr, cg, cb), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_bars_[i], lv_color_make(cr, cg, cb), 0);
+    }
+
+    // Pulsate central circle with bass (30% bigger)
+    if (this->spectrum_glow_circle_) {
+      int circle_size = 46 + (int)(bass_avg * 0.65f);  // 35*1.3
+      if (circle_size > 117) circle_size = 117;
+      lv_obj_set_size(this->spectrum_glow_circle_, circle_size, circle_size);
+      lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+
+      uint32_t cidx = (this->spectrum_color_phase_ / 10) % SPECTRUM_BANDS;
+      uint32_t cc = neon_colors[cidx];
+      lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_hex(cc), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_hex(cc), 0);
+      int shadow = 33 + (int)(bass_avg * 0.5f);  // 25*1.3
+      lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, shadow, 0);
+    }
+
+    // Pulsate outer ring (30% bigger)
+    if (this->spectrum_glow_ring_) {
+      int ring_size = 182 + (int)(total_avg * 0.8f);  // 140*1.3
+      if (ring_size > 253) ring_size = 253;
+      lv_obj_set_size(this->spectrum_glow_ring_, ring_size, ring_size);
+      lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+
+      uint8_t ring_opa = (uint8_t)(50 + total_avg * 1.5f);
+      if (ring_opa > 200) ring_opa = 200;
+      lv_obj_set_style_border_opa(this->spectrum_glow_ring_, ring_opa, 0);
+
+      uint32_t ridx = (this->spectrum_color_phase_ / 15 + 4) % SPECTRUM_BANDS;
+      uint32_t rc = neon_colors[ridx];
+      lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_hex(rc), 0);
+      lv_obj_set_style_shadow_color(this->spectrum_glow_ring_, lv_color_hex(rc), 0);
+      lv_obj_set_style_shadow_opa(this->spectrum_glow_ring_, (uint8_t)(ring_opa / 2), 0);
+    }
   }
 }
 

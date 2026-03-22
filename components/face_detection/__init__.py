@@ -229,14 +229,14 @@ CLEAR_ALL_FACES_ACTION_SCHEMA = cv.Schema({
 })
 
 
-@automation.register_action("face_detection.enroll", EnrollFaceAction, ENROLL_FACE_ACTION_SCHEMA)
+@automation.register_action("face_detection.enroll", EnrollFaceAction, ENROLL_FACE_ACTION_SCHEMA, synchronous=True)
 async def enroll_face_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("face_detection.enroll_with_name", EnrollFaceWithNameAction, ENROLL_FACE_WITH_NAME_ACTION_SCHEMA)
+@automation.register_action("face_detection.enroll_with_name", EnrollFaceWithNameAction, ENROLL_FACE_WITH_NAME_ACTION_SCHEMA, synchronous=True)
 async def enroll_face_with_name_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
@@ -245,7 +245,7 @@ async def enroll_face_with_name_action_to_code(config, action_id, template_arg, 
     return var
 
 
-@automation.register_action("face_detection.set_name", SetFaceNameAction, SET_FACE_NAME_ACTION_SCHEMA)
+@automation.register_action("face_detection.set_name", SetFaceNameAction, SET_FACE_NAME_ACTION_SCHEMA, synchronous=True)
 async def set_face_name_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
@@ -256,7 +256,7 @@ async def set_face_name_action_to_code(config, action_id, template_arg, args):
     return var
 
 
-@automation.register_action("face_detection.delete", DeleteFaceAction, DELETE_FACE_ACTION_SCHEMA)
+@automation.register_action("face_detection.delete", DeleteFaceAction, DELETE_FACE_ACTION_SCHEMA, synchronous=True)
 async def delete_face_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
@@ -265,7 +265,7 @@ async def delete_face_action_to_code(config, action_id, template_arg, args):
     return var
 
 
-@automation.register_action("face_detection.clear_all", ClearAllFacesAction, CLEAR_ALL_FACES_ACTION_SCHEMA)
+@automation.register_action("face_detection.clear_all", ClearAllFacesAction, CLEAR_ALL_FACES_ACTION_SCHEMA, synchronous=True)
 async def clear_all_faces_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])

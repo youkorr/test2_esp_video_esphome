@@ -77,7 +77,7 @@ USB_WRITE_FILE_ACTION_SCHEMA = cv.Schema(
 ).extend(USB_PATH_ACTION_SCHEMA)
 
 @automation.register_action(
-    "usb_media_storage.write_file", UsbWriteFileAction, USB_WRITE_FILE_ACTION_SCHEMA
+    "usb_media_storage.write_file", UsbWriteFileAction, USB_WRITE_FILE_ACTION_SCHEMA, synchronous=True
 )
 async def usb_write_file_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
@@ -90,7 +90,7 @@ async def usb_write_file_to_code(config, action_id, template_arg, args):
 
 
 @automation.register_action(
-    "usb_media_storage.append_file", UsbAppendFileAction, USB_WRITE_FILE_ACTION_SCHEMA
+    "usb_media_storage.append_file", UsbAppendFileAction, USB_WRITE_FILE_ACTION_SCHEMA, synchronous=True
 )
 async def usb_append_file_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
@@ -103,7 +103,7 @@ async def usb_append_file_to_code(config, action_id, template_arg, args):
 
 
 @automation.register_action(
-    "usb_media_storage.create_directory", UsbCreateDirectoryAction, USB_PATH_ACTION_SCHEMA
+    "usb_media_storage.create_directory", UsbCreateDirectoryAction, USB_PATH_ACTION_SCHEMA, synchronous=True
 )
 async def usb_create_directory_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
@@ -114,7 +114,7 @@ async def usb_create_directory_to_code(config, action_id, template_arg, args):
 
 
 @automation.register_action(
-    "usb_media_storage.remove_directory", UsbRemoveDirectoryAction, USB_PATH_ACTION_SCHEMA
+    "usb_media_storage.remove_directory", UsbRemoveDirectoryAction, USB_PATH_ACTION_SCHEMA, synchronous=True
 )
 async def usb_remove_directory_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
@@ -125,7 +125,7 @@ async def usb_remove_directory_to_code(config, action_id, template_arg, args):
 
 
 @automation.register_action(
-    "usb_media_storage.delete_file", UsbDeleteFileAction, USB_PATH_ACTION_SCHEMA
+    "usb_media_storage.delete_file", UsbDeleteFileAction, USB_PATH_ACTION_SCHEMA, synchronous=True
 )
 async def usb_delete_file_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])

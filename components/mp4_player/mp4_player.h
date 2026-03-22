@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esphome/components/speaker/speaker.h"
 #include "esphome/components/audio/audio.h"
 #include <dirent.h>
@@ -113,6 +114,12 @@ class Mp4Player : public Component {
   // Static callbacks
   static void play_btn_cb_(lv_event_t *e);
   static void stop_btn_cb_(lv_event_t *e);
+  static void spectrum_stop_cb_(lv_event_t *e);
+  static void spectrum_playpause_cb_(lv_event_t *e);
+  static void spectrum_next_cb_(lv_event_t *e);
+  static void spectrum_prev_cb_(lv_event_t *e);
+  void play_next_track_();
+  void play_prev_track_();
   static void progress_slider_cb_(lv_event_t *e);
   static void volume_slider_cb_(lv_event_t *e);
   static void hide_timer_cb_(lv_timer_t *timer);
@@ -136,6 +143,7 @@ class Mp4Player : public Component {
   static FileType get_file_type_(const std::string &name);
   void open_media_file_(const std::string &path, FileType type);
   void show_image_viewer_(const std::string &path);
+  bool show_jpeg_image_(const std::string &path);
   void destroy_image_viewer_();
   static void image_close_cb_(lv_event_t *e);
   static void file_item_cb_(lv_event_t *e);
@@ -158,16 +166,36 @@ class Mp4Player : public Component {
   lv_obj_t *browser_title_{nullptr};
   lv_obj_t *image_viewer_{nullptr};
   std::string image_viewer_path_;
+  bool image_viewer_close_pending_{false};
+  lv_draw_buf_t *lottie_draw_buf_{nullptr};  // Draw buffer for Lottie rendering
 
   // Spectrum analyzer UI
   lv_obj_t *spectrum_container_{nullptr};
   lv_obj_t *spectrum_bars_[SPECTRUM_BANDS]{};
   lv_obj_t *spectrum_title_label_{nullptr};
   lv_obj_t *spectrum_artist_label_{nullptr};
+  lv_obj_t *spectrum_play_btn_{nullptr};
+  lv_obj_t *spectrum_volume_slider_{nullptr};
+  lv_obj_t *spectrum_time_label_{nullptr};
+  lv_obj_t *spectrum_glow_circle_{nullptr};
+  lv_obj_t *spectrum_glow_ring_{nullptr};
+  lv_obj_t *spectrum_bars_area_{nullptr};
+  lv_obj_t *spectrum_mode_btn_{nullptr};
+  lv_obj_t *spectrum_peak_indicators_[SPECTRUM_BANDS]{};
+  uint8_t spectrum_viz_mode_{0};  // 0=neon bars, 1=abstract sphere, 2=spectrum analyzer
+  uint32_t spectrum_color_phase_{0};
+  static void spectrum_volume_cb_(lv_event_t *e);
+  static void spectrum_mode_cb_(lv_event_t *e);
+  void rebuild_spectrum_viz_();
   float spectrum_magnitudes_[SPECTRUM_BANDS]{};
   float spectrum_peaks_[SPECTRUM_BANDS]{};
   float spectrum_smooth_[SPECTRUM_BANDS]{};
-  bool audio_only_mode_{false};
+  volatile bool audio_only_mode_{false};
+
+  // Playlist (built from current directory's audio files)
+  std::vector<std::string> playlist_;
+  int playlist_index_{-1};
+  volatile bool track_finished_{false};
   uint32_t spectrum_last_update_{0};
 
   // Configuration
@@ -238,6 +266,23 @@ class Mp4Player : public Component {
   uint8_t audio_channels_{0};
   uint8_t audio_bits_per_sample_{0};
   bool audio_decoder_ready_{false};
+  bool output_mono_{true};  // ESP32-P4 board has single speaker - downmix to mono
+
+  // Downmix stereo PCM to mono (in-place, returns new size = half)
+  size_t downmix_stereo_to_mono_(uint8_t *pcm_data, size_t size);
+
+  // Audio frame queue: decouples audio decode from video decode (like Waveshare)
+  // Playback task puts encoded audio frames on the queue
+  // Audio decode task reads from queue, decodes, downmixes, pushes to ring buffer
+  struct AudioFrameItem {
+    uint8_t *data;
+    size_t size;
+  };
+  static constexpr int AUDIO_FRAME_QUEUE_SIZE = 12;
+  QueueHandle_t audio_frame_queue_{nullptr};
+  static void audio_decode_task_(void *arg);
+  TaskHandle_t audio_decode_task_handle_{nullptr};
+  volatile bool audio_decode_task_running_{false};
 
   // Audio ring buffer for decoupling decode from speaker output
   uint8_t *audio_ring_buffer_{nullptr};

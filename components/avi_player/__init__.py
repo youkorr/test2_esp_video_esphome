@@ -115,14 +115,14 @@ AVI_PLAYER_ACTION_SCHEMA = cv.Schema({
 })
 
 
-@automation.register_action("avi_player.play", PlayAction, AVI_PLAYER_ACTION_SCHEMA)
+@automation.register_action("avi_player.play", PlayAction, AVI_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def play_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("avi_player.stop", StopAction, AVI_PLAYER_ACTION_SCHEMA)
+@automation.register_action("avi_player.stop", StopAction, AVI_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def stop_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])

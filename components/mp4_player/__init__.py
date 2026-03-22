@@ -97,6 +97,12 @@ async def to_code(config):
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
 
+    # Enable LVGL built-in image decoders for file browser image viewing
+    # LODEPNG: built-in PNG decoder (part of LVGL source, no external lib needed)
+    # BMP: built-in BMP decoder
+    cg.add_build_flag("-DLV_USE_LODEPNG=1")
+    cg.add_build_flag("-DLV_USE_BMP=1")
+
     # esp_extractor include paths and libraries
     esp_extractor_dir = os.path.join(component_dir, "components", "esp_extractor")
     if os.path.exists(esp_extractor_dir):
@@ -139,21 +145,21 @@ MP4_PLAYER_ACTION_SCHEMA = cv.Schema({
 })
 
 
-@automation.register_action("mp4_player.play", PlayAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.play", PlayAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def play_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("mp4_player.pause", PauseAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.pause", PauseAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def pause_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("mp4_player.stop", StopAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.stop", StopAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def stop_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])

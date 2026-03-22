@@ -98,22 +98,20 @@ external_components:
 # 🆕 LVGL ADVANCED FEATURES - ThorVG/SVG/Lottie
 # ============================================================================
 lvgl_advanced_features:
-  # ThorVG - Moteur de rendu vectoriel haute performance
-  # ThorVG utilise le GPU/PPA de l'ESP32-P4 pour le rendu accéléré
-  thorvg:
-    internal: true    # Utiliser la version ThorVG intégrée à LVGL
-    external: false   # Pas de ThorVG externe
+  # ThorVG - DISABLED: causes Guru Meditation stack overflow crashes on ESP32
+  # ThorVG rendering uses deep stack recursion that overflows loopTask stack
+  # even with small files (27KB). Incompatible with ESP32 task stack sizes.
+  # thorvg:
+  #   internal: true
+  #   external: false
 
   # Support SVG natif (nécessite ThorVG)
   # Permet d'utiliser des icônes et graphiques SVG
   # Exemple: icônes météo, logos, graphiques vectoriels
   svg: true
 
-  # Support Lottie (nécessite ThorVG)
-  # Permet d'utiliser des animations Lottie (JSON)
-  # Exemple: animations météo de Basmilius Weather Icons
-  # https://github.com/basmilius/weather-icons
-  lottie: true
+  # Lottie - DISABLED: requires ThorVG which crashes on ESP32
+  # lottie: true
 
   # Support de formats d'images supplémentaires
   gif: true      # Animations GIF (alternative à Lottie pour animations simples)
