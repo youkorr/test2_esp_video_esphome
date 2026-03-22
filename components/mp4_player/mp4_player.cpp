@@ -485,6 +485,14 @@ void Mp4Player::loop() {
     this->update_spectrum_();
   }
 
+  // Auto-next: track finished naturally, advance playlist
+  if (this->track_finished_) {
+    this->track_finished_ = false;
+    this->state_ = PlayerState::STOPPED;
+    this->playback_task_handle_ = nullptr;
+    this->play_next_track_();
+  }
+
   // Deferred image viewer cleanup (safe to delete LVGL objects outside event handler)
   if (this->image_viewer_close_pending_) {
     this->image_viewer_close_pending_ = false;
@@ -619,6 +627,11 @@ void Mp4Player::stop() {
   if (this->audio_only_mode_) {
     this->destroy_spectrum_ui_();
   }
+
+  // Clear playlist on manual stop
+  this->playlist_.clear();
+  this->playlist_index_ = -1;
+  this->track_finished_ = false;
 
   // Fire on_stop trigger (e.g. to restart microphone/wake word)
   this->on_stop_callbacks_.call();
@@ -1007,6 +1020,12 @@ void Mp4Player::playback_task_(void *arg) {
 
     esp_extractor_unregister_all();
     if (player->stop_requested_) break;
+  }
+
+  // Signal track finished naturally (not user-initiated stop)
+  if (!player->stop_requested_ && player->audio_only_mode_ && !player->playlist_.empty()) {
+    ESP_LOGI(TAG, "Track finished, signaling for next track");
+    player->track_finished_ = true;
   }
 
   ESP_LOGI(TAG, "Playback task exiting");
@@ -1614,6 +1633,124 @@ void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
       lv_obj_t *lbl = lv_obj_get_child(p->spectrum_play_btn_, 0);
       if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
     }
+  }
+}
+
+void Mp4Player::spectrum_next_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->play_next_track_();
+}
+
+void Mp4Player::spectrum_prev_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  p->play_prev_track_();
+}
+
+void Mp4Player::play_next_track_() {
+  if (this->playlist_.empty() || this->playlist_index_ < 0) {
+    this->stop();
+    return;
+  }
+  if (this->playlist_index_ + 1 >= (int)this->playlist_.size()) {
+    // End of album - stop and return to browser
+    ESP_LOGI(TAG, "End of playlist, returning to browser");
+    this->playlist_.clear();
+    this->playlist_index_ = -1;
+    this->stop();
+    return;
+  }
+  this->playlist_index_++;
+  std::string next_path = this->playlist_[this->playlist_index_];
+  ESP_LOGI(TAG, "Next track [%d/%d]: %s", this->playlist_index_ + 1, this->playlist_.size(), next_path.c_str());
+
+  // Stop current playback without destroying spectrum UI or returning to browser
+  this->stop_requested_ = true;
+  this->state_ = PlayerState::STOPPED;
+  if (this->playback_task_handle_) {
+    xEventGroupSetBits(this->playback_event_group_, EVENT_STOP);
+    xEventGroupWaitBits(this->playback_event_group_, EVENT_TASK_EXIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(3000));
+    this->playback_task_handle_ = nullptr;
+  }
+  this->current_time_ms_ = 0;
+  this->frame_count_ = 0;
+
+  // Start new track
+  this->play_file(next_path);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  // Update spectrum title
+  if (this->spectrum_title_label_) {
+    const char *fname = strrchr(next_path.c_str(), '/');
+    lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : next_path.c_str());
+  }
+  // Update format info
+  if (this->spectrum_artist_label_) {
+    char info[64];
+    const char *ch_str = "Mono";
+    if (this->audio_channels_ > 1 && !this->output_mono_) ch_str = "Stereo";
+    else if (this->audio_channels_ > 1 && this->output_mono_) ch_str = "Mono (downmix)";
+    snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+             this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100, ch_str,
+             this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+    lv_label_set_text(this->spectrum_artist_label_, info);
+  }
+  // Update play button icon
+  if (this->spectrum_play_btn_) {
+    lv_obj_t *lbl = lv_obj_get_child(this->spectrum_play_btn_, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+  }
+}
+
+void Mp4Player::play_prev_track_() {
+  if (this->playlist_.empty() || this->playlist_index_ < 0) return;
+  if (this->playlist_index_ - 1 < 0) {
+    // Already at first track - restart it
+    this->playlist_index_ = 0;
+  } else {
+    this->playlist_index_--;
+  }
+  std::string prev_path = this->playlist_[this->playlist_index_];
+  ESP_LOGI(TAG, "Prev track [%d/%d]: %s", this->playlist_index_ + 1, this->playlist_.size(), prev_path.c_str());
+
+  // Stop current playback without destroying spectrum UI
+  this->stop_requested_ = true;
+  this->state_ = PlayerState::STOPPED;
+  if (this->playback_task_handle_) {
+    xEventGroupSetBits(this->playback_event_group_, EVENT_STOP);
+    xEventGroupWaitBits(this->playback_event_group_, EVENT_TASK_EXIT, pdTRUE, pdFALSE, pdMS_TO_TICKS(3000));
+    this->playback_task_handle_ = nullptr;
+  }
+  this->current_time_ms_ = 0;
+  this->frame_count_ = 0;
+
+  // Start new track
+  this->play_file(prev_path);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  // Update spectrum title
+  if (this->spectrum_title_label_) {
+    const char *fname = strrchr(prev_path.c_str(), '/');
+    lv_label_set_text(this->spectrum_title_label_, fname ? fname + 1 : prev_path.c_str());
+  }
+  if (this->spectrum_artist_label_) {
+    char info[64];
+    const char *ch_str = "Mono";
+    if (this->audio_channels_ > 1 && !this->output_mono_) ch_str = "Stereo";
+    else if (this->audio_channels_ > 1 && this->output_mono_) ch_str = "Mono (downmix)";
+    snprintf(info, sizeof(info), "%u Hz  %s  %u-bit",
+             this->audio_sample_rate_ > 0 ? this->audio_sample_rate_ : 44100, ch_str,
+             this->audio_bits_per_sample_ > 0 ? this->audio_bits_per_sample_ : 16);
+    lv_label_set_text(this->spectrum_artist_label_, info);
+  }
+  if (this->spectrum_play_btn_) {
+    lv_obj_t *lbl = lv_obj_get_child(this->spectrum_play_btn_, 0);
+    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
   }
 }
 
@@ -2281,6 +2418,19 @@ void Mp4Player::open_media_file_(const std::string &path, FileType type) {
       break;
 
     case FileType::AUDIO:
+      // Build playlist from all audio files in current directory
+      this->playlist_.clear();
+      this->playlist_index_ = -1;
+      for (size_t i = 0; i < this->file_entries_.size(); i++) {
+        if (this->file_entries_[i].file_type == FileType::AUDIO) {
+          if (this->file_entries_[i].full_path == path) {
+            this->playlist_index_ = (int)this->playlist_.size();
+          }
+          this->playlist_.push_back(this->file_entries_[i].full_path);
+        }
+      }
+      ESP_LOGI(TAG, "Playlist: %d tracks, starting at index %d", this->playlist_.size(), this->playlist_index_);
+
       this->play_file(path);
 
       // play_file() shows video UI elements (touch_layer_, canvas_, controls_)
@@ -2749,10 +2899,10 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_CLICKABLE);
 
-  // --- Row 1: Back | Play/Pause | Stop | Time ---
+  // --- Row 1: Back | Prev | Play/Pause | Next | Stop | Mode | Time ---
   lv_obj_t *back_btn = lv_btn_create(ctrl_bar);
-  lv_obj_set_size(back_btn, 55, 40);
-  lv_obj_set_pos(back_btn, 10, 5);
+  lv_obj_set_size(back_btn, 50, 40);
+  lv_obj_set_pos(back_btn, 5, 5);
   lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x1A0030), 0);
   lv_obj_set_style_shadow_width(back_btn, 10, 0);
@@ -2764,9 +2914,24 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_center(back_lbl);
   lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
 
+  // Previous track button
+  lv_obj_t *prev_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(prev_btn, 50, 40);
+  lv_obj_set_pos(prev_btn, 62, 5);
+  lv_obj_set_style_radius(prev_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(prev_btn, lv_color_hex(0x001A30), 0);
+  lv_obj_set_style_shadow_width(prev_btn, 10, 0);
+  lv_obj_set_style_shadow_color(prev_btn, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_shadow_opa(prev_btn, LV_OPA_40, 0);
+  lv_obj_t *prev_lbl = lv_label_create(prev_btn);
+  lv_label_set_text(prev_lbl, LV_SYMBOL_PREV);
+  lv_obj_set_style_text_color(prev_lbl, lv_color_hex(0x00FFFF), 0);
+  lv_obj_center(prev_lbl);
+  lv_obj_add_event_cb(prev_btn, spectrum_prev_cb_, LV_EVENT_CLICKED, this);
+
   this->spectrum_play_btn_ = lv_btn_create(ctrl_bar);
-  lv_obj_set_size(this->spectrum_play_btn_, 55, 40);
-  lv_obj_set_pos(this->spectrum_play_btn_, 75, 5);
+  lv_obj_set_size(this->spectrum_play_btn_, 50, 40);
+  lv_obj_set_pos(this->spectrum_play_btn_, 119, 5);
   lv_obj_set_style_radius(this->spectrum_play_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(this->spectrum_play_btn_, lv_color_hex(0x001A30), 0);
   lv_obj_set_style_shadow_width(this->spectrum_play_btn_, 10, 0);
@@ -2778,9 +2943,24 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_center(play_lbl);
   lv_obj_add_event_cb(this->spectrum_play_btn_, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
 
+  // Next track button
+  lv_obj_t *next_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(next_btn, 50, 40);
+  lv_obj_set_pos(next_btn, 176, 5);
+  lv_obj_set_style_radius(next_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(next_btn, lv_color_hex(0x001A30), 0);
+  lv_obj_set_style_shadow_width(next_btn, 10, 0);
+  lv_obj_set_style_shadow_color(next_btn, lv_color_hex(0x00FFFF), 0);
+  lv_obj_set_style_shadow_opa(next_btn, LV_OPA_40, 0);
+  lv_obj_t *next_lbl = lv_label_create(next_btn);
+  lv_label_set_text(next_lbl, LV_SYMBOL_NEXT);
+  lv_obj_set_style_text_color(next_lbl, lv_color_hex(0x00FFFF), 0);
+  lv_obj_center(next_lbl);
+  lv_obj_add_event_cb(next_btn, spectrum_next_cb_, LV_EVENT_CLICKED, this);
+
   lv_obj_t *stop_btn = lv_btn_create(ctrl_bar);
-  lv_obj_set_size(stop_btn, 55, 40);
-  lv_obj_set_pos(stop_btn, 140, 5);
+  lv_obj_set_size(stop_btn, 50, 40);
+  lv_obj_set_pos(stop_btn, 233, 5);
   lv_obj_set_style_radius(stop_btn, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(stop_btn, lv_color_hex(0x300010), 0);
   lv_obj_set_style_shadow_width(stop_btn, 10, 0);
@@ -2792,10 +2972,10 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_center(stop_lbl);
   lv_obj_add_event_cb(stop_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
 
-  // Mode switch button (neon bars / abstract sphere)
+  // Mode switch button
   this->spectrum_mode_btn_ = lv_btn_create(ctrl_bar);
-  lv_obj_set_size(this->spectrum_mode_btn_, 55, 40);
-  lv_obj_set_pos(this->spectrum_mode_btn_, 205, 5);
+  lv_obj_set_size(this->spectrum_mode_btn_, 50, 40);
+  lv_obj_set_pos(this->spectrum_mode_btn_, 290, 5);
   lv_obj_set_style_radius(this->spectrum_mode_btn_, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_bg_color(this->spectrum_mode_btn_, lv_color_hex(0x0A1A0A), 0);
   lv_obj_set_style_shadow_width(this->spectrum_mode_btn_, 10, 0);
@@ -2810,7 +2990,7 @@ void Mp4Player::create_spectrum_ui_() {
   // Time label (elapsed)
   this->spectrum_time_label_ = lv_label_create(ctrl_bar);
   lv_label_set_text(this->spectrum_time_label_, "00:00");
-  lv_obj_set_pos(this->spectrum_time_label_, 270, 15);
+  lv_obj_set_pos(this->spectrum_time_label_, 350, 15);
   lv_obj_set_style_text_color(this->spectrum_time_label_, lv_color_hex(0x00FFFF), 0);
   lv_obj_set_style_text_font(this->spectrum_time_label_, &lv_font_montserrat_14, 0);
 

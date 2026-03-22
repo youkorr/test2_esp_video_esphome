@@ -116,6 +116,10 @@ class Mp4Player : public Component {
   static void stop_btn_cb_(lv_event_t *e);
   static void spectrum_stop_cb_(lv_event_t *e);
   static void spectrum_playpause_cb_(lv_event_t *e);
+  static void spectrum_next_cb_(lv_event_t *e);
+  static void spectrum_prev_cb_(lv_event_t *e);
+  void play_next_track_();
+  void play_prev_track_();
   static void progress_slider_cb_(lv_event_t *e);
   static void volume_slider_cb_(lv_event_t *e);
   static void hide_timer_cb_(lv_timer_t *timer);
@@ -187,6 +191,11 @@ class Mp4Player : public Component {
   float spectrum_peaks_[SPECTRUM_BANDS]{};
   float spectrum_smooth_[SPECTRUM_BANDS]{};
   volatile bool audio_only_mode_{false};
+
+  // Playlist (built from current directory's audio files)
+  std::vector<std::string> playlist_;
+  int playlist_index_{-1};
+  volatile bool track_finished_{false};
   uint32_t spectrum_last_update_{0};
 
   // Configuration
