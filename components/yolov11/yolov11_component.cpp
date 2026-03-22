@@ -238,16 +238,20 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     xSemaphoreGive(this->detections_mutex_);
   }
 
-  // Build detection string and notify callbacks
-  std::string detection_str = this->get_detection_string();
+  // Build detection strings and notify callbacks
+  std::string class_str = this->get_detection_class_string();
+  std::string bb_str = this->get_detection_bb_string();
 
-  for (auto &callback : this->detection_callbacks_) {
-    callback(detection_str);
+  for (auto &callback : this->detection_class_callbacks_) {
+    callback(class_str);
+  }
+  for (auto &callback : this->detection_bb_callbacks_) {
+    callback(bb_str);
   }
 
   if (!results.empty()) {
     ESP_LOGD(TAG, "Detected %d object(s): %s", (int)results.size(),
-             detection_str.c_str());
+             class_str.c_str());
   }
 #endif
 }
@@ -290,7 +294,7 @@ std::vector<DetectionResult> YOLOV11Component::get_detections() {
   return detections;
 }
 
-std::string YOLOV11Component::get_detection_string() {
+std::string YOLOV11Component::get_detection_class_string() {
   std::string result;
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
     for (size_t i = 0; i < this->cached_detections_.size(); i++) {
@@ -300,6 +304,23 @@ std::string YOLOV11Component::get_detection_string() {
       char buf[64];
       snprintf(buf, sizeof(buf), "%s:%.0f%%",
                this->get_class_name(det.category), det.score * 100.0f);
+      result += buf;
+    }
+    xSemaphoreGive(this->detections_mutex_);
+  }
+  return result;
+}
+
+std::string YOLOV11Component::get_detection_bb_string() {
+  std::string result;
+  if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    for (size_t i = 0; i < this->cached_detections_.size(); i++) {
+      auto &det = this->cached_detections_[i];
+      if (i > 0)
+        result += ",";
+      char buf[64];
+      snprintf(buf, sizeof(buf), "[%d,%d,%d,%d]",
+               det.x1, det.y1, det.x2, det.y2);
       result += buf;
     }
     xSemaphoreGive(this->detections_mutex_);

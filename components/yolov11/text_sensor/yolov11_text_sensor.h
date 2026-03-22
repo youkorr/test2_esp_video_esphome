@@ -7,7 +7,19 @@
 namespace esphome {
 namespace yolov11 {
 
-class YOLOV11TextSensor : public text_sensor::TextSensor, public Component {
+class YOLOV11DetectionClassSensor : public text_sensor::TextSensor, public Component {
+ public:
+  void setup() override;
+  void dump_config() override;
+  float get_setup_priority() const override { return setup_priority::DATA; }
+
+  void set_yolov11(YOLOV11Component *parent) { this->parent_ = parent; }
+
+ protected:
+  YOLOV11Component *parent_{nullptr};
+};
+
+class YOLOV11DetectionBBSensor : public text_sensor::TextSensor, public Component {
  public:
   void setup() override;
   void dump_config() override;

@@ -84,11 +84,15 @@ class YOLOV11Component : public Component {
   // Results access
   int get_detected_count();
   std::vector<DetectionResult> get_detections();
-  std::string get_detection_string();
+  std::string get_detection_class_string();
+  std::string get_detection_bb_string();
 
   // Callbacks for text sensor updates
-  void add_on_detection_callback(std::function<void(std::string)> callback) {
-    this->detection_callbacks_.push_back(std::move(callback));
+  void add_on_detection_class_callback(std::function<void(std::string)> callback) {
+    this->detection_class_callbacks_.push_back(std::move(callback));
+  }
+  void add_on_detection_bb_callback(std::function<void(std::string)> callback) {
+    this->detection_bb_callbacks_.push_back(std::move(callback));
   }
 
  protected:
@@ -122,7 +126,8 @@ class YOLOV11Component : public Component {
   SemaphoreHandle_t detections_mutex_{nullptr};
 
   // Callbacks
-  std::vector<std::function<void(std::string)>> detection_callbacks_;
+  std::vector<std::function<void(std::string)>> detection_class_callbacks_;
+  std::vector<std::function<void(std::string)>> detection_bb_callbacks_;
 };
 
 }  // namespace yolov11
