@@ -1604,15 +1604,26 @@ void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
   if (p->state_ == PlayerState::PLAYING) {
     p->pause();
-    // Update button icon to play
-    lv_obj_t *btn = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
+    if (p->spectrum_play_btn_) {
+      lv_obj_t *lbl = lv_obj_get_child(p->spectrum_play_btn_, 0);
+      if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PLAY);
+    }
   } else if (p->state_ == PlayerState::PAUSED) {
     p->play();
-    lv_obj_t *btn = static_cast<lv_obj_t *>(lv_event_get_target(e));
-    lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-    if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+    if (p->spectrum_play_btn_) {
+      lv_obj_t *lbl = lv_obj_get_child(p->spectrum_play_btn_, 0);
+      if (lbl) lv_label_set_text(lbl, LV_SYMBOL_PAUSE);
+    }
+  }
+}
+
+void Mp4Player::spectrum_volume_cb_(lv_event_t *e) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+  p->volume_level_ = (uint8_t)val;
+  // Sync video player volume slider if it exists
+  if (p->volume_slider_) {
+    lv_slider_set_value(p->volume_slider_, val, LV_ANIM_OFF);
   }
 }
 
@@ -2666,7 +2677,7 @@ void Mp4Player::create_spectrum_ui_() {
 
   lv_obj_t *parent = this->parent_ ? this->parent_ : lv_scr_act();
 
-  // Full-screen container
+  // Full-screen container with dark background
   this->spectrum_container_ = lv_obj_create(parent);
   lv_obj_set_size(this->spectrum_container_, LV_PCT(100), LV_PCT(100));
   lv_obj_center(this->spectrum_container_);
@@ -2676,70 +2687,40 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_style_pad_all(this->spectrum_container_, 0, 0);
   lv_obj_clear_flag(this->spectrum_container_, LV_OBJ_FLAG_SCROLLABLE);
 
-  // Top bar with back button and controls
+  // ========== TOP: Title area (music icon + song name + format) ==========
   lv_obj_t *title_area = lv_obj_create(this->spectrum_container_);
-  lv_obj_set_size(title_area, LV_PCT(100), 80);
-  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
+  lv_obj_set_size(title_area, LV_PCT(100), 60);
+  lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 5);
   lv_obj_set_style_bg_opa(title_area, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(title_area, 0, 0);
   lv_obj_set_style_pad_all(title_area, 0, 0);
   lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
-  // Don't let title_area intercept clicks meant for child buttons
   lv_obj_clear_flag(title_area, LV_OBJ_FLAG_CLICKABLE);
 
-  // Back button (stop and return to browser) - large touch target
-  lv_obj_t *back_btn = lv_btn_create(this->spectrum_container_);
-  lv_obj_set_size(back_btn, 70, 50);
-  lv_obj_align(back_btn, LV_ALIGN_TOP_LEFT, 10, 15);
-  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333355), 0);
-  lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(back_btn, 10, 0);
-  lv_obj_t *back_lbl = lv_label_create(back_btn);
-  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Back");
-  lv_obj_set_style_text_color(back_lbl, lv_color_white(), 0);
-  lv_obj_center(back_lbl);
-  lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
-
-  // Play/Pause button - large touch target
-  lv_obj_t *play_btn = lv_btn_create(this->spectrum_container_);
-  lv_obj_set_size(play_btn, 60, 50);
-  lv_obj_align(play_btn, LV_ALIGN_TOP_RIGHT, -10, 15);
-  lv_obj_set_style_bg_color(play_btn, lv_color_hex(0x333355), 0);
-  lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(play_btn, 10, 0);
-  lv_obj_t *play_lbl = lv_label_create(play_btn);
-  lv_label_set_text(play_lbl, LV_SYMBOL_PAUSE);
-  lv_obj_set_style_text_color(play_lbl, lv_color_white(), 0);
-  lv_obj_center(play_lbl);
-  lv_obj_add_event_cb(play_btn, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
-
-  // Music icon
   lv_obj_t *music_icon = lv_label_create(title_area);
   lv_label_set_text(music_icon, LV_SYMBOL_AUDIO);
   lv_obj_set_style_text_color(music_icon, lv_color_hex(0x00D4FF), 0);
   lv_obj_set_style_text_font(music_icon, &lv_font_montserrat_16, 0);
-  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 55, -10);
+  lv_obj_align(music_icon, LV_ALIGN_LEFT_MID, 15, -8);
 
-  // Song title (filename)
   this->spectrum_title_label_ = lv_label_create(title_area);
   lv_label_set_text(this->spectrum_title_label_, "");
   lv_obj_set_style_text_color(this->spectrum_title_label_, lv_color_white(), 0);
   lv_obj_set_style_text_font(this->spectrum_title_label_, &lv_font_montserrat_16, 0);
-  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_DOT);
-  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(60));
-  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 80, -10);
+  lv_label_set_long_mode(this->spectrum_title_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+  lv_obj_set_width(this->spectrum_title_label_, LV_PCT(75));
+  lv_obj_align(this->spectrum_title_label_, LV_ALIGN_LEFT_MID, 45, -8);
 
-  // Format info
   this->spectrum_artist_label_ = lv_label_create(title_area);
   lv_label_set_text(this->spectrum_artist_label_, "");
   lv_obj_set_style_text_color(this->spectrum_artist_label_, lv_color_hex(0x888888), 0);
   lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
-  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 80, 12);
+  lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 45, 12);
 
-  // Spectrum bars area
+  // ========== CENTER: Spectrum bars ==========
   lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);
-  lv_obj_set_size(bars_area, LV_PCT(90), LV_PCT(55));
-  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, 10);
+  lv_obj_set_size(bars_area, LV_PCT(92), LV_PCT(45));
+  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, -15);
   lv_obj_set_style_bg_opa(bars_area, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(bars_area, 0, 0);
   lv_obj_set_style_pad_all(bars_area, 0, 0);
@@ -2747,22 +2728,18 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_flex_flow(bars_area, LV_FLEX_FLOW_ROW);
   lv_obj_set_flex_align(bars_area, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
 
-  // Create bars with gradient colors
   for (int i = 0; i < SPECTRUM_BANDS; i++) {
     lv_obj_t *bar = lv_obj_create(bars_area);
-    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);  // Start small
+    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);
     lv_obj_set_style_border_width(bar, 0, 0);
     lv_obj_set_style_radius(bar, 3, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    // Color gradient from cyan to magenta across bands
     uint8_t r = (uint8_t)(i * 255 / SPECTRUM_BANDS);
     uint8_t g = (uint8_t)(100 + (SPECTRUM_BANDS - i) * 100 / SPECTRUM_BANDS);
     uint8_t b = (uint8_t)(200 + i * 55 / SPECTRUM_BANDS);
     lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-
-    // Gradient from bottom (darker) to top (brighter)
     lv_obj_set_style_bg_grad_color(bar, lv_color_make(r / 3, g / 3, b / 3), 0);
     lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
 
@@ -2770,6 +2747,91 @@ void Mp4Player::create_spectrum_ui_() {
     this->spectrum_smooth_[i] = 0;
     this->spectrum_peaks_[i] = 0;
   }
+
+  // ========== BOTTOM: Control bar (like video player) ==========
+  lv_obj_t *ctrl_bar = lv_obj_create(this->spectrum_container_);
+  lv_obj_set_size(ctrl_bar, LV_PCT(100), 100);
+  lv_obj_align(ctrl_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+  lv_obj_set_style_bg_color(ctrl_bar, lv_color_hex(0x111122), 0);
+  lv_obj_set_style_bg_opa(ctrl_bar, LV_OPA_COVER, 0);
+  lv_obj_set_style_border_width(ctrl_bar, 0, 0);
+  lv_obj_set_style_pad_all(ctrl_bar, 0, 0);
+  lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(ctrl_bar, LV_OBJ_FLAG_CLICKABLE);
+
+  // --- Row 1: Back | Play/Pause | Stop | Time ---
+  lv_obj_t *back_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(back_btn, 55, 40);
+  lv_obj_set_pos(back_btn, 10, 5);
+  lv_obj_set_style_radius(back_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x0F3460), 0);
+  lv_obj_t *back_lbl = lv_label_create(back_btn);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_obj_center(back_lbl);
+  lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
+
+  this->spectrum_play_btn_ = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(this->spectrum_play_btn_, 55, 40);
+  lv_obj_set_pos(this->spectrum_play_btn_, 75, 5);
+  lv_obj_set_style_radius(this->spectrum_play_btn_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_t *play_lbl = lv_label_create(this->spectrum_play_btn_);
+  lv_label_set_text(play_lbl, LV_SYMBOL_PAUSE);
+  lv_obj_center(play_lbl);
+  lv_obj_add_event_cb(this->spectrum_play_btn_, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
+
+  lv_obj_t *stop_btn = lv_btn_create(ctrl_bar);
+  lv_obj_set_size(stop_btn, 55, 40);
+  lv_obj_set_pos(stop_btn, 140, 5);
+  lv_obj_set_style_radius(stop_btn, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(stop_btn, lv_color_hex(0xCC3333), 0);
+  lv_obj_t *stop_lbl = lv_label_create(stop_btn);
+  lv_label_set_text(stop_lbl, LV_SYMBOL_STOP);
+  lv_obj_center(stop_lbl);
+  lv_obj_add_event_cb(stop_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
+
+  // Time label (elapsed)
+  this->spectrum_time_label_ = lv_label_create(ctrl_bar);
+  lv_label_set_text(this->spectrum_time_label_, "00:00");
+  lv_obj_set_pos(this->spectrum_time_label_, 210, 15);
+  lv_obj_set_style_text_color(this->spectrum_time_label_, lv_color_white(), 0);
+  lv_obj_set_style_text_font(this->spectrum_time_label_, &lv_font_montserrat_14, 0);
+
+  // --- Row 2: Volume ---
+  lv_obj_t *vol_icon = lv_label_create(ctrl_bar);
+  lv_label_set_text(vol_icon, LV_SYMBOL_VOLUME_MAX);
+  lv_obj_set_pos(vol_icon, 12, 52);
+  lv_obj_set_style_text_color(vol_icon, lv_color_hex(0xCCCCCC), 0);
+  lv_obj_set_style_text_font(vol_icon, &lv_font_montserrat_16, 0);
+
+  this->spectrum_volume_slider_ = lv_slider_create(ctrl_bar);
+  lv_obj_set_size(this->spectrum_volume_slider_, 180, 10);
+  lv_obj_set_pos(this->spectrum_volume_slider_, 45, 57);
+  lv_slider_set_range(this->spectrum_volume_slider_, 0, 100);
+  lv_slider_set_value(this->spectrum_volume_slider_, this->volume_level_, LV_ANIM_OFF);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0x404040), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(this->spectrum_volume_slider_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0xFF8C00), LV_PART_INDICATOR);
+  lv_obj_set_style_bg_opa(this->spectrum_volume_slider_, LV_OPA_COVER, LV_PART_INDICATOR);
+  lv_obj_set_style_bg_color(this->spectrum_volume_slider_, lv_color_hex(0xFFFFFF), LV_PART_KNOB);
+  lv_obj_set_style_pad_all(this->spectrum_volume_slider_, 0, LV_PART_MAIN);
+  lv_obj_add_event_cb(this->spectrum_volume_slider_, spectrum_volume_cb_, LV_EVENT_VALUE_CHANGED, this);
+
+  // --- Row 3: Format badge ---
+  lv_obj_t *format_lbl = lv_label_create(ctrl_bar);
+  const char *ext = strrchr(this->file_path_.c_str(), '.');
+  const char *fmt = "AUDIO";
+  if (ext) {
+    if (strcasecmp(ext, ".mp3") == 0) fmt = "MP3";
+    else if (strcasecmp(ext, ".wav") == 0) fmt = "WAV";
+    else if (strcasecmp(ext, ".flac") == 0) fmt = "FLAC";
+    else if (strcasecmp(ext, ".aac") == 0) fmt = "AAC";
+    else if (strcasecmp(ext, ".ogg") == 0) fmt = "OGG";
+    else if (strcasecmp(ext, ".m4a") == 0) fmt = "M4A";
+  }
+  lv_label_set_text(format_lbl, fmt);
+  lv_obj_set_pos(format_lbl, 10, 78);
+  lv_obj_set_style_text_color(format_lbl, lv_color_hex(0x00FF00), 0);
+  lv_obj_set_style_text_font(format_lbl, &lv_font_montserrat_14, 0);
 
   this->spectrum_last_update_ = 0;
   ESP_LOGI(TAG, "Spectrum analyzer UI created");
@@ -2781,6 +2843,9 @@ void Mp4Player::destroy_spectrum_ui_() {
     this->spectrum_container_ = nullptr;
     this->spectrum_title_label_ = nullptr;
     this->spectrum_artist_label_ = nullptr;
+    this->spectrum_play_btn_ = nullptr;
+    this->spectrum_volume_slider_ = nullptr;
+    this->spectrum_time_label_ = nullptr;
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
       this->spectrum_bars_[i] = nullptr;
       this->spectrum_smooth_[i] = 0;
@@ -2798,6 +2863,20 @@ void Mp4Player::update_spectrum_() {
   uint32_t now = lv_tick_get();
   if (now - this->spectrum_last_update_ < 33) return;
   this->spectrum_last_update_ = now;
+
+  // Update elapsed time label
+  if (this->spectrum_time_label_ && this->current_time_ms_ > 0) {
+    uint32_t sec = this->current_time_ms_ / 1000;
+    uint32_t total = this->total_duration_ms_ / 1000;
+    char time_str[32];
+    if (total > 0) {
+      snprintf(time_str, sizeof(time_str), "%02u:%02u / %02u:%02u",
+               sec / 60, sec % 60, total / 60, total % 60);
+    } else {
+      snprintf(time_str, sizeof(time_str), "%02u:%02u", sec / 60, sec % 60);
+    }
+    lv_label_set_text(this->spectrum_time_label_, time_str);
+  }
 
   // Sample PCM data from the ring buffer (peek, don't consume)
   // After downmix, ring buffer contains mono data if output_mono_ is set
