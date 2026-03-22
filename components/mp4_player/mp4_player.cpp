@@ -2682,27 +2682,34 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_align(title_area, LV_ALIGN_TOP_MID, 0, 10);
   lv_obj_set_style_bg_opa(title_area, LV_OPA_TRANSP, 0);
   lv_obj_set_style_border_width(title_area, 0, 0);
+  lv_obj_set_style_pad_all(title_area, 0, 0);
   lv_obj_clear_flag(title_area, LV_OBJ_FLAG_SCROLLABLE);
+  // Don't let title_area intercept clicks meant for child buttons
+  lv_obj_clear_flag(title_area, LV_OBJ_FLAG_CLICKABLE);
 
-  // Back button (stop and return to browser)
-  lv_obj_t *back_btn = lv_btn_create(title_area);
-  lv_obj_set_size(back_btn, 40, 36);
-  lv_obj_align(back_btn, LV_ALIGN_LEFT_MID, 5, 0);
+  // Back button (stop and return to browser) - large touch target
+  lv_obj_t *back_btn = lv_btn_create(this->spectrum_container_);
+  lv_obj_set_size(back_btn, 70, 50);
+  lv_obj_align(back_btn, LV_ALIGN_TOP_LEFT, 10, 15);
   lv_obj_set_style_bg_color(back_btn, lv_color_hex(0x333355), 0);
-  lv_obj_set_style_radius(back_btn, 8, 0);
+  lv_obj_set_style_bg_opa(back_btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(back_btn, 10, 0);
   lv_obj_t *back_lbl = lv_label_create(back_btn);
-  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT);
+  lv_label_set_text(back_lbl, LV_SYMBOL_LEFT " Back");
+  lv_obj_set_style_text_color(back_lbl, lv_color_white(), 0);
   lv_obj_center(back_lbl);
   lv_obj_add_event_cb(back_btn, spectrum_stop_cb_, LV_EVENT_CLICKED, this);
 
-  // Play/Pause button
-  lv_obj_t *play_btn = lv_btn_create(title_area);
-  lv_obj_set_size(play_btn, 40, 36);
-  lv_obj_align(play_btn, LV_ALIGN_RIGHT_MID, -5, 0);
+  // Play/Pause button - large touch target
+  lv_obj_t *play_btn = lv_btn_create(this->spectrum_container_);
+  lv_obj_set_size(play_btn, 60, 50);
+  lv_obj_align(play_btn, LV_ALIGN_TOP_RIGHT, -10, 15);
   lv_obj_set_style_bg_color(play_btn, lv_color_hex(0x333355), 0);
-  lv_obj_set_style_radius(play_btn, 8, 0);
+  lv_obj_set_style_bg_opa(play_btn, LV_OPA_COVER, 0);
+  lv_obj_set_style_radius(play_btn, 10, 0);
   lv_obj_t *play_lbl = lv_label_create(play_btn);
   lv_label_set_text(play_lbl, LV_SYMBOL_PAUSE);
+  lv_obj_set_style_text_color(play_lbl, lv_color_white(), 0);
   lv_obj_center(play_lbl);
   lv_obj_add_event_cb(play_btn, spectrum_playpause_cb_, LV_EVENT_CLICKED, this);
 
