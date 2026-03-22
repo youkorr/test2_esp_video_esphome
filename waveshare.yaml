@@ -366,19 +366,19 @@ lvgl_camera_display:
   #face_detection_id: face_detect      # Désactivé pour tester YOLO
   yolo11_detection_id: yolo_detect
 
-# Detection de visages + reconnaissance (désactivé temporairement pour YOLO)
-#face_detection:
-#  id: face_detect
-#  camera_id: tab5_cam
-#  canvas_id: camera_canvas
-#  model_type: face_recognition
-#  score_threshold: 0.3
-#  nms_threshold: 0.5
-#  detection_interval: 5
-#  draw_enabled: true
-#  recognition_enabled: true
-#  face_db_path: "/sdcard/reconnaisance_faciale/faces.db"
-#  recognition_threshold: 0.83
+# Detection de visages + reconnaissance (garde actif pour les boutons, mais pas connecte au display)
+face_detection:
+  id: face_detect
+  camera_id: tab5_cam
+  canvas_id: camera_canvas
+  model_type: face_recognition
+  score_threshold: 0.3
+  nms_threshold: 0.5
+  detection_interval: 5
+  draw_enabled: false
+  recognition_enabled: true
+  face_db_path: "/sdcard/reconnaisance_faciale/faces.db"
+  recognition_threshold: 0.83
 
 
 # ============================================================================
