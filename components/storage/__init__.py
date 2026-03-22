@@ -162,15 +162,17 @@ async def sd_image_unload_action_to_code(config, action_id, template_arg, args):
 
 # Enregistrer les actions
 automation.register_action(
-    "sd_image.load", 
-    SdImageLoadAction, 
-    LOAD_ACTION_SCHEMA
+    "sd_image.load",
+    SdImageLoadAction,
+    LOAD_ACTION_SCHEMA,
+    synchronous=True,
 )(sd_image_load_action_to_code)
 
 automation.register_action(
-    "sd_image.unload", 
-    SdImageUnloadAction, 
-    UNLOAD_ACTION_SCHEMA
+    "sd_image.unload",
+    SdImageUnloadAction,
+    UNLOAD_ACTION_SCHEMA,
+    synchronous=True,
 )(sd_image_unload_action_to_code)
 
 async def to_code(config):

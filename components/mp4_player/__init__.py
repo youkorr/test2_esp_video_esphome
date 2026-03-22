@@ -145,21 +145,21 @@ MP4_PLAYER_ACTION_SCHEMA = cv.Schema({
 })
 
 
-@automation.register_action("mp4_player.play", PlayAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.play", PlayAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def play_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("mp4_player.pause", PauseAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.pause", PauseAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def pause_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
 
 
-@automation.register_action("mp4_player.stop", StopAction, MP4_PLAYER_ACTION_SCHEMA)
+@automation.register_action("mp4_player.stop", StopAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def stop_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
