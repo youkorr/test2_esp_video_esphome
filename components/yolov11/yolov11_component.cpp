@@ -1,15 +1,6 @@
 #include "yolov11_component.h"
 #include "esphome/core/log.h"
 
-#ifdef ESP_DL_MODEL_YOLO11
-#include "dl_model_base.hpp"
-#include "dl_image_preprocessor.hpp"
-#include "dl_detect_yolo11_postprocessor.hpp"
-#include "dl_detect_define.hpp"
-#include "dl_image_define.hpp"
-#include "fbs_model.hpp"
-#endif
-
 #ifdef USE_YOLOV11_ESP32_CAMERA
 #include "esphome/components/esp32_camera/esp32_camera.h"
 #endif

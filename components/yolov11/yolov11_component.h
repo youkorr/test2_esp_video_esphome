@@ -15,17 +15,14 @@ class CameraImage;
 }  // namespace esp32_camera
 #endif
 
-// Forward declarations for ESP-DL
-namespace dl {
-class Model;
-namespace image {
-class ImagePreprocessor;
-}
-namespace detect {
-class DetectPostprocessor;
-struct result_t;
-}  // namespace detect
-}  // namespace dl
+#ifdef ESP_DL_MODEL_YOLO11
+#include "dl_model_base.hpp"
+#include "dl_image_preprocessor.hpp"
+#include "dl_detect_yolo11_postprocessor.hpp"
+#include "dl_detect_define.hpp"
+#include "dl_image_define.hpp"
+#include "fbs_model.hpp"
+#endif
 
 namespace esphome {
 namespace yolov11 {
@@ -112,9 +109,11 @@ class YOLOV11Component : public Component {
   std::vector<std::string> class_labels_;
 
   // ESP-DL objects
+#ifdef ESP_DL_MODEL_YOLO11
   dl::Model *dl_model_{nullptr};
   dl::image::ImagePreprocessor *preprocessor_{nullptr};
-  dl::detect::DetectPostprocessor *postprocessor_{nullptr};
+  dl::detect::yolo11PostProcessor *postprocessor_{nullptr};
+#endif
   bool detector_initialized_{false};
 
   // Results
