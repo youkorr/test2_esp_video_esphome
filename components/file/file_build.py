@@ -6,7 +6,7 @@ import os
 import json
 Import("env")
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
+script_dir = Dir('.').srcnode().abspath
 info_path = os.path.join(script_dir, ".file_embed_info.json")
 
 if os.path.exists(info_path):
