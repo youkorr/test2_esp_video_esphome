@@ -176,8 +176,12 @@ class Mp4Player : public Component {
   lv_obj_t *spectrum_glow_circle_{nullptr};
   lv_obj_t *spectrum_glow_ring_{nullptr};
   lv_obj_t *spectrum_bars_area_{nullptr};
+  lv_obj_t *spectrum_mode_btn_{nullptr};
+  uint8_t spectrum_viz_mode_{0};  // 0=neon bars, 1=abstract sphere
   uint32_t spectrum_color_phase_{0};
   static void spectrum_volume_cb_(lv_event_t *e);
+  static void spectrum_mode_cb_(lv_event_t *e);
+  void rebuild_spectrum_viz_();
   float spectrum_magnitudes_[SPECTRUM_BANDS]{};
   float spectrum_peaks_[SPECTRUM_BANDS]{};
   float spectrum_smooth_[SPECTRUM_BANDS]{};
