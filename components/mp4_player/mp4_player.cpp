@@ -2729,36 +2729,100 @@ void Mp4Player::create_spectrum_ui_() {
   lv_obj_set_style_text_font(this->spectrum_artist_label_, &lv_font_montserrat_14, 0);
   lv_obj_align(this->spectrum_artist_label_, LV_ALIGN_LEFT_MID, 45, 12);
 
-  // ========== CENTER: Spectrum bars ==========
-  lv_obj_t *bars_area = lv_obj_create(this->spectrum_container_);
-  lv_obj_set_size(bars_area, LV_PCT(92), LV_PCT(45));
-  lv_obj_align(bars_area, LV_ALIGN_CENTER, 0, -15);
-  lv_obj_set_style_bg_opa(bars_area, LV_OPA_TRANSP, 0);
-  lv_obj_set_style_border_width(bars_area, 0, 0);
-  lv_obj_set_style_pad_all(bars_area, 0, 0);
-  lv_obj_clear_flag(bars_area, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_set_flex_flow(bars_area, LV_FLEX_FLOW_ROW);
-  lv_obj_set_flex_align(bars_area, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER);
+  // ========== CENTER: Spherical spectrum visualization ==========
+  // Container for the spherical effect
+  this->spectrum_bars_area_ = lv_obj_create(this->spectrum_container_);
+  int area_size = 200;  // Square area for the sphere
+  lv_obj_set_size(this->spectrum_bars_area_, LV_PCT(95), area_size);
+  lv_obj_align(this->spectrum_bars_area_, LV_ALIGN_CENTER, 0, -20);
+  lv_obj_set_style_bg_opa(this->spectrum_bars_area_, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(this->spectrum_bars_area_, 0, 0);
+  lv_obj_set_style_pad_all(this->spectrum_bars_area_, 0, 0);
+  lv_obj_clear_flag(this->spectrum_bars_area_, LV_OBJ_FLAG_SCROLLABLE);
+
+  // Outer glowing ring (sphere outline effect)
+  this->spectrum_glow_ring_ = lv_obj_create(this->spectrum_bars_area_);
+  lv_obj_set_size(this->spectrum_glow_ring_, 160, 160);
+  lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_radius(this->spectrum_glow_ring_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_opa(this->spectrum_glow_ring_, LV_OPA_TRANSP, 0);
+  lv_obj_set_style_border_width(this->spectrum_glow_ring_, 3, 0);
+  lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_border_opa(this->spectrum_glow_ring_, LV_OPA_40, 0);
+  lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(this->spectrum_glow_ring_, LV_OBJ_FLAG_CLICKABLE);
+
+  // Central pulsating circle (bass indicator - "core" of the sphere)
+  this->spectrum_glow_circle_ = lv_obj_create(this->spectrum_bars_area_);
+  lv_obj_set_size(this->spectrum_glow_circle_, 50, 50);
+  lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+  lv_obj_set_style_radius(this->spectrum_glow_circle_, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_bg_opa(this->spectrum_glow_circle_, LV_OPA_70, 0);
+  lv_obj_set_style_border_width(this->spectrum_glow_circle_, 0, 0);
+  lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, 30, 0);
+  lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_hex(0x00D4FF), 0);
+  lv_obj_set_style_shadow_opa(this->spectrum_glow_circle_, LV_OPA_60, 0);
+  lv_obj_set_style_shadow_spread(this->spectrum_glow_circle_, 5, 0);
+  lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_clear_flag(this->spectrum_glow_circle_, LV_OBJ_FLAG_CLICKABLE);
+
+  // Bars arranged in arc pattern around the center (spherical projection)
+  // Bars positioned from left to right in a curved arc
+  int parent_w = 420;  // Approximate width
+  int center_x = parent_w / 2;
+  int center_y = area_size / 2;
+  int bar_width = 12;
 
   for (int i = 0; i < SPECTRUM_BANDS; i++) {
-    lv_obj_t *bar = lv_obj_create(bars_area);
-    lv_obj_set_size(bar, LV_PCT(100 / SPECTRUM_BANDS - 1), 4);
+    lv_obj_t *bar = lv_obj_create(this->spectrum_bars_area_);
+    lv_obj_set_size(bar, bar_width, 4);
     lv_obj_set_style_border_width(bar, 0, 0);
-    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_set_style_radius(bar, 4, 0);
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
 
-    uint8_t r = (uint8_t)(i * 255 / SPECTRUM_BANDS);
-    uint8_t g = (uint8_t)(100 + (SPECTRUM_BANDS - i) * 100 / SPECTRUM_BANDS);
-    uint8_t b = (uint8_t)(200 + i * 55 / SPECTRUM_BANDS);
+    // Position bars in arc: spread evenly across width
+    // Apply spherical curvature: center bars higher, edge bars lower
+    float frac = (float)i / (SPECTRUM_BANDS - 1);  // 0..1
+    float angle = frac - 0.5f;  // -0.5..0.5
+    float sphere_curve = cosf(angle * 3.14159f);  // 1.0 at center, 0 at edges
+
+    int x = (int)(20 + frac * (parent_w - 40 - bar_width));
+    // Bars grow upward from a curved baseline
+    int base_y = center_y + 60 - (int)(sphere_curve * 30);  // Curved baseline
+    lv_obj_set_pos(bar, x, base_y);
+
+    // Rainbow color cycling: hue shifts across bands
+    float hue = frac * 300.0f;  // 0=red, 60=yellow, 120=green, 180=cyan, 240=blue, 300=magenta
+    // HSV to RGB (simplified, S=1, V=1)
+    float h6 = hue / 60.0f;
+    int hi = (int)h6 % 6;
+    float f = h6 - (int)h6;
+    uint8_t r, g, b;
+    switch (hi) {
+      case 0: r = 255; g = (uint8_t)(255*f); b = 0; break;
+      case 1: r = (uint8_t)(255*(1-f)); g = 255; b = 0; break;
+      case 2: r = 0; g = 255; b = (uint8_t)(255*f); break;
+      case 3: r = 0; g = (uint8_t)(255*(1-f)); b = 255; break;
+      case 4: r = (uint8_t)(255*f); g = 0; b = 255; break;
+      default: r = 255; g = 0; b = (uint8_t)(255*(1-f)); break;
+    }
     lv_obj_set_style_bg_color(bar, lv_color_make(r, g, b), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_grad_color(bar, lv_color_make(r / 3, g / 3, b / 3), 0);
+    lv_obj_set_style_bg_grad_color(bar, lv_color_make(r/2, g/2, b/2), 0);
     lv_obj_set_style_bg_grad_dir(bar, LV_GRAD_DIR_VER, 0);
+    // Glow effect on each bar
+    lv_obj_set_style_shadow_width(bar, 8, 0);
+    lv_obj_set_style_shadow_color(bar, lv_color_make(r, g, b), 0);
+    lv_obj_set_style_shadow_opa(bar, LV_OPA_50, 0);
 
     this->spectrum_bars_[i] = bar;
     this->spectrum_smooth_[i] = 0;
     this->spectrum_peaks_[i] = 0;
   }
+
+  this->spectrum_color_phase_ = 0;
 
   // ========== BOTTOM: Control bar (like video player) ==========
   lv_obj_t *ctrl_bar = lv_obj_create(this->spectrum_container_);
@@ -2858,6 +2922,10 @@ void Mp4Player::destroy_spectrum_ui_() {
     this->spectrum_play_btn_ = nullptr;
     this->spectrum_volume_slider_ = nullptr;
     this->spectrum_time_label_ = nullptr;
+    this->spectrum_glow_circle_ = nullptr;
+    this->spectrum_glow_ring_ = nullptr;
+    this->spectrum_bars_area_ = nullptr;
+    this->spectrum_color_phase_ = 0;
     for (int i = 0; i < SPECTRUM_BANDS; i++) {
       this->spectrum_bars_[i] = nullptr;
       this->spectrum_smooth_[i] = 0;
@@ -2908,10 +2976,17 @@ void Mp4Player::update_spectrum_() {
     }
   }
 
-  // Get max bar height from parent
-  lv_obj_t *bars_parent = lv_obj_get_parent(this->spectrum_bars_[0]);
-  if (!bars_parent) return;
-  int max_h = lv_obj_get_content_height(bars_parent);
+  if (!this->spectrum_bars_area_) return;
+  int area_h = lv_obj_get_content_height(this->spectrum_bars_area_);
+  int area_w = lv_obj_get_content_width(this->spectrum_bars_area_);
+  int center_x = area_w / 2;
+  int center_y = area_h / 2;
+  int max_bar_h = area_h / 2 - 10;
+  int bar_width = 12;
+
+  // Compute average bass level for central circle pulsation
+  float bass_avg = 0;
+  float total_avg = 0;
 
   for (int i = 0; i < SPECTRUM_BANDS; i++) {
     if (!this->spectrum_bars_[i]) continue;
@@ -2919,23 +2994,118 @@ void Mp4Player::update_spectrum_() {
     // Smooth animation (fast attack, slow decay)
     float target = this->spectrum_magnitudes_[i];
     if (target > this->spectrum_smooth_[i]) {
-      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.4f;  // Fast attack
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.4f;
     } else {
-      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.15f;  // Slow decay
+      this->spectrum_smooth_[i] += (target - this->spectrum_smooth_[i]) * 0.15f;
     }
 
     // Peak hold with slow fall
     if (this->spectrum_smooth_[i] > this->spectrum_peaks_[i]) {
       this->spectrum_peaks_[i] = this->spectrum_smooth_[i];
     } else {
-      this->spectrum_peaks_[i] *= 0.97f;  // Slow peak decay
+      this->spectrum_peaks_[i] *= 0.97f;
     }
 
-    int bar_h = (int)(this->spectrum_smooth_[i] * max_h / 100.0f);
-    if (bar_h < 4) bar_h = 4;
-    if (bar_h > max_h) bar_h = max_h;
+    if (i < 4) bass_avg += this->spectrum_smooth_[i];
+    total_avg += this->spectrum_smooth_[i];
 
-    lv_obj_set_height(this->spectrum_bars_[i], bar_h);
+    // Spherical bar positioning
+    float frac = (float)i / (SPECTRUM_BANDS - 1);
+    float angle = frac - 0.5f;
+    float sphere_curve = cosf(angle * 3.14159f);
+
+    // Bar height scaled by sphere curvature (center bars can be taller)
+    float level = this->spectrum_smooth_[i] / 100.0f;
+    int bar_h = (int)(level * max_bar_h * (0.6f + 0.4f * sphere_curve));
+    if (bar_h < 4) bar_h = 4;
+    if (bar_h > max_bar_h) bar_h = max_bar_h;
+
+    // Position: bars grow upward from curved baseline
+    int x = (int)(10 + frac * (area_w - 20 - bar_width));
+    int base_y = center_y + 50 - (int)(sphere_curve * 25);
+    int y = base_y - bar_h;
+    lv_obj_set_pos(this->spectrum_bars_[i], x, y);
+    lv_obj_set_size(this->spectrum_bars_[i], bar_width, bar_h);
+
+    // Dynamic color: cycle hue over time + per-band offset
+    float hue_shift = (float)(this->spectrum_color_phase_ % 360);
+    float hue = fmodf(frac * 300.0f + hue_shift, 360.0f);
+    float h6 = hue / 60.0f;
+    int hi = (int)h6 % 6;
+    float f = h6 - (int)h6;
+    uint8_t r, g, b;
+    switch (hi) {
+      case 0: r = 255; g = (uint8_t)(255*f); b = 0; break;
+      case 1: r = (uint8_t)(255*(1-f)); g = 255; b = 0; break;
+      case 2: r = 0; g = 255; b = (uint8_t)(255*f); break;
+      case 3: r = 0; g = (uint8_t)(255*(1-f)); b = 255; break;
+      case 4: r = (uint8_t)(255*f); g = 0; b = 255; break;
+      default: r = 255; g = 0; b = (uint8_t)(255*(1-f)); break;
+    }
+    lv_obj_set_style_bg_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+    lv_obj_set_style_bg_grad_color(this->spectrum_bars_[i], lv_color_make(r/2, g/2, b/2), 0);
+    lv_obj_set_style_shadow_color(this->spectrum_bars_[i], lv_color_make(r, g, b), 0);
+  }
+
+  // Advance color cycling (slow rotation)
+  this->spectrum_color_phase_ += 2;
+
+  bass_avg /= 4.0f;
+  total_avg /= SPECTRUM_BANDS;
+
+  // Pulsate central circle with bass
+  if (this->spectrum_glow_circle_) {
+    int circle_size = 40 + (int)(bass_avg * 0.4f);
+    if (circle_size > 90) circle_size = 90;
+    lv_obj_set_size(this->spectrum_glow_circle_, circle_size, circle_size);
+    lv_obj_align(this->spectrum_glow_circle_, LV_ALIGN_CENTER, 0, 0);
+
+    // Circle color follows dominant hue
+    float center_hue = fmodf((float)(this->spectrum_color_phase_ % 360) + 150.0f, 360.0f);
+    float h6 = center_hue / 60.0f;
+    int hi = (int)h6 % 6;
+    float f = h6 - (int)h6;
+    uint8_t cr, cg, cb;
+    switch (hi) {
+      case 0: cr = 255; cg = (uint8_t)(255*f); cb = 0; break;
+      case 1: cr = (uint8_t)(255*(1-f)); cg = 255; cb = 0; break;
+      case 2: cr = 0; cg = 255; cb = (uint8_t)(255*f); break;
+      case 3: cr = 0; cg = (uint8_t)(255*(1-f)); cb = 255; break;
+      case 4: cr = (uint8_t)(255*f); cg = 0; cb = 255; break;
+      default: cr = 255; cg = 0; cb = (uint8_t)(255*(1-f)); break;
+    }
+    lv_obj_set_style_bg_color(this->spectrum_glow_circle_, lv_color_make(cr, cg, cb), 0);
+    lv_obj_set_style_shadow_color(this->spectrum_glow_circle_, lv_color_make(cr, cg, cb), 0);
+    int shadow = 20 + (int)(bass_avg * 0.3f);
+    lv_obj_set_style_shadow_width(this->spectrum_glow_circle_, shadow, 0);
+  }
+
+  // Pulsate outer ring with overall level
+  if (this->spectrum_glow_ring_) {
+    int ring_size = 140 + (int)(total_avg * 0.5f);
+    if (ring_size > 195) ring_size = 195;
+    lv_obj_set_size(this->spectrum_glow_ring_, ring_size, ring_size);
+    lv_obj_align(this->spectrum_glow_ring_, LV_ALIGN_CENTER, 0, 0);
+
+    uint8_t ring_opa = (uint8_t)(60 + total_avg * 1.5f);
+    if (ring_opa > 200) ring_opa = 200;
+    lv_obj_set_style_border_opa(this->spectrum_glow_ring_, ring_opa, 0);
+
+    // Ring color matches but slightly offset
+    float ring_hue = fmodf((float)(this->spectrum_color_phase_ % 360) + 60.0f, 360.0f);
+    float h6 = ring_hue / 60.0f;
+    int hi = (int)h6 % 6;
+    float f = h6 - (int)h6;
+    uint8_t rr, rg, rb;
+    switch (hi) {
+      case 0: rr = 255; rg = (uint8_t)(255*f); rb = 0; break;
+      case 1: rr = (uint8_t)(255*(1-f)); rg = 255; rb = 0; break;
+      case 2: rr = 0; rg = 255; rb = (uint8_t)(255*f); break;
+      case 3: rr = 0; rg = (uint8_t)(255*(1-f)); rb = 255; break;
+      case 4: rr = (uint8_t)(255*f); rg = 0; rb = 255; break;
+      default: rr = 255; rg = 0; rb = (uint8_t)(255*(1-f)); break;
+    }
+    lv_obj_set_style_border_color(this->spectrum_glow_ring_, lv_color_make(rr, rg, rb), 0);
   }
 }
 

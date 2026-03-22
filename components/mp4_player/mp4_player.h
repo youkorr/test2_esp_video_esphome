@@ -173,6 +173,10 @@ class Mp4Player : public Component {
   lv_obj_t *spectrum_play_btn_{nullptr};
   lv_obj_t *spectrum_volume_slider_{nullptr};
   lv_obj_t *spectrum_time_label_{nullptr};
+  lv_obj_t *spectrum_glow_circle_{nullptr};
+  lv_obj_t *spectrum_glow_ring_{nullptr};
+  lv_obj_t *spectrum_bars_area_{nullptr};
+  uint32_t spectrum_color_phase_{0};
   static void spectrum_volume_cb_(lv_event_t *e);
   float spectrum_magnitudes_[SPECTRUM_BANDS]{};
   float spectrum_peaks_[SPECTRUM_BANDS]{};
