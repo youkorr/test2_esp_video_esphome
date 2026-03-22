@@ -2943,7 +2943,7 @@ void Mp4Player::rebuild_spectrum_viz_() {
       lv_label_set_text(this->spectrum_db_labels_[i], db_labels[i]);
       lv_obj_set_pos(this->spectrum_db_labels_[i], base_x - 38, y_line - 6);
       lv_obj_set_style_text_color(this->spectrum_db_labels_[i], lv_color_hex(0x40FF40), 0);
-      lv_obj_set_style_text_font(this->spectrum_db_labels_[i], &lv_font_montserrat_12, 0);
+      lv_obj_set_style_text_font(this->spectrum_db_labels_[i], &lv_font_montserrat_14, 0);
     }
 
     // Frequency labels for each band
@@ -3000,7 +3000,7 @@ void Mp4Player::rebuild_spectrum_viz_() {
       lv_label_set_text(this->spectrum_freq_labels_[i], freq_labels[i]);
       lv_obj_set_pos(this->spectrum_freq_labels_[i], x - 2, margin_top + max_bar_h + 4);
       lv_obj_set_style_text_color(this->spectrum_freq_labels_[i], lv_color_hex(0x40FF40), 0);
-      lv_obj_set_style_text_font(this->spectrum_freq_labels_[i], &lv_font_montserrat_12, 0);
+      lv_obj_set_style_text_font(this->spectrum_freq_labels_[i], &lv_font_montserrat_14, 0);
     }
 
     // Title label "SPECTRUM ANALYZER" at top-right
@@ -3008,7 +3008,7 @@ void Mp4Player::rebuild_spectrum_viz_() {
     lv_label_set_text(title, "SPECTRUM ANALYZER");
     lv_obj_set_pos(title, base_x + SPECTRUM_BANDS * (bar_w + bar_gap) - 130, margin_top - 2);
     lv_obj_set_style_text_color(title, lv_color_hex(0x00FF80), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_set_style_text_opa(title, LV_OPA_60, 0);
 
   } else if (this->spectrum_viz_mode_ == 0) {
