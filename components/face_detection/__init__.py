@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
+from esphome.core import CORE
 import os
 
 DEPENDENCIES = ["esp_cam_sensor"]
@@ -164,8 +165,12 @@ async def to_code(config):
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
     # Add ESP-DL include paths for src/ compilation
-    # PlatformIO puts libs in .piolibdeps/<env>/esp-dl/esp-dl/
-    # These -I flags are added globally so face_detection.cpp can find dl_image.hpp etc.
+    # PlatformIO puts libs in .piolibdeps/<pioenv>/esp-dl/esp-dl/
+    # Use CORE.build_path and CORE.name to construct the concrete path
+    build_path = CORE.build_path
+    pioenv = CORE.name
+    esp_dl_base = os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl")
+
     esp_dl_include_subdirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
         "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
@@ -178,7 +183,7 @@ async def to_code(config):
         "vision/classification",
     ]
     for subdir in esp_dl_include_subdirs:
-        cg.add_build_flag(f"-I$PROJECT_DIR/.piolibdeps/$PIOENV/esp-dl/esp-dl/{subdir}")
+        cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
 
     # Build script for compiling ESP-DL sources and embedding models
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
