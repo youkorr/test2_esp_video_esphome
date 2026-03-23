@@ -8,9 +8,18 @@ import sys
 import glob
 Import("env")
 
-script_dir = Dir('.').srcnode().abspath
-component_dir = script_dir
-parent_components_dir = os.path.dirname(component_dir)
+# Resolve component directory: use custom platformio option set by __init__.py,
+# fall back to Dir('.') which may be wrong in some build contexts.
+try:
+    parent_components_dir = env.GetProjectOption("custom_face_detection_components_dir")
+    component_dir = os.path.join(parent_components_dir, "face_detection")
+except:
+    script_dir = Dir('.').srcnode().abspath
+    component_dir = script_dir
+    parent_components_dir = os.path.dirname(component_dir)
+
+print(f"[Face Detection] component_dir = {component_dir}")
+print(f"[Face Detection] parent_components_dir = {parent_components_dir}")
 
 # Find esp-dl (downloaded by PlatformIO lib_deps or local)
 sys.path.insert(0, parent_components_dir)

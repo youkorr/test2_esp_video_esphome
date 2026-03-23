@@ -201,6 +201,11 @@ async def to_code(config):
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+        # Pass the real components directory to the build script
+        cg.add_platformio_option(
+            "custom_face_detection_components_dir",
+            os.path.dirname(component_dir),
+        )
 
 
 # Action schemas
