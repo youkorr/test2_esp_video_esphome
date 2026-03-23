@@ -7,6 +7,10 @@ import os
 import sys
 import glob
 Import("env")
+try:
+    Import("projenv")
+except Exception:
+    projenv = None
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
@@ -252,8 +256,11 @@ if os.path.exists(esp_dl_dir):
         inc_path = os.path.join(esp_dl_dir, inc_dir)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
+            # Also add to projenv so src/ files can find esp-dl headers
+            if projenv is not None:
+                projenv.Append(CPPPATH=[inc_path])
 
-    print("[Face Detection] ESP-DL includes added")
+    print("[Face Detection] ESP-DL includes added (env + projenv)")
 
     # ESP-DL source files - based on selected model type
     # Core directories (always needed)

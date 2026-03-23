@@ -8,6 +8,10 @@ Model embedding is handled by the file component separately.
 import os
 import sys
 Import("env")
+try:
+    Import("projenv")
+except Exception:
+    projenv = None
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
@@ -46,8 +50,10 @@ if os.path.exists(esp_dl_dir):
         inc_path = os.path.join(esp_dl_dir, inc_dir)
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
+            if projenv is not None:
+                projenv.Append(CPPPATH=[inc_path])
 
-    print("[YOLOV11] ESP-DL includes added (sources shared via libface_detection.a)")
+    print("[YOLOV11] ESP-DL includes added (env + projenv, sources shared via libface_detection.a)")
 
 env.Append(CPPPATH=[component_dir])
 
