@@ -160,37 +160,9 @@ async def to_code(config):
     if os.path.exists(yolo11_detect_dir):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
-    # ESP-DL include paths
-    esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
-    if os.path.exists(esp_dl_dir):
-        esp_dl_includes = [
-            "dl",
-            "dl/tool/include",
-            "dl/tool/isa/esp32p4",
-            "dl/tool/src",
-            "dl/tensor/include",
-            "dl/tensor/src",
-            "dl/base",
-            "dl/base/isa",
-            "dl/base/isa/esp32p4",
-            "dl/math/include",
-            "dl/math/src",
-            "dl/model/include",
-            "dl/model/src",
-            "dl/module/include",
-            "dl/module/src",
-            "fbs_loader/include",
-            "fbs_loader/lib/esp32p4",
-            "fbs_loader/src",
-            "vision/detect",
-            "vision/image",
-            "vision/image/isa",
-            "vision/image/isa/esp32p4",
-        ]
-        for inc in esp_dl_includes:
-            inc_path = os.path.join(esp_dl_dir, inc)
-            if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
+    # ESP-DL: download via PlatformIO lib_deps
+    # Include paths are set by the build script (yolov11_build.py)
+    cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
     # Register build script
     build_script = os.path.join(component_dir, "yolov11_build.py")

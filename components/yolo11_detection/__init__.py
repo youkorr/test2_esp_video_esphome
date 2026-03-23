@@ -107,37 +107,9 @@ async def to_code(config):
         cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32S3=1")
         isa_target = "tie728"
 
-    # ESP-DL include paths (platform-adaptive)
-    esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
-    if os.path.exists(esp_dl_dir):
-        esp_dl_includes = [
-            "dl",
-            "dl/tool/include",
-            f"dl/tool/isa/{isa_target}",
-            "dl/tool/src",
-            "dl/tensor/include",
-            "dl/tensor/src",
-            "dl/base",
-            "dl/base/isa",
-            f"dl/base/isa/{isa_target}",
-            "dl/math/include",
-            "dl/math/src",
-            "dl/model/include",
-            "dl/model/src",
-            "dl/module/include",
-            "dl/module/src",
-            "fbs_loader/include",
-            f"fbs_loader/lib/{isa_target}",
-            "fbs_loader/src",
-            "vision/detect",
-            "vision/image",
-            "vision/image/isa",
-            f"vision/image/isa/{isa_target}",
-        ]
-        for inc in esp_dl_includes:
-            inc_path = os.path.join(esp_dl_dir, inc)
-            if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
+    # ESP-DL: download via PlatformIO lib_deps
+    # Include paths are set by the build script (yolo11_detection_build.py)
+    cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
     # Build script for model embedding
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")

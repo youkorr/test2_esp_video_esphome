@@ -13,10 +13,10 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-# Ensure esp-dl is available (download from GitHub if needed)
+# Find esp-dl (downloaded by PlatformIO lib_deps or local)
 sys.path.insert(0, parent_components_dir)
-from esp_dl_manager import ensure_esp_dl
-ensure_esp_dl(parent_components_dir)
+from esp_dl_path import find_esp_dl
+esp_dl_resolved_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
 
 print("[YOLOV11] Build script running...")
 
@@ -30,7 +30,7 @@ env.Append(CPPDEFINES=[
 # ========================================================================
 # ESP-DL Include paths only (sources are in libface_detection.a)
 # ========================================================================
-esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
+esp_dl_dir = esp_dl_resolved_dir
 if os.path.exists(esp_dl_dir):
     esp_dl_include_dirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
