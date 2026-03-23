@@ -249,28 +249,29 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
 
   // Debug: check model output tensor values
   {
-    auto outputs = this->dl_model_->get_outputs();
+    auto &outputs = this->dl_model_->get_outputs();
     ESP_LOGI(TAG, "Model outputs: %d tensors", (int)outputs.size());
-    for (int i = 0; i < (int)outputs.size(); i++) {
-      auto *tensor = outputs[i];
+    int idx = 0;
+    for (auto &kv : outputs) {
+      auto *tensor = kv.second;
       int total = 1;
       std::string shape_str;
-      for (int d = 0; d < tensor->shape.size(); d++) {
+      for (int d = 0; d < (int)tensor->shape.size(); d++) {
         total *= tensor->shape[d];
         if (d > 0) shape_str += "x";
         shape_str += std::to_string(tensor->shape[d]);
       }
-      // Check if all zeros
       int8_t *data = (int8_t *)tensor->data;
       int non_zero = 0;
       int8_t max_val = 0, min_val = 0;
-      for (int j = 0; j < std::min(total, 1000); j++) {
+      int check = std::min(total, 1000);
+      for (int j = 0; j < check; j++) {
         if (data[j] != 0) non_zero++;
         if (data[j] > max_val) max_val = data[j];
         if (data[j] < min_val) min_val = data[j];
       }
-      ESP_LOGI(TAG, "  Output[%d]: shape=[%s], non_zero=%d/1000, range=[%d..%d]",
-               i, shape_str.c_str(), non_zero, min_val, max_val);
+      ESP_LOGI(TAG, "  Output[%d] '%s': shape=[%s], non_zero=%d/%d, range=[%d..%d]",
+               idx++, kv.first.c_str(), shape_str.c_str(), non_zero, check, min_val, max_val);
     }
   }
 
