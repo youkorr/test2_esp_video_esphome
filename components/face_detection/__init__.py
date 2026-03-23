@@ -164,6 +164,12 @@ async def to_code(config):
     # ESP-DL: download via PlatformIO lib_deps
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
+    # Prevent PlatformIO LDF from auto-compiling esp-dl as a regular library.
+    # Our build script (face_detection_build.py) manually compiles only the
+    # esp-dl sources we need.  Without this, LDF tries to build everything
+    # including audio/ which has missing internal dependencies.
+    cg.add_platformio_option("lib_ignore", ["esp-dl"])
+
     # Add ESP-DL include paths for src/ compilation
     # PlatformIO puts libs in .piolibdeps/<pioenv>/esp-dl/
     # (PlatformIO installs the esp-dl subcomponent directly, not the whole repo)
