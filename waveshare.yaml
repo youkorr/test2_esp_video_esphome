@@ -1143,6 +1143,18 @@ text_sensor:
         id(tab5_cam).get_image_size() / 1024);
       return {buf};
 
+  # YOLO11 detection text sensors
+  - platform: yolov11
+    yolov11_id: my_yolo
+    detection_id:
+      name: "YOLO Detections"
+      id: yolo_detection_text
+      on_value:
+        then:
+          - lvgl.label.update:
+              id: yolo_detection_label
+              text: !lambda 'return x.c_str();'
+
   - platform: homeassistant
     id: alarm_panel_sensor_state
     entity_id: ${alarm_panel_entity}
@@ -3433,15 +3445,17 @@ lvgl:
         bg_color: color_slate_blue_gray
         on_load:
           - lambda: |-
-              ESP_LOGI("camera", "📷 Page caméra chargée");
+              ESP_LOGI("camera", "Page camera chargee");
               auto canvas = id(camera_canvas);
               if (canvas == nullptr) {
                 ESP_LOGE("camera", "Canvas introuvable!");
                 return;
               }
               lv_obj_set_size(canvas, 640, 480);
-              lv_obj_set_pos(canvas, 192, 60);  
-              ESP_LOGI("camera", "Canvas: 640x480 @ (192,60)");
+              lv_obj_set_pos(canvas, 192, 60);
+              // Configure le canvas pour camera_display (indispensable pour le dessin des detections)
+              id(camera_display).configure_canvas(canvas);
+              ESP_LOGI("camera", "Canvas: 640x480 @ (192,60) - configure pour YOLO");
 
         widgets:
           # ===== CANVAS CAMERA =====
@@ -3456,75 +3470,29 @@ lvgl:
               radius: 0
               pad_all: 0
 
-          # ===== BOUTONS GAUCHE (Face Recognition) =====
-          
-          # Bouton ENROLL (enregistrer visage)
-          - button:
-              id: btn_enroll_face
-              width: 150
-              height: 60
-              x: 20
-              y: 150
-              bg_color: 0x00AA00
-              bg_opa: COVER
-              radius: 10
-              on_click:
-                then:
-                  - lvgl.widget.show: enroll_popup
+          # ===== GAUCHE: YOLO Detection Info =====
 
-              widgets:
-                - label:
-                    text: "ENROLL"
-                    text_color: 0xFFFFFF
-                    text_font: nunito_24
-                    text_align: CENTER
-                    align: CENTER
+          # Label titre YOLO
+          - label:
+              id: yolo_title_label
+              x: 10
+              y: 70
+              width: 170
+              text: "YOLO11"
+              text_color: 0x00FF88
+              text_font: nunito_24
+              text_align: CENTER
 
-          # Bouton COUNT (nombre de visages)
-          - button:
-              id: btn_count_faces
-              width: 150
-              height: 60
-              x: 20
-              y: 230
-              bg_color: 0x0088FF
-              bg_opa: COVER
-              radius: 10
-              on_click:
-                then:
-                  - lambda: |-
-                      int count = id(face_detect).get_enrolled_count();
-                      ESP_LOGI("face", "📊 Visages enregistrés: %d", count);
-              widgets:
-                - label:
-                    text: "COUNT"
-                    text_color: 0xFFFFFF
-                    text_font: nunito_24
-                    text_align: CENTER
-                    align: CENTER
-
-          # Bouton CLEAR (effacer tous)
-          - button:
-              id: btn_clear_faces
-              width: 150
-              height: 60
-              x: 20
-              y: 310
-              bg_color: 0xFF4444
-              bg_opa: COVER
-              radius: 10
-              on_click:
-                then:
-                  - lambda: |-
-                      id(face_detect).clear_all_faces();
-                      ESP_LOGI("face", "🗑️ Tous les visages effacés");
-              widgets:
-                - label:
-                    text: "CLEAR FACES"
-                    text_color: 0xFFFFFF
-                    text_font: nunito_24
-                    text_align: CENTER
-                    align: CENTER
+          # Label de detection YOLO (mis a jour par text_sensor)
+          - label:
+              id: yolo_detection_label
+              x: 10
+              y: 110
+              width: 170
+              text: "..."
+              text_color: 0xFFFFFF
+              text_font: montserrat_14
+              text_align: LEFT
 
           # ===== BOUTONS DROITE (Camera Control) =====
           
@@ -3629,67 +3597,6 @@ lvgl:
                     text_align: CENTER
                     align: CENTER  
 
-          # ===== POPUP ENREGISTREMENT (SIMPLIFIÉ) =====
-          - obj:
-              id: enroll_popup
-              width: 1024
-              height: 600
-              x: 0
-              y: 0
-              bg_color: 0x1a1a2e
-              bg_opa: 100%
-              hidden: true
-              widgets:
-                # Titre
-                - label:
-                    text: "ENREGISTRER UN VISAGE"
-                    y: 20
-                    align: TOP_MID
-                    text_color: 0x00FF00
-                    text_font: montserrat_36
-
-                # Zone de saisie du nom
-                - textarea:
-                    id: name_input
-                    width: 800
-                    height: 70
-                    align: TOP_MID
-                    y: 80
-                    one_line: true
-                    max_length: 20
-                    placeholder_text: "Entrez le nom..."
-                    bg_color: 0x2d2d44
-                    text_color: 0xFFFFFF
-                    text_font: montserrat_36
-                    border_color: 0x4444AA
-                    border_width: 2
-                    radius: 10
-                    on_ready:
-                      then:
-                        - lambda: |-
-                            const char* name = lv_textarea_get_text(id(name_input));
-                            if (name && strlen(name) > 0) {
-                              ESP_LOGI("face", "Enregistrement: %s", name);
-                              id(face_detect).enroll_face_with_name(name);
-                            }
-                            lv_textarea_set_text(id(name_input), "");
-                        - lvgl.widget.hide: enroll_popup
-
-                # Clavier GRAND
-                - keyboard:
-                    id: face_keyboard
-                    width: 900
-                    height: 400
-                    align: TOP_MID
-                    y: 170
-                    mode: TEXT_UPPER
-                    textarea: name_input
-                    bg_color: 0x2d2d44
-                    radius: 10
-                    on_cancel:
-                      then:
-                        - lambda: lv_textarea_set_text(id(name_input), "");
-                        - lvgl.widget.hide: enroll_popup
                                    
 #######################################################################################################################################################################################
 #######################################################################################################################################################################################
