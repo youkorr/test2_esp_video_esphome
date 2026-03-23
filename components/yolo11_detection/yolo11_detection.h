@@ -59,6 +59,10 @@ class YOLO11DetectionComponent : public Component {
   void process_frame_();
   void detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
+  void draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, char c, uint16_t color, int scale);
+  void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, const char *text, uint16_t color, int scale);
 
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
