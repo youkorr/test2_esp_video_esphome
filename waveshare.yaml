@@ -387,7 +387,7 @@ face_detection:
 
 file:
   - id: yolo_model
-    path: ./yolo11/coco_detect_yolo11n_s8_v1.espdl
+    path: ./yolo11/coco_detect_yolo11n_320_s8_v3.espdl
 
 yolov11:
   id: my_yolo
