@@ -87,8 +87,12 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
+  // Official esp-dl YOLO11 preprocessing: normalize pixels to [0,1] by dividing by 255
+  // With std={1,1,1} the model received raw 0-255 values → no detections!
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1});
+      this->dl_model_, {0, 0, 0}, {255, 255, 255});
+  // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
+  this->preprocessor_->enable_letterbox({114, 114, 114});
 
   this->postprocessor_ = new dl::detect::yolo11PostProcessor(
       this->dl_model_,
