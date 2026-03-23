@@ -7,7 +7,9 @@ Model embedding is handled by the file component separately.
 
 import os
 import sys
+from SCons.Script import DefaultEnvironment
 Import("env")
+global_env = DefaultEnvironment()
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
@@ -42,12 +44,16 @@ if os.path.exists(esp_dl_dir):
         "vision/image/isa", "vision/image/isa/esp32p4",
     ]
 
+    esp_dl_paths = []
     for inc_dir in esp_dl_include_dirs:
         inc_path = os.path.join(esp_dl_dir, inc_dir)
         if os.path.exists(inc_path):
-            env.Append(CPPPATH=[inc_path])
+            esp_dl_paths.append(inc_path)
 
-    print("[YOLOV11] ESP-DL includes added (sources shared via libface_detection.a)")
+    env.Append(CPPPATH=esp_dl_paths)
+    global_env.Append(CPPPATH=esp_dl_paths)
+
+    print(f"[YOLOV11] ESP-DL includes added ({len(esp_dl_paths)} paths, env + global)")
 
 env.Append(CPPPATH=[component_dir])
 

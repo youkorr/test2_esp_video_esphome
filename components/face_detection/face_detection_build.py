@@ -6,7 +6,11 @@ Embeds face detection/recognition models and compiles optimized ESP-DL sources
 import os
 import sys
 import glob
+from SCons.Script import DefaultEnvironment
 Import("env")
+
+# Get the global/default environment to add includes for src/ files too
+global_env = DefaultEnvironment()
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
@@ -248,12 +252,18 @@ if os.path.exists(esp_dl_dir):
         "vision/classification",
     ]
 
+    esp_dl_paths = []
     for inc_dir in esp_dl_include_dirs:
         inc_path = os.path.join(esp_dl_dir, inc_dir)
         if os.path.exists(inc_path):
-            env.Append(CPPPATH=[inc_path])
+            esp_dl_paths.append(inc_path)
 
-    print("[Face Detection] ESP-DL includes added")
+    # Add to library env
+    env.Append(CPPPATH=esp_dl_paths)
+    # Add to global/default env so src/ files also find ESP-DL headers
+    global_env.Append(CPPPATH=esp_dl_paths)
+
+    print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths, env + global)")
 
     # ESP-DL source files - based on selected model type
     # Core directories (always needed)
