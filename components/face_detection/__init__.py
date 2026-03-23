@@ -163,6 +163,23 @@ async def to_code(config):
     # ESP-DL: download via PlatformIO lib_deps
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
+    # Add ESP-DL include paths for src/ compilation
+    # PlatformIO puts libs in .piolibdeps/<env>/esp-dl/esp-dl/
+    # These -I flags are added globally so face_detection.cpp can find dl_image.hpp etc.
+    esp_dl_include_subdirs = [
+        "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
+        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
+        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4",
+        "dl/math/include", "dl/math/src", "dl/model/include",
+        "dl/model/src", "dl/module/include", "dl/module/src",
+        "fbs_loader/include", "fbs_loader/src",
+        "vision/detect", "vision/image", "vision/image/isa",
+        "vision/image/isa/esp32p4", "vision/recognition",
+        "vision/classification",
+    ]
+    for subdir in esp_dl_include_subdirs:
+        cg.add_build_flag(f"-I$PROJECT_DIR/.piolibdeps/$PIOENV/esp-dl/esp-dl/{subdir}")
+
     # Build script for compiling ESP-DL sources and embedding models
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
     if os.path.exists(build_script_path):

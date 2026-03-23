@@ -6,11 +6,7 @@ Embeds face detection/recognition models and compiles optimized ESP-DL sources
 import os
 import sys
 import glob
-from SCons.Script import DefaultEnvironment
 Import("env")
-
-# Get the global/default environment to add includes for src/ files too
-global_env = DefaultEnvironment()
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
@@ -258,12 +254,9 @@ if os.path.exists(esp_dl_dir):
         if os.path.exists(inc_path):
             esp_dl_paths.append(inc_path)
 
-    # Add to library env
     env.Append(CPPPATH=esp_dl_paths)
-    # Add to global/default env so src/ files also find ESP-DL headers
-    global_env.Append(CPPPATH=esp_dl_paths)
 
-    print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths, env + global)")
+    print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths)")
 
     # ESP-DL source files - based on selected model type
     # Core directories (always needed)
@@ -375,19 +368,21 @@ if os.path.exists(esp_dl_dir):
         print("[Face Detection] Added libfbs_model.a")
 
 # ========================================================================
-# Add local stub files (already in face_detection component)
+# Add local stub files (in extra/ subfolder to avoid ESPHome auto-compile)
 # ========================================================================
+extra_dir = os.path.join(component_dir, "extra")
+
 # Custom dotprod implementation (no DSP version)
-dotprod_file = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
+dotprod_file = os.path.join(extra_dir, "dl_base_dotprod_no_dsp.cpp")
 if os.path.exists(dotprod_file):
     sources_to_add.append(dotprod_file)
-    print("[Face Detection] + dl_base_dotprod_no_dsp.cpp")
+    print("[Face Detection] + extra/dl_base_dotprod_no_dsp.cpp")
 
 # mbedTLS stub (if exists)
-mbedtls_stub = os.path.join(component_dir, "mbedtls_aes_stub.c")
+mbedtls_stub = os.path.join(extra_dir, "mbedtls_aes_stub.c")
 if os.path.exists(mbedtls_stub):
     sources_to_add.append(mbedtls_stub)
-    print("[Face Detection] + mbedtls_aes_stub.c")
+    print("[Face Detection] + extra/mbedtls_aes_stub.c")
 
 env.Append(CPPPATH=[component_dir])
 
