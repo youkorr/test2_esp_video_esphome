@@ -5,6 +5,7 @@ ESP-DL sources are compiled separately by the yolov11 build system.
 """
 
 import os
+import sys
 import glob
 import subprocess
 Import("env")
@@ -12,6 +13,11 @@ Import("env")
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
+
+# Ensure esp-dl is available (download from GitHub if needed)
+sys.path.insert(0, parent_components_dir)
+from esp_dl_manager import ensure_esp_dl
+ensure_esp_dl(parent_components_dir)
 
 print("[YOLO11 Detection] Build script running...")
 

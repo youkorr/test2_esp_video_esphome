@@ -3,6 +3,9 @@
 *.pyc
 __pycache__/
 
+# ESP-DL (downloaded automatically by esp_dl_manager.py)
+components/esp-dl/
+
 # Editor temporary files
 *.swp
 *.swo

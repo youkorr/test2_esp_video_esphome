@@ -4,12 +4,18 @@ Embeds face detection/recognition models and compiles optimized ESP-DL sources
 """
 
 import os
+import sys
 import glob
 Import("env")
 
 script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
+
+# Ensure esp-dl is available (download from GitHub if needed)
+sys.path.insert(0, parent_components_dir)
+from esp_dl_manager import ensure_esp_dl
+ensure_esp_dl(parent_components_dir)
 
 print("[Face Detection] Build script running...")
 
