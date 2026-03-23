@@ -75,25 +75,56 @@ def find_esp_dl(env, fallback_components_dir=None):
     except (KeyError, OSError):
         pass
 
-    # 3. Try LIBSOURCE_DIRS from PlatformIO env
+    # 3. Try LIBSOURCE_DIRS from PlatformIO env (resolve SCons variables)
     try:
         lib_dirs = env.get("LIBSOURCE_DIRS", [])
         if lib_dirs:
             print(f"[ESP-DL] Checking LIBSOURCE_DIRS: {lib_dirs}")
         for lib_dir in lib_dirs:
             lib_dir_str = str(lib_dir)
-            if os.path.exists(lib_dir_str):
-                for name in os.listdir(lib_dir_str):
-                    if "esp-dl" in name.lower() or "esp_dl" in name.lower():
-                        candidate = os.path.join(lib_dir_str, name)
-                        result = _check_esp_dl_dir(candidate)
-                        if result:
-                            print(f"[ESP-DL] Found in LIBSOURCE_DIRS: {result}")
-                            return result
+            # Resolve PlatformIO variables like $PROJECT_LIBDEPS_DIR/$PIOENV
+            try:
+                lib_dir_resolved = env.subst(lib_dir_str)
+            except Exception:
+                lib_dir_resolved = lib_dir_str
+            for path_to_check in [lib_dir_resolved, lib_dir_str]:
+                if os.path.exists(path_to_check):
+                    entries = os.listdir(path_to_check)
+                    print(f"[ESP-DL] LIBSOURCE_DIR {path_to_check} contents: {entries}")
+                    for name in entries:
+                        candidate = os.path.join(path_to_check, name)
+                        if os.path.isdir(candidate):
+                            result = _check_esp_dl_dir(candidate)
+                            if result:
+                                print(f"[ESP-DL] Found in LIBSOURCE_DIRS: {result}")
+                                return result
     except (KeyError, OSError, TypeError):
         pass
 
-    # 4. Try ESPHome managed_components directory
+    # 4. Try PROJECT_LIBDEPS_DIR directly
+    try:
+        project_libdeps = env.subst("$PROJECT_LIBDEPS_DIR")
+        pioenv = env["PIOENV"]
+        if project_libdeps and os.path.exists(project_libdeps):
+            print(f"[ESP-DL] PROJECT_LIBDEPS_DIR={project_libdeps}")
+            # Check <libdeps>/<env>/
+            env_libdeps = os.path.join(project_libdeps, pioenv)
+            # Also check <libdeps>/ directly
+            for check_dir in [env_libdeps, project_libdeps]:
+                if os.path.exists(check_dir):
+                    entries = os.listdir(check_dir)
+                    print(f"[ESP-DL] Checking {check_dir}: {entries}")
+                    for name in entries:
+                        candidate = os.path.join(check_dir, name)
+                        if os.path.isdir(candidate):
+                            result = _check_esp_dl_dir(candidate)
+                            if result:
+                                print(f"[ESP-DL] Found in PROJECT_LIBDEPS_DIR: {result}")
+                                return result
+    except (KeyError, OSError):
+        pass
+
+    # 5. Try ESPHome managed_components directory
     try:
         project_dir = env["PROJECT_DIR"]
         managed_dir = os.path.join(project_dir, "managed_components", "espressif__esp-dl")
@@ -103,29 +134,33 @@ def find_esp_dl(env, fallback_components_dir=None):
     except (KeyError, OSError):
         pass
 
-    # 5. Search common PlatformIO library cache locations
+    # 6. Deep search: /data, project dir, common PlatformIO paths
     try:
         project_dir = env["PROJECT_DIR"]
-        search_paths = [
-            os.path.join(project_dir, ".pio", "libdeps"),  # all envs
-            os.path.join(os.path.expanduser("~"), ".platformio", "lib"),
-            os.path.join(os.path.expanduser("~"), ".platformio", "packages"),
-        ]
-        for search_path in search_paths:
-            if os.path.exists(search_path):
-                for root, dirs, files in os.walk(search_path):
-                    # Don't go deeper than 3 levels
-                    depth = root[len(search_path):].count(os.sep)
-                    if depth > 3:
-                        dirs.clear()
-                        continue
-                    if "dl" in dirs and os.path.exists(os.path.join(root, "dl", "base")):
-                        print(f"[ESP-DL] Found by deep search: {root}")
-                        return root
+        search_roots = set()
+        search_roots.add(os.path.join(project_dir, ".pio"))
+        search_roots.add(os.path.join(os.path.expanduser("~"), ".platformio"))
+        # ESPHome Docker uses /data and /piolibs
+        for extra in ["/data", "/piolibs"]:
+            if os.path.exists(extra):
+                search_roots.add(extra)
+
+        print(f"[ESP-DL] Deep search in: {search_roots}")
+        for search_path in search_roots:
+            if not os.path.exists(search_path):
+                continue
+            for root, dirs, files in os.walk(search_path):
+                depth = root[len(search_path):].count(os.sep)
+                if depth > 4:
+                    dirs.clear()
+                    continue
+                if "dl" in dirs and os.path.exists(os.path.join(root, "dl", "base")):
+                    print(f"[ESP-DL] Found by deep search: {root}")
+                    return root
     except (KeyError, OSError):
         pass
 
-    # 6. Fallback to local components/esp-dl/
+    # 7. Fallback to local components/esp-dl/
     if fallback_components_dir:
         local_dir = os.path.join(fallback_components_dir, "esp-dl")
         if os.path.isdir(local_dir) and os.path.exists(os.path.join(local_dir, "dl")):
