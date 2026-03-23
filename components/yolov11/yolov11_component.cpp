@@ -234,9 +234,15 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   this->postprocessor_->postprocess();
   uint32_t t3 = esp_log_timestamp();
   auto &results = this->postprocessor_->get_result(width, height);
-  ESP_LOGI(TAG, "Timing: preprocess=%lums, inference=%lums, postprocess=%lums, total=%lums",
+  ESP_LOGI(TAG, "Timing: preprocess=%lums, inference=%lums, postprocess=%lums, total=%lums, raw_detections=%d",
            (unsigned long)(t1 - t0), (unsigned long)(t2 - t1),
-           (unsigned long)(t3 - t2), (unsigned long)(t3 - t0));
+           (unsigned long)(t3 - t2), (unsigned long)(t3 - t0), (int)results.size());
+
+  for (auto &result : results) {
+    ESP_LOGI(TAG, "  Raw det: cat=%d score=%.2f box=[%d,%d,%d,%d]",
+             result.category, result.score,
+             result.box[0], result.box[1], result.box[2], result.box[3]);
+  }
 
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
