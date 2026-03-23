@@ -94,7 +94,12 @@ void YOLOV11Component::init_detector_() {
       {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
 
   this->detector_initialized_ = true;
-  ESP_LOGI(TAG, "YOLO11 detector initialized");
+  ESP_LOGI(TAG, "YOLO11 detector initialized (model input: %dx%d)",
+           (int)this->dl_model_->get_input()->shape[2],
+           (int)this->dl_model_->get_input()->shape[1]);
+  ESP_LOGI(TAG, "Free heap: %lu, free PSRAM: %lu",
+           (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 #endif
 }
 
@@ -218,12 +223,19 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   img.height = height;
   img.pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565;
 
+  uint32_t t0 = esp_log_timestamp();
   this->preprocessor_->preprocess(img);
+  uint32_t t1 = esp_log_timestamp();
   this->dl_model_->run();
+  uint32_t t2 = esp_log_timestamp();
 
   this->postprocessor_->clear_result();
   this->postprocessor_->postprocess();
+  uint32_t t3 = esp_log_timestamp();
   auto &results = this->postprocessor_->get_result(width, height);
+  ESP_LOGI(TAG, "Timing: preprocess=%lums, inference=%lums, postprocess=%lums, total=%lums",
+           (unsigned long)(t1 - t0), (unsigned long)(t2 - t1),
+           (unsigned long)(t3 - t2), (unsigned long)(t3 - t0));
 
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
