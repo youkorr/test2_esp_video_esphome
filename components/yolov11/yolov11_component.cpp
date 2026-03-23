@@ -109,6 +109,17 @@ void YOLOV11Component::loop() {
       return;
     }
 
+    // Wait until camera has produced at least one frame
+    if (!this->first_frame_ready_) {
+      auto *buf = this->mipi_camera_->acquire_buffer();
+      if (buf == nullptr) {
+        return;  // Camera not ready yet, silently wait
+      }
+      this->mipi_camera_->release_buffer(buf);
+      this->first_frame_ready_ = true;
+      ESP_LOGI(TAG, "Camera ready, starting detection");
+    }
+
     // Auto-detect every N frames
     this->frame_counter_++;
     if (this->frame_counter_ < this->detection_interval_) {

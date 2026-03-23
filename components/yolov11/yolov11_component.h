@@ -113,6 +113,7 @@ class YOLOV11Component : public Component {
   // Auto-detection state
   uint32_t frame_counter_{0};
   bool inference_requested_{false};
+  bool first_frame_ready_{false};
 
   // Model
   file_component::FileData *model_file_{nullptr};
