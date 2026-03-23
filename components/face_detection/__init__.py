@@ -165,11 +165,15 @@ async def to_code(config):
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
     # Add ESP-DL include paths for src/ compilation
-    # PlatformIO puts libs in .piolibdeps/<pioenv>/esp-dl/esp-dl/
-    # Use CORE.build_path and CORE.name to construct the concrete path
+    # PlatformIO puts libs in .piolibdeps/<pioenv>/esp-dl/
+    # (PlatformIO installs the esp-dl subcomponent directly, not the whole repo)
     build_path = CORE.build_path
     pioenv = CORE.name
-    esp_dl_base = os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl")
+    # Try both possible structures: direct and nested esp-dl/esp-dl/
+    esp_dl_candidates = [
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl"),
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl"),
+    ]
 
     esp_dl_include_subdirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
@@ -182,8 +186,10 @@ async def to_code(config):
         "vision/image/isa/esp32p4", "vision/recognition",
         "vision/classification",
     ]
-    for subdir in esp_dl_include_subdirs:
-        cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
+    # Add -I flags for all candidates (non-existent dirs are harmless)
+    for esp_dl_base in esp_dl_candidates:
+        for subdir in esp_dl_include_subdirs:
+            cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
 
     # Build script for compiling ESP-DL sources and embedding models
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
