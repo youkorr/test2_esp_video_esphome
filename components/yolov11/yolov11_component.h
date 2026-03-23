@@ -110,7 +110,8 @@ class YOLOV11Component : public Component {
   esp_cam_sensor::MipiDSICamComponent *mipi_camera_{nullptr};
 #endif
 
-  // Inference request flag (shared by both camera types)
+  // Auto-detection state
+  uint32_t frame_counter_{0};
   bool inference_requested_{false};
 
   // Model

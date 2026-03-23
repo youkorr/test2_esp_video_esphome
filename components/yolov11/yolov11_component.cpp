@@ -99,12 +99,23 @@ void YOLOV11Component::init_detector_() {
 }
 
 void YOLOV11Component::loop() {
-  if (!this->detector_initialized_ || !this->inference_requested_) {
+  if (!this->detector_initialized_) {
     return;
   }
 
 #ifdef USE_YOLOV11_MIPI_CAMERA
   if (this->mipi_camera_ != nullptr) {
+    if (!this->mipi_camera_->is_streaming()) {
+      return;
+    }
+
+    // Auto-detect every N frames
+    this->frame_counter_++;
+    if (this->frame_counter_ < this->detection_interval_) {
+      return;
+    }
+    this->frame_counter_ = 0;
+
     this->run_inference();
   }
 #endif
@@ -138,7 +149,6 @@ void YOLOV11Component::run_inference() {
     }
 
     this->mipi_camera_->release_buffer(buffer);
-    this->inference_requested_ = false;
     return;
   }
 #endif

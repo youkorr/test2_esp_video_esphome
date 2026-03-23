@@ -363,10 +363,10 @@ lvgl_camera_display:
   camera_id: tab5_cam
   canvas_id: camera_canvas
   update_interval: 33ms
-  #face_detection_id: face_detect      # Désactivé pour tester YOLO
-  yolo11_detection_id: yolo_detect
+  #face_detection_id: face_detect
+  yolov11_id: my_yolo
 
-# Detection de visages + reconnaissance (garde actif pour les boutons, mais pas connecte au display)
+# Detection de visages (garde actif pour les boutons, draw desactive)
 face_detection:
   id: face_detect
   camera_id: tab5_cam
@@ -382,19 +382,25 @@ face_detection:
 
 
 # ============================================================================
-# yolo11_detection
+# YOLO11 Detection (yolov11 + file)
 # ============================================================================
 
-yolo11_detection:
-  id: yolo_detect
+file:
+  - id: yolo_model
+    path: ./yolo11/coco_detect_yolo11n_s8_v1.espdl
+
+yolov11:
+  id: my_yolo
   camera_id: tab5_cam
+  model_id: yolo_model
   score_threshold: 0.3
   nms_threshold: 0.5
+  detect_classes:
+    - 0   # person
+    - 15  # cat
+    - 16  # dog
   detection_interval: 8
-  draw_enabled: true
-  on_object_detected:
-    - lambda: |-
-        ESP_LOGI("main", "Objects détectés: %d", object_count);  
+  draw_enabled: true  
 
 # ============================================================================
 # simple_video_player 
@@ -513,7 +519,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [yolo11_detection]
+    components: [yolov11, file]
 
 
 
