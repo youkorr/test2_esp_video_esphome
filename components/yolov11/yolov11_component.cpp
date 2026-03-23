@@ -5,6 +5,10 @@
 #include "esphome/components/esp32_camera/esp32_camera.h"
 #endif
 
+#if defined(USE_ESP_IDF) && defined(USE_YOLOV11_MIPI_CAMERA)
+#include "esp_cache.h"
+#endif
+
 namespace esphome {
 namespace yolov11 {
 
@@ -162,6 +166,19 @@ void YOLOV11Component::run_inference() {
     uint16_t height = this->mipi_camera_->get_image_height();
 
     if (img_data != nullptr) {
+      // ESP32-P4: Invalidate CPU cache before reading SPIRAM buffer filled by DMA
+      // Without this, CPU reads stale cached data → model sees blank/corrupted image
+      uint32_t frame_size = width * height * 2;  // RGB565
+      esp_cache_msync(img_data, frame_size,
+                      ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+
+      // Debug: dump first pixels to verify data integrity
+      if (this->frame_counter_ == 0) {
+        uint16_t *pixels = (uint16_t *)img_data;
+        ESP_LOGI(TAG, "YOLO input: %ux%u, first pixels: %04X %04X %04X %04X",
+                 width, height, pixels[0], pixels[1], pixels[2], pixels[3]);
+      }
+
       this->detect_objects_(img_data, width, height);
     }
 
@@ -229,6 +246,33 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   uint32_t t1 = esp_log_timestamp();
   this->dl_model_->run();
   uint32_t t2 = esp_log_timestamp();
+
+  // Debug: check model output tensor values
+  {
+    auto outputs = this->dl_model_->get_outputs();
+    ESP_LOGI(TAG, "Model outputs: %d tensors", (int)outputs.size());
+    for (int i = 0; i < (int)outputs.size(); i++) {
+      auto *tensor = outputs[i];
+      int total = 1;
+      std::string shape_str;
+      for (int d = 0; d < tensor->shape.size(); d++) {
+        total *= tensor->shape[d];
+        if (d > 0) shape_str += "x";
+        shape_str += std::to_string(tensor->shape[d]);
+      }
+      // Check if all zeros
+      int8_t *data = (int8_t *)tensor->data;
+      int non_zero = 0;
+      int8_t max_val = 0, min_val = 0;
+      for (int j = 0; j < std::min(total, 1000); j++) {
+        if (data[j] != 0) non_zero++;
+        if (data[j] > max_val) max_val = data[j];
+        if (data[j] < min_val) min_val = data[j];
+      }
+      ESP_LOGI(TAG, "  Output[%d]: shape=[%s], non_zero=%d/1000, range=[%d..%d]",
+               i, shape_str.c_str(), non_zero, min_val, max_val);
+    }
+  }
 
   this->postprocessor_->clear_result();
   this->postprocessor_->postprocess();
