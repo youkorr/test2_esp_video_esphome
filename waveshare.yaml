@@ -510,6 +510,11 @@ external_components:
     components: [esp_cam_sensor, esp_video, lvgl_camera_display, sd_mmc_card, webdavbox3, storage, simple_video_player, face_detection, network_camera]
     refresh: always
 
+  - source:
+      type: local
+      path: components
+    components: [yolo11_detection]
+
 
 
 i2s_audio:
