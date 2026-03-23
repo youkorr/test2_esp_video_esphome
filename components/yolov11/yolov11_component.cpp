@@ -67,18 +67,11 @@ void YOLOV11Component::init_detector_() {
 
   ESP_LOGI(TAG, "Loading model (%u bytes)...", (unsigned)model_size);
 
-  // Query available internal RAM and use what's available (cap at 24KB to leave room for system)
-  size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  int max_internal = 0;
-  if (largest_block > 32 * 1024) {
-    max_internal = largest_block - 8 * 1024;  // Leave 8KB margin
-  }
-  ESP_LOGI(TAG, "Internal RAM largest block: %u bytes, using %d for model", (unsigned)largest_block, max_internal);
-
+  // Internal RAM too limited (~31KB free after system/LVGL/WiFi), use SPIRAM for all tensors
   this->dl_model_ = new dl::Model(
       (const char *)model_data,
       fbs::MODEL_LOCATION_IN_FLASH_RODATA,
-      max_internal,
+      0,
       dl::MEMORY_MANAGER_GREEDY,
       nullptr,
       true
