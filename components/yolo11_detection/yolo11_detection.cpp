@@ -8,6 +8,14 @@
 #include "dl_detect_yolo11_postprocessor.hpp"
 #include "dl_image.hpp"
 
+#ifdef USE_YOLO11_ESP32_CAMERA
+#include "esphome/components/esp32_camera/esp32_camera.h"
+#endif
+
+#if defined(USE_ESP_IDF) && defined(USE_YOLO11_MIPI_CAMERA)
+#include "esp_cache.h"
+#endif
+
 // Model data - embedded in flash rodata by build script
 extern const uint8_t yolo11_detect_espdl[] asm("_binary_yolo11_detect_espdl_start");
 
@@ -85,12 +93,6 @@ static const char *const COCO_CLASSES[] = {
 void YOLO11DetectionComponent::setup() {
   ESP_LOGCONFIG(TAG, "Setting up YOLO11 Object Detection...");
 
-  if (this->camera_ == nullptr) {
-    ESP_LOGE(TAG, "Camera not configured");
-    this->mark_failed();
-    return;
-  }
-
   this->detections_mutex_ = xSemaphoreCreateMutex();
   if (this->detections_mutex_ == nullptr) {
     ESP_LOGE(TAG, "Failed to create detections mutex");
@@ -140,6 +142,23 @@ void YOLO11DetectionComponent::setup() {
 
   this->detector_initialized_ = true;
 
+  // Register with ESP32 camera (callback-based)
+#ifdef USE_YOLO11_ESP32_CAMERA
+  if (this->esp32_camera_ != nullptr) {
+    this->esp32_camera_->add_image_callback(
+        [this](std::shared_ptr<esp32_camera::CameraImage> image) {
+          this->on_esp32_camera_image_(std::move(image));
+        });
+    ESP_LOGI(TAG, "Registered with ESP32 camera (callback mode)");
+  }
+#endif
+
+#ifdef USE_YOLO11_MIPI_CAMERA
+  if (this->mipi_camera_ != nullptr) {
+    ESP_LOGI(TAG, "Registered with MIPI camera (polling mode)");
+  }
+#endif
+
   ESP_LOGI(TAG, "YOLO11 Object Detection ready");
   ESP_LOGI(TAG, "  Detection interval: every %d frames", this->detection_interval_);
   ESP_LOGI(TAG, "  Score threshold: %.2f", this->score_threshold_);
@@ -152,11 +171,15 @@ void YOLO11DetectionComponent::loop() {
     return;
   }
 
-  if (this->camera_ == nullptr || !this->camera_->is_streaming()) {
-    return;
+#ifdef USE_YOLO11_MIPI_CAMERA
+  if (this->mipi_camera_ != nullptr) {
+    if (!this->mipi_camera_->is_streaming()) {
+      return;
+    }
+    this->process_frame_();
   }
-
-  this->process_frame_();
+#endif
+  // For ESP32 camera, inference is handled via on_esp32_camera_image_ callback
 }
 
 void YOLO11DetectionComponent::process_frame_() {
@@ -168,21 +191,65 @@ void YOLO11DetectionComponent::process_frame_() {
 
   this->frame_counter_ = 0;
 
-  esp_cam_sensor::SimpleBufferElement *buffer = this->camera_->acquire_buffer();
-  if (buffer == nullptr) {
+#ifdef USE_YOLO11_MIPI_CAMERA
+  if (this->mipi_camera_ != nullptr) {
+    esp_cam_sensor::SimpleBufferElement *buffer = this->mipi_camera_->acquire_buffer();
+    if (buffer == nullptr) {
+      return;
+    }
+
+    uint8_t *img_data = this->mipi_camera_->get_buffer_data(buffer);
+    uint16_t width = this->mipi_camera_->get_image_width();
+    uint16_t height = this->mipi_camera_->get_image_height();
+
+    if (img_data != nullptr) {
+      // ESP32-P4: Invalidate CPU cache before reading SPIRAM buffer filled by DMA
+      uint32_t frame_size = width * height * 2;  // RGB565
+      esp_cache_msync(img_data, frame_size,
+                      ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+      this->detect_objects_(img_data, width, height);
+    }
+
+    this->mipi_camera_->release_buffer(buffer);
+  }
+#endif
+}
+
+#ifdef USE_YOLO11_ESP32_CAMERA
+void YOLO11DetectionComponent::on_esp32_camera_image_(
+    std::shared_ptr<esp32_camera::CameraImage> image) {
+  if (!this->detector_initialized_) {
     return;
   }
 
-  uint8_t *img_data = this->camera_->get_buffer_data(buffer);
-  uint16_t width = this->camera_->get_image_width();
-  uint16_t height = this->camera_->get_image_height();
+  // Rate-limit detection using frame counter
+  this->frame_counter_++;
+  if (this->frame_counter_ < this->detection_interval_) {
+    return;
+  }
+  this->frame_counter_ = 0;
 
-  if (img_data != nullptr) {
-    this->detect_objects_(img_data, width, height);
+  uint8_t *data = image->get_data_buffer();
+  size_t len = image->get_data_length();
+
+  if (data == nullptr || len == 0) {
+    return;
   }
 
-  this->camera_->release_buffer(buffer);
+  // Determine dimensions from data length (RGB565 = 2 bytes per pixel)
+  const uint16_t resolutions[][2] = {
+      {320, 240}, {640, 480}, {160, 120}, {800, 600}, {1024, 768},
+  };
+
+  for (auto &res : resolutions) {
+    if (len == (size_t)res[0] * res[1] * 2) {
+      this->detect_objects_(data, res[0], res[1]);
+      return;
+    }
+  }
+  ESP_LOGW(TAG, "Unsupported image size: %u bytes (need RGB565 format)", (unsigned)len);
 }
+#endif
 
 void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height) {
   if (this->dl_model_ == nullptr || this->postprocessor_ == nullptr) {
@@ -364,6 +431,12 @@ void YOLO11DetectionComponent::draw_text_(uint8_t *img_data, uint16_t img_width,
 
 void YOLO11DetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLO11 Object Detection:");
+#ifdef USE_YOLO11_ESP32_CAMERA
+  ESP_LOGCONFIG(TAG, "  Camera: ESP32 Camera");
+#endif
+#ifdef USE_YOLO11_MIPI_CAMERA
+  ESP_LOGCONFIG(TAG, "  Camera: MIPI DSI Camera (esp_cam_sensor)");
+#endif
   ESP_LOGCONFIG(TAG, "  Model: direct ESP-DL (flash rodata)");
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);

@@ -2,9 +2,19 @@
 
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
-#include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 #include <vector>
 #include <list>
+
+#ifdef USE_YOLO11_MIPI_CAMERA
+#include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
+#endif
+
+#ifdef USE_YOLO11_ESP32_CAMERA
+namespace esp32_camera {
+class ESP32Camera;
+class CameraImage;
+}  // namespace esp32_camera
+#endif
 
 // ESP-DL forward declarations
 namespace dl {
@@ -34,8 +44,14 @@ class YOLO11DetectionComponent : public Component {
   void dump_config() override;
   float get_setup_priority() const override { return -200.0f; }
 
-  // Configuration setters
-  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
+  // Camera setters (mutually exclusive)
+#ifdef USE_YOLO11_MIPI_CAMERA
+  void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->mipi_camera_ = camera; }
+#endif
+#ifdef USE_YOLO11_ESP32_CAMERA
+  void set_esp32_camera(esp32_camera::ESP32Camera *camera) { this->esp32_camera_ = camera; }
+#endif
+
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float threshold) { this->score_threshold_ = threshold; }
   void set_nms_threshold(float threshold) { this->nms_threshold_ = threshold; }
@@ -64,8 +80,14 @@ class YOLO11DetectionComponent : public Component {
   void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
                   int x, int y, const char *text, uint16_t color, int scale);
 
-  // Components
-  esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
+#ifdef USE_YOLO11_ESP32_CAMERA
+  void on_esp32_camera_image_(std::shared_ptr<esp32_camera::CameraImage> image);
+  esp32_camera::ESP32Camera *esp32_camera_{nullptr};
+#endif
+
+#ifdef USE_YOLO11_MIPI_CAMERA
+  esp_cam_sensor::MipiDSICamComponent *mipi_camera_{nullptr};
+#endif
 
   // ESP-DL objects (direct, no wrapper)
   dl::Model *dl_model_{nullptr};

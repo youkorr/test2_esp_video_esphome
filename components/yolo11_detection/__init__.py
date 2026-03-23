@@ -4,9 +4,7 @@ from esphome.const import CONF_ID
 from esphome import automation
 import os
 
-DEPENDENCIES = ["esp_cam_sensor"]
-AUTO_LOAD = ["esp_cam_sensor"]
-
+CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_CAMERA_ID = "camera_id"
 CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
@@ -21,29 +19,60 @@ YOLO11DetectionComponent = yolo11_detection_ns.class_("YOLO11DetectionComponent"
 # Triggers
 ObjectDetectedTrigger = yolo11_detection_ns.class_("ObjectDetectedTrigger", automation.Trigger.template(cg.int_))
 
+# esp32_camera (ESPHome standard - for ESP32-S3, etc.)
+esp32_camera_ns = cg.esphome_ns.namespace("esp32_camera")
+ESP32Camera = esp32_camera_ns.class_("ESP32Camera", cg.Component)
+
+# esp_cam_sensor (MIPI DSI - ESP32-P4)
 esp_cam_sensor_ns = cg.esphome_ns.namespace("esp_cam_sensor")
 MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(YOLO11DetectionComponent),
-    cv.Required(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
-    cv.Optional(CONF_CANVAS_ID): cv.string,
-    cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
-    cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
-    cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=600),
-    cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
-    cv.Optional(CONF_ON_OBJECT_DETECTED): automation.validate_automation({
-        cv.GenerateID(): cv.declare_id(ObjectDetectedTrigger),
-    }),
-}).extend(cv.COMPONENT_SCHEMA)
+
+def validate_camera_config(config):
+    has_esp32_cam = CONF_ESP32_CAMERA_ID in config
+    has_mipi_cam = CONF_CAMERA_ID in config
+    if not has_esp32_cam and not has_mipi_cam:
+        raise cv.Invalid(
+            "Either 'esp32_camera_id' or 'camera_id' must be specified"
+        )
+    if has_esp32_cam and has_mipi_cam:
+        raise cv.Invalid(
+            "Only one of 'esp32_camera_id' or 'camera_id' can be specified"
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    cv.Schema({
+        cv.GenerateID(): cv.declare_id(YOLO11DetectionComponent),
+        cv.Optional(CONF_ESP32_CAMERA_ID): cv.use_id(ESP32Camera),
+        cv.Optional(CONF_CAMERA_ID): cv.use_id(MipiDsiCam),
+        cv.Optional(CONF_CANVAS_ID): cv.string,
+        cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(min=0.0, max=1.0),
+        cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
+        cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=600),
+        cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+        cv.Optional(CONF_ON_OBJECT_DETECTED): automation.validate_automation({
+            cv.GenerateID(): cv.declare_id(ObjectDetectedTrigger),
+        }),
+    }).extend(cv.COMPONENT_SCHEMA),
+    validate_camera_config,
+)
 
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    camera = await cg.get_variable(config[CONF_CAMERA_ID])
-    cg.add(var.set_camera(camera))
+    # Set camera (mutually exclusive)
+    if CONF_ESP32_CAMERA_ID in config:
+        camera = await cg.get_variable(config[CONF_ESP32_CAMERA_ID])
+        cg.add(var.set_esp32_camera(camera))
+        cg.add_build_flag("-DUSE_YOLO11_ESP32_CAMERA")
+    elif CONF_CAMERA_ID in config:
+        camera = await cg.get_variable(config[CONF_CAMERA_ID])
+        cg.add(var.set_camera(camera))
+        cg.add_build_flag("-DUSE_YOLO11_MIPI_CAMERA")
 
     if CONF_CANVAS_ID in config:
         cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
@@ -60,25 +89,37 @@ async def to_code(config):
 
     # Build flags
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
-    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
     # Add include paths
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
-    # ESP-DL include paths
+    # Detect target platform for ISA-specific includes
+    # ESP32-P4 uses MIPI camera, ESP32-S3 uses esp32_camera
+    is_p4 = CONF_CAMERA_ID in config  # MIPI = P4
+    is_s3 = CONF_ESP32_CAMERA_ID in config  # esp32_camera = S3 or other
+
+    if is_p4:
+        cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+        isa_target = "esp32p4"
+    else:
+        # ESP32-S3 uses TIE728 SIMD engine
+        cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32S3=1")
+        isa_target = "tie728"
+
+    # ESP-DL include paths (platform-adaptive)
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if os.path.exists(esp_dl_dir):
         esp_dl_includes = [
             "dl",
             "dl/tool/include",
-            "dl/tool/isa/esp32p4",
+            f"dl/tool/isa/{isa_target}",
             "dl/tool/src",
             "dl/tensor/include",
             "dl/tensor/src",
             "dl/base",
             "dl/base/isa",
-            "dl/base/isa/esp32p4",
+            f"dl/base/isa/{isa_target}",
             "dl/math/include",
             "dl/math/src",
             "dl/model/include",
@@ -86,12 +127,12 @@ async def to_code(config):
             "dl/module/include",
             "dl/module/src",
             "fbs_loader/include",
-            "fbs_loader/lib/esp32p4",
+            f"fbs_loader/lib/{isa_target}",
             "fbs_loader/src",
             "vision/detect",
             "vision/image",
             "vision/image/isa",
-            "vision/image/isa/esp32p4",
+            f"vision/image/isa/{isa_target}",
         ]
         for inc in esp_dl_includes:
             inc_path = os.path.join(esp_dl_dir, inc)
