@@ -67,10 +67,12 @@ void YOLOV11Component::init_detector_() {
 
   ESP_LOGI(TAG, "Loading model (%u bytes)...", (unsigned)model_size);
 
+  // Use up to 150KB of internal SRAM for intermediate tensors (much faster than SPIRAM)
+  // ESP32-P4 has 500KB internal RAM, ~400KB free at runtime
   this->dl_model_ = new dl::Model(
       (const char *)model_data,
       fbs::MODEL_LOCATION_IN_FLASH_RODATA,
-      0,
+      150 * 1024,
       dl::MEMORY_MANAGER_GREEDY,
       nullptr,
       true
