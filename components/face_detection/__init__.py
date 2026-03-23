@@ -161,14 +161,19 @@ async def to_code(config):
         cg.add_build_flag(f"-I{human_face_recognition_dir}")
 
     # ESP-DL: download via PlatformIO lib_deps
-    # Include paths are set by the build script (face_detection_build.py)
-    # since the library is only available after PlatformIO downloads it
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
-    # Add build script for compiling ESP-DL sources and embedding models
+    # Pre-build script: adds ESP-DL includes to projenv (for src/ files)
+    # Post-build script: compiles ESP-DL sources and embeds models
+    pre_script_path = os.path.join(component_dir, "esp_dl_includes.py")
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
+    extra_scripts = []
+    if os.path.exists(pre_script_path):
+        extra_scripts.append(f"pre:{pre_script_path}")
     if os.path.exists(build_script_path):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+        extra_scripts.append(f"post:{build_script_path}")
+    if extra_scripts:
+        cg.add_platformio_option("extra_scripts", extra_scripts)
 
 
 # Action schemas
