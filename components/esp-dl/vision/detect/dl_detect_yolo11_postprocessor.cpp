@@ -74,14 +74,27 @@ template void yolo11PostProcessor::parse_stage<int16_t>(TensorBase *score, Tenso
 
 void yolo11PostProcessor::postprocess()
 {
+    // Support both esp-dl standard names (box0/score0) and raw YOLO export names (one2one_p*_box/cls)
     TensorBase *bbox0 = m_model->get_output("box0");
     TensorBase *score0 = m_model->get_output("score0");
-
     TensorBase *bbox1 = m_model->get_output("box1");
     TensorBase *score1 = m_model->get_output("score1");
-
     TensorBase *bbox2 = m_model->get_output("box2");
     TensorBase *score2 = m_model->get_output("score2");
+
+    if (!bbox0 || !score0) {
+        // Fallback: try raw YOLO11 output names (one2one variant)
+        bbox0 = m_model->get_output("one2one_p3_box");
+        score0 = m_model->get_output("one2one_p3_cls");
+        bbox1 = m_model->get_output("one2one_p4_box");
+        score1 = m_model->get_output("one2one_p4_cls");
+        bbox2 = m_model->get_output("one2one_p5_box");
+        score2 = m_model->get_output("one2one_p5_cls");
+    }
+
+    if (!bbox0 || !score0 || !bbox1 || !score1 || !bbox2 || !score2) {
+        return;
+    }
 
     if (bbox0->dtype == DATA_TYPE_INT8) {
         parse_stage<int8_t>(score0, bbox0, 0);
