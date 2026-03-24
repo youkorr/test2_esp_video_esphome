@@ -1,4 +1,7 @@
 #include "human_face_detect.hpp"
+#include "esp_log.h"
+
+static const char *TAG_HFD = "human_face_detect";
 
 #if CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA
 extern const uint8_t human_face_detect_espdl[] asm("_binary_human_face_detect_espdl_start");
@@ -20,14 +23,16 @@ MSR::MSR(const char *model_name)
 
 #if CONFIG_IDF_TARGET_ESP32P4
     // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
+    ESP_LOGI(TAG_HFD, "MSR: Using RGB565 BIG ENDIAN + RGB_SWAP (ESP32-P4 mode)");
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1},
         dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
+    ESP_LOGI(TAG_HFD, "MSR: Using RGB_SWAP only (default mode)");
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
 
     m_postprocessor = new dl::detect::MSRPostprocessor(
-        m_model, m_image_preprocessor, 0.2, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
+        m_model, m_image_preprocessor, 0.1, 0.5, 10, {{8, 8, 9, 9, {{16, 16}, {32, 32}}}, {16, 16, 9, 9, {{64, 64}, {128, 128}}}});
 }
 
 MNP::MNP(const char *model_name)
@@ -41,9 +46,11 @@ MNP::MNP(const char *model_name)
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32P4
+    ESP_LOGI(TAG_HFD, "MNP: Using RGB565 BIG ENDIAN + RGB_SWAP (ESP32-P4 mode)");
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1},
         dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
+    ESP_LOGI(TAG_HFD, "MNP: Using RGB_SWAP only (default mode)");
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1}, dl::image::DL_IMAGE_CAP_RGB_SWAP);
 #endif
     m_postprocessor = new dl::detect::MNPPostprocessor(m_model, m_image_preprocessor, 0.2, 0.5, 10, {{1, 1, 0, 0, {{48, 48}}}});
