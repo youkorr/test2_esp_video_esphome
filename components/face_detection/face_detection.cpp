@@ -312,17 +312,52 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
              (float)r_sum_be / sample_count, (float)g_sum_be / sample_count, (float)b_sum_be / sample_count);
   }
 
-  // WDT protection: face detection inference can take 1-2 seconds.
-  // When combined with LVGL page transitions (auto-lock), total main loop time
-  // can exceed the 5s watchdog. Reset WDT timer before and after inference.
+  // WDT protection
   esp_task_wdt_reset();
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
   esp_task_wdt_reset();
 
-  // Debug: log detection results count
+  // Debug: inspect model raw output scores (from face_detection.cpp where logs work)
   static int face_log_count = 0;
-  if (face_log_count < 20) {
+  if (face_log_count < 10) {
     face_log_count++;
+
+    // Access internal model to inspect raw scores
+    dl::Model *raw_model = this->face_detector_->get_raw_model(0);
+    if (raw_model) {
+      for (const char *name : {"score0", "score1"}) {
+        dl::TensorBase *tensor = raw_model->get_output(name);
+        if (tensor && tensor->data) {
+          int total = 1;
+          for (auto s : tensor->shape) total *= s;
+          int8_t *data = (int8_t *)tensor->data;
+          int8_t max_val = -128, min_val = 127;
+          for (int i = 0; i < total; i++) {
+            if (data[i] > max_val) max_val = data[i];
+            if (data[i] < min_val) min_val = data[i];
+          }
+          ESP_LOGI(TAG, "[frame %d] %s: shape=[%d,%d,%d,%d] exp=%d raw_scores=[%d..%d] (total=%d)",
+                   face_log_count, name,
+                   (int)tensor->shape[0], (int)tensor->shape[1],
+                   (int)tensor->shape[2], (int)tensor->shape[3],
+                   (int)tensor->exponent, (int)min_val, (int)max_val, total);
+        } else {
+          ESP_LOGW(TAG, "[frame %d] %s: tensor NOT FOUND", face_log_count, name);
+        }
+      }
+
+      // Also check model input shape
+      dl::TensorBase *input = raw_model->get_input();
+      if (input && face_log_count == 1) {
+        ESP_LOGI(TAG, "Model input: shape=[%d,%d,%d,%d] dtype=%d exp=%d",
+                 (int)input->shape[0], (int)input->shape[1],
+                 (int)input->shape[2], (int)input->shape[3],
+                 (int)input->dtype, (int)input->exponent);
+      }
+    } else {
+      ESP_LOGW(TAG, "[frame %d] get_raw_model(0) returned NULL!", face_log_count);
+    }
+
     ESP_LOGI(TAG, "Face detection result: %d faces found (frame %d)", (int)face_results.size(), face_log_count);
     for (auto &r : face_results) {
       ESP_LOGI(TAG, "  Face: box=[%d,%d,%d,%d] score=%.3f", r.box[0], r.box[1], r.box[2], r.box[3], r.score);
