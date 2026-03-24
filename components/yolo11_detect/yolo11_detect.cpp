@@ -20,10 +20,9 @@ YOLO11Impl::YOLO11Impl(const char *model_name)
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // So we don't use DL_IMAGE_CAP_RGB565_BIG_ENDIAN flag
-    m_image_preprocessor =
-        new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+    // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1},
+        dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
     m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
 #endif

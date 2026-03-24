@@ -89,11 +89,10 @@ void YOLOV11Component::init_detector_() {
 
   // Official esp-dl YOLO11 preprocessing: mean={0,0,0}, std={1,1,1}
   // The .espdl model handles quantization internally via tensor exponents.
-  // Do NOT use std={255,255,255} — that divides pixels by 255 before quantization,
-  // producing near-zero int8 values and making the model see a blank image.
-  // caps=0: ESP32-P4 camera produces RGB565 little-endian (matches official pedestrian_detect)
+  // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1});
+      this->dl_model_, {0, 0, 0}, {1, 1, 1},
+      dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
   // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
   this->preprocessor_->enable_letterbox({114, 114, 114});
 

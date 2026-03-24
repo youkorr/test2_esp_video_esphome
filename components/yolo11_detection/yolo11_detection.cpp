@@ -127,8 +127,10 @@ void YOLO11DetectionComponent::setup() {
 
   ESP_LOGI(TAG, "Model loaded, creating preprocessor...");
 
+  // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1});
+      this->dl_model_, {0, 0, 0}, {1, 1, 1},
+      dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 
   ESP_LOGI(TAG, "Creating YOLO11 postprocessor...");
 
