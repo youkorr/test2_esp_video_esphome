@@ -87,16 +87,13 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  // Official esp-dl YOLO11 preprocessing: normalize pixels to [0,1] by dividing by 255
-  // ESP32-P4 MIPI camera outputs RGB565 in big-endian byte order.
-  // Must set DL_IMAGE_CAP_RGB565_BIG_ENDIAN | DL_IMAGE_CAP_RGB_SWAP to correctly
-  // extract R/G/B channels (same as human_face_recognition component for ESP32-P4).
-  uint32_t caps = 0;
-#if CONFIG_IDF_TARGET_ESP32P4
-  caps = dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN;
-#endif
+  // Official esp-dl YOLO11 preprocessing: mean={0,0,0}, std={1,1,1}
+  // The .espdl model handles quantization internally via tensor exponents.
+  // Do NOT use std={255,255,255} — that divides pixels by 255 before quantization,
+  // producing near-zero int8 values and making the model see a blank image.
+  // caps=0: ESP-Video camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN=false)
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {255, 255, 255}, caps);
+      this->dl_model_, {0, 0, 0}, {1, 1, 1});
   // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
   this->preprocessor_->enable_letterbox({114, 114, 114});
 
@@ -182,7 +179,7 @@ void YOLOV11Component::run_inference() {
       esp_cache_msync(img_data, frame_size,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-      // Debug: analyze image brightness (ESP32-P4: RGB565 big-endian byte order)
+      // Debug: analyze image brightness (LE RGB565, caps=0)
       if (this->frame_counter_ == 0) {
         uint16_t *pixels = (uint16_t *)img_data;
         uint32_t total_pixels = width * height;
@@ -191,20 +188,16 @@ void YOLOV11Component::run_inference() {
         uint32_t step = total_pixels / sample_count;
         for (uint32_t i = 0; i < total_pixels; i += step) {
           uint16_t p = pixels[i];
-          // Big-endian RGB565 extraction (matches ESP32-P4 camera output)
-          uint8_t r = p & 0xF8;
-          uint8_t g = ((p & 0x7) << 5) | ((p & 0xE000) >> 11);
-          uint8_t b = (p & 0x1F00) >> 5;
-          r_sum += r;
-          g_sum += g;
-          b_sum += b;
+          r_sum += ((p >> 11) & 0x1F) << 3;
+          g_sum += ((p >> 5) & 0x3F) << 2;
+          b_sum += (p & 0x1F) << 3;
         }
         float r_avg = (float)r_sum / sample_count;
         float g_avg = (float)g_sum / sample_count;
         float b_avg = (float)b_sum / sample_count;
         ESP_LOGI(TAG, "YOLO input: %ux%u, first pixels: %04X %04X %04X %04X",
                  width, height, pixels[0], pixels[1], pixels[2], pixels[3]);
-        ESP_LOGI(TAG, "  Avg RGB (BE): (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
+        ESP_LOGI(TAG, "  Avg RGB: (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
       }
 
       this->detect_objects_(img_data, width, height);
