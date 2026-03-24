@@ -39,13 +39,11 @@ print(f"[Face Detection] component_dir = {component_dir}")
 print(f"[Face Detection] parent_components_dir = {parent_components_dir}")
 
 # ========================================================================
-# Find local esp-dl directory
+# Find esp-dl (local components/esp-dl/ or PlatformIO libdeps)
 # ========================================================================
-esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
-if not os.path.exists(esp_dl_dir):
-    print(f"[Face Detection] ERROR: esp-dl not found at {esp_dl_dir}")
-    raise FileNotFoundError(f"esp-dl not found at {esp_dl_dir}")
-
+sys.path.insert(0, parent_components_dir)
+from esp_dl_path import find_esp_dl
+esp_dl_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
 print(f"[Face Detection] ESP-DL: {esp_dl_dir}")
 
 # ========================================================================
@@ -216,13 +214,10 @@ if model_type == "face_recognition":
                     print("[Face Detection] human_face_recognition model cached (skip)")
 
 # ========================================================================
-# ESP-DL Core Sources
-# Only compile ESP-DL infrastructure here.
-# Face-specific sources are handled by wrapper files at component root
-# (auto-compiled by ESPHome):
+# ESP-DL Sources + Postprocessors + Recognition
+# This script compiles: ESP-DL core, vision/detect, vision/recognition
+# Wrapper files at component root (auto-compiled by ESPHome) handle:
 #   - human_face_detect_wrapper.cpp -> human_face_detect.cpp
-#   - esp_dl_face_postprocessors_wrapper.cpp -> MSR/MNP postprocessors
-#   - esp_dl_recognition_wrapper.cpp -> recognition sources
 #   - human_face_recognition_wrapper.cpp -> human_face_recognition.cpp
 #   - dl_base_dotprod_no_dsp.cpp -> custom dotprod (no DSP)
 #   - mbedtls_aes_stub.c -> AES stubs
@@ -250,7 +245,10 @@ for inc_dir in esp_dl_include_dirs:
 env.Append(CPPPATH=esp_dl_paths)
 print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths)")
 
-# ESP-DL core source directories (NOT face-specific - those are in wrappers)
+# ESP-DL source directories
+# Core + vision/detect + vision/recognition (compiled in build script)
+# human_face_detect.cpp and human_face_recognition.cpp are handled by
+# wrapper files at component root (auto-compiled by ESPHome)
 esp_dl_source_dirs = [
     "dl/tensor/src",
     "dl/model/src",
@@ -259,33 +257,31 @@ esp_dl_source_dirs = [
     "dl/math/src",
     "fbs_loader/src",
     "vision/image",
+    "vision/detect",
 ]
 
-# Files to always exclude
+# Add recognition sources if face recognition is enabled
+if has_face_recognition:
+    esp_dl_source_dirs.append("vision/recognition")
+    print("[Face Detection] Including: vision/recognition")
+
+# Files to exclude
 esp_dl_exclude = [
-    "dl_base_dotprod.cpp",       # Replaced by our custom dl_base_dotprod_no_dsp.cpp
+    "dl_base_dotprod.cpp",       # Replaced by custom dl_base_dotprod_no_dsp.cpp (at component root)
     "dl_image_jpeg.cpp",         # JPEG not used
     "dl_image_bmp.cpp",          # BMP not used
 ]
 
-# Exclude ALL postprocessors - wrappers handle the ones we need (MSR/MNP)
-esp_dl_exclude.extend([
-    "dl_detect_postprocessor.cpp",
-    "dl_detect_msr_postprocessor.cpp",
-    "dl_detect_mnp_postprocessor.cpp",
-    "dl_detect_espdet_postprocessor.cpp",
-    "dl_detect_pico_postprocessor.cpp",
-    "dl_detect_yolo11_postprocessor.cpp",
-    "dl_pose_yolo11_postprocessor.cpp",
-])
-
-# Exclude ALL recognition sources - wrapper handles them
-esp_dl_exclude.extend([
-    "dl_feat_base.cpp",
-    "dl_feat_image_preprocessor.cpp",
-    "dl_feat_postprocessor.cpp",
-    "dl_recognition_database.cpp",
-])
+# Exclude unused postprocessors
+if not has_yolo11:
+    esp_dl_exclude.append("dl_detect_yolo11_postprocessor.cpp")
+if not has_pose:
+    esp_dl_exclude.append("dl_pose_yolo11_postprocessor.cpp")
+if not has_face_recognition:
+    esp_dl_exclude.append("dl_detect_msr_postprocessor.cpp")
+    esp_dl_exclude.append("dl_detect_mnp_postprocessor.cpp")
+esp_dl_exclude.append("dl_detect_espdet_postprocessor.cpp")
+esp_dl_exclude.append("dl_detect_pico_postprocessor.cpp")
 
 sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
 
@@ -305,14 +301,7 @@ for src_dir in esp_dl_source_dirs:
                     sources_to_add.append(src_file)
                     sources_count["core"] += 1
 
-# Add vision/detect/dl_detect_base.cpp only (postprocessors handled by wrapper)
-detect_base = os.path.join(esp_dl_dir, "vision", "detect", "dl_detect_base.cpp")
-if os.path.exists(detect_base):
-    sources_to_add.append(detect_base)
-    sources_count["vision"] += 1
-    print("[Face Detection] + vision/detect/dl_detect_base.cpp")
-
-# Add dl/base/*.cpp (except dotprod - replaced by our custom version)
+# Add dl/base/*.cpp (except dotprod - replaced by our custom version at component root)
 dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
 if os.path.exists(dl_base_dir):
     for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
