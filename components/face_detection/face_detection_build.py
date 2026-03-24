@@ -8,18 +8,49 @@ import sys
 import glob
 Import("env")
 
-# Resolve component directory: use custom platformio option set by __init__.py,
-# fall back to Dir('.') which may be wrong in some build contexts.
+# Resolve component directory by finding this script's own path from extra_scripts.
+# __init__.py sets extra_scripts to "post:<absolute_path>/face_detection_build.py",
+# so we can parse it to recover the real component directory.
+component_dir = None
+parent_components_dir = None
+
+# Method 1: parse extra_scripts to find our own absolute path
 try:
-    parent_components_dir = env.GetProjectOption("custom_face_detection_components_dir")
-    component_dir = os.path.join(parent_components_dir, "face_detection")
-except:
+    extra_scripts = env.GetProjectOption("extra_scripts", [])
+    for es in extra_scripts:
+        es_str = str(es).strip()
+        if "face_detection_build.py" in es_str:
+            script_path = es_str.replace("post:", "").strip()
+            component_dir = os.path.dirname(os.path.abspath(script_path))
+            parent_components_dir = os.path.dirname(component_dir)
+            print(f"[Face Detection] Resolved path from extra_scripts: {component_dir}")
+            break
+except Exception as e:
+    print(f"[Face Detection] extra_scripts parse failed: {e}")
+
+# Method 2: custom platformio option (fallback)
+if not component_dir:
+    try:
+        parent_components_dir = env.GetProjectOption("custom_face_detection_components_dir")
+        component_dir = os.path.join(parent_components_dir, "face_detection")
+        print(f"[Face Detection] Resolved path from custom option: {component_dir}")
+    except:
+        pass
+
+# Method 3: Dir('.') fallback
+if not component_dir:
     script_dir = Dir('.').srcnode().abspath
     component_dir = script_dir
     parent_components_dir = os.path.dirname(component_dir)
+    print(f"[Face Detection] WARNING: Using Dir('.') fallback: {component_dir}")
 
 print(f"[Face Detection] component_dir = {component_dir}")
 print(f"[Face Detection] parent_components_dir = {parent_components_dir}")
+
+# Verify directories exist
+for check_name in ["human_face_detect", "human_face_recognition", "esp_dl_path.py"]:
+    check_path = os.path.join(parent_components_dir, check_name)
+    print(f"[Face Detection]   {check_name}: {'EXISTS' if os.path.exists(check_path) else 'MISSING'} ({check_path})")
 
 # Find esp-dl (downloaded by PlatformIO lib_deps or local)
 sys.path.insert(0, parent_components_dir)
