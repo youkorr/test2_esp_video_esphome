@@ -59,8 +59,12 @@ esp_dl_resolved_dir = find_esp_dl(env, fallback_components_dir=parent_components
 
 print("[Face Detection] Build script running...")
 
-# Detect model type from build flags
-model_type = "face_recognition"  # default
+# Detect which models this component needs from build flags.
+# Multiple model defines can coexist (e.g. face_detection + yolov11 components).
+# For THIS component's build script, we care about ESP_DL_MODEL_FACE_RECOGNITION.
+has_face_recognition = False
+has_yolo11 = False
+has_pose = False
 cpp_defines = env.get('CPPDEFINES', [])
 for define in cpp_defines:
     if isinstance(define, tuple):
@@ -69,16 +73,25 @@ for define in cpp_defines:
         key = define
         val = None
 
-    if key == "ESP_DL_MODEL_YOLO11":
-        model_type = "yolo11"
-        break
+    if key == "ESP_DL_MODEL_FACE_RECOGNITION":
+        has_face_recognition = True
+    elif key == "ESP_DL_MODEL_YOLO11":
+        has_yolo11 = True
     elif key == "ESP_DL_MODEL_POSE_DETECTION":
-        model_type = "pose_detection"
-        break
-    elif key == "ESP_DL_MODEL_FACE_RECOGNITION":
-        model_type = "face_recognition"
+        has_pose = True
 
-print(f"[Face Detection] Model type: {model_type}")
+# This is the face_detection build script, so default to face_recognition
+# unless ONLY other model types are defined
+if has_face_recognition:
+    model_type = "face_recognition"
+elif has_yolo11:
+    model_type = "yolo11"
+elif has_pose:
+    model_type = "pose_detection"
+else:
+    model_type = "face_recognition"  # default
+
+print(f"[Face Detection] Model type: {model_type} (face_recognition={has_face_recognition}, yolo11={has_yolo11}, pose={has_pose})")
 
 # ========================================================================
 # Add CONFIG defines for detection models
