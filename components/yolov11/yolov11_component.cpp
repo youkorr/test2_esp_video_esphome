@@ -91,17 +91,9 @@ void YOLOV11Component::init_detector_() {
   // The .espdl model handles quantization internally via tensor exponents.
   // Do NOT use std={255,255,255} — that divides pixels by 255 before quantization,
   // producing near-zero int8 values and making the model see a blank image.
-  //
-  // ESP32-P4 MIPI camera DMA writes RGB565 in big-endian byte order to SPIRAM.
-  // Evidence: camera reads 0x8210 (cached), YOLO reads 0x1082 (after cache sync) = byte-swapped.
-  // Without BIG_ENDIAN flag, LE extraction of 0x1082 gives R=16,G=16,B=16 (dark).
-  // With BIG_ENDIAN flag, BE extraction of 0x1082 gives R=128,G=64,B=128 (correct).
-  uint32_t caps = 0;
-#if CONFIG_IDF_TARGET_ESP32P4
-  caps = dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN;
-#endif
+  // caps=0: ESP32-P4 camera produces RGB565 little-endian (matches official pedestrian_detect)
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1}, caps);
+      this->dl_model_, {0, 0, 0}, {1, 1, 1});
   // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
   this->preprocessor_->enable_letterbox({114, 114, 114});
 
@@ -114,9 +106,26 @@ void YOLOV11Component::init_detector_() {
       {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
 
   this->detector_initialized_ = true;
+  auto *input_tensor = this->dl_model_->get_input();
   ESP_LOGI(TAG, "YOLO11 detector initialized (model input: %dx%d)",
-           (int)this->dl_model_->get_input()->shape[2],
-           (int)this->dl_model_->get_input()->shape[1]);
+           (int)input_tensor->shape[2], (int)input_tensor->shape[1]);
+  ESP_LOGI(TAG, "  Input tensor: dtype=%d, exponent=%d, shape=[%d,%d,%d,%d]",
+           (int)input_tensor->dtype, input_tensor->exponent,
+           (int)input_tensor->shape[0], (int)input_tensor->shape[1],
+           (int)input_tensor->shape[2], (int)input_tensor->shape[3]);
+  // CRITICAL: The exponent determines how pixel values are quantized to int8.
+  // With mean=0, std=1: quant_value = clamp(pixel * (1 << -exponent), -128, 127)
+  // If exponent=-7: pixel=1 → 1*128=128 → clamped to 127 (ALL pixels > 0 become 127!)
+  // If exponent=0:  pixel=200 → 200*1=200 → clamped to 127 (values > 127 clip)
+  // The correct std depends on the exponent:
+  //   exponent=-7 → model expects [0,1] range → need std={255,255,255}
+  //   exponent=0  → model expects [0,255] range → need std={1,1,1}
+  if (input_tensor->exponent < -1) {
+    ESP_LOGW(TAG, "  WARNING: Input exponent=%d means model expects normalized [0,1] input!",
+             input_tensor->exponent);
+    ESP_LOGW(TAG, "  With std={1,1,1}, ALL pixels >0 saturate to 127 (binary image)!");
+    ESP_LOGW(TAG, "  This is likely the cause of zero detections.");
+  }
   ESP_LOGI(TAG, "Free heap: %lu, free PSRAM: %lu",
            (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -187,8 +196,7 @@ void YOLOV11Component::run_inference() {
       esp_cache_msync(img_data, frame_size,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-      // Debug: analyze image brightness
-      // ESP32-P4: DMA writes BE RGB565 to SPIRAM, so after cache sync we read byte-swapped data
+      // Debug: analyze image brightness (every 10 inferences to track AE convergence)
       if (this->frame_counter_ == 0) {
         uint16_t *pixels = (uint16_t *)img_data;
         uint32_t total_pixels = width * height;
@@ -197,17 +205,26 @@ void YOLOV11Component::run_inference() {
         uint32_t step = total_pixels / sample_count;
         for (uint32_t i = 0; i < total_pixels; i += step) {
           uint16_t p = pixels[i];
-          // BE RGB565 extraction (matches what preprocessor sees with BIG_ENDIAN cap)
-          r_sum += p & 0xF8;                                          // R: bits [7:3] of low byte
-          g_sum += ((p & 0x7) << 5) | ((p & 0xE000) >> 11);          // G: split across bytes
-          b_sum += (p & 0x1F00) >> 5;                                  // B: bits [4:0] of high byte
+          // LE RGB565 extraction (matches caps=0, official Espressif)
+          r_sum += ((p >> 11) & 0x1F) << 3;
+          g_sum += ((p >> 5) & 0x3F) << 2;
+          b_sum += (p & 0x1F) << 3;
         }
         float r_avg = (float)r_sum / sample_count;
         float g_avg = (float)g_sum / sample_count;
         float b_avg = (float)b_sum / sample_count;
-        ESP_LOGI(TAG, "YOLO input: %ux%u, first pixels: %04X %04X %04X %04X",
-                 width, height, pixels[0], pixels[1], pixels[2], pixels[3]);
-        ESP_LOGI(TAG, "  Avg RGB (BE decode): (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
+
+        // Also show raw bytes for first pixel to verify endianness
+        uint8_t *raw = img_data;
+        ESP_LOGI(TAG, "YOLO input: %ux%u, raw bytes[0-7]: %02X %02X %02X %02X %02X %02X %02X %02X",
+                 width, height, raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
+        ESP_LOGI(TAG, "  uint16 LE: %04X %04X %04X %04X", pixels[0], pixels[1], pixels[2], pixels[3]);
+        ESP_LOGI(TAG, "  Avg RGB (LE decode): (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
+        // Check if image is mostly dark (AE not converged)
+        float brightness = (r_avg + g_avg + b_avg) / 3.0f;
+        if (brightness < 30) {
+          ESP_LOGW(TAG, "  IMAGE VERY DARK (avg=%.0f) - auto-exposure may not have converged", brightness);
+        }
       }
 
       this->detect_objects_(img_data, width, height);
@@ -275,6 +292,44 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   uint32_t t0 = esp_log_timestamp();
   this->preprocessor_->preprocess(img);
   uint32_t t1 = esp_log_timestamp();
+
+  // Debug: analyze model input tensor after preprocessing (first inference only)
+  static bool input_tensor_logged = false;
+  if (!input_tensor_logged) {
+    input_tensor_logged = true;
+    auto *input = this->dl_model_->get_input();
+    int8_t *idata = (int8_t *)input->data;
+    int H = input->shape[1], W = input->shape[2], C = input->shape[3];
+    int total = H * W * C;
+    // Histogram of quantized values
+    int8_t imin = 127, imax = -128;
+    int zero_count = 0, saturated_pos = 0, saturated_neg = 0;
+    long sum = 0;
+    for (int i = 0; i < total; i++) {
+      int8_t v = idata[i];
+      if (v < imin) imin = v;
+      if (v > imax) imax = v;
+      if (v == 0) zero_count++;
+      if (v == 127) saturated_pos++;
+      if (v == -128) saturated_neg++;
+      sum += v;
+    }
+    float avg = (float)sum / total;
+    ESP_LOGI(TAG, "Model INPUT tensor: shape=[%d,%d,%d,%d], exponent=%d",
+             (int)input->shape[0], H, W, C, input->exponent);
+    ESP_LOGI(TAG, "  Quantized stats: min=%d, max=%d, avg=%.1f", (int)imin, (int)imax, avg);
+    ESP_LOGI(TAG, "  zeros=%d (%.1f%%), sat_127=%d (%.1f%%), sat_-128=%d (%.1f%%)",
+             zero_count, 100.0f * zero_count / total,
+             saturated_pos, 100.0f * saturated_pos / total,
+             saturated_neg, 100.0f * saturated_neg / total);
+    ESP_LOGI(TAG, "  First 16 values: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+             idata[0], idata[1], idata[2], idata[3], idata[4], idata[5], idata[6], idata[7],
+             idata[8], idata[9], idata[10], idata[11], idata[12], idata[13], idata[14], idata[15]);
+    // Center pixel values (should be from actual image, not letterbox padding)
+    int center = (H/2 * W + W/2) * C;
+    ESP_LOGI(TAG, "  Center pixel RGB: %d %d %d", idata[center], idata[center+1], idata[center+2]);
+  }
+
   this->dl_model_->run();
   uint32_t t2 = esp_log_timestamp();
 
