@@ -176,11 +176,25 @@ void YOLOV11Component::run_inference() {
       esp_cache_msync(img_data, frame_size,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-      // Debug: dump first pixels to verify data integrity
+      // Debug: analyze image brightness and color distribution
       if (this->frame_counter_ == 0) {
         uint16_t *pixels = (uint16_t *)img_data;
+        uint32_t total_pixels = width * height;
+        uint32_t r_sum = 0, g_sum = 0, b_sum = 0;
+        uint32_t sample_count = std::min(total_pixels, (uint32_t)10000);
+        uint32_t step = total_pixels / sample_count;
+        for (uint32_t i = 0; i < total_pixels; i += step) {
+          uint16_t p = pixels[i];
+          r_sum += (p >> 11) & 0x1F;
+          g_sum += (p >> 5) & 0x3F;
+          b_sum += p & 0x1F;
+        }
+        float r_avg = (float)r_sum / sample_count * 8.0f;  // Scale to 0-255
+        float g_avg = (float)g_sum / sample_count * 4.0f;
+        float b_avg = (float)b_sum / sample_count * 8.0f;
         ESP_LOGI(TAG, "YOLO input: %ux%u, first pixels: %04X %04X %04X %04X",
                  width, height, pixels[0], pixels[1], pixels[2], pixels[3]);
+        ESP_LOGI(TAG, "  Avg RGB: (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
       }
 
       this->detect_objects_(img_data, width, height);
@@ -251,7 +265,7 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   this->dl_model_->run();
   uint32_t t2 = esp_log_timestamp();
 
-  // Debug: check model output tensor values
+  // Debug: check model output tensor values and score analysis
   {
     auto &outputs = this->dl_model_->get_outputs();
     ESP_LOGI(TAG, "Model outputs: %d tensors", (int)outputs.size());
@@ -266,16 +280,61 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
         shape_str += std::to_string(tensor->shape[d]);
       }
       int8_t *data = (int8_t *)tensor->data;
-      int non_zero = 0;
-      int8_t max_val = 0, min_val = 0;
+      int8_t max_val = -128, min_val = 127;
       int check = std::min(total, 1000);
       for (int j = 0; j < check; j++) {
-        if (data[j] != 0) non_zero++;
         if (data[j] > max_val) max_val = data[j];
         if (data[j] < min_val) min_val = data[j];
       }
-      ESP_LOGI(TAG, "  Output[%d] '%s': shape=[%s], non_zero=%d/%d, range=[%d..%d]",
-               idx++, kv.first.c_str(), shape_str.c_str(), non_zero, check, min_val, max_val);
+      float scale = (tensor->exponent > 0) ? (float)(1 << tensor->exponent)
+                                             : (1.0f / (float)(1 << -(tensor->exponent)));
+      ESP_LOGI(TAG, "  Output[%d] '%s': shape=[%s], exponent=%d, scale=%.6f, range=[%d..%d]",
+               idx++, kv.first.c_str(), shape_str.c_str(), tensor->exponent, scale, min_val, max_val);
+    }
+
+    // Detailed score analysis for score0 (largest feature map)
+    auto *score0 = this->dl_model_->get_output("score0");
+    if (score0 != nullptr) {
+      float s_scale = (score0->exponent > 0) ? (float)(1 << score0->exponent)
+                                               : (1.0f / (float)(1 << -(score0->exponent)));
+      float inv_sigmoid_thr = -logf(1.0f / this->score_threshold_ - 1.0f);
+      int8_t quant_thr = (int8_t)std::max(-128.0f, std::min(127.0f, roundf(inv_sigmoid_thr / s_scale)));
+
+      int8_t *sdata = (int8_t *)score0->data;
+      int H = score0->shape[1], W = score0->shape[2], C = score0->shape[3];
+      int total_cells = H * W;
+      int total_scores = H * W * C;
+
+      // Find global max score and count above threshold
+      int8_t global_max = -128;
+      int above_thr = 0;
+      int best_class = -1;
+      int best_y = -1, best_x = -1;
+      for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+          for (int c = 0; c < C; c++) {
+            int8_t val = sdata[(y * W + x) * C + c];
+            if (val > global_max) {
+              global_max = val;
+              best_class = c;
+              best_y = y;
+              best_x = x;
+            }
+            if (val > quant_thr) {
+              above_thr++;
+            }
+          }
+        }
+      }
+      float best_dequant = global_max * s_scale;
+      float best_prob = 1.0f / (1.0f + expf(-best_dequant));
+      ESP_LOGI(TAG, "Score0 analysis: %dx%dx%d=%d scores, exponent=%d, scale=%.6f",
+               H, W, C, total_scores, score0->exponent, s_scale);
+      ESP_LOGI(TAG, "  Threshold: score_thr=%.2f -> inverse_sigmoid=%.3f -> quant_thr=%d",
+               this->score_threshold_, inv_sigmoid_thr, (int)quant_thr);
+      ESP_LOGI(TAG, "  Best score: quant=%d, dequant=%.4f, sigmoid=%.4f, class=%d, pos=(%d,%d)",
+               (int)global_max, best_dequant, best_prob, best_class, best_x, best_y);
+      ESP_LOGI(TAG, "  Scores above threshold: %d / %d", above_thr, total_scores);
     }
   }
 
