@@ -1,20 +1,21 @@
 """
 Build script for Face Detection component
-Embeds face detection/recognition models and compiles optimized ESP-DL sources
+Embeds face detection/recognition models and compiles ESP-DL core sources.
+Wrapper files at component root handle face-specific sources (auto-compiled by ESPHome).
 """
 
 import os
 import sys
 import glob
+import subprocess
 Import("env")
 
-# Resolve component directory by finding this script's own path from extra_scripts.
-# __init__.py sets extra_scripts to "post:<absolute_path>/face_detection_build.py",
-# so we can parse it to recover the real component directory.
+# ========================================================================
+# Resolve component directory
+# ========================================================================
 component_dir = None
 parent_components_dir = None
 
-# Method 1: parse extra_scripts to find our own absolute path
 try:
     extra_scripts = env.GetProjectOption("extra_scripts", [])
     for es in extra_scripts:
@@ -28,16 +29,6 @@ try:
 except Exception as e:
     print(f"[Face Detection] extra_scripts parse failed: {e}")
 
-# Method 2: custom platformio option (fallback)
-if not component_dir:
-    try:
-        parent_components_dir = env.GetProjectOption("custom_face_detection_components_dir")
-        component_dir = os.path.join(parent_components_dir, "face_detection")
-        print(f"[Face Detection] Resolved path from custom option: {component_dir}")
-    except:
-        pass
-
-# Method 3: Dir('.') fallback
 if not component_dir:
     script_dir = Dir('.').srcnode().abspath
     component_dir = script_dir
@@ -47,21 +38,19 @@ if not component_dir:
 print(f"[Face Detection] component_dir = {component_dir}")
 print(f"[Face Detection] parent_components_dir = {parent_components_dir}")
 
-# Verify directories exist
-for check_name in ["human_face_detect", "human_face_recognition", "esp_dl_path.py"]:
-    check_path = os.path.join(parent_components_dir, check_name)
-    print(f"[Face Detection]   {check_name}: {'EXISTS' if os.path.exists(check_path) else 'MISSING'} ({check_path})")
+# ========================================================================
+# Find local esp-dl directory
+# ========================================================================
+esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
+if not os.path.exists(esp_dl_dir):
+    print(f"[Face Detection] ERROR: esp-dl not found at {esp_dl_dir}")
+    raise FileNotFoundError(f"esp-dl not found at {esp_dl_dir}")
 
-# Find esp-dl (downloaded by PlatformIO lib_deps or local)
-sys.path.insert(0, parent_components_dir)
-from esp_dl_path import find_esp_dl
-esp_dl_resolved_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
+print(f"[Face Detection] ESP-DL: {esp_dl_dir}")
 
-print("[Face Detection] Build script running...")
-
-# Detect which models this component needs from build flags.
-# Multiple model defines can coexist (e.g. face_detection + yolov11 components).
-# For THIS component's build script, we care about ESP_DL_MODEL_FACE_RECOGNITION.
+# ========================================================================
+# Detect model type from build flags
+# ========================================================================
 has_face_recognition = False
 has_yolo11 = False
 has_pose = False
@@ -72,7 +61,6 @@ for define in cpp_defines:
     else:
         key = define
         val = None
-
     if key == "ESP_DL_MODEL_FACE_RECOGNITION":
         has_face_recognition = True
     elif key == "ESP_DL_MODEL_YOLO11":
@@ -80,8 +68,6 @@ for define in cpp_defines:
     elif key == "ESP_DL_MODEL_POSE_DETECTION":
         has_pose = True
 
-# This is the face_detection build script, so default to face_recognition
-# unless ONLY other model types are defined
 if has_face_recognition:
     model_type = "face_recognition"
 elif has_yolo11:
@@ -89,20 +75,15 @@ elif has_yolo11:
 elif has_pose:
     model_type = "pose_detection"
 else:
-    model_type = "face_recognition"  # default
+    model_type = "face_recognition"
 
-print(f"[Face Detection] Model type: {model_type} (face_recognition={has_face_recognition}, yolo11={has_yolo11}, pose={has_pose})")
+print(f"[Face Detection] Model type: {model_type}")
 
 # ========================================================================
-# Add CONFIG defines for detection models
+# Add CONFIG defines
 # ========================================================================
-env.Append(CPPDEFINES=[
-    ("CONFIG_IDF_TARGET_ESP32P4", "1"),
-])
+env.Append(CPPDEFINES=[("CONFIG_IDF_TARGET_ESP32P4", "1")])
 
-# Human face detection configuration
-# Default: flash rodata mode (override with model_location: sdcard in YAML)
-# Only add defaults if not already defined (to avoid redefinition warnings)
 existing_defines = [define[0] if isinstance(define, tuple) else define for define in env.get("CPPDEFINES", [])]
 
 if "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA" not in existing_defines:
@@ -115,11 +96,7 @@ if "CONFIG_HUMAN_FACE_DETECT_MODEL_IN_FLASH_RODATA" not in existing_defines:
         ("CONFIG_HUMAN_FACE_DETECT_MODEL_IN_SDCARD", "0"),
         ("CONFIG_HUMAN_FACE_DETECT_MODEL_LOCATION", "0"),
     ])
-    print("[Face Detection] Added default face detection CONFIG defines (flash rodata mode)")
-else:
-    print("[Face Detection] Face detection CONFIG defines already set by YAML (skipping defaults)")
 
-# Human face recognition configuration
 if "CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA" not in existing_defines:
     env.Append(CPPDEFINES=[
         ("CONFIG_HUMAN_FACE_FEAT_MFN_S8_V1", "1"),
@@ -127,34 +104,27 @@ if "CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA" not in existing_defines:
         ("CONFIG_HUMAN_FACE_FEAT_MODEL_IN_FLASH_RODATA", "1"),
         ("CONFIG_HUMAN_FACE_FEAT_MODEL_LOCATION", "0"),
     ])
-    print("[Face Detection] Added default face recognition CONFIG defines")
-else:
-    print("[Face Detection] Face recognition CONFIG defines already set")
-
-print("[Face Detection] CONFIG defines added")
-
-sources_to_add = []
 
 # ========================================================================
-# Helper function for caching
+# Helper
 # ========================================================================
-import subprocess
-
 def needs_rebuild(output_file, input_files):
-    """Check if output_file needs to be rebuilt."""
     if not os.path.exists(output_file):
         return True
     output_mtime = os.path.getmtime(output_file)
     for input_file in input_files:
-        if os.path.exists(input_file):
-            if os.path.getmtime(input_file) > output_mtime:
-                return True
+        if os.path.exists(input_file) and os.path.getmtime(input_file) > output_mtime:
+            return True
     return False
 
 # ========================================================================
-# Pack and Embed Face Detection Models (ONLY for face_recognition model)
+# Pack and Embed Models (generates _embed.c files at component root)
+# These .c files are auto-compiled by ESPHome since they're in the component dir.
 # ========================================================================
+sources_to_add = []
+
 if model_type == "face_recognition":
+    # Human face detection model
     human_face_detect_dir = os.path.join(parent_components_dir, "human_face_detect")
     if os.path.exists(human_face_detect_dir):
         models_dir = os.path.join(human_face_detect_dir, "models", "p4")
@@ -180,24 +150,16 @@ if model_type == "face_recognition":
                         if result.returncode == 0 and os.path.exists(packed_model):
                             with open(packed_model, 'rb') as f:
                                 model_data = f.read()
-
-                            c_content = '''// Auto-generated - embedded human_face_detect model
-#include <stddef.h>
-#include <stdint.h>
-
-__attribute__((aligned(16)))
-const uint8_t _binary_human_face_detect_espdl_start[] = {
-'''
+                            c_content = '// Auto-generated - embedded human_face_detect model\n'
+                            c_content += '#include <stddef.h>\n#include <stdint.h>\n\n'
+                            c_content += '__attribute__((aligned(16)))\nconst uint8_t _binary_human_face_detect_espdl_start[] = {\n'
                             for i in range(0, len(model_data), 16):
                                 chunk = model_data[i:i+16]
                                 hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
                                 c_content += f'    {hex_bytes},\n'
-
-                            c_content += f'''}};
-
-const uint8_t *_binary_human_face_detect_espdl_end = _binary_human_face_detect_espdl_start + {len(model_data)};
-const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
-'''
+                            c_content += '};\n\n'
+                            c_content += f'const uint8_t *_binary_human_face_detect_espdl_end = _binary_human_face_detect_espdl_start + {len(model_data)};\n'
+                            c_content += f'const size_t _binary_human_face_detect_espdl_size = {len(model_data)};\n'
                             with open(embed_c_file, 'w') as f:
                                 f.write(c_content)
                             print(f"[Face Detection] Model embedded: {len(model_data)} bytes")
@@ -206,20 +168,9 @@ const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
                 else:
                     print("[Face Detection] human_face_detect models cached (skip)")
 
-                if os.path.exists(embed_c_file):
-                    sources_to_add.append(embed_c_file)
-
         env.Append(CPPPATH=[human_face_detect_dir])
-        human_face_sources = ["human_face_detect.cpp"]
-        for src in human_face_sources:
-            src_path = os.path.join(human_face_detect_dir, src)
-            if os.path.exists(src_path):
-                sources_to_add.append(src_path)
-                print(f"[Face Detection] + {src}")
 
-    # ========================================================================
-    # Pack and Embed Face Recognition Model (ONLY for face_recognition model)
-    # ========================================================================
+    # Human face recognition model
     human_face_recognition_dir = os.path.join(parent_components_dir, "human_face_recognition")
     if os.path.exists(human_face_recognition_dir):
         env.Append(CPPPATH=[human_face_recognition_dir])
@@ -246,24 +197,16 @@ const size_t _binary_human_face_detect_espdl_size = {len(model_data)};
                         if result.returncode == 0 and os.path.exists(packed_model):
                             with open(packed_model, 'rb') as f:
                                 model_data = f.read()
-
-                            c_content = '''// Auto-generated - embedded human_face_feat model
-#include <stddef.h>
-#include <stdint.h>
-
-__attribute__((aligned(16)))
-const uint8_t _binary_human_face_feat_mfn_s8_v1_espdl_start[] = {
-'''
+                            c_content = '// Auto-generated - embedded human_face_feat model\n'
+                            c_content += '#include <stddef.h>\n#include <stdint.h>\n\n'
+                            c_content += '__attribute__((aligned(16)))\nconst uint8_t _binary_human_face_feat_mfn_s8_v1_espdl_start[] = {\n'
                             for i in range(0, len(model_data), 16):
                                 chunk = model_data[i:i+16]
                                 hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
                                 c_content += f'    {hex_bytes},\n'
-
-                            c_content += f'''}};
-
-const uint8_t *_binary_human_face_feat_mfn_s8_v1_espdl_end = _binary_human_face_feat_mfn_s8_v1_espdl_start + {len(model_data)};
-const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
-'''
+                            c_content += '};\n\n'
+                            c_content += f'const uint8_t *_binary_human_face_feat_mfn_s8_v1_espdl_end = _binary_human_face_feat_mfn_s8_v1_espdl_start + {len(model_data)};\n'
+                            c_content += f'const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};\n'
                             with open(embed_c_file, 'w') as f:
                                 f.write(c_content)
                             print(f"[Face Detection] Recognition model embedded: {len(model_data)} bytes")
@@ -272,159 +215,140 @@ const size_t _binary_human_face_feat_mfn_s8_v1_espdl_size = {len(model_data)};
                 else:
                     print("[Face Detection] human_face_recognition model cached (skip)")
 
-                if os.path.exists(embed_c_file):
-                    sources_to_add.append(embed_c_file)
-
-        recognition_sources = ["human_face_recognition.cpp"]
-        for src in recognition_sources:
-            src_path = os.path.join(human_face_recognition_dir, src)
-            if os.path.exists(src_path):
-                sources_to_add.append(src_path)
-                print(f"[Face Detection] + {src}")
-else:
-    print(f"[Face Detection] Skipping human_face_detect and human_face_recognition (model_type={model_type})")
-
 # ========================================================================
-# ESP-DL Sources - Optimized: only essential files
+# ESP-DL Core Sources
+# Only compile ESP-DL infrastructure here.
+# Face-specific sources are handled by wrapper files at component root
+# (auto-compiled by ESPHome):
+#   - human_face_detect_wrapper.cpp -> human_face_detect.cpp
+#   - esp_dl_face_postprocessors_wrapper.cpp -> MSR/MNP postprocessors
+#   - esp_dl_recognition_wrapper.cpp -> recognition sources
+#   - human_face_recognition_wrapper.cpp -> human_face_recognition.cpp
+#   - dl_base_dotprod_no_dsp.cpp -> custom dotprod (no DSP)
+#   - mbedtls_aes_stub.c -> AES stubs
+#   - human_face_detect_espdl_embed.c -> detection model data
+#   - human_face_feat_espdl_embed.c -> recognition model data
 # ========================================================================
-esp_dl_dir = esp_dl_resolved_dir
-if os.path.exists(esp_dl_dir):
-    # Add include directories
-    esp_dl_include_dirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
-        "dl/tool/isa/xtensa", "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4", "dl/base/isa/tie728",
-        "dl/base/isa/xtensa", "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src", "fbs_loader/include",
-        "fbs_loader/lib/esp32p4", "fbs_loader/src", "vision/detect", "vision/image",
-        "vision/image/isa", "vision/image/isa/esp32p4", "vision/recognition",
-        "vision/classification",
-    ]
 
-    esp_dl_paths = []
-    for inc_dir in esp_dl_include_dirs:
-        inc_path = os.path.join(esp_dl_dir, inc_dir)
-        if os.path.exists(inc_path):
-            esp_dl_paths.append(inc_path)
+# Add include directories
+esp_dl_include_dirs = [
+    "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
+    "dl/tool/isa/xtensa", "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
+    "dl/base", "dl/base/isa", "dl/base/isa/esp32p4", "dl/base/isa/tie728",
+    "dl/base/isa/xtensa", "dl/math/include", "dl/math/src", "dl/model/include",
+    "dl/model/src", "dl/module/include", "dl/module/src", "fbs_loader/include",
+    "fbs_loader/lib/esp32p4", "fbs_loader/src", "vision/detect", "vision/image",
+    "vision/image/isa", "vision/image/isa/esp32p4", "vision/recognition",
+    "vision/classification",
+]
 
-    env.Append(CPPPATH=esp_dl_paths)
+esp_dl_paths = []
+for inc_dir in esp_dl_include_dirs:
+    inc_path = os.path.join(esp_dl_dir, inc_dir)
+    if os.path.exists(inc_path):
+        esp_dl_paths.append(inc_path)
+env.Append(CPPPATH=esp_dl_paths)
+print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths)")
 
-    print(f"[Face Detection] ESP-DL includes added ({len(esp_dl_paths)} paths)")
+# ESP-DL core source directories (NOT face-specific - those are in wrappers)
+esp_dl_source_dirs = [
+    "dl/tensor/src",
+    "dl/model/src",
+    "dl/module/src",
+    "dl/tool/src",
+    "dl/math/src",
+    "fbs_loader/src",
+    "vision/image",
+]
 
-    # ESP-DL source files - based on selected model type
-    # Core directories (always needed)
-    esp_dl_source_dirs = [
-        "dl/tensor/src",
-        "dl/model/src",
-        "dl/module/src",
-        "dl/tool/src",
-        "dl/math/src",
-        "fbs_loader/src",
-        "vision/image",          # Image processing (required)
-        "vision/detect",         # Detection base (always needed, even for face recognition)
-    ]
+# Files to always exclude
+esp_dl_exclude = [
+    "dl_base_dotprod.cpp",       # Replaced by our custom dl_base_dotprod_no_dsp.cpp
+    "dl_image_jpeg.cpp",         # JPEG not used
+    "dl_image_bmp.cpp",          # BMP not used
+]
 
-    # Add model-specific directories
-    if has_face_recognition:
-        esp_dl_source_dirs.append("vision/recognition")  # Face recognition
-        print("[Face Detection] Including: vision/recognition (face recognition)")
+# Exclude ALL postprocessors - wrappers handle the ones we need (MSR/MNP)
+esp_dl_exclude.extend([
+    "dl_detect_postprocessor.cpp",
+    "dl_detect_msr_postprocessor.cpp",
+    "dl_detect_mnp_postprocessor.cpp",
+    "dl_detect_espdet_postprocessor.cpp",
+    "dl_detect_pico_postprocessor.cpp",
+    "dl_detect_yolo11_postprocessor.cpp",
+    "dl_pose_yolo11_postprocessor.cpp",
+])
 
-    # Files to exclude (conditionally based on model type)
-    esp_dl_exclude = [
-        "dl_base_dotprod.cpp",       # Use custom implementation
-        "dl_image_jpeg.cpp",         # JPEG not used
-        "dl_image_bmp.cpp",          # BMP not used
-    ]
+# Exclude ALL recognition sources - wrapper handles them
+esp_dl_exclude.extend([
+    "dl_feat_base.cpp",
+    "dl_feat_image_preprocessor.cpp",
+    "dl_feat_postprocessor.cpp",
+    "dl_recognition_database.cpp",
+])
 
-    # Only exclude postprocessors that are definitely not needed
-    if not has_yolo11:
-        esp_dl_exclude.append("dl_detect_yolo11_postprocessor.cpp")
-    if not has_pose:
-        esp_dl_exclude.append("dl_pose_yolo11_postprocessor.cpp")
-    if not has_face_recognition:
-        esp_dl_exclude.append("dl_detect_msr_postprocessor.cpp")
-        esp_dl_exclude.append("dl_detect_mnp_postprocessor.cpp")
-    # Always exclude unused detectors
-    esp_dl_exclude.append("dl_detect_espdet_postprocessor.cpp")
-    esp_dl_exclude.append("dl_detect_pico_postprocessor.cpp")
+sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
 
-    print(f"[Face Detection] Excluding: {esp_dl_exclude}")
+# Add core sources
+for src_dir in esp_dl_source_dirs:
+    src_dir_path = os.path.join(esp_dl_dir, src_dir)
+    if os.path.exists(src_dir_path):
+        if src_dir.startswith("vision/"):
+            pattern = os.path.join(src_dir_path, "**", "*.cpp")
+            for src_file in glob.glob(pattern, recursive=True):
+                if os.path.basename(src_file) not in esp_dl_exclude:
+                    sources_to_add.append(src_file)
+                    sources_count["vision"] += 1
+        else:
+            for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
+                if os.path.basename(src_file) not in esp_dl_exclude:
+                    sources_to_add.append(src_file)
+                    sources_count["core"] += 1
 
-    # Count files by category for better visibility
-    sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
+# Add vision/detect/dl_detect_base.cpp only (postprocessors handled by wrapper)
+detect_base = os.path.join(esp_dl_dir, "vision", "detect", "dl_detect_base.cpp")
+if os.path.exists(detect_base):
+    sources_to_add.append(detect_base)
+    sources_count["vision"] += 1
+    print("[Face Detection] + vision/detect/dl_detect_base.cpp")
 
-    # Add sources from specific directories
-    for src_dir in esp_dl_source_dirs:
-        src_dir_path = os.path.join(esp_dl_dir, src_dir)
-        if os.path.exists(src_dir_path):
-            # Use recursive glob for ALL vision/* directories to get files in subdirectories
-            if src_dir.startswith("vision/"):
-                pattern = os.path.join(src_dir_path, "**", "*.cpp")
-                for src_file in glob.glob(pattern, recursive=True):
-                    if os.path.basename(src_file) not in esp_dl_exclude:
-                        sources_to_add.append(src_file)
-                        sources_count["vision"] += 1
-            else:
-                for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
-                    if os.path.basename(src_file) not in esp_dl_exclude:
-                        sources_to_add.append(src_file)
-                        sources_count["core"] += 1
+# Add dl/base/*.cpp (except dotprod - replaced by our custom version)
+dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
+if os.path.exists(dl_base_dir):
+    for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
+        if os.path.basename(src_file) not in esp_dl_exclude:
+            sources_to_add.append(src_file)
+            sources_count["base"] += 1
 
-    # Add ALL dl/base/*.cpp files (required for neural network operations)
-    dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
-    if os.path.exists(dl_base_dir):
-        for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
-            if os.path.basename(src_file) not in esp_dl_exclude:
-                sources_to_add.append(src_file)
-                sources_count["base"] += 1
+# Add ESP32P4 ISA files (optimized assembly)
+isa_dirs = [
+    ("dl/base/isa/esp32p4", "*.S"),
+    ("dl/base/isa/esp32p4", "*.cpp"),
+    ("dl/tool/isa/esp32p4", "*.S"),
+    ("vision/image/isa/esp32p4", "*.S"),
+]
+for isa_dir, pattern in isa_dirs:
+    isa_path = os.path.join(esp_dl_dir, isa_dir)
+    if os.path.exists(isa_path):
+        for asm_file in glob.glob(os.path.join(isa_path, pattern)):
+            sources_to_add.append(asm_file)
+            sources_count["isa"] += 1
 
-    # Add ESP32P4 ISA files (optimized assembly for ESP32P4)
-    isa_dirs = [
-        ("dl/base/isa/esp32p4", "*.S"),
-        ("dl/base/isa/esp32p4", "*.cpp"),
-        ("dl/tool/isa/esp32p4", "*.S"),
-        ("vision/image/isa/esp32p4", "*.S"),
-    ]
+esp_dl_total = sum(sources_count.values())
+print(f"[Face Detection] ESP-DL: {esp_dl_total} files (base:{sources_count['base']} isa:{sources_count['isa']} core:{sources_count['core']} vision:{sources_count['vision']})")
 
-    for isa_dir, pattern in isa_dirs:
-        isa_path = os.path.join(esp_dl_dir, isa_dir)
-        if os.path.exists(isa_path):
-            for asm_file in glob.glob(os.path.join(isa_path, pattern)):
-                sources_to_add.append(asm_file)
-                sources_count["isa"] += 1
-
-    esp_dl_total = sum(sources_count.values())
-    print(f"[Face Detection] ESP-DL: {esp_dl_total} files (base:{sources_count['base']} isa:{sources_count['isa']} core:{sources_count['core']} vision:{sources_count['vision']})")
-
-    # Add prebuilt FBS library
-    fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
-    fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
-    if os.path.exists(fbs_lib):
-        env.Append(LIBPATH=[fbs_lib_dir])
-        env.Prepend(LIBS=["fbs_model"])
-        print("[Face Detection] Added libfbs_model.a")
-
-# ========================================================================
-# Add local stub files (in extra/ subfolder to avoid ESPHome auto-compile)
-# ========================================================================
-extra_dir = os.path.join(component_dir, "extra")
-
-# Custom dotprod implementation (no DSP version)
-dotprod_file = os.path.join(extra_dir, "dl_base_dotprod_no_dsp.cpp")
-if os.path.exists(dotprod_file):
-    sources_to_add.append(dotprod_file)
-    print("[Face Detection] + extra/dl_base_dotprod_no_dsp.cpp")
-
-# mbedTLS stub (if exists)
-mbedtls_stub = os.path.join(extra_dir, "mbedtls_aes_stub.c")
-if os.path.exists(mbedtls_stub):
-    sources_to_add.append(mbedtls_stub)
-    print("[Face Detection] + extra/mbedtls_aes_stub.c")
+# Add prebuilt FBS library
+fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
+fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
+if os.path.exists(fbs_lib):
+    env.Append(LIBPATH=[fbs_lib_dir])
+    env.Prepend(LIBS=["fbs_model"])
+    print("[Face Detection] Added libfbs_model.a")
 
 env.Append(CPPPATH=[component_dir])
 
 # ========================================================================
-# Compile sources
+# Compile ESP-DL core sources into static library
 # ========================================================================
 if sources_to_add:
     objects = []
@@ -436,22 +360,15 @@ if sources_to_add:
             print(f"[Face Detection] Failed to compile {os.path.basename(src_file)}: {e}")
 
     if objects:
-        # Create static library
         lib = env.StaticLibrary(
             os.path.join("$BUILD_DIR", "libface_detection"),
             objects
         )
-
-        # Add library with proper linking flags for circular dependencies
         env.Append(LINKFLAGS=["-Wl,--start-group"])
         env.Prepend(LIBS=[lib])
         env.Append(LINKFLAGS=["-Wl,--end-group"])
-
-        # Also add objects directly to ensure they're linked
         env.Append(PIOBUILDFILES=objects)
 
-        print(f"[Face Detection] {len(sources_to_add)} source files compiled")
-        print(f"[Face Detection] {len(objects)} object files created")
-        print("[Face Detection] libface_detection.a created and linked")
+        print(f"[Face Detection] {len(sources_to_add)} source files compiled into libface_detection.a")
 
 print("[Face Detection] Build script completed")
