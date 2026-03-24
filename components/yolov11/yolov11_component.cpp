@@ -91,9 +91,17 @@ void YOLOV11Component::init_detector_() {
   // The .espdl model handles quantization internally via tensor exponents.
   // Do NOT use std={255,255,255} — that divides pixels by 255 before quantization,
   // producing near-zero int8 values and making the model see a blank image.
-  // caps=0: ESP-Video camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN=false)
+  //
+  // ESP32-P4 MIPI camera DMA writes RGB565 in big-endian byte order to SPIRAM.
+  // Evidence: camera reads 0x8210 (cached), YOLO reads 0x1082 (after cache sync) = byte-swapped.
+  // Without BIG_ENDIAN flag, LE extraction of 0x1082 gives R=16,G=16,B=16 (dark).
+  // With BIG_ENDIAN flag, BE extraction of 0x1082 gives R=128,G=64,B=128 (correct).
+  uint32_t caps = 0;
+#if CONFIG_IDF_TARGET_ESP32P4
+  caps = dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN;
+#endif
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1});
+      this->dl_model_, {0, 0, 0}, {1, 1, 1}, caps);
   // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
   this->preprocessor_->enable_letterbox({114, 114, 114});
 
@@ -179,7 +187,8 @@ void YOLOV11Component::run_inference() {
       esp_cache_msync(img_data, frame_size,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-      // Debug: analyze image brightness (LE RGB565, caps=0)
+      // Debug: analyze image brightness
+      // ESP32-P4: DMA writes BE RGB565 to SPIRAM, so after cache sync we read byte-swapped data
       if (this->frame_counter_ == 0) {
         uint16_t *pixels = (uint16_t *)img_data;
         uint32_t total_pixels = width * height;
@@ -188,16 +197,17 @@ void YOLOV11Component::run_inference() {
         uint32_t step = total_pixels / sample_count;
         for (uint32_t i = 0; i < total_pixels; i += step) {
           uint16_t p = pixels[i];
-          r_sum += ((p >> 11) & 0x1F) << 3;
-          g_sum += ((p >> 5) & 0x3F) << 2;
-          b_sum += (p & 0x1F) << 3;
+          // BE RGB565 extraction (matches what preprocessor sees with BIG_ENDIAN cap)
+          r_sum += p & 0xF8;                                          // R: bits [7:3] of low byte
+          g_sum += ((p & 0x7) << 5) | ((p & 0xE000) >> 11);          // G: split across bytes
+          b_sum += (p & 0x1F00) >> 5;                                  // B: bits [4:0] of high byte
         }
         float r_avg = (float)r_sum / sample_count;
         float g_avg = (float)g_sum / sample_count;
         float b_avg = (float)b_sum / sample_count;
         ESP_LOGI(TAG, "YOLO input: %ux%u, first pixels: %04X %04X %04X %04X",
                  width, height, pixels[0], pixels[1], pixels[2], pixels[3]);
-        ESP_LOGI(TAG, "  Avg RGB: (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
+        ESP_LOGI(TAG, "  Avg RGB (BE decode): (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
       }
 
       this->detect_objects_(img_data, width, height);
