@@ -1194,36 +1194,6 @@ bool MipiDSICamComponent::start_streaming() {
     ESP_LOGW(TAG, "Brightness/Contrast/Saturation/AWB controls will not be available");
   } else {
     ESP_LOGI(TAG, "ISP device opened for V4L2 controls: %s", ESP_VIDEO_ISP1_DEVICE_NAME);
-
-    // Apply sRGB gamma correction: RAW sensor data is linear, which looks extremely dark.
-    // YOLO models and displays expect gamma-corrected (sRGB) images.
-    // Gamma curve: Y = (X/255)^(1/2.2) * 255  (sRGB approximation)
-    esp_video_isp_gamma_t gamma;
-    gamma.enable = true;
-    // 16-point gamma curve with uniform spacing of 16 (2^4)
-    // Computed as: Y = pow(X/255.0, 1/2.2) * 255
-    static const uint8_t gamma_x[] = {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240};
-    static const uint8_t gamma_y[] = {0, 72, 98, 117, 133, 147, 160, 171, 182, 192, 201, 210, 219, 227, 235, 242};
-    for (int i = 0; i < ISP_GAMMA_CURVE_POINTS_NUM; i++) {
-      gamma.points[i].x = gamma_x[i];
-      gamma.points[i].y = gamma_y[i];
-    }
-
-    struct v4l2_ext_controls ctrls;
-    struct v4l2_ext_control ctrl;
-    memset(&ctrls, 0, sizeof(ctrls));
-    memset(&ctrl, 0, sizeof(ctrl));
-    ctrls.ctrl_class = V4L2_CID_USER_CLASS;
-    ctrls.count = 1;
-    ctrls.controls = &ctrl;
-    ctrl.id = V4L2_CID_USER_ESP_ISP_GAMMA;
-    ctrl.p_u8 = (uint8_t *)&gamma;
-    ctrl.size = sizeof(gamma);
-    if (ioctl(this->isp_fd_, VIDIOC_S_EXT_CTRLS, &ctrls) == 0) {
-      ESP_LOGI(TAG, "ISP gamma correction enabled (sRGB curve, 16 points)");
-    } else {
-      ESP_LOGW(TAG, "Failed to set ISP gamma: %s", strerror(errno));
-    }
   }
 
   // Les buffers SPIRAM ont déjà été alloués et passés à V4L2 en mode USERPTR
