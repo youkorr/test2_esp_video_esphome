@@ -349,9 +349,6 @@ if os.path.exists(esp_dl_dir):
     esp_dl_exclude.append("dl_detect_pico_postprocessor.cpp")
 
     print(f"[Face Detection] Excluding: {esp_dl_exclude}")
-            "dl_detect_mnp_postprocessor.cpp",      # Face detection specific
-        ])
-        print("[Face Detection] Excluding: face detection postprocessors (using pose detection)")
 
     # Count files by category for better visibility
     sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
