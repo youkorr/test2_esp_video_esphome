@@ -152,7 +152,7 @@ std::list<dl::detect::result_t> &MSRMNP::run(const dl::image::img_t &img)
                 if (tensor && tensor->data) {
                     int total = 1;
                     for (auto s : tensor->shape) total *= s;
-                    if (tensor->dtype == DATA_TYPE_INT8) {
+                    if (tensor->dtype == dl::DATA_TYPE_INT8) {
                         int8_t *data = (int8_t *)tensor->data;
                         int8_t max_val = -128, min_val = 127;
                         for (int i = 0; i < total; i++) {
