@@ -140,18 +140,23 @@ void SdMmc::setup() {
   ESP_LOGW(TAG, "SOC_SDMMC_USE_GPIO_MATRIX not defined: using fixed slot pins, YAML pin config ignored!");
 #endif
 
-  // Initialisation explicite du slot AVANT esp_vfs_fat_sdmmc_mount().
-  // Nécessaire sur ESP32-S3 pour que le GPIO matrix soit correctement configuré :
-  // sans cet appel, les pins SDMMC ne sont pas routées et la carte ne répond pas.
-  // esp_vfs_fat_sdmmc_mount() appellera ensuite sdmmc_host_init() + sdmmc_host_init_slot()
-  // en interne, ce qui réinitialise et reconfigure le slot — ce double appel est normal.
-  ESP_LOGI(TAG, "Initializing SDMMC slot %d", this->slot_);
-  esp_err_t slot_init_err = sdmmc_host_init_slot(host.slot, &slot_config);
-  if (slot_init_err != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize SDMMC slot %d: %s", this->slot_, esp_err_to_name(slot_init_err));
-    this->init_error_ = ErrorCode::ERR_PIN_SETUP;
-    mark_failed();
-    return;
+  // Tentative d'initialisation explicite du slot (utile sur ESP32-P4).
+  // Sur ESP32-S3, sdmmc_host_init_slot() retourne ESP_ERR_INVALID_STATE car
+  // sdmmc_host_init() n'a pas encore été appelé — c'est esp_vfs_fat_sdmmc_mount()
+  // qui s'en charge en interne. Dans ce cas on skip silencieusement.
+  // Sur ESP32-P4, cet appel réussit et préconfigure le GPIO matrix avant le mount.
+  {
+    esp_err_t slot_init_err = sdmmc_host_init_slot(host.slot, &slot_config);
+    if (slot_init_err == ESP_OK) {
+      ESP_LOGD(TAG, "SDMMC slot %d pre-initialized (GPIO matrix ready)", this->slot_);
+    } else if (slot_init_err == ESP_ERR_INVALID_STATE) {
+      ESP_LOGD(TAG, "SDMMC host not yet initialized, esp_vfs_fat_sdmmc_mount() will handle it");
+    } else {
+      ESP_LOGE(TAG, "Unexpected slot init error: %s", esp_err_to_name(slot_init_err));
+      this->init_error_ = ErrorCode::ERR_PIN_SETUP;
+      mark_failed();
+      return;
+    }
   }
 
   // Tentative de montage avec logique de réessai
