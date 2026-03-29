@@ -83,14 +83,17 @@ void SdMmc::dump_config() {
 #ifdef USE_ESP_IDF
 
 void SdMmc::setup() {
-  // Étape 1 : Configuration du contrôle d'alimentation (GPIO45)
+  // Étape 1 : Activation optionnelle du contrôle d'alimentation
+  // Utilisé uniquement sur les cartes qui le nécessitent (ex: ESP32-S3-BOX-3 via GPIO43)
+  // D'autres ESP32-S3 ou ESP32-P4 sans ce besoin ne définissent pas ce pin dans le YAML
   if (this->power_ctrl_pin_ != nullptr) {
     this->power_ctrl_pin_->setup();
     this->power_ctrl_pin_->digital_write(true);
-    ESP_LOGI(TAG, "Power control pin activated (slot %d)", this->slot_);
-    vTaskDelay(pdMS_TO_TICKS(100));  // 100 ms pour stabiliser l'alimentation
+    ESP_LOGI(TAG, "Power control pin activated, waiting for SD card power stabilization...");
+    vTaskDelay(pdMS_TO_TICKS(500));  // 500 ms : délai suffisant pour la stabilisation
+                                     // de l'alimentation avant d'initialiser la carte
   } else {
-    ESP_LOGD(TAG, "No power control pin (slot %d, SD always powered)", this->slot_);
+    ESP_LOGD(TAG, "No power control pin, SD card always powered");
   }
 
   // Étape 2 : Configuration optimale pour le montage de la carte SD
@@ -128,16 +131,19 @@ void SdMmc::setup() {
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
   // Tentative de montage avec logique de réessai
+  // esp_vfs_fat_sdmmc_mount() peut bloquer plusieurs secondes sur échec :
+  // esp_task_wdt_reset() est obligatoire avant chaque tentative pour éviter le crash WDT
   esp_err_t ret = ESP_FAIL;
   for (int attempt = 1; attempt <= 3; attempt++) {
+    esp_task_wdt_reset();  // Réinitialiser le watchdog : chaque tentative bloque ~3-5s
     ESP_LOGI(TAG, "Mounting SD Card on slot %d (attempt %d/3)...", this->slot_, attempt);
     ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT.c_str(), &host, &slot_config, &mount_config, &this->card_);
     if (ret == ESP_OK) {
       ESP_LOGI(TAG, "SD Card mounted successfully on slot %d!", this->slot_);
       break;
     }
-    ESP_LOGD(TAG, "Mount attempt %d failed: %s (will retry)", attempt, esp_err_to_name(ret));
-    vTaskDelay(pdMS_TO_TICKS(100));  // Pause entre tentatives
+    ESP_LOGE(TAG, "Mount attempt %d failed: %s", attempt, esp_err_to_name(ret));
+    vTaskDelay(pdMS_TO_TICKS(200));  // Pause entre tentatives
   }
 
   if (ret != ESP_OK) {
