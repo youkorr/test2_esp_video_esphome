@@ -140,6 +140,20 @@ void SdMmc::setup() {
   ESP_LOGW(TAG, "SOC_SDMMC_USE_GPIO_MATRIX not defined: using fixed slot pins, YAML pin config ignored!");
 #endif
 
+  // Initialisation explicite du slot AVANT esp_vfs_fat_sdmmc_mount().
+  // Nécessaire sur ESP32-S3 pour que le GPIO matrix soit correctement configuré :
+  // sans cet appel, les pins SDMMC ne sont pas routées et la carte ne répond pas.
+  // esp_vfs_fat_sdmmc_mount() appellera ensuite sdmmc_host_init() + sdmmc_host_init_slot()
+  // en interne, ce qui réinitialise et reconfigure le slot — ce double appel est normal.
+  ESP_LOGI(TAG, "Initializing SDMMC slot %d", this->slot_);
+  esp_err_t slot_init_err = sdmmc_host_init_slot(host.slot, &slot_config);
+  if (slot_init_err != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to initialize SDMMC slot %d: %s", this->slot_, esp_err_to_name(slot_init_err));
+    this->init_error_ = ErrorCode::ERR_PIN_SETUP;
+    mark_failed();
+    return;
+  }
+
   // Tentative de montage avec logique de réessai
   // esp_vfs_fat_sdmmc_mount() peut bloquer plusieurs secondes sur échec :
   // esp_task_wdt_reset() est obligatoire avant chaque tentative pour éviter le crash WDT
