@@ -130,6 +130,16 @@ void SdMmc::setup() {
   // Activation des pull-ups internes
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
 
+  // Log de diagnostic : affiche la configuration réelle avant tentative de montage
+#ifdef SOC_SDMMC_USE_GPIO_MATRIX
+  ESP_LOGI(TAG, "SDMMC GPIO matrix: CLK=%d CMD=%d D0=%d", this->clk_pin_, this->cmd_pin_, this->data0_pin_);
+  if (!this->mode_1bit_) {
+    ESP_LOGI(TAG, "SDMMC 4-bit: D1=%d D2=%d D3=%d", this->data1_pin_, this->data2_pin_, this->data3_pin_);
+  }
+#else
+  ESP_LOGW(TAG, "SOC_SDMMC_USE_GPIO_MATRIX not defined: using fixed slot pins, YAML pin config ignored!");
+#endif
+
   // Tentative de montage avec logique de réessai
   // esp_vfs_fat_sdmmc_mount() peut bloquer plusieurs secondes sur échec :
   // esp_task_wdt_reset() est obligatoire avant chaque tentative pour éviter le crash WDT
