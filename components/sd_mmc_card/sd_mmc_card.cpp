@@ -15,9 +15,6 @@
 #include "sdmmc_cmd.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
-#if defined(CONFIG_IDF_TARGET_ESP32P4)
-#include "sd_pwr_ctrl_by_on_chip_ldo.h"
-#endif
 #include <dirent.h>
 #include <errno.h>
 
@@ -88,12 +85,12 @@ void SdMmc::dump_config() {
 void SdMmc::setup() {
   // Étape 1 : Configuration du contrôle d'alimentation (GPIO45)
   if (this->power_ctrl_pin_ != nullptr) {
-    this->power_ctrl_pin_->setup();  // Configure GPIO45 en sortie
-    this->power_ctrl_pin_->digital_write(true);  // Active l'alimentation (met GPIO45 à HIGH)
-    ESP_LOGI(TAG, "Power control pin activated.");
-    vTaskDelay(pdMS_TO_TICKS(100));  // Attends 100 ms pour stabiliser l'alimentation
+    this->power_ctrl_pin_->setup();
+    this->power_ctrl_pin_->digital_write(true);
+    ESP_LOGI(TAG, "Power control pin activated (slot %d)", this->slot_);
+    vTaskDelay(pdMS_TO_TICKS(100));  // 100 ms pour stabiliser l'alimentation
   } else {
-    ESP_LOGD(TAG, "No power control pin defined (SD card always powered)");
+    ESP_LOGD(TAG, "No power control pin (slot %d, SD always powered)", this->slot_);
   }
 
   // Étape 2 : Configuration optimale pour le montage de la carte SD
@@ -106,9 +103,11 @@ void SdMmc::setup() {
   };
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.slot = SDMMC_HOST_SLOT_0 + this->slot_;  // Utilise le slot configuré
-  host.max_freq_khz = SDMMC_FREQ_52M;  // 52MHz (au lieu de SDMMC_FREQ_HIGHSPEED 40MHz)
-                                        // Gain: +30% de vitesse théorique sur cartes compatibles
+  // Assigner le slot explicitement via les constantes ESP-IDF
+  // SDMMC_HOST_DEFAULT() initialise slot=SDMMC_HOST_SLOT_1 par défaut dans ESP-IDF 5.x,
+  // donc on doit toujours écraser explicitement pour slot 0 comme pour slot 1.
+  host.slot = (this->slot_ == 0) ? SDMMC_HOST_SLOT_0 : SDMMC_HOST_SLOT_1;
+  host.max_freq_khz = SDMMC_FREQ_52M;
 
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
