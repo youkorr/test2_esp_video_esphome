@@ -15,7 +15,9 @@
 #include "sdmmc_cmd.h"
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#endif
 #include <dirent.h>
 #include <errno.h>
 
@@ -125,16 +127,6 @@ void SdMmc::setup() {
 
   // Activation des pull-ups internes
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
-
-  // Initialiser le slot spécifique avant le montage
-  ESP_LOGI(TAG, "Initializing SDMMC slot %d", this->slot_);
-  esp_err_t slot_init = sdmmc_host_init_slot(host.slot, &slot_config);
-  if (slot_init != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize slot %d: %s", this->slot_, esp_err_to_name(slot_init));
-    this->init_error_ = ErrorCode::ERR_PIN_SETUP;
-    mark_failed();
-    return;
-  }
 
   // Tentative de montage avec logique de réessai
   esp_err_t ret = ESP_FAIL;
