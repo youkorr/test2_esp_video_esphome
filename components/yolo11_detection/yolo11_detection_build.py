@@ -14,12 +14,13 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-# Find esp-dl (downloaded by PlatformIO lib_deps or local)
-sys.path.insert(0, parent_components_dir)
-from esp_dl_path import find_esp_dl
-esp_dl_resolved_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
-
 print("[YOLO11 Detection] Build script running...")
+
+# Shared ESP-DL download + compilation
+sys.path.insert(0, parent_components_dir)
+from esp_dl_build import build_espdl
+esp_dl_resolved_dir = build_espdl(env, isa_target="esp32p4")
+print(f"[YOLO11 Detection] ESP-DL: {esp_dl_resolved_dir}")
 
 # ========================================================================
 # Helper function for caching
@@ -35,28 +36,7 @@ def needs_rebuild(output_file, input_files):
                 return True
     return False
 
-# ========================================================================
-# Add include paths for ESP-DL headers
-# ========================================================================
-esp_dl_dir = esp_dl_resolved_dir
-if os.path.exists(esp_dl_dir):
-    esp_dl_include_dirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
-        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4",
-        "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src",
-        "fbs_loader/include", "fbs_loader/lib/esp32p4", "fbs_loader/src",
-        "vision/detect", "vision/image", "vision/image/isa",
-        "vision/image/isa/esp32p4",
-    ]
-
-    for inc_dir in esp_dl_include_dirs:
-        inc_path = os.path.join(esp_dl_dir, inc_dir)
-        if os.path.exists(inc_path):
-            env.Append(CPPPATH=[inc_path])
-
-    print("[YOLO11 Detection] ESP-DL include paths added")
+# Include paths already added by build_espdl()
 
 # Add yolo11_detect component include path (for model wrapper headers)
 yolo11_detect_inc = os.path.join(parent_components_dir, "yolo11_detect")

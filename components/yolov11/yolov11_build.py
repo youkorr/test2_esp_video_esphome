@@ -1,6 +1,6 @@
 """
 Build script for YOLOV11 component.
-Uses shared ESP-DL compilation (esp_dl_build.py) to avoid duplicate libraries.
+Uses shared ESP-DL download + compilation (esp_dl_build.py).
 """
 
 import os
@@ -11,13 +11,7 @@ script_dir = Dir('.').srcnode().abspath
 component_dir = script_dir
 parent_components_dir = os.path.dirname(component_dir)
 
-# Find esp-dl
-sys.path.insert(0, parent_components_dir)
-from esp_dl_path import find_esp_dl
-esp_dl_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
-
-print(f"[YOLOV11] Build script running...")
-print(f"[YOLOV11] ESP-DL: {esp_dl_dir}")
+print("[YOLOV11] Build script running...")
 
 # CONFIG defines
 env.Append(CPPDEFINES=[
@@ -31,8 +25,11 @@ if os.path.exists(yolo11_detect_dir):
 
 env.Append(CPPPATH=[component_dir])
 
-# Shared ESP-DL compilation (compiles once, reused by all detection components)
+# Shared ESP-DL download + compilation
+# (downloads esp-dl via sparse git checkout, compiles once, reused by all)
+sys.path.insert(0, parent_components_dir)
 from esp_dl_build import build_espdl
-build_espdl(env, esp_dl_dir, isa_target="esp32p4")
+esp_dl_dir = build_espdl(env, isa_target="esp32p4")
+print(f"[YOLOV11] ESP-DL: {esp_dl_dir}")
 
 print("[YOLOV11] Build script completed")

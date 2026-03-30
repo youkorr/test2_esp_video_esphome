@@ -1,36 +1,158 @@
 """
-Shared ESP-DL source compilation.
+Shared ESP-DL download + compilation.
 Called by detection component build scripts (face_detection, yolov11, yolo11_detection).
-Compiles ESP-DL sources ONCE into a single shared libespdl.a.
-Subsequent calls detect the existing library and skip recompilation.
+
+Downloads esp-dl via sparse git checkout (only dl/, fbs_loader/, vision/).
+Compiles ESP-DL sources ONCE into a single shared libespdl_shared.a.
+Subsequent calls detect the existing library and skip.
 """
 
 import os
 import glob
+import subprocess
 
 # Marker to prevent double compilation within the same SCons run
 _ESPDL_BUILT_KEY = "_ESPDL_SHARED_LIB_BUILT"
+_ESPDL_DIR_KEY = "_ESPDL_SHARED_DIR"
+
+ESP_DL_REPO = "https://github.com/espressif/esp-dl.git"
+ESP_DL_TAG = "v3.2.3"
+
+# Only these top-level dirs are needed for detection/recognition
+SPARSE_DIRS = ["dl", "fbs_loader", "vision"]
+
+# Dirs to exclude from compilation
+EXCLUDE_DIRS = {"audio", "examples", "docs", "test", "speech"}
+
+# Files to exclude from compilation
+EXCLUDE_FILES = {
+    "dl_base_dotprod.cpp",   # Requires esp_dsp.h — replaced by dl_base_dotprod_no_dsp.cpp
+    "dl_image_jpeg.cpp",     # JPEG not needed
+    "dl_image_bmp.cpp",      # BMP not needed
+}
 
 
-def build_espdl(env, esp_dl_dir, isa_target="esp32p4"):
+def _download_esp_dl(download_dir):
+    """Download esp-dl via sparse checkout (only dl/, fbs_loader/, vision/).
+    Falls back to full clone + delete if sparse checkout fails.
+
+    Returns path to esp-dl root (containing dl/, vision/, etc.)
+    """
+    if os.path.isdir(download_dir) and os.path.exists(os.path.join(download_dir, "dl")):
+        print(f"[ESP-DL Download] Already present: {download_dir}")
+        return download_dir
+
+    print(f"[ESP-DL Download] Downloading esp-dl {ESP_DL_TAG} (sparse: {SPARSE_DIRS})...")
+
+    # Try sparse checkout first
+    try:
+        os.makedirs(download_dir, exist_ok=True)
+        subprocess.run(["git", "init"], cwd=download_dir,
+                        capture_output=True, check=True)
+        subprocess.run(["git", "remote", "add", "origin", ESP_DL_REPO],
+                        cwd=download_dir, capture_output=True, check=True)
+        subprocess.run(["git", "config", "core.sparseCheckout", "true"],
+                        cwd=download_dir, capture_output=True, check=True)
+
+        sparse_file = os.path.join(download_dir, ".git", "info", "sparse-checkout")
+        os.makedirs(os.path.dirname(sparse_file), exist_ok=True)
+        with open(sparse_file, "w") as f:
+            for d in SPARSE_DIRS:
+                f.write(f"{d}/\n")
+
+        result = subprocess.run(
+            ["git", "fetch", "--depth=1", "origin", f"tags/{ESP_DL_TAG}"],
+            cwd=download_dir, capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            subprocess.run(["git", "checkout", "FETCH_HEAD"],
+                            cwd=download_dir, capture_output=True, check=True)
+            if os.path.exists(os.path.join(download_dir, "dl")):
+                print(f"[ESP-DL Download] Sparse checkout OK: {download_dir}")
+                return download_dir
+
+        print(f"[ESP-DL Download] Sparse checkout failed, trying full clone...")
+    except Exception as e:
+        print(f"[ESP-DL Download] Sparse checkout error: {e}, trying full clone...")
+
+    # Fallback: full shallow clone
+    import shutil
+    if os.path.exists(download_dir):
+        shutil.rmtree(download_dir)
+
+    try:
+        subprocess.run(
+            ["git", "clone", "--depth=1", "--branch", ESP_DL_TAG, ESP_DL_REPO, download_dir],
+            capture_output=True, text=True, timeout=300, check=True
+        )
+        # Remove unnecessary dirs to save space
+        for unwanted in ["audio", "examples", "docs", "test"]:
+            unwanted_path = os.path.join(download_dir, unwanted)
+            if os.path.exists(unwanted_path):
+                shutil.rmtree(unwanted_path)
+                print(f"[ESP-DL Download] Removed {unwanted}/")
+
+        print(f"[ESP-DL Download] Full clone OK: {download_dir}")
+        return download_dir
+    except Exception as e:
+        print(f"[ESP-DL Download] ERROR: {e}")
+        raise FileNotFoundError(f"Failed to download esp-dl: {e}")
+
+
+def get_esp_dl_dir(env):
+    """Get or download esp-dl. Returns path to esp-dl root."""
+    # Return cached path if already resolved
+    cached = env.get(_ESPDL_DIR_KEY)
+    if cached:
+        return cached
+
+    # Try to find existing esp-dl
+    project_dir = env.get("PROJECT_DIR", "")
+
+    # 1. Check PlatformIO libdeps (if someone still uses add_library)
+    pioenv = env.get("PIOENV", "")
+    for base in [
+        os.path.join(project_dir, ".piolibdeps", pioenv, "esp-dl"),
+        os.path.join(project_dir, ".pio", "libdeps", pioenv, "esp-dl"),
+    ]:
+        if os.path.isdir(base) and os.path.exists(os.path.join(base, "dl")):
+            print(f"[ESP-DL] Found in libdeps: {base}")
+            env[_ESPDL_DIR_KEY] = base
+            return base
+
+    # 2. Download to project build dir
+    download_dir = os.path.join(project_dir, ".espdl_cache", "esp-dl")
+    result = _download_esp_dl(download_dir)
+    env[_ESPDL_DIR_KEY] = result
+    return result
+
+
+def build_espdl(env, esp_dl_dir=None, isa_target="esp32p4"):
     """Compile ESP-DL sources into a shared static library.
 
     Args:
         env: PlatformIO SCons environment
-        esp_dl_dir: Path to esp-dl root (containing dl/, vision/, fbs_loader/)
+        esp_dl_dir: Path to esp-dl root (if None, auto-downloads)
         isa_target: ISA target (esp32p4, tie728, xtensa)
 
     Returns:
-        True if library was built or already exists, False on error.
+        Path to esp-dl directory.
     """
     # Skip if already built in this SCons run
     if env.get(_ESPDL_BUILT_KEY, False):
+        esp_dl_dir = env.get(_ESPDL_DIR_KEY, esp_dl_dir)
         print("[ESP-DL Shared] Already compiled in this build, skipping")
-        return True
+        return esp_dl_dir
+
+    # Get or download esp-dl
+    if esp_dl_dir is None or not os.path.exists(esp_dl_dir):
+        esp_dl_dir = get_esp_dl_dir(env)
 
     if not os.path.exists(esp_dl_dir):
         print(f"[ESP-DL Shared] ERROR: esp-dl not found at {esp_dl_dir}")
-        return False
+        return esp_dl_dir
+
+    env[_ESPDL_DIR_KEY] = esp_dl_dir
 
     # ====================================================================
     # Include paths
@@ -56,8 +178,7 @@ def build_espdl(env, esp_dl_dir, isa_target="esp32p4"):
     print(f"[ESP-DL Shared] {inc_count} include paths added")
 
     # ====================================================================
-    # Source directories (only dl/, fbs_loader/, vision/)
-    # Excludes: audio/, examples/, docs/, test/, speech/
+    # Source files (only dl/, fbs_loader/, vision/)
     # ====================================================================
     esp_dl_source_dirs = [
         "dl/tensor/src",
@@ -71,15 +192,8 @@ def build_espdl(env, esp_dl_dir, isa_target="esp32p4"):
         "vision/recognition",
     ]
 
-    exclude_dirs = {"audio", "examples", "docs", "test", "speech"}
-    exclude_files = {
-        "dl_image_jpeg.cpp",
-        "dl_image_bmp.cpp",
-    }
-
     sources = []
 
-    # Core + vision sources
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
         if not os.path.exists(src_dir_path):
@@ -89,21 +203,23 @@ def build_espdl(env, esp_dl_dir, isa_target="esp32p4"):
                 fname = os.path.basename(src_file)
                 rel = os.path.relpath(src_file, esp_dl_dir)
                 parts = set(rel.split(os.sep))
-                if parts & exclude_dirs:
+                if parts & EXCLUDE_DIRS:
                     continue
-                if fname not in exclude_files:
+                if fname not in EXCLUDE_FILES:
                     sources.append(src_file)
         else:
             for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                 fname = os.path.basename(src_file)
-                if fname not in exclude_files:
+                if fname not in EXCLUDE_FILES:
                     sources.append(src_file)
 
-    # dl/base/*.cpp
+    # dl/base/*.cpp (exclude dl_base_dotprod.cpp — needs esp_dsp.h)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
     if os.path.exists(dl_base_dir):
         for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
-            sources.append(src_file)
+            fname = os.path.basename(src_file)
+            if fname not in EXCLUDE_FILES:
+                sources.append(src_file)
 
     # ISA-specific assembly/source
     for isa_dir in [f"dl/base/isa/{isa_target}", f"dl/tool/isa/{isa_target}",
@@ -147,4 +263,4 @@ def build_espdl(env, esp_dl_dir, isa_target="esp32p4"):
 
     # Mark as built
     env[_ESPDL_BUILT_KEY] = True
-    return True
+    return esp_dl_dir

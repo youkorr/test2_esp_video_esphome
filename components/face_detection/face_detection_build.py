@@ -39,12 +39,15 @@ print(f"[Face Detection] component_dir = {component_dir}")
 print(f"[Face Detection] parent_components_dir = {parent_components_dir}")
 
 # ========================================================================
-# Find esp-dl (local components/esp-dl/ or PlatformIO libdeps)
+# Find esp-dl (try local first, then download cache, then esp_dl_path)
 # ========================================================================
 sys.path.insert(0, parent_components_dir)
-from esp_dl_path import find_esp_dl
-esp_dl_dir = find_esp_dl(env, fallback_components_dir=parent_components_dir)
-print(f"[Face Detection] ESP-DL: {esp_dl_dir}")
+esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
+if not os.path.isdir(esp_dl_dir) or not os.path.exists(os.path.join(esp_dl_dir, "dl")):
+    # Not local — will be downloaded by build_espdl() below
+    esp_dl_dir = None
+else:
+    print(f"[Face Detection] ESP-DL (local): {esp_dl_dir}")
 
 # ========================================================================
 # Detect model type from build flags
@@ -224,7 +227,8 @@ if model_type == "face_recognition":
 #   - human_face_feat_espdl_embed.c -> recognition model data
 # ========================================================================
 from esp_dl_build import build_espdl
-build_espdl(env, esp_dl_dir, isa_target="esp32p4")
+esp_dl_dir = build_espdl(env, esp_dl_dir=esp_dl_dir, isa_target="esp32p4")
+print(f"[Face Detection] ESP-DL: {esp_dl_dir}")
 
 env.Append(CPPPATH=[component_dir])
 

@@ -161,14 +161,8 @@ async def to_code(config):
     if os.path.exists(human_face_recognition_dir):
         cg.add_build_flag(f"-I{human_face_recognition_dir}")
 
-    # ESP-DL: download via PlatformIO lib_deps
-    cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
-
-    # Prevent PlatformIO LDF from auto-compiling esp-dl as a regular library.
-    # Our build script manually compiles only the esp-dl sources we need.
-    cg.add_platformio_option("lib_ignore", ["esp-dl"])
-
-    # Add ESP-DL include paths (try local and PlatformIO locations)
+    # ESP-DL: downloaded and compiled by build script (esp_dl_build.py)
+    # No cg.add_library — avoids PlatformIO auto-compiling esp-dl.
     esp_dl_include_subdirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
         "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
@@ -189,16 +183,11 @@ async def to_code(config):
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
 
-    # Also add PlatformIO libdeps paths (for HA/Docker builds)
+    # Also add build cache path (for HA/Docker builds where esp-dl is downloaded)
     build_path = CORE.build_path
-    pioenv = CORE.name
-    esp_dl_candidates = [
-        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl"),
-        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl"),
-    ]
-    for esp_dl_base in esp_dl_candidates:
-        for subdir in esp_dl_include_subdirs:
-            cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
+    esp_dl_cache = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
+    for subdir in esp_dl_include_subdirs:
+        cg.add_build_flag(f"-I{esp_dl_cache}/{subdir}")
 
     # Build script for compiling ESP-DL sources and embedding models
     build_script_path = os.path.join(component_dir, "face_detection_build.py")
