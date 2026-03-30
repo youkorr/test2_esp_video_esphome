@@ -161,33 +161,13 @@ async def to_code(config):
     if os.path.exists(human_face_recognition_dir):
         cg.add_build_flag(f"-I{human_face_recognition_dir}")
 
-    # ESP-DL: downloaded and compiled by build script (esp_dl_build.py)
-    # No cg.add_library — avoids PlatformIO auto-compiling esp-dl.
-    esp_dl_include_subdirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
-        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4",
-        "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src",
-        "fbs_loader/include", "fbs_loader/lib/esp32p4", "fbs_loader/src",
-        "vision/detect", "vision/image", "vision/image/isa",
-        "vision/image/isa/esp32p4", "vision/recognition",
-        "vision/classification",
-    ]
-
-    # Try local components/esp-dl/ first
+    # ESP-DL: try local components/esp-dl/ first, otherwise download
+    from esp_dl_downloader import download_esp_dl, get_include_flags
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
-    if os.path.exists(esp_dl_dir):
-        for subdir in esp_dl_include_subdirs:
-            inc_path = os.path.join(esp_dl_dir, subdir)
-            if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
-
-    # Also add build cache path (for HA/Docker builds where esp-dl is downloaded)
-    build_path = CORE.build_path
-    esp_dl_cache = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
-    for subdir in esp_dl_include_subdirs:
-        cg.add_build_flag(f"-I{esp_dl_cache}/{subdir}")
+    if not os.path.isdir(esp_dl_dir) or not os.path.exists(os.path.join(esp_dl_dir, "dl")):
+        esp_dl_dir = download_esp_dl(CORE.build_path)
+    for flag in get_include_flags(esp_dl_dir, isa_target="esp32p4"):
+        cg.add_build_flag(flag)
 
     # Build script for compiling ESP-DL sources and embedding models
     build_script_path = os.path.join(component_dir, "face_detection_build.py")

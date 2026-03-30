@@ -161,24 +161,13 @@ async def to_code(config):
     if os.path.exists(yolo11_detect_dir):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
-    # ESP-DL: downloaded and compiled by build script (esp_dl_build.py)
+    # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
     # No cg.add_library — we manage esp-dl ourselves to avoid PlatformIO
     # auto-compiling it (which fails due to missing esp_dsp.h).
-    # Include paths are added by the build script at SCons time.
-    build_path = CORE.build_path
-    esp_dl_cache = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
-    esp_dl_include_subdirs = [
-        "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
-        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4",
-        "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src",
-        "fbs_loader/include", "fbs_loader/lib/esp32p4", "fbs_loader/src",
-        "vision/detect", "vision/image", "vision/image/isa",
-        "vision/image/isa/esp32p4",
-    ]
-    for subdir in esp_dl_include_subdirs:
-        cg.add_build_flag(f"-I{esp_dl_cache}/{subdir}")
+    from esp_dl_downloader import download_esp_dl, get_include_flags
+    esp_dl_dir = download_esp_dl(CORE.build_path)
+    for flag in get_include_flags(esp_dl_dir, isa_target="esp32p4"):
+        cg.add_build_flag(flag)
 
     # Register build script
     build_script = os.path.join(component_dir, "yolov11_build.py")

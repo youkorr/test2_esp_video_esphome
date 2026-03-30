@@ -162,23 +162,11 @@ async def to_code(config):
         cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32S3=1")
         isa_target = "tie728"
 
-    # ESP-DL: downloaded and compiled by build script (esp_dl_build.py)
-    # No cg.add_library — avoids PlatformIO auto-compiling esp-dl
-    # (which fails due to missing esp_dsp.h dependency).
-    build_path = CORE.build_path
-    esp_dl_cache = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
-    esp_dl_include_subdirs = [
-        "dl", "dl/tool/include", f"dl/tool/isa/{isa_target}",
-        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
-        "dl/base", "dl/base/isa", f"dl/base/isa/{isa_target}",
-        "dl/math/include", "dl/math/src", "dl/model/include",
-        "dl/model/src", "dl/module/include", "dl/module/src",
-        "fbs_loader/include", f"fbs_loader/lib/{isa_target}", "fbs_loader/src",
-        "vision/detect", "vision/image", "vision/image/isa",
-        f"vision/image/isa/{isa_target}",
-    ]
-    for subdir in esp_dl_include_subdirs:
-        cg.add_build_flag(f"-I{esp_dl_cache}/{subdir}")
+    # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
+    from esp_dl_downloader import download_esp_dl, get_include_flags
+    esp_dl_dir = download_esp_dl(CORE.build_path)
+    for flag in get_include_flags(esp_dl_dir, isa_target=isa_target):
+        cg.add_build_flag(flag)
 
     # Build script for model embedding + ESP-DL source compilation
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")
