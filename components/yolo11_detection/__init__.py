@@ -163,6 +163,8 @@ async def to_code(config):
         isa_target = "tie728"
 
     # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
+    import sys
+    sys.path.insert(0, parent_components_dir)
     from esp_dl_downloader import download_esp_dl, get_include_flags
     esp_dl_dir = download_esp_dl(CORE.build_path)
     for flag in get_include_flags(esp_dl_dir, isa_target=isa_target):

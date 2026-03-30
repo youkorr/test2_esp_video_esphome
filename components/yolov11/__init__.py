@@ -164,6 +164,8 @@ async def to_code(config):
     # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
     # No cg.add_library — we manage esp-dl ourselves to avoid PlatformIO
     # auto-compiling it (which fails due to missing esp_dsp.h).
+    import sys
+    sys.path.insert(0, parent_components_dir)
     from esp_dl_downloader import download_esp_dl, get_include_flags
     esp_dl_dir = download_esp_dl(CORE.build_path)
     for flag in get_include_flags(esp_dl_dir, isa_target="esp32p4"):

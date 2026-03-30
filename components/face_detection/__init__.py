@@ -162,6 +162,8 @@ async def to_code(config):
         cg.add_build_flag(f"-I{human_face_recognition_dir}")
 
     # ESP-DL: try local components/esp-dl/ first, otherwise download
+    import sys
+    sys.path.insert(0, parent_components_dir)
     from esp_dl_downloader import download_esp_dl, get_include_flags
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if not os.path.isdir(esp_dl_dir) or not os.path.exists(os.path.join(esp_dl_dir, "dl")):
