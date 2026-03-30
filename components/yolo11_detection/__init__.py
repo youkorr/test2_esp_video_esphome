@@ -4,6 +4,65 @@ from esphome.const import CONF_ID
 from esphome import automation
 from esphome.core import CORE
 import os
+import subprocess
+import logging
+
+_LOGGER = logging.getLogger(__name__)
+
+ESP_DL_REPO = "https://github.com/espressif/esp-dl.git"
+ESP_DL_TAG = "v3.2.3"
+
+
+def _ensure_esp_dl(build_path):
+    """Download esp-dl if not already present. Returns path to esp-dl root."""
+    download_dir = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
+    marker = os.path.join(download_dir, "dl", "base")
+    if os.path.isdir(marker):
+        _LOGGER.info("[ESP-DL] Already present: %s", download_dir)
+        return download_dir
+
+    _LOGGER.info("[ESP-DL] Downloading esp-dl %s ...", ESP_DL_TAG)
+    import shutil
+    if os.path.exists(download_dir):
+        shutil.rmtree(download_dir)
+    os.makedirs(download_dir, exist_ok=True)
+
+    # Try sparse checkout first
+    try:
+        subprocess.run(["git", "init"], cwd=download_dir, capture_output=True, check=True)
+        subprocess.run(["git", "remote", "add", "origin", ESP_DL_REPO],
+                        cwd=download_dir, capture_output=True, check=True)
+        subprocess.run(["git", "config", "core.sparseCheckout", "true"],
+                        cwd=download_dir, capture_output=True, check=True)
+        sparse_file = os.path.join(download_dir, ".git", "info", "sparse-checkout")
+        os.makedirs(os.path.dirname(sparse_file), exist_ok=True)
+        with open(sparse_file, "w") as f:
+            for d in ["dl", "fbs_loader", "vision"]:
+                f.write(f"{d}/\n")
+        r = subprocess.run(["git", "fetch", "--depth=1", "origin", f"tags/{ESP_DL_TAG}"],
+                            cwd=download_dir, capture_output=True, text=True, timeout=120)
+        if r.returncode == 0:
+            subprocess.run(["git", "checkout", "FETCH_HEAD"],
+                            cwd=download_dir, capture_output=True, check=True)
+            if os.path.isdir(marker):
+                _LOGGER.info("[ESP-DL] Sparse checkout OK")
+                return download_dir
+    except Exception as e:
+        _LOGGER.warning("[ESP-DL] Sparse failed: %s", e)
+
+    # Fallback: full clone
+    if os.path.exists(download_dir):
+        shutil.rmtree(download_dir)
+    subprocess.run(
+        ["git", "clone", "--depth=1", "--branch", ESP_DL_TAG, ESP_DL_REPO, download_dir],
+        capture_output=True, text=True, timeout=300, check=True
+    )
+    for d in ["audio", "examples", "docs", "test"]:
+        p = os.path.join(download_dir, d)
+        if os.path.exists(p):
+            shutil.rmtree(p)
+    _LOGGER.info("[ESP-DL] Full clone OK")
+    return download_dir
 
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_CAMERA_ID = "camera_id"
@@ -163,12 +222,19 @@ async def to_code(config):
         isa_target = "tie728"
 
     # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
-    import sys
-    sys.path.insert(0, parent_components_dir)
-    from esp_dl_downloader import download_esp_dl, get_include_flags
-    esp_dl_dir = download_esp_dl(CORE.build_path)
-    for flag in get_include_flags(esp_dl_dir, isa_target=isa_target):
-        cg.add_build_flag(flag)
+    esp_dl_dir = _ensure_esp_dl(CORE.build_path)
+    esp_dl_inc = [
+        "dl", "dl/tool/include", f"dl/tool/isa/{isa_target}",
+        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
+        "dl/base", "dl/base/isa", f"dl/base/isa/{isa_target}",
+        "dl/math/include", "dl/math/src", "dl/model/include",
+        "dl/model/src", "dl/module/include", "dl/module/src",
+        "fbs_loader/include", f"fbs_loader/lib/{isa_target}", "fbs_loader/src",
+        "vision/detect", "vision/image", "vision/image/isa",
+        f"vision/image/isa/{isa_target}",
+    ]
+    for subdir in esp_dl_inc:
+        cg.add_build_flag(f"-I{os.path.join(esp_dl_dir, subdir)}")
 
     # Build script for model embedding + ESP-DL source compilation
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")
