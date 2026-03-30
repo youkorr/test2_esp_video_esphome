@@ -170,6 +170,27 @@ async def to_code(config):
     # (dl/, fbs_loader/, vision/ — excludes audio/, examples/, docs/)
     cg.add_platformio_option("lib_ignore", ["esp-dl"])
 
+    # Add ESP-DL include paths via build flags (available at compile time)
+    build_path = CORE.build_path
+    pioenv = CORE.name
+    esp_dl_candidates = [
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl"),
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl"),
+    ]
+    esp_dl_include_subdirs = [
+        "dl", "dl/tool/include", f"dl/tool/isa/{isa_target}",
+        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
+        "dl/base", "dl/base/isa", f"dl/base/isa/{isa_target}",
+        "dl/math/include", "dl/math/src", "dl/model/include",
+        "dl/model/src", "dl/module/include", "dl/module/src",
+        "fbs_loader/include", f"fbs_loader/lib/{isa_target}", "fbs_loader/src",
+        "vision/detect", "vision/image", "vision/image/isa",
+        f"vision/image/isa/{isa_target}",
+    ]
+    for esp_dl_base in esp_dl_candidates:
+        for subdir in esp_dl_include_subdirs:
+            cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
+
     # Build script for model embedding + ESP-DL source compilation
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")
     if os.path.exists(build_script_path):

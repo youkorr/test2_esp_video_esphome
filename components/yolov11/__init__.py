@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
+from esphome.core import CORE
 import os
 
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
@@ -161,8 +162,33 @@ async def to_code(config):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
     # ESP-DL: download via PlatformIO lib_deps
-    # Include paths are set by the build script (yolov11_build.py)
+    # lib_ignore prevents PlatformIO LDF from auto-compiling esp-dl.
+    # Include paths and sources are managed by build scripts.
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
+    cg.add_platformio_option("lib_ignore", ["esp-dl"])
+
+    # Add ESP-DL include paths via build flags (available at compile time)
+    # The build script (post:) also adds them, but these ensure headers are
+    # found even when compilation starts before the post-script runs.
+    build_path = CORE.build_path
+    pioenv = CORE.name
+    esp_dl_candidates = [
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl"),
+        os.path.join(str(build_path), ".piolibdeps", pioenv, "esp-dl", "esp-dl"),
+    ]
+    esp_dl_include_subdirs = [
+        "dl", "dl/tool/include", "dl/tool/isa/esp32p4",
+        "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
+        "dl/base", "dl/base/isa", "dl/base/isa/esp32p4",
+        "dl/math/include", "dl/math/src", "dl/model/include",
+        "dl/model/src", "dl/module/include", "dl/module/src",
+        "fbs_loader/include", "fbs_loader/lib/esp32p4", "fbs_loader/src",
+        "vision/detect", "vision/image", "vision/image/isa",
+        "vision/image/isa/esp32p4",
+    ]
+    for esp_dl_base in esp_dl_candidates:
+        for subdir in esp_dl_include_subdirs:
+            cg.add_build_flag(f"-I{esp_dl_base}/{subdir}")
 
     # Register build script
     build_script = os.path.join(component_dir, "yolov11_build.py")
