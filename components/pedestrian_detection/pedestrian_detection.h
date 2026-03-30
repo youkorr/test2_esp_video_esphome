@@ -55,8 +55,8 @@ class PedestrianDetectionComponent : public Component {
   bool draw_enabled_{true};  // Draw bounding boxes on image buffer
 
   // Detection configuration
-  float score_threshold_{0.5f};
-  float nms_threshold_{0.5f};
+  float score_threshold_{0.3f};
+  float nms_threshold_{0.3f};
   int detection_interval_{4};  // Run detection every N frames
   const char *sdcard_model_path_{nullptr};
 
