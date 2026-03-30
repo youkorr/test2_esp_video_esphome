@@ -58,6 +58,7 @@ class YOLO11DetectionComponent : public Component {
   void set_detection_interval(int interval) { this->detection_interval_ = interval; }
   void set_draw_enabled(bool enabled) { this->draw_enabled_ = enabled; }
   void set_sdcard_model_path(const char *path) { this->sdcard_model_path_ = path; }
+  void add_detect_class(int class_id) { this->detect_classes_.push_back(class_id); }
 
   // Getters
   int get_detected_count();
@@ -101,6 +102,7 @@ class YOLO11DetectionComponent : public Component {
   int detection_interval_{8};
   bool draw_enabled_{true};
   const char *sdcard_model_path_{nullptr};
+  std::vector<int> detect_classes_{};  // Empty = detect all classes
 
   // State
   uint32_t frame_counter_{0};

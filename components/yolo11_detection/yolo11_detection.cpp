@@ -64,10 +64,12 @@ static const uint8_t FONT_5X7[][7] = {
   {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, // 7
   {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, // 8
   {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}, // 9
-  // Special characters (index 36-38)
+  // Special characters (index 36-40)
   {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // Space
   {0x00, 0x00, 0x04, 0x00, 0x04, 0x00, 0x00}, // : (colon)
   {0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x08}, // , (comma)
+  {0x11, 0x11, 0x09, 0x01, 0x12, 0x12, 0x0C}, // % (percent)
+  {0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}, // . (dot)
 };
 
 // COCO class names (80 classes)
@@ -143,6 +145,21 @@ void YOLO11DetectionComponent::setup() {
       {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
 
   this->detector_initialized_ = true;
+
+  // Boot diagnostics: log model input shape and preprocessing caps
+  ESP_LOGI(TAG, "YOLO11 model input: [1, H, W, 3]");
+  ESP_LOGI(TAG, "YOLO11: Using RGB565 BIG ENDIAN caps=0x%x",
+           dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+
+  if (!this->detect_classes_.empty()) {
+    ESP_LOGI(TAG, "Class filter: %d classes enabled", (int)this->detect_classes_.size());
+    for (int cls_id : this->detect_classes_) {
+      const char *name = (cls_id >= 0 && cls_id < 80) ? COCO_CLASSES[cls_id] : "unknown";
+      ESP_LOGI(TAG, "  - [%d] %s", cls_id, name);
+    }
+  } else {
+    ESP_LOGI(TAG, "Class filter: all 80 COCO classes");
+  }
 
   // Register with ESP32 camera (callback-based)
 #ifdef USE_YOLO11_ESP32_CAMERA
@@ -273,11 +290,24 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
   this->postprocessor_->postprocess();
   auto &results = this->postprocessor_->get_result(width, height);
 
-  // Cache results (mutex protected)
+  // Streaming diagnostics
+  ESP_LOGD(TAG, "YOLO11 stage: %d candidates from %ux%u image",
+           (int)results.size(), width, height);
+
+  // Cache results (mutex protected), apply class filter
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
 
     for (auto &result : results) {
+      // Class filtering: skip classes not in detect_classes_ (if filter is set)
+      if (!this->detect_classes_.empty()) {
+        bool found = false;
+        for (int cls_id : this->detect_classes_) {
+          if (result.category == cls_id) { found = true; break; }
+        }
+        if (!found) continue;
+      }
+
       DetectionBox box;
       box.x1 = result.box[0];
       box.y1 = result.box[1];
@@ -286,17 +316,25 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
       box.score = result.score;
       box.category = result.category;
       this->cached_detections_.push_back(box);
+
+      const char *name = (box.category >= 0 && box.category < 80) ? COCO_CLASSES[box.category] : "?";
+      ESP_LOGD(TAG, "  -> %s score=%.2f box=[%d,%d,%d,%d]",
+               name, box.score, box.x1, box.y1, box.x2, box.y2);
     }
 
     xSemaphoreGive(this->detections_mutex_);
   }
 
   // Trigger callbacks
-  if (!results.empty()) {
-    int count = results.size();
-    ESP_LOGD(TAG, "Detected %d object(s)", count);
+  int filtered_count = 0;
+  if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    filtered_count = this->cached_detections_.size();
+    xSemaphoreGive(this->detections_mutex_);
+  }
+  if (filtered_count > 0) {
+    ESP_LOGD(TAG, "Detected %d object(s) (after filter)", filtered_count);
     for (auto &callback : this->on_object_detected_callbacks_) {
-      callback(count);
+      callback(filtered_count);
     }
   }
 }
@@ -358,13 +396,38 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
         }
       }
 
-      // Draw object name above the box
+      // Build label: "CLASS XX%"
       const char *class_name = "unknown";
       if (box.category >= 0 && box.category < 80) {
         class_name = COCO_CLASSES[box.category];
       }
-      int text_y = std::max(2, y1 - 10);
-      this->draw_text_(img_data, width, height, x1, text_y, class_name, color, 1);
+      char label[32];
+      int pct = (int)(box.score * 100.0f);
+      snprintf(label, sizeof(label), "%s %d%%", class_name, pct);
+
+      // Label dimensions
+      int label_len = strlen(label);
+      int char_w = 6;  // 5px + 1px spacing
+      int char_h = 9;  // 7px + 2px padding
+      int label_w = label_len * char_w + 2;
+      int label_h = char_h + 2;
+
+      // Position: above the box, or inside if no room
+      int label_x = x1;
+      int label_y = y1 - label_h;
+      if (label_y < 0) label_y = y1 + 2;  // Inside box if no room above
+
+      // Draw label background (filled rectangle in box color)
+      uint16_t *buffer = (uint16_t *)img_data;
+      for (int by = std::max(0, label_y); by < std::min((int)height, label_y + label_h); by++) {
+        for (int bx = std::max(0, label_x); bx < std::min((int)width, label_x + label_w); bx++) {
+          buffer[by * width + bx] = color;
+        }
+      }
+
+      // Draw text in white on colored background
+      const uint16_t COLOR_WHITE = 0xFFFF;
+      this->draw_text_(img_data, width, height, label_x + 1, label_y + 1, label, COLOR_WHITE, 1);
     }
 
     if (!this->cached_detections_.empty()) {
@@ -390,6 +453,10 @@ void YOLO11DetectionComponent::draw_char_(uint8_t *img_data, uint16_t img_width,
     font_idx = 37;
   } else if (c == ',') {
     font_idx = 38;
+  } else if (c == '%') {
+    font_idx = 39;
+  } else if (c == '.') {
+    font_idx = 40;
   }
 
   if (font_idx < 0) return;
@@ -444,6 +511,11 @@ void YOLO11DetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d frames", this->detection_interval_);
   ESP_LOGCONFIG(TAG, "  Draw enabled: %s", this->draw_enabled_ ? "YES" : "NO");
+  if (!this->detect_classes_.empty()) {
+    ESP_LOGCONFIG(TAG, "  Class filter: %d classes", (int)this->detect_classes_.size());
+  } else {
+    ESP_LOGCONFIG(TAG, "  Class filter: all 80 COCO classes");
+  }
   ESP_LOGCONFIG(TAG, "  Initialized: %s", this->detector_initialized_ ? "YES" : "NO");
 }
 

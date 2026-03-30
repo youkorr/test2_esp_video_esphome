@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 from esphome import automation
+from esphome.core import CORE
 import os
 
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
@@ -12,6 +13,7 @@ CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
 CONF_ON_OBJECT_DETECTED = "on_object_detected"
+CONF_DETECT_CLASSES = "detect_classes"
 
 yolo11_detection_ns = cg.esphome_ns.namespace("yolo11_detection")
 YOLO11DetectionComponent = yolo11_detection_ns.class_("YOLO11DetectionComponent", cg.Component)
@@ -26,6 +28,52 @@ ESP32Camera = esp32_camera_ns.class_("ESP32Camera", cg.Component)
 # esp_cam_sensor (MIPI DSI - ESP32-P4)
 esp_cam_sensor_ns = cg.esphome_ns.namespace("esp_cam_sensor")
 MipiDsiCam = esp_cam_sensor_ns.class_("MipiDSICamComponent", cg.Component)
+
+
+# COCO class name -> index mapping for YAML config
+COCO_CLASSES = {
+    "person": 0, "bicycle": 1, "car": 2, "motorcycle": 3, "airplane": 4,
+    "bus": 5, "train": 6, "truck": 7, "boat": 8, "traffic light": 9,
+    "fire hydrant": 10, "stop sign": 11, "parking meter": 12, "bench": 13,
+    "bird": 14, "cat": 15, "dog": 16, "horse": 17, "sheep": 18, "cow": 19,
+    "elephant": 20, "bear": 21, "zebra": 22, "giraffe": 23, "backpack": 24,
+    "umbrella": 25, "handbag": 26, "tie": 27, "suitcase": 28, "frisbee": 29,
+    "skis": 30, "snowboard": 31, "sports ball": 32, "kite": 33,
+    "baseball bat": 34, "baseball glove": 35, "skateboard": 36,
+    "surfboard": 37, "tennis racket": 38, "bottle": 39, "wine glass": 40,
+    "cup": 41, "fork": 42, "knife": 43, "spoon": 44, "bowl": 45,
+    "banana": 46, "apple": 47, "sandwich": 48, "orange": 49, "broccoli": 50,
+    "carrot": 51, "hot dog": 52, "pizza": 53, "donut": 54, "cake": 55,
+    "chair": 56, "couch": 57, "potted plant": 58, "bed": 59,
+    "dining table": 60, "toilet": 61, "tv": 62, "laptop": 63, "mouse": 64,
+    "remote": 65, "keyboard": 66, "cell phone": 67, "microwave": 68,
+    "oven": 69, "toaster": 70, "sink": 71, "refrigerator": 72, "book": 73,
+    "clock": 74, "vase": 75, "scissors": 76, "teddy bear": 77,
+    "hair drier": 78, "toothbrush": 79,
+}
+
+
+def validate_detect_classes(value):
+    """Validate detect_classes: accepts class names (str) or indices (int)."""
+    if not isinstance(value, list):
+        raise cv.Invalid("detect_classes must be a list")
+    indices = []
+    for item in value:
+        if isinstance(item, int):
+            if item < 0 or item > 79:
+                raise cv.Invalid(f"Class index {item} out of range (0-79)")
+            indices.append(item)
+        elif isinstance(item, str):
+            name = item.lower().strip()
+            if name in COCO_CLASSES:
+                indices.append(COCO_CLASSES[name])
+            else:
+                raise cv.Invalid(
+                    f"Unknown class '{item}'. Valid: {', '.join(sorted(COCO_CLASSES.keys()))}"
+                )
+        else:
+            raise cv.Invalid(f"Invalid class specifier: {item}")
+    return indices
 
 
 def validate_camera_config(config):
@@ -52,6 +100,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
         cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=600),
         cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+        cv.Optional(CONF_DETECT_CLASSES, default=[]): validate_detect_classes,
         cv.Optional(CONF_ON_OBJECT_DETECTED): automation.validate_automation({
             cv.GenerateID(): cv.declare_id(ObjectDetectedTrigger),
         }),
@@ -82,6 +131,12 @@ async def to_code(config):
     cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
     cg.add(var.set_draw_enabled(config[CONF_DRAW_ENABLED]))
 
+    # Class filtering
+    detect_classes = config.get(CONF_DETECT_CLASSES, [])
+    if detect_classes:
+        for cls_id in detect_classes:
+            cg.add(var.add_detect_class(cls_id))
+
     # Setup automations
     for conf in config.get(CONF_ON_OBJECT_DETECTED, []):
         trigger = cg.new_Pvariable(conf[CONF_ID], var)
@@ -108,10 +163,14 @@ async def to_code(config):
         isa_target = "tie728"
 
     # ESP-DL: download via PlatformIO lib_deps
-    # Include paths are set by the build script (yolo11_detection_build.py)
     cg.add_library("esp-dl", None, "https://github.com/espressif/esp-dl.git#v3.2.3")
 
-    # Build script for model embedding
+    # Prevent PlatformIO LDF from auto-compiling esp-dl.
+    # Our build script manually compiles only the needed sources
+    # (dl/, fbs_loader/, vision/ — excludes audio/, examples/, docs/)
+    cg.add_platformio_option("lib_ignore", ["esp-dl"])
+
+    # Build script for model embedding + ESP-DL source compilation
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])

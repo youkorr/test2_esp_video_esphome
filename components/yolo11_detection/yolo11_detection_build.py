@@ -58,6 +58,11 @@ if os.path.exists(esp_dl_dir):
 
     print("[YOLO11 Detection] ESP-DL include paths added")
 
+# Add yolo11_detect component include path (for model wrapper headers)
+yolo11_detect_inc = os.path.join(parent_components_dir, "yolo11_detect")
+if os.path.exists(yolo11_detect_inc):
+    env.Append(CPPPATH=[yolo11_detect_inc])
+
 # ========================================================================
 # Embed YOLO11 Detection Model in flash rodata
 # ========================================================================
@@ -157,7 +162,84 @@ else:
     print(f"[YOLO11 Detection] ERROR: yolo11_detect dir not found: {yolo11_detect_dir}")
 
 # ========================================================================
-# Compile embedded model source
+# ESP-DL Sources: compile only dl/, fbs_loader/, vision/
+# Excludes: audio/, examples/, docs/, test/
+# ========================================================================
+esp_dl_sources = []
+
+esp_dl_source_dirs = [
+    "dl/tensor/src",
+    "dl/model/src",
+    "dl/module/src",
+    "dl/tool/src",
+    "dl/math/src",
+    "fbs_loader/src",
+    "vision/image",
+    "vision/detect",
+]
+
+# Directories to always exclude from compilation
+esp_dl_exclude_dirs = {"audio", "examples", "docs", "test", "speech"}
+
+# Individual files to exclude
+esp_dl_exclude_files = {
+    "dl_image_jpeg.cpp",
+    "dl_image_bmp.cpp",
+}
+
+if os.path.exists(esp_dl_dir):
+    for src_dir in esp_dl_source_dirs:
+        src_dir_path = os.path.join(esp_dl_dir, src_dir)
+        if not os.path.exists(src_dir_path):
+            continue
+        if src_dir.startswith("vision/"):
+            pattern = os.path.join(src_dir_path, "**", "*.cpp")
+            for src_file in glob.glob(pattern, recursive=True):
+                fname = os.path.basename(src_file)
+                # Check excluded dirs
+                rel = os.path.relpath(src_file, esp_dl_dir)
+                parts = set(rel.split(os.sep))
+                if parts & esp_dl_exclude_dirs:
+                    continue
+                if fname not in esp_dl_exclude_files:
+                    esp_dl_sources.append(src_file)
+        else:
+            for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
+                fname = os.path.basename(src_file)
+                if fname not in esp_dl_exclude_files:
+                    esp_dl_sources.append(src_file)
+
+    # dl/base/*.cpp (platform-independent base operations)
+    dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
+    if os.path.exists(dl_base_dir):
+        for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
+            esp_dl_sources.append(src_file)
+
+    # ISA-specific assembly/source files for ESP32-P4
+    for isa_dir in ["dl/base/isa/esp32p4", "dl/tool/isa/esp32p4",
+                     "vision/image/isa/esp32p4"]:
+        isa_path = os.path.join(esp_dl_dir, isa_dir)
+        if os.path.exists(isa_path):
+            for ext in ["*.cpp", "*.S", "*.c"]:
+                for src_file in glob.glob(os.path.join(isa_path, ext)):
+                    esp_dl_sources.append(src_file)
+
+    # Pre-compiled static library (fbs_loader)
+    fbs_lib = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4", "libfbs_model.a")
+    if os.path.exists(fbs_lib):
+        env.Append(LIBPATH=[os.path.dirname(fbs_lib)])
+        env.Append(LIBS=["fbs_model"])
+        print(f"[YOLO11 Detection] + libfbs_model.a")
+
+    print(f"[YOLO11 Detection] ESP-DL: {len(esp_dl_sources)} source files to compile")
+else:
+    print("[YOLO11 Detection] WARNING: esp-dl not found, skipping source compilation")
+
+# Merge all sources
+sources_to_add.extend(esp_dl_sources)
+
+# ========================================================================
+# Compile all sources (model embed + ESP-DL)
 # ========================================================================
 if sources_to_add:
     objects = []
@@ -170,14 +252,14 @@ if sources_to_add:
 
     if objects:
         lib = env.StaticLibrary(
-            os.path.join("$BUILD_DIR", "libyolo11_model_embed"),
+            os.path.join("$BUILD_DIR", "libyolo11_detection"),
             objects
         )
         env.Prepend(LIBS=[lib])
         env['_LIBFLAGS'] = '-Wl,--start-group ' + env['_LIBFLAGS'] + ' -Wl,--end-group'
-        print(f"[YOLO11 Detection] libyolo11_model_embed.a created")
+        print(f"[YOLO11 Detection] libyolo11_detection.a created ({len(objects)} objects)")
 else:
-    print("[YOLO11 Detection] WARNING: No model embedded!")
+    print("[YOLO11 Detection] WARNING: No sources to compile!")
 
 env.Append(CPPPATH=[component_dir])
 print("[YOLO11 Detection] Build script completed")
