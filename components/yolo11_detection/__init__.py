@@ -74,6 +74,7 @@ async def to_code(config):
 
     # YOLO11 detection configuration
     cg.add_build_flag("-DCONFIG_YOLO11_DETECT_S8_V1=1")
+    cg.add_build_flag("-DCONFIG_COCO_DETECT_YOLO11N_320_s8_v3=1")
     cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_TYPE=0")
 
     # Model location configuration
