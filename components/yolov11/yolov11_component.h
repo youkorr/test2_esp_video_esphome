@@ -23,10 +23,16 @@ class CameraImage;
 #include "dl_detect_define.hpp"
 #include "dl_image_define.hpp"
 #include "fbs_model.hpp"
+#include "yolo26n_postprocessor.h"
 #endif
 
 namespace esphome {
 namespace yolov11 {
+
+enum ModelType {
+  MODEL_TYPE_YOLO11 = 0,
+  MODEL_TYPE_YOLO26N = 1,
+};
 
 struct DetectionResult {
   int category;
@@ -55,6 +61,8 @@ class YOLOV11Component : public Component {
 
   // Model
   void set_model(file_component::FileData *model) { this->model_file_ = model; }
+  void set_model_type(ModelType type) { this->model_type_ = type; }
+  void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_score_threshold(float thr) { this->score_threshold_ = thr; }
   void set_nms_threshold(float thr) { this->nms_threshold_ = thr; }
   void add_class_label(const std::string &label) {
@@ -117,6 +125,8 @@ class YOLOV11Component : public Component {
 
   // Model
   file_component::FileData *model_file_{nullptr};
+  ModelType model_type_{MODEL_TYPE_YOLO11};
+  std::string canvas_id_{};
   float score_threshold_{0.3f};
   float nms_threshold_{0.5f};
   std::vector<std::string> class_labels_;
@@ -129,6 +139,7 @@ class YOLOV11Component : public Component {
   dl::Model *dl_model_{nullptr};
   dl::image::ImagePreprocessor *preprocessor_{nullptr};
   dl::detect::yolo11PostProcessor *postprocessor_{nullptr};
+  Yolo26nPostProcessor *yolo26n_postprocessor_{nullptr};
 #endif
   bool detector_initialized_{false};
 

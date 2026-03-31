@@ -69,9 +69,9 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  ESP_LOGI(TAG, "Loading model (%u bytes)...", (unsigned)model_size);
+  const char *model_type_str = (this->model_type_ == MODEL_TYPE_YOLO26N) ? "yolo26n" : "yolo11";
+  ESP_LOGI(TAG, "Loading %s model (%u bytes)...", model_type_str, (unsigned)model_size);
 
-  // Internal RAM too limited (~31KB free after system/LVGL/WiFi), use SPIRAM for all tensors
   this->dl_model_ = new dl::Model(
       (const char *)model_data,
       fbs::MODEL_LOCATION_IN_FLASH_RODATA,
@@ -87,45 +87,46 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  // YOLO11 preprocessing: normalize pixels [0,255] to [0,1] with std={255,255,255}
-  // Model input exponent=-7 means quantize = round(normalized * 128)
-  // With std=1: round(pixel * 128) saturates to 127 for all pixel >= 1
-  // With std=255: round(pixel/255 * 128) gives proper [0,127] distribution
+  // Preprocessor: normalize [0,255] to [0,1] with std={255,255,255}
+  // ESP32-P4 PPA outputs RGB565 in native LE byte order (RISC-V is little-endian)
+  // DO NOT use DL_IMAGE_CAP_RGB565_BIG_ENDIAN - causes wrong channel extraction
+  // (Center pixel [32,0,0] instead of proper RGB values → model sees garbage → 0 detections)
+  uint32_t caps = 0;
+#ifdef USE_YOLOV11_MIPI_CAMERA
+  caps = 0;  // LE RGB565, no swap needed for standard RGB565 from PPA
+  ESP_LOGI(TAG, "Preprocessor: P4 mode (RGB565 LE, caps=0)");
+#else
+  caps = 0;  // ESP32-S3 / standard esp32_camera: RGB565 LE
+  ESP_LOGI(TAG, "Preprocessor: S3 mode (RGB565 LE, caps=0)");
+#endif
+
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {255, 255, 255},
-      dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
-  // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
+      this->dl_model_, {0, 0, 0}, {255, 255, 255}, caps);
   this->preprocessor_->enable_letterbox({114, 114, 114});
 
-  this->postprocessor_ = new dl::detect::yolo11PostProcessor(
-      this->dl_model_,
-      this->preprocessor_,
-      this->score_threshold_,
-      this->nms_threshold_,
-      0.7,
-      {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+  // Model-specific postprocessor
+  if (this->model_type_ == MODEL_TYPE_YOLO26N) {
+    this->yolo26n_postprocessor_ = new Yolo26nPostProcessor(
+        this->dl_model_, this->preprocessor_,
+        this->score_threshold_, 32);
+    ESP_LOGI(TAG, "Using yolo26n postprocessor (anchor-free, top-32)");
+  } else {
+    this->postprocessor_ = new dl::detect::yolo11PostProcessor(
+        this->dl_model_,
+        this->preprocessor_,
+        this->score_threshold_,
+        this->nms_threshold_,
+        0.7,
+        {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+    ESP_LOGI(TAG, "Using yolo11 postprocessor (DFL + NMS)");
+  }
 
   this->detector_initialized_ = true;
   auto *input_tensor = this->dl_model_->get_input();
-  ESP_LOGI(TAG, "YOLO11 detector initialized (model input: %dx%d)",
-           (int)input_tensor->shape[2], (int)input_tensor->shape[1]);
-  ESP_LOGI(TAG, "  Input tensor: dtype=%d, exponent=%d, shape=[%d,%d,%d,%d]",
-           (int)input_tensor->dtype, input_tensor->exponent,
-           (int)input_tensor->shape[0], (int)input_tensor->shape[1],
-           (int)input_tensor->shape[2], (int)input_tensor->shape[3]);
-  // CRITICAL: The exponent determines how pixel values are quantized to int8.
-  // With mean=0, std=1: quant_value = clamp(pixel * (1 << -exponent), -128, 127)
-  // If exponent=-7: pixel=1 → 1*128=128 → clamped to 127 (ALL pixels > 0 become 127!)
-  // If exponent=0:  pixel=200 → 200*1=200 → clamped to 127 (values > 127 clip)
-  // The correct std depends on the exponent:
-  //   exponent=-7 → model expects [0,1] range → need std={255,255,255}
-  //   exponent=0  → model expects [0,255] range → need std={1,1,1}
-  if (input_tensor->exponent < -1) {
-    ESP_LOGW(TAG, "  WARNING: Input exponent=%d means model expects normalized [0,1] input!",
-             input_tensor->exponent);
-    ESP_LOGW(TAG, "  With std={1,1,1}, ALL pixels >0 saturate to 127 (binary image)!");
-    ESP_LOGW(TAG, "  This is likely the cause of zero detections.");
-  }
+  ESP_LOGI(TAG, "%s detector initialized (input: %dx%dx%d, exponent=%d)",
+           model_type_str,
+           (int)input_tensor->shape[2], (int)input_tensor->shape[1],
+           (int)input_tensor->shape[3], input_tensor->exponent);
   ESP_LOGI(TAG, "Free heap: %lu, free PSRAM: %lu",
            (unsigned long)esp_get_free_heap_size(),
            (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
@@ -279,9 +280,9 @@ void YOLOV11Component::on_esp32_camera_image_(
 void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
                                         uint16_t height) {
 #ifdef ESP_DL_MODEL_YOLO11
-  if (this->dl_model_ == nullptr || this->postprocessor_ == nullptr) {
-    return;
-  }
+  if (this->dl_model_ == nullptr) return;
+  if (this->model_type_ == MODEL_TYPE_YOLO26N && this->yolo26n_postprocessor_ == nullptr) return;
+  if (this->model_type_ == MODEL_TYPE_YOLO11 && this->postprocessor_ == nullptr) return;
 
   dl::image::img_t img;
   img.data = rgb565_data;
@@ -406,40 +407,54 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     }
   }
 
-  this->postprocessor_->clear_result();
-  this->postprocessor_->postprocess();
   uint32_t t3 = esp_log_timestamp();
-  auto &results = this->postprocessor_->get_result(width, height);
-  ESP_LOGI(TAG, "Timing: preprocess=%lums, inference=%lums, postprocess=%lums, total=%lums, raw_detections=%d",
-           (unsigned long)(t1 - t0), (unsigned long)(t2 - t1),
-           (unsigned long)(t3 - t2), (unsigned long)(t3 - t0), (int)results.size());
-
-  for (auto &result : results) {
-    ESP_LOGI(TAG, "  Raw det: cat=%d score=%.2f box=[%d,%d,%d,%d]",
-             result.category, result.score,
-             result.box[0], result.box[1], result.box[2], result.box[3]);
-  }
+  int raw_count = 0;
 
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
     this->cached_detections_.clear();
 
-    for (auto &result : results) {
-      // Runtime class filtering
-      if (!this->is_class_allowed_(result.category)) {
-        continue;
+    if (this->model_type_ == MODEL_TYPE_YOLO26N) {
+      this->yolo26n_postprocessor_->clear_result();
+      this->yolo26n_postprocessor_->postprocess();
+      t3 = esp_log_timestamp();
+      auto scaled = this->yolo26n_postprocessor_->get_results_scaled(width, height);
+      raw_count = scaled.size();
+      for (auto &det : scaled) {
+        if (!this->is_class_allowed_(det.class_id)) continue;
+        DetectionResult d;
+        d.category = det.class_id;
+        d.score = det.score;
+        d.x1 = (int)det.x1;
+        d.y1 = (int)det.y1;
+        d.x2 = (int)det.x2;
+        d.y2 = (int)det.y2;
+        this->cached_detections_.push_back(d);
       }
-      DetectionResult det;
-      det.category = result.category;
-      det.score = result.score;
-      det.x1 = result.box[0];
-      det.y1 = result.box[1];
-      det.x2 = result.box[2];
-      det.y2 = result.box[3];
-      this->cached_detections_.push_back(det);
+    } else {
+      this->postprocessor_->clear_result();
+      this->postprocessor_->postprocess();
+      t3 = esp_log_timestamp();
+      auto &results = this->postprocessor_->get_result(width, height);
+      raw_count = results.size();
+      for (auto &result : results) {
+        if (!this->is_class_allowed_(result.category)) continue;
+        DetectionResult det;
+        det.category = result.category;
+        det.score = result.score;
+        det.x1 = result.box[0];
+        det.y1 = result.box[1];
+        det.x2 = result.box[2];
+        det.y2 = result.box[3];
+        this->cached_detections_.push_back(det);
+      }
     }
 
     xSemaphoreGive(this->detections_mutex_);
   }
+
+  ESP_LOGI(TAG, "Timing: preprocess=%lums, inference=%lums, postprocess=%lums, total=%lums, detections=%d",
+           (unsigned long)(t1 - t0), (unsigned long)(t2 - t1),
+           (unsigned long)(t3 - t2), (unsigned long)(t3 - t0), raw_count);
 
   std::string class_str = this->get_detection_class_string();
   std::string bb_str = this->get_detection_bb_string();
@@ -451,8 +466,8 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
     callback(bb_str);
   }
 
-  if (!results.empty()) {
-    ESP_LOGD(TAG, "Detected %d object(s): %s", (int)results.size(),
+  if (raw_count > 0) {
+    ESP_LOGD(TAG, "Detected %d object(s): %s", raw_count,
              class_str.c_str());
   }
 #endif
@@ -533,11 +548,13 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
 
 void YOLOV11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLOV11:");
+  ESP_LOGCONFIG(TAG, "  Model type: %s",
+                this->model_type_ == MODEL_TYPE_YOLO26N ? "yolo26n" : "yolo11");
 #ifdef USE_YOLOV11_ESP32_CAMERA
-  ESP_LOGCONFIG(TAG, "  Camera: ESP32 Camera");
+  ESP_LOGCONFIG(TAG, "  Camera: ESP32 Camera (S3)");
 #endif
 #ifdef USE_YOLOV11_MIPI_CAMERA
-  ESP_LOGCONFIG(TAG, "  Camera: MIPI DSI Camera (esp_cam_sensor)");
+  ESP_LOGCONFIG(TAG, "  Camera: MIPI DSI Camera (P4)");
 #endif
   ESP_LOGCONFIG(TAG, "  Score threshold: %.2f", this->score_threshold_);
   ESP_LOGCONFIG(TAG, "  NMS threshold: %.2f", this->nms_threshold_);

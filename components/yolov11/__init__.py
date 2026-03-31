@@ -105,14 +105,19 @@ def _ensure_esp_dl(build_path):
 
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_CAMERA_ID = "camera_id"
-CONF_MODEL_ID = "model_id"
 CONF_CANVAS_ID = "canvas_id"
+CONF_MODEL_ID = "model_id"
+CONF_MODEL_TYPE = "model_type"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_CLASS_LABELS = "class_labels"
 CONF_DETECT_CLASSES = "detect_classes"
 CONF_DETECTION_INTERVAL = "detection_interval"
 CONF_DRAW_ENABLED = "draw_enabled"
+
+# Supported model types
+MODEL_TYPE_YOLO11 = "yolo11"
+MODEL_TYPE_YOLO26N = "yolo26n"
 
 # 80 classes COCO par défaut
 DEFAULT_COCO_LABELS = [
@@ -174,6 +179,9 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CAMERA_ID): cv.use_id(MipiDSICamComponent),
             cv.Optional(CONF_CANVAS_ID): cv.string,
             cv.Required(CONF_MODEL_ID): cv.use_id(FileData),
+            cv.Optional(CONF_MODEL_TYPE, default=MODEL_TYPE_YOLO11): cv.one_of(
+                MODEL_TYPE_YOLO11, MODEL_TYPE_YOLO26N, lower=True
+            ),
             cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(
                 min=0.0, max=1.0
             ),
@@ -226,13 +234,18 @@ async def to_code(config):
         camera = await cg.get_variable(config[CONF_CAMERA_ID])
         cg.add(var.set_mipi_camera(camera))
         cg.add_build_flag("-DUSE_YOLOV11_MIPI_CAMERA")
-        
+
+    # Canvas ID (for lvgl_camera_display integration)
     if CONF_CANVAS_ID in config:
         cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
-        
     # Set model
     model = await cg.get_variable(config[CONF_MODEL_ID])
     cg.add(var.set_model(model))
+
+    # Model type: yolo11 (default) or yolo26n
+    model_type = config[CONF_MODEL_TYPE]
+    if model_type == MODEL_TYPE_YOLO26N:
+        cg.add(var.set_model_type(cg.RawExpression("yolov11::MODEL_TYPE_YOLO26N")))
 
     # Set thresholds
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
@@ -253,7 +266,8 @@ async def to_code(config):
 
     # Build flags for ESP-DL
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
-    cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
+    if CONF_CAMERA_ID in config:
+        cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
     # Include paths
     component_dir = os.path.dirname(os.path.abspath(__file__))
