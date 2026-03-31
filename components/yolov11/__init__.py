@@ -106,6 +106,7 @@ def _ensure_esp_dl(build_path):
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_CAMERA_ID = "camera_id"
 CONF_MODEL_ID = "model_id"
+CONF_CANVAS_ID = "canvas_id"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_CLASS_LABELS = "class_labels"
@@ -171,6 +172,7 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(): cv.declare_id(YOLOV11Component),
             cv.Optional(CONF_ESP32_CAMERA_ID): cv.use_id(ESP32Camera),
             cv.Optional(CONF_CAMERA_ID): cv.use_id(MipiDSICamComponent),
+            cv.Optional(CONF_CANVAS_ID): cv.string,
             cv.Required(CONF_MODEL_ID): cv.use_id(FileData),
             cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(
                 min=0.0, max=1.0
@@ -224,7 +226,10 @@ async def to_code(config):
         camera = await cg.get_variable(config[CONF_CAMERA_ID])
         cg.add(var.set_mipi_camera(camera))
         cg.add_build_flag("-DUSE_YOLOV11_MIPI_CAMERA")
-
+        
+    if CONF_CANVAS_ID in config:
+        cg.add(var.set_canvas_id(config[CONF_CANVAS_ID]))
+        
     # Set model
     model = await cg.get_variable(config[CONF_MODEL_ID])
     cg.add(var.set_model(model))
