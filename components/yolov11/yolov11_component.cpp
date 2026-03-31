@@ -278,35 +278,42 @@ void YOLOV11Component::run_inference() {
       esp_cache_msync(img_data, frame_size,
                       ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-      // Debug: analyze image brightness (every 10 inferences to track AE convergence)
-      if (this->frame_counter_ == 0) {
-        uint16_t *pixels = (uint16_t *)img_data;
-        uint32_t total_pixels = width * height;
-        uint32_t r_sum = 0, g_sum = 0, b_sum = 0;
-        uint32_t sample_count = std::min(total_pixels, (uint32_t)10000);
-        uint32_t step = total_pixels / sample_count;
-        for (uint32_t i = 0; i < total_pixels; i += step) {
-          uint16_t p = pixels[i];
-          // LE RGB565 extraction (matches caps=0, official Espressif)
-          r_sum += ((p >> 11) & 0x1F) << 3;
-          g_sum += ((p >> 5) & 0x3F) << 2;
-          b_sum += (p & 0x1F) << 3;
-        }
-        float r_avg = (float)r_sum / sample_count;
-        float g_avg = (float)g_sum / sample_count;
-        float b_avg = (float)b_sum / sample_count;
+      // Check image brightness - skip very dark frames (AE not converged)
+      uint16_t *pixels = (uint16_t *)img_data;
+      uint32_t total_pixels = width * height;
+      uint32_t r_sum = 0, g_sum = 0, b_sum = 0;
+      uint32_t sample_count = std::min(total_pixels, (uint32_t)2000);
+      uint32_t step = total_pixels / sample_count;
+      for (uint32_t i = 0; i < total_pixels; i += step) {
+        uint16_t p = pixels[i];
+        r_sum += ((p >> 11) & 0x1F) << 3;
+        g_sum += ((p >> 5) & 0x3F) << 2;
+        b_sum += (p & 0x1F) << 3;
+      }
+      float brightness = ((float)r_sum + g_sum + b_sum) / (3.0f * sample_count);
 
-        // Also show raw bytes for first pixel to verify endianness
-        uint8_t *raw = img_data;
-        ESP_LOGI(TAG, "YOLO input: %ux%u, raw bytes[0-7]: %02X %02X %02X %02X %02X %02X %02X %02X",
-                 width, height, raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]);
-        ESP_LOGI(TAG, "  uint16 LE: %04X %04X %04X %04X", pixels[0], pixels[1], pixels[2], pixels[3]);
-        ESP_LOGI(TAG, "  Avg RGB (LE decode): (%.0f, %.0f, %.0f) / 255", r_avg, g_avg, b_avg);
-        // Check if image is mostly dark (AE not converged)
-        float brightness = (r_avg + g_avg + b_avg) / 3.0f;
-        if (brightness < 30) {
-          ESP_LOGW(TAG, "  IMAGE VERY DARK (avg=%.0f) - auto-exposure may not have converged", brightness);
+      // Skip dark frames - wait for auto-exposure to converge
+      if (brightness < 25.0f) {
+        this->warmup_frames_skipped_++;
+        if (this->warmup_frames_skipped_ <= 5 || (this->warmup_frames_skipped_ % 20) == 0) {
+          ESP_LOGW(TAG, "Frame too dark (avg=%.0f), skipping inference (skipped %d frames, waiting for AE)",
+                   brightness, (int)this->warmup_frames_skipped_);
         }
+        this->mipi_camera_->release_buffer(buffer);
+        return;
+      }
+
+      if (this->warmup_frames_skipped_ > 0) {
+        ESP_LOGI(TAG, "AE converged (brightness=%.0f), starting detection after %d dark frames",
+                 brightness, (int)this->warmup_frames_skipped_);
+        this->warmup_frames_skipped_ = 0;
+      }
+
+      // Log image stats periodically (every 10th inference)
+      this->inference_count_++;
+      if (this->inference_count_ <= 3 || (this->inference_count_ % 10) == 0) {
+        ESP_LOGI(TAG, "Inference #%d: %ux%u, brightness=%.0f",
+                 (int)this->inference_count_, width, height, brightness);
       }
 
       this->detect_objects_(img_data, width, height);
@@ -375,118 +382,8 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   this->preprocessor_->preprocess(img);
   uint32_t t1 = esp_log_timestamp();
 
-  // Debug: analyze model input tensor after preprocessing (first inference only)
-  static bool input_tensor_logged = false;
-  if (!input_tensor_logged) {
-    input_tensor_logged = true;
-    auto *input = this->dl_model_->get_input();
-    int8_t *idata = (int8_t *)input->data;
-    int H = input->shape[1], W = input->shape[2], C = input->shape[3];
-    int total = H * W * C;
-    // Histogram of quantized values
-    int8_t imin = 127, imax = -128;
-    int zero_count = 0, saturated_pos = 0, saturated_neg = 0;
-    long sum = 0;
-    for (int i = 0; i < total; i++) {
-      int8_t v = idata[i];
-      if (v < imin) imin = v;
-      if (v > imax) imax = v;
-      if (v == 0) zero_count++;
-      if (v == 127) saturated_pos++;
-      if (v == -128) saturated_neg++;
-      sum += v;
-    }
-    float avg = (float)sum / total;
-    ESP_LOGI(TAG, "Model INPUT tensor: shape=[%d,%d,%d,%d], exponent=%d",
-             (int)input->shape[0], H, W, C, input->exponent);
-    ESP_LOGI(TAG, "  Quantized stats: min=%d, max=%d, avg=%.1f", (int)imin, (int)imax, avg);
-    ESP_LOGI(TAG, "  zeros=%d (%.1f%%), sat_127=%d (%.1f%%), sat_-128=%d (%.1f%%)",
-             zero_count, 100.0f * zero_count / total,
-             saturated_pos, 100.0f * saturated_pos / total,
-             saturated_neg, 100.0f * saturated_neg / total);
-    ESP_LOGI(TAG, "  First 16 values: %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
-             idata[0], idata[1], idata[2], idata[3], idata[4], idata[5], idata[6], idata[7],
-             idata[8], idata[9], idata[10], idata[11], idata[12], idata[13], idata[14], idata[15]);
-    // Center pixel values (should be from actual image, not letterbox padding)
-    int center = (H/2 * W + W/2) * C;
-    ESP_LOGI(TAG, "  Center pixel RGB: %d %d %d", idata[center], idata[center+1], idata[center+2]);
-  }
-
   this->dl_model_->run();
   uint32_t t2 = esp_log_timestamp();
-
-  // Debug: check model output tensor values and score analysis
-  {
-    auto &outputs = this->dl_model_->get_outputs();
-    ESP_LOGI(TAG, "Model outputs: %d tensors", (int)outputs.size());
-    int idx = 0;
-    for (auto &kv : outputs) {
-      auto *tensor = kv.second;
-      int total = 1;
-      std::string shape_str;
-      for (int d = 0; d < (int)tensor->shape.size(); d++) {
-        total *= tensor->shape[d];
-        if (d > 0) shape_str += "x";
-        shape_str += std::to_string(tensor->shape[d]);
-      }
-      int8_t *data = (int8_t *)tensor->data;
-      int8_t max_val = -128, min_val = 127;
-      int check = std::min(total, 1000);
-      for (int j = 0; j < check; j++) {
-        if (data[j] > max_val) max_val = data[j];
-        if (data[j] < min_val) min_val = data[j];
-      }
-      float scale = (tensor->exponent > 0) ? (float)(1 << tensor->exponent)
-                                             : (1.0f / (float)(1 << -(tensor->exponent)));
-      ESP_LOGI(TAG, "  Output[%d] '%s': shape=[%s], exponent=%d, scale=%.6f, range=[%d..%d]",
-               idx++, kv.first.c_str(), shape_str.c_str(), tensor->exponent, scale, min_val, max_val);
-    }
-
-    // Detailed score analysis for score0 (largest feature map)
-    auto *score0 = this->dl_model_->get_output("score0");
-    if (score0 != nullptr) {
-      float s_scale = (score0->exponent > 0) ? (float)(1 << score0->exponent)
-                                               : (1.0f / (float)(1 << -(score0->exponent)));
-      float inv_sigmoid_thr = -logf(1.0f / this->score_threshold_ - 1.0f);
-      int8_t quant_thr = (int8_t)std::max(-128.0f, std::min(127.0f, roundf(inv_sigmoid_thr / s_scale)));
-
-      int8_t *sdata = (int8_t *)score0->data;
-      int H = score0->shape[1], W = score0->shape[2], C = score0->shape[3];
-      int total_cells = H * W;
-      int total_scores = H * W * C;
-
-      // Find global max score and count above threshold
-      int8_t global_max = -128;
-      int above_thr = 0;
-      int best_class = -1;
-      int best_y = -1, best_x = -1;
-      for (int y = 0; y < H; y++) {
-        for (int x = 0; x < W; x++) {
-          for (int c = 0; c < C; c++) {
-            int8_t val = sdata[(y * W + x) * C + c];
-            if (val > global_max) {
-              global_max = val;
-              best_class = c;
-              best_y = y;
-              best_x = x;
-            }
-            if (val > quant_thr) {
-              above_thr++;
-            }
-          }
-        }
-      }
-      float best_dequant = global_max * s_scale;
-      float best_prob = 1.0f / (1.0f + expf(-best_dequant));
-      ESP_LOGI(TAG, "Score0 analysis: %dx%dx%d=%d scores, exponent=%d, scale=%.6f",
-               H, W, C, total_scores, score0->exponent, s_scale);
-      ESP_LOGI(TAG, "  Threshold: score_thr=%.2f -> inverse_sigmoid=%.3f -> quant_thr=%d",
-               this->score_threshold_, inv_sigmoid_thr, (int)quant_thr);
-      ESP_LOGI(TAG, "  Best score: quant=%d, dequant=%.4f, sigmoid=%.4f, class=%d, pos=(%d,%d)",
-               (int)global_max, best_dequant, best_prob, best_class, best_x, best_y);
-      ESP_LOGI(TAG, "  Scores above threshold: %d / %d", above_thr, total_scores);
-    }
-  }
 
   uint32_t t3 = esp_log_timestamp();
   int raw_count = 0;

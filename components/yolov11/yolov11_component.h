@@ -124,6 +124,8 @@ class YOLOV11Component : public Component {
 
   // Auto-detection state
   uint32_t frame_counter_{0};
+  uint32_t warmup_frames_skipped_{0};
+  uint32_t inference_count_{0};
   bool inference_requested_{false};
   bool first_frame_ready_{false};
 
