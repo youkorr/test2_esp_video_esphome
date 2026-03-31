@@ -21,10 +21,11 @@ YOLO11Impl::YOLO11Impl(const char *model_name)
 #endif
 #if CONFIG_IDF_TARGET_ESP32P4
     // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1},
+    // std={255,255,255} normalizes [0,255] to [0,1] before quantization
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {255, 255, 255},
         dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {255, 255, 255});
 #endif
 
     // YOLO11 postprocessor configuration

@@ -87,11 +87,12 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  // Official esp-dl YOLO11 preprocessing: mean={0,0,0}, std={1,1,1}
-  // The .espdl model handles quantization internally via tensor exponents.
-  // ESP32-P4 MIPI CSI camera stores RGB565 big-endian in memory
+  // YOLO11 preprocessing: normalize pixels [0,255] to [0,1] with std={255,255,255}
+  // Model input exponent=-7 means quantize = round(normalized * 128)
+  // With std=1: round(pixel * 128) saturates to 127 for all pixel >= 1
+  // With std=255: round(pixel/255 * 128) gives proper [0,127] distribution
   this->preprocessor_ = new dl::image::ImagePreprocessor(
-      this->dl_model_, {0, 0, 0}, {1, 1, 1},
+      this->dl_model_, {0, 0, 0}, {255, 255, 255},
       dl::image::DL_IMAGE_CAP_RGB_SWAP | dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
   // Standard YOLO letterbox padding (gray 114,114,114) for non-square input images
   this->preprocessor_->enable_letterbox({114, 114, 114});
