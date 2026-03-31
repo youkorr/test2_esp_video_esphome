@@ -32,15 +32,27 @@ EXCLUDE_FILES = {
 }
 
 
+def _resolve_esp_dl_root(path):
+    """Handle nested esp-dl/esp-dl/ repo structure. Returns path containing dl/."""
+    if os.path.isdir(os.path.join(path, "dl")):
+        return path
+    inner = os.path.join(path, "esp-dl")
+    if os.path.isdir(os.path.join(inner, "dl")):
+        return inner
+    return path
+
+
 def _download_esp_dl(download_dir):
     """Download esp-dl via sparse checkout (only dl/, fbs_loader/, vision/).
     Falls back to full clone + delete if sparse checkout fails.
 
     Returns path to esp-dl root (containing dl/, vision/, etc.)
     """
-    if os.path.isdir(download_dir) and os.path.exists(os.path.join(download_dir, "dl")):
-        print(f"[ESP-DL Download] Already present: {download_dir}")
-        return download_dir
+    # Check both direct and nested structure
+    resolved = _resolve_esp_dl_root(download_dir)
+    if os.path.isdir(resolved) and os.path.exists(os.path.join(resolved, "dl")):
+        print(f"[ESP-DL Download] Already present: {resolved}")
+        return resolved
 
     print(f"[ESP-DL Download] Downloading esp-dl {ESP_DL_TAG} (sparse: {SPARSE_DIRS})...")
 
@@ -67,9 +79,10 @@ def _download_esp_dl(download_dir):
         if result.returncode == 0:
             subprocess.run(["git", "checkout", "FETCH_HEAD"],
                             cwd=download_dir, capture_output=True, check=True)
-            if os.path.exists(os.path.join(download_dir, "dl")):
-                print(f"[ESP-DL Download] Sparse checkout OK: {download_dir}")
-                return download_dir
+            resolved = _resolve_esp_dl_root(download_dir)
+            if os.path.exists(os.path.join(resolved, "dl")):
+                print(f"[ESP-DL Download] Sparse checkout OK: {resolved}")
+                return resolved
 
         print(f"[ESP-DL Download] Sparse checkout failed, trying full clone...")
     except Exception as e:
@@ -85,15 +98,16 @@ def _download_esp_dl(download_dir):
             ["git", "clone", "--depth=1", "--branch", ESP_DL_TAG, ESP_DL_REPO, download_dir],
             capture_output=True, text=True, timeout=300, check=True
         )
+        resolved = _resolve_esp_dl_root(download_dir)
         # Remove unnecessary dirs to save space
         for unwanted in ["audio", "examples", "docs", "test"]:
-            unwanted_path = os.path.join(download_dir, unwanted)
+            unwanted_path = os.path.join(resolved, unwanted)
             if os.path.exists(unwanted_path):
                 shutil.rmtree(unwanted_path)
                 print(f"[ESP-DL Download] Removed {unwanted}/")
 
-        print(f"[ESP-DL Download] Full clone OK: {download_dir}")
-        return download_dir
+        print(f"[ESP-DL Download] Full clone OK: {resolved}")
+        return resolved
     except Exception as e:
         print(f"[ESP-DL Download] ERROR: {e}")
         raise FileNotFoundError(f"Failed to download esp-dl: {e}")
@@ -115,10 +129,11 @@ def get_esp_dl_dir(env):
         os.path.join(project_dir, ".piolibdeps", pioenv, "esp-dl"),
         os.path.join(project_dir, ".pio", "libdeps", pioenv, "esp-dl"),
     ]:
-        if os.path.isdir(base) and os.path.exists(os.path.join(base, "dl")):
-            print(f"[ESP-DL] Found in libdeps: {base}")
-            env[_ESPDL_DIR_KEY] = base
-            return base
+        resolved = _resolve_esp_dl_root(base)
+        if os.path.isdir(resolved) and os.path.exists(os.path.join(resolved, "dl")):
+            print(f"[ESP-DL] Found in libdeps: {resolved}")
+            env[_ESPDL_DIR_KEY] = resolved
+            return resolved
 
     # 2. Download to project build dir
     download_dir = os.path.join(project_dir, ".espdl_cache", "esp-dl")

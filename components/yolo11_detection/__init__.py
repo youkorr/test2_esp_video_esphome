@@ -13,13 +13,26 @@ ESP_DL_REPO = "https://github.com/espressif/esp-dl.git"
 ESP_DL_TAG = "v3.2.3"
 
 
+def _resolve_esp_dl_root(path):
+    """Handle nested esp-dl/esp-dl/ repo structure. Returns path containing dl/."""
+    if os.path.isdir(os.path.join(path, "dl")):
+        return path
+    inner = os.path.join(path, "esp-dl")
+    if os.path.isdir(os.path.join(inner, "dl")):
+        return inner
+    return path
+
+
 def _ensure_esp_dl(build_path):
     """Download esp-dl if not already present. Returns path to esp-dl root."""
     download_dir = os.path.join(str(build_path), ".espdl_cache", "esp-dl")
-    marker = os.path.join(download_dir, "dl", "base")
+
+    # Already downloaded? Check both direct and nested structure
+    resolved = _resolve_esp_dl_root(download_dir)
+    marker = os.path.join(resolved, "dl", "base")
     if os.path.isdir(marker):
-        _LOGGER.info("[ESP-DL] Already present: %s", download_dir)
-        return download_dir
+        _LOGGER.info("[ESP-DL] Already present: %s", resolved)
+        return resolved
 
     _LOGGER.info("[ESP-DL] Downloading esp-dl %s ...", ESP_DL_TAG)
     import shutil
@@ -44,9 +57,10 @@ def _ensure_esp_dl(build_path):
         if r.returncode == 0:
             subprocess.run(["git", "checkout", "FETCH_HEAD"],
                             cwd=download_dir, capture_output=True, check=True)
-            if os.path.isdir(marker):
-                _LOGGER.info("[ESP-DL] Sparse checkout OK")
-                return download_dir
+            resolved = _resolve_esp_dl_root(download_dir)
+            if os.path.isdir(os.path.join(resolved, "dl", "base")):
+                _LOGGER.info("[ESP-DL] Sparse checkout OK: %s", resolved)
+                return resolved
     except Exception as e:
         _LOGGER.warning("[ESP-DL] Sparse failed: %s", e)
 
@@ -57,12 +71,13 @@ def _ensure_esp_dl(build_path):
         ["git", "clone", "--depth=1", "--branch", ESP_DL_TAG, ESP_DL_REPO, download_dir],
         capture_output=True, text=True, timeout=300, check=True
     )
+    resolved = _resolve_esp_dl_root(download_dir)
     for d in ["audio", "examples", "docs", "test"]:
-        p = os.path.join(download_dir, d)
+        p = os.path.join(resolved, d)
         if os.path.exists(p):
             shutil.rmtree(p)
-    _LOGGER.info("[ESP-DL] Full clone OK")
-    return download_dir
+    _LOGGER.info("[ESP-DL] Full clone OK: %s", resolved)
+    return resolved
 
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_CAMERA_ID = "camera_id"
