@@ -167,7 +167,6 @@ void YOLOV11Component::init_detector_() {
     }
     ESP_LOGI(TAG, "Model loaded in PSRAM-only mode (inference will be slower)");
   }
-  }
 
   // Preprocessor: normalize [0,255] to [0,1] with std={255,255,255}
   // ESP32-P4 PPA outputs RGB565 in native LE byte order (RISC-V is little-endian)
