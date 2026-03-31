@@ -121,13 +121,20 @@ void YOLOV11Component::init_detector_() {
   const char *model_type_str = (this->model_type_ == MODEL_TYPE_YOLO26N) ? "yolo26n" : "yolo11";
   ESP_LOGI(TAG, "Loading %s model (%u bytes)...", model_type_str, (unsigned)model_size);
 
-  // max_internal_size: use largest contiguous internal SRAM block for ESP-DL
-  // Total free SRAM may be fragmented, so use largest_free_block instead
+  // ESP32-P4 ESP-DL requires MALLOC_CAP_SIMD memory (separate, smaller pool)
+  // Query the actual SIMD-capable block size to avoid allocation failure + crash
   size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  size_t largest_block = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-  size_t max_internal = (largest_block > 16 * 1024) ? (largest_block - 8 * 1024) : 0;
-  ESP_LOGI(TAG, "Internal SRAM: %u KB free, largest block %u KB, giving %u KB to ESP-DL",
-           (unsigned)(free_internal / 1024), (unsigned)(largest_block / 1024),
+  size_t largest_simd = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+#ifdef USE_YOLOV11_MIPI_CAMERA
+  // P4: check SIMD pool specifically (cap 0x800)
+  size_t simd_block = heap_caps_get_largest_free_block(0x800);  // MALLOC_CAP_SIMD
+  if (simd_block > 0 && simd_block < largest_simd) {
+    largest_simd = simd_block;
+  }
+#endif
+  size_t max_internal = (largest_simd > 16 * 1024) ? (largest_simd - 8 * 1024) : 0;
+  ESP_LOGI(TAG, "Internal SRAM: %u KB free, SIMD block %u KB, giving %u KB to ESP-DL",
+           (unsigned)(free_internal / 1024), (unsigned)(largest_simd / 1024),
            (unsigned)(max_internal / 1024));
 
   this->dl_model_ = new dl::Model(
@@ -139,10 +146,27 @@ void YOLOV11Component::init_detector_() {
       true
   );
 
-  if (this->dl_model_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to create dl::Model");
-    this->mark_failed();
-    return;
+  // Verify model loaded correctly (allocation failure leaves object in broken state)
+  if (this->dl_model_ == nullptr || this->dl_model_->get_input() == nullptr) {
+    ESP_LOGE(TAG, "Failed to create dl::Model (internal alloc may have failed)");
+    // Retry with max_internal=0 (all PSRAM, slower but works)
+    ESP_LOGW(TAG, "Retrying with PSRAM only (slower inference)...");
+    delete this->dl_model_;
+    this->dl_model_ = new dl::Model(
+        (const char *)model_data,
+        fbs::MODEL_LOCATION_IN_FLASH_RODATA,
+        0,
+        dl::MEMORY_MANAGER_GREEDY,
+        nullptr,
+        true
+    );
+    if (this->dl_model_ == nullptr || this->dl_model_->get_input() == nullptr) {
+      ESP_LOGE(TAG, "Failed to create dl::Model even with PSRAM-only mode");
+      this->mark_failed();
+      return;
+    }
+    ESP_LOGI(TAG, "Model loaded in PSRAM-only mode (inference will be slower)");
+  }
   }
 
   // Preprocessor: normalize [0,255] to [0,1] with std={255,255,255}
