@@ -121,10 +121,18 @@ void YOLOV11Component::init_detector_() {
   const char *model_type_str = (this->model_type_ == MODEL_TYPE_YOLO26N) ? "yolo26n" : "yolo11";
   ESP_LOGI(TAG, "Loading %s model (%u bytes)...", model_type_str, (unsigned)model_size);
 
+  // max_internal_size: allow ESP-DL to use fast internal SRAM for computation buffers
+  // P4 has 768KB SRAM - allocating internal RAM dramatically reduces inference time
+  // S3 has less SRAM available, use a smaller budget
+  size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  size_t max_internal = (free_internal > 30 * 1024) ? (free_internal - 30 * 1024) : 0;
+  ESP_LOGI(TAG, "Free internal SRAM: %u KB, allocating %u KB for ESP-DL",
+           (unsigned)(free_internal / 1024), (unsigned)(max_internal / 1024));
+
   this->dl_model_ = new dl::Model(
       (const char *)model_data,
       fbs::MODEL_LOCATION_IN_FLASH_RODATA,
-      0,
+      max_internal,
       dl::MEMORY_MANAGER_GREEDY,
       nullptr,
       true
