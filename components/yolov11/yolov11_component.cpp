@@ -102,7 +102,7 @@ void YOLOV11Component::init_detector_() {
       this->preprocessor_,
       this->score_threshold_,
       this->nms_threshold_,
-      10,
+      0.25, 0.7, 10,
       {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
 
   this->detector_initialized_ = true;
