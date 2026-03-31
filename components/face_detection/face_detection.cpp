@@ -288,44 +288,12 @@ void FaceDetectionComponent::detect_faces_(uint8_t *img_data, uint16_t width, ui
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // Debug: log image brightness on first detection
-  static bool face_img_logged = false;
-  if (!face_img_logged) {
-    face_img_logged = true;
-    uint8_t *raw = img_data;
-    uint32_t total_pixels = width * height;
-    uint32_t r_sum_be = 0, g_sum_be = 0, b_sum_be = 0;
-    uint32_t sample_count = std::min(total_pixels, (uint32_t)10000);
-    uint32_t step = total_pixels / sample_count;
-    for (uint32_t i = 0; i < total_pixels; i += step) {
-      // Read as BE RGB565: byte[0]=MSB, byte[1]=LSB
-      uint8_t b0 = raw[i * 2];
-      uint8_t b1 = raw[i * 2 + 1];
-      // BE extraction (same as esp-dl extract_channel*_from_rgb565be)
-      r_sum_be += (b0 & 0xF8);         // R: top 5 bits of byte 0
-      g_sum_be += ((b0 & 0x07) << 5) | ((b1 >> 5) & 0x07);  // G: split across bytes
-      b_sum_be += ((b1 & 0x1F) << 3);  // B: low 5 bits of byte 1
-    }
-    ESP_LOGI(TAG, "Face detect input: %ux%u, raw bytes: %02X %02X %02X %02X %02X %02X",
-             width, height, raw[0], raw[1], raw[2], raw[3], raw[4], raw[5]);
-    ESP_LOGI(TAG, "  Avg RGB (BE): (%.0f, %.0f, %.0f) / 255",
-             (float)r_sum_be / sample_count, (float)g_sum_be / sample_count, (float)b_sum_be / sample_count);
-  }
-
-  // WDT protection
+  // WDT protection: face detection inference can take 1-2 seconds.
+  // When combined with LVGL page transitions (auto-lock), total main loop time
+  // can exceed the 5s watchdog. Reset WDT timer before and after inference.
   esp_task_wdt_reset();
   std::list<dl::detect::result_t> &face_results = this->face_detector_->run(img);
   esp_task_wdt_reset();
-
-  // Debug: log detection results
-  static int face_log_count = 0;
-  if (face_log_count < 20) {
-    face_log_count++;
-    ESP_LOGI(TAG, "Face detection result: %d faces found (frame %d)", (int)face_results.size(), face_log_count);
-    for (auto &r : face_results) {
-      ESP_LOGI(TAG, "  Face: box=[%d,%d,%d,%d] score=%.3f", r.box[0], r.box[1], r.box[2], r.box[3], r.score);
-    }
-  }
 
   // Cache results (mutex protected)
   if (xSemaphoreTake(this->face_results_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
