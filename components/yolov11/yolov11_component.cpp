@@ -293,7 +293,7 @@ void YOLOV11Component::run_inference() {
       float brightness = ((float)r_sum + g_sum + b_sum) / (3.0f * sample_count);
 
       // Skip dark frames - wait for auto-exposure to converge
-      if (brightness < 25.0f) {
+      if (brightness < 5.0f) {
         this->warmup_frames_skipped_++;
         if (this->warmup_frames_skipped_ <= 5 || (this->warmup_frames_skipped_ % 20) == 0) {
           ESP_LOGW(TAG, "Frame too dark (avg=%.0f), skipping inference (skipped %d frames, waiting for AE)",
