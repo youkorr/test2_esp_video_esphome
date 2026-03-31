@@ -107,6 +107,10 @@ class YOLOV11Component : public Component {
   void init_detector_();
   void detect_objects_(uint8_t *rgb565_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
+  void draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, char c, uint16_t color, int scale);
+  void draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                  int x, int y, const char *text, uint16_t color, int scale);
   bool is_class_allowed_(int category) const;
 
 #ifdef USE_YOLOV11_ESP32_CAMERA

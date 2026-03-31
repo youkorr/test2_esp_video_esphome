@@ -14,6 +14,55 @@ namespace yolov11 {
 
 static const char *const TAG = "yolov11";
 
+// 5x7 bitmap font for drawing text on RGB565 frame buffer
+static const uint8_t FONT_5X7[][7] = {
+  // A-Z (index 0-25)
+  {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // A
+  {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}, // B
+  {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}, // C
+  {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // D
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}, // E
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}, // F
+  {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F}, // G
+  {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // H
+  {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // I
+  {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C}, // J
+  {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}, // K
+  {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}, // L
+  {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // M
+  {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // N
+  {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // O
+  {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}, // P
+  {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}, // Q
+  {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // R
+  {0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E}, // S
+  {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // T
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // U
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}, // V
+  {0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A}, // W
+  {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}, // X
+  {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}, // Y
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}, // Z
+  // 0-9 (index 26-35)
+  {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}, // 0
+  {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1
+  {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
+  {0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E}, // 3
+  {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, // 4
+  {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}, // 5
+  {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}, // 6
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, // 7
+  {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, // 8
+  {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}, // 9
+  // Special characters (index 36-40)
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // Space
+  {0x00, 0x00, 0x04, 0x00, 0x04, 0x00, 0x00}, // : (colon)
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x08}, // , (comma)
+  {0x11, 0x11, 0x09, 0x01, 0x12, 0x12, 0x0C}, // % (percent)
+  {0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}, // . (dot)
+  {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}, // - (hyphen, index 41)
+};
+
 void YOLOV11Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up YOLOV11...");
 
@@ -500,6 +549,7 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
     const uint16_t COLOR_YELLOW = 0xFFE0;
     const uint16_t COLOR_CYAN   = 0x07FF;
     const uint16_t COLOR_MAGENTA = 0xF81F;
+    const uint16_t COLOR_WHITE  = 0xFFFF;
 
     for (auto &det : this->cached_detections_) {
       int x1 = std::max(2, std::min(det.x1, (int)width - 3));
@@ -522,7 +572,7 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
       const int line_width = 2;
       uint16_t *buffer = (uint16_t *)img_data;
 
-      // Top and bottom lines
+      // Draw bounding box - top and bottom lines
       for (int x = x1; x <= x2; x++) {
         for (int t = 0; t < line_width; t++) {
           int top = (y1 + t) * width + x;
@@ -540,9 +590,103 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
           if (right >= 0 && right < width * height) buffer[right] = color;
         }
       }
+
+      // Build label: "CLASS XX%"
+      const char *class_name = this->get_class_name(det.category);
+      char label[32];
+      int pct = (int)(det.score * 100.0f);
+      snprintf(label, sizeof(label), "%s %d%%", class_name, pct);
+
+      // Label dimensions
+      int label_len = strlen(label);
+      int char_w = 6;  // 5px + 1px spacing
+      int char_h = 9;  // 7px + 2px padding
+      int label_w = label_len * char_w + 2;
+      int label_h = char_h + 2;
+
+      // Position: above the box, or inside if no room
+      int label_x = x1;
+      int label_y = y1 - label_h;
+      if (label_y < 0) label_y = y1 + 2;  // Inside box if no room above
+
+      // Draw label background (filled rectangle in box color)
+      for (int by = std::max(0, label_y); by < std::min((int)height, label_y + label_h); by++) {
+        for (int bx = std::max(0, label_x); bx < std::min((int)width, label_x + label_w); bx++) {
+          buffer[by * width + bx] = color;
+        }
+      }
+
+      // Draw text in white on colored background
+      this->draw_text_(img_data, width, height, label_x + 1, label_y + 1, label, COLOR_WHITE, 1);
     }
 
+    if (!this->cached_detections_.empty()) {
+      ESP_LOGD(TAG, "Drew %d detection boxes with labels", (int)this->cached_detections_.size());
+    }
     xSemaphoreGive(this->detections_mutex_);
+  }
+}
+
+void YOLOV11Component::draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                                   int x, int y, char c, uint16_t color, int scale) {
+  int font_idx = -1;
+
+  if (c >= 'A' && c <= 'Z') {
+    font_idx = c - 'A';
+  } else if (c >= 'a' && c <= 'z') {
+    font_idx = c - 'a';  // Map to uppercase
+  } else if (c >= '0' && c <= '9') {
+    font_idx = 26 + (c - '0');
+  } else if (c == ' ') {
+    font_idx = 36;
+  } else if (c == ':') {
+    font_idx = 37;
+  } else if (c == ',') {
+    font_idx = 38;
+  } else if (c == '%') {
+    font_idx = 39;
+  } else if (c == '.') {
+    font_idx = 40;
+  } else if (c == '-') {
+    font_idx = 41;
+  }
+
+  if (font_idx < 0) return;
+
+  int char_w = 5 * scale;
+  int char_h = 7 * scale;
+  if (x + char_w <= 0 || x >= img_width || y + char_h <= 0 || y >= img_height) return;
+
+  uint16_t *buffer = (uint16_t *)img_data;
+
+  for (int row = 0; row < 7; row++) {
+    uint8_t row_data = FONT_5X7[font_idx][row];
+    for (int col = 0; col < 5; col++) {
+      if (row_data & (0x10 >> col)) {
+        for (int sy = 0; sy < scale; sy++) {
+          int py = y + row * scale + sy;
+          if (py < 0 || py >= img_height) continue;
+          for (int sx = 0; sx < scale; sx++) {
+            int px = x + col * scale + sx;
+            if (px >= 0 && px < img_width) {
+              buffer[py * img_width + px] = color;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+void YOLOV11Component::draw_text_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
+                                   int x, int y, const char *text, uint16_t color, int scale) {
+  int char_width = 6 * scale;  // 5 pixels + 1 spacing
+  int current_x = x;
+
+  for (const char *p = text; *p != '\0'; p++) {
+    if (current_x + 5 * scale >= img_width) break;
+    this->draw_char_(img_data, img_width, img_height, current_x, y, *p, color, scale);
+    current_x += char_width;
   }
 }
 
