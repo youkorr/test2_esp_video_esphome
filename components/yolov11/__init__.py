@@ -121,7 +121,7 @@ MODEL_TYPE_YOLO26N = "yolo26n"
 
 # 80 classes COCO par défaut
 DEFAULT_COCO_LABELS = [
-    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "person", "bicycle", "car", "cat", "dog", "bus", "train",
 
 ]
 
