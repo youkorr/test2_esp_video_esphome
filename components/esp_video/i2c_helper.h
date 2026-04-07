@@ -56,12 +56,46 @@ inline i2c_master_bus_handle_t get_i2c_bus_handle(i2c::I2CBus *bus) {
 
   void **obj_ptr = reinterpret_cast<void**>(bus);
 
-  // Le membre bus_ est à offset 40 = obj_ptr[10]
+  // Tentative 1: layout connu (offset 40 = obj_ptr[10])
   i2c_master_bus_handle_t handle = reinterpret_cast<i2c_master_bus_handle_t>(obj_ptr[10]);
+  ESP_LOGI(TAG_I2C_HELPER, "Tentative offset 40 (obj_ptr[10]): %p", handle);
 
-  ESP_LOGI(TAG_I2C_HELPER, "Handle I2C extrait (obj_ptr[10], offset 40): %p", handle);
+  // Validation: tenter une opération inoffensive sur ce handle
+  if (handle != nullptr) {
+    esp_err_t probe = i2c_master_probe(handle, 0x7F, 10);
+    if (probe == ESP_OK || probe == ESP_ERR_NOT_FOUND || probe == ESP_ERR_TIMEOUT) {
+      ESP_LOGI(TAG_I2C_HELPER, "Handle valide via offset 40");
+      return handle;
+    }
+    ESP_LOGW(TAG_I2C_HELPER, "Handle offset 40 invalide (probe=%s)", esp_err_to_name(probe));
+  }
 
-  return handle;
+  // Tentative 2: scan de plusieurs offsets candidats autour de la zone attendue
+  // (le layout peut varier selon la version d'ESPHome / ESP-IDF / options de compilation)
+  for (int off = 6; off <= 16; off++) {
+    void *candidate = obj_ptr[off];
+    if (candidate == nullptr) continue;
+    // Filtrer les valeurs improbables (alignement pointeur)
+    if ((reinterpret_cast<uintptr_t>(candidate) & 0x3) != 0) continue;
+    esp_err_t probe = i2c_master_probe(reinterpret_cast<i2c_master_bus_handle_t>(candidate), 0x7F, 10);
+    if (probe == ESP_OK || probe == ESP_ERR_NOT_FOUND || probe == ESP_ERR_TIMEOUT) {
+      ESP_LOGW(TAG_I2C_HELPER, "Handle trouvé à offset %d (%d bytes): %p",
+               off, off * (int)sizeof(void*), candidate);
+      return reinterpret_cast<i2c_master_bus_handle_t>(candidate);
+    }
+  }
+
+  // Tentative 3: récupération via l'API ESP-IDF directement (ports 0 et 1)
+  for (int port = 0; port < 2; port++) {
+    i2c_master_bus_handle_t hdl = nullptr;
+    if (i2c_master_get_bus_handle((i2c_port_num_t)port, &hdl) == ESP_OK && hdl != nullptr) {
+      ESP_LOGW(TAG_I2C_HELPER, "Handle récupéré via i2c_master_get_bus_handle(port=%d): %p", port, hdl);
+      return hdl;
+    }
+  }
+
+  ESP_LOGE(TAG_I2C_HELPER, "Aucun handle I2C ESP-IDF trouvé");
+  return nullptr;
 }
 
 /**
