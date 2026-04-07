@@ -12,8 +12,27 @@ print("[ESP-Video Build] ========================================")
 print("[ESP-Video Build] Adding ISP Pipeline Controller define")
 env.Append(CPPDEFINES=[
     ("CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER", "1"),
+    # SC2336 sensor configuration (must mirror CMakeLists.txt because the
+    # PlatformIO build bypasses CMake for these sources)
+    ("CONFIG_CAMERA_SC2336", "1"),
+    ("CONFIG_CAMERA_SC2336_AUTO_DETECT", "1"),
+    ("CONFIG_CAMERA_SC2336_AUTO_DETECT_MIPI_INTERFACE_SENSOR", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_IF_FORMAT_INDEX_DEFAULT", "0"),
+    ("CONFIG_CAMERA_SC2336_DVP_IF_FORMAT_INDEX_DEFAULT", "0"),
+    ("CONFIG_CAMERA_SC2336_CSI_LINESYNC_ENABLE", "0"),
+    ("CONFIG_CAMERA_SC2336_ABSOLUTE_GAIN_LIMIT", "63008"),
+    ("CONFIG_CAMERA_SC2336_ANA_GAIN_PRIORITY", "1"),
+    ("CONFIG_CAMERA_SC2336_DIG_GAIN_PRIORITY", "0"),
+    ("CONFIG_CAMERA_SC2336_MAX_SUPPORT", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW8_800X800_30FPS", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW10_800X800_30FPS", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW8_1024X600_30FPS", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW10_1280X720_30FPS", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW10_1920X1080_30FPS", "1"),
+    ("CONFIG_CAMERA_SC2336_MIPI_RAW10_640X480_50FPS", "1"),
 ])
 print("[ESP-Video Build]   - CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER=1")
+print("[ESP-Video Build]   - CONFIG_CAMERA_SC2336_*=1 (driver enabled)")
 print("[ESP-Video Build] ========================================")
 
 # Obtenir le répertoire du composant (ce script est dans components/esp_video/)
