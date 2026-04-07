@@ -15,7 +15,7 @@ extern "C" {
 #endif
 
 /* Custom register list */
-static const sc2336_reginfo_t init_reglist_custom_MIPI_2lane_800x800_raw8_30fps[] = {
+static const sc2336_reginfo_t init_reglist_custom_MIPI_2lane_800x640_raw8_30fps[] = {
     {0x0103, 0x01},
     {0x0100, 0x00}, // sleep en
     {0x36e9, 0x80},
@@ -34,8 +34,8 @@ static const sc2336_reginfo_t init_reglist_custom_MIPI_2lane_800x800_raw8_30fps[
     {0x3207, 0xb3},
     {0x3208, 0x03},
     {0x3209, 0x20},
-    {0x320a, 0x03},
-    {0x320b, 0x20},
+    {0x320a, 0x02},
+    {0x320b, 0x80}, // output height = 640 (0x280)
     {0x320c, 0x08},
     {0x320d, 0xc0},
     {0x320e, 0x04},
@@ -202,14 +202,14 @@ static const esp_cam_sensor_isp_info_t custom_fmt_isp_info = {
 /*Provides the description of the initializer list.
  *Note that the description of the format must be `static const` type */
 static const esp_cam_sensor_format_t custom_format_info = {
-    .name = "MIPI_2lane_24Minput_RAW8_800x800_30fps",
+    .name = "MIPI_2lane_24Minput_RAW8_800x640_30fps",
     .format = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
     .port = ESP_CAM_SENSOR_MIPI_CSI,
     .xclk = 24000000,
     .width = 800,
-    .height = 800,
-    .regs = init_reglist_custom_MIPI_2lane_800x800_raw8_30fps,
-    .regs_size = ARRAY_SIZE(init_reglist_custom_MIPI_2lane_800x800_raw8_30fps),
+    .height = 640,
+    .regs = init_reglist_custom_MIPI_2lane_800x640_raw8_30fps,
+    .regs_size = ARRAY_SIZE(init_reglist_custom_MIPI_2lane_800x640_raw8_30fps),
     .fps = 30,
     .isp_info = &custom_fmt_isp_info,
     .mipi_info = {
