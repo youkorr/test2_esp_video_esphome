@@ -118,7 +118,24 @@ static const esp_cam_sensor_format_t ov5647_format_info[] = {
         },
         .reserved = NULL,
     },
-    // Removed 800x800 custom format: 800x640 is preferred (better quality, stable timing).
+    {
+        .name = "MIPI_2lane_24Minput_RAW8_800x800_50fps",
+        .format = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
+        .port = ESP_CAM_SENSOR_MIPI_CSI,
+        .xclk = 24000000,
+        .width = 800,
+        .height = 800,
+        .regs = ov5647_input_24M_MIPI_2lane_raw8_800x800_50fps,
+        .regs_size = ARRAY_SIZE(ov5647_input_24M_MIPI_2lane_raw8_800x800_50fps),
+        .fps = 50,
+        .isp_info = &ov5647_isp_info[2],
+        .mipi_info = {
+            .mipi_clk = OV5647_MIPI_CSI_LINE_RATE_800x800_50FPS,
+            .lane_num = 2,
+            .line_sync_en = CONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE ? true : false,
+        },
+        .reserved = NULL,
+    },
     {
         .name = "MIPI_2lane_24Minput_RAW10_1920x1080_30fps",
         .format = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
