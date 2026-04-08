@@ -194,7 +194,12 @@ json_files_to_embed = [
     {
         "path": os.path.join(esp_cam_sensor_dir, "sensor/sc202cs/cfg/sc202cs_default.json"),
         "symbol": "sc202cs_ipa_config_json",
-    },    
+    },
+    {
+        # ESP32-P4 eco4 (rev1.3) — matches current hardware of users reporting SC2336 issues
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/sc2336/cfg/sc2336_default_p4_eco4.json"),
+        "symbol": "sc2336_ipa_config_json",
+    },
 ]
 
 # Embarquer chaque fichier JSON comme binary data
