@@ -171,10 +171,10 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_MODEL_TYPE, default=MODEL_TYPE_YOLO11): cv.one_of(
                 MODEL_TYPE_YOLO11, MODEL_TYPE_YOLO26N, lower=True
             ),
-            cv.Optional(CONF_SCORE_THRESHOLD, default=0.3): cv.float_range(
+            cv.Optional(CONF_SCORE_THRESHOLD, default=0.25): cv.float_range(
                 min=0.0, max=1.0
             ),
-            cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(
+            cv.Optional(CONF_NMS_THRESHOLD, default=0.7): cv.float_range(
                 min=0.0, max=1.0
             ),
             cv.Optional(CONF_CLASS_LABELS, default=DEFAULT_COCO_LABELS): cv.ensure_list(cv.string),

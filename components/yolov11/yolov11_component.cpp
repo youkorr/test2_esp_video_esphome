@@ -445,8 +445,8 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
   }
 
   if (raw_count > 0) {
-    ESP_LOGD(TAG, "Detected %d object(s): %s", raw_count,
-             class_str.c_str());
+    ESP_LOGI(TAG, "Detected %d object(s): %s", raw_count, class_str.c_str());
+    ESP_LOGI(TAG, "  BBoxes: %s", bb_str.c_str());
   }
 #endif
 }
@@ -479,12 +479,19 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
     const uint16_t COLOR_CYAN   = 0x07FF;
     const uint16_t COLOR_MAGENTA = 0xF81F;
     const uint16_t COLOR_WHITE  = 0xFFFF;
+    const uint16_t COLOR_BLACK  = 0x0000;
+
+    uint16_t *buffer = (uint16_t *)img_data;
 
     for (auto &det : this->cached_detections_) {
-      int x1 = std::max(2, std::min(det.x1, (int)width - 3));
-      int y1 = std::max(2, std::min(det.y1, (int)height - 3));
-      int x2 = std::max(x1 + 10, std::min(det.x2, (int)width - 3));
-      int y2 = std::max(y1 + 10, std::min(det.y2, (int)height - 3));
+      // Clamp coordinates to image bounds
+      int x1 = std::max(0, std::min(det.x1, (int)width - 1));
+      int y1 = std::max(0, std::min(det.y1, (int)height - 1));
+      int x2 = std::max(0, std::min(det.x2, (int)width - 1));
+      int y2 = std::max(0, std::min(det.y2, (int)height - 1));
+
+      // Skip invalid boxes (too small or inverted)
+      if (x2 - x1 < 4 || y2 - y1 < 4) continue;
 
       // Color by category
       uint16_t color;
@@ -492,32 +499,23 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
         case 0:  color = COLOR_RED; break;      // person
         case 1:  color = COLOR_GREEN; break;    // bicycle
         case 2:  color = COLOR_CYAN; break;     // car
+        case 3:  color = COLOR_YELLOW; break;   // motorcycle
         case 14: color = COLOR_MAGENTA; break;  // bird
         case 15: color = COLOR_BLUE; break;     // cat
         case 16: color = COLOR_GREEN; break;    // dog
         default: color = COLOR_YELLOW; break;
       }
 
-      const int line_width = 2;
-      uint16_t *buffer = (uint16_t *)img_data;
-
-      // Draw bounding box - top and bottom lines
+      // Draw bounding box - 1px thin lines
+      // Top and bottom horizontal lines
       for (int x = x1; x <= x2; x++) {
-        for (int t = 0; t < line_width; t++) {
-          int top = (y1 + t) * width + x;
-          if (top >= 0 && top < width * height) buffer[top] = color;
-          int bot = (y2 - t) * width + x;
-          if (bot >= 0 && bot < width * height) buffer[bot] = color;
-        }
+        buffer[y1 * width + x] = color;
+        buffer[y2 * width + x] = color;
       }
-      // Left and right lines
+      // Left and right vertical lines
       for (int y = y1; y <= y2; y++) {
-        for (int t = 0; t < line_width; t++) {
-          int left = y * width + (x1 + t);
-          if (left >= 0 && left < width * height) buffer[left] = color;
-          int right = y * width + (x2 - t);
-          if (right >= 0 && right < width * height) buffer[right] = color;
-        }
+        buffer[y * width + x1] = color;
+        buffer[y * width + x2] = color;
       }
 
       // Build label: "CLASS XX%"
@@ -526,19 +524,19 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
       int pct = (int)(det.score * 100.0f);
       snprintf(label, sizeof(label), "%s %d%%", class_name, pct);
 
-      // Label dimensions
+      // Label dimensions (scale=1: 5x7 font, 6px per char)
       int label_len = strlen(label);
-      int char_w = 6;  // 5px + 1px spacing
-      int char_h = 9;  // 7px + 2px padding
+      int char_w = 6;
+      int char_h = 8;
       int label_w = label_len * char_w + 2;
       int label_h = char_h + 2;
 
-      // Position: above the box, or inside if no room
+      // Position: above the box, or inside top if no room
       int label_x = x1;
       int label_y = y1 - label_h;
-      if (label_y < 0) label_y = y1 + 2;  // Inside box if no room above
+      if (label_y < 0) label_y = y1 + 1;
 
-      // Draw label background (filled rectangle in box color)
+      // Draw label background
       for (int by = std::max(0, label_y); by < std::min((int)height, label_y + label_h); by++) {
         for (int bx = std::max(0, label_x); bx < std::min((int)width, label_x + label_w); bx++) {
           buffer[by * width + bx] = color;
@@ -547,6 +545,14 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
 
       // Draw text in white on colored background
       this->draw_text_(img_data, width, height, label_x + 1, label_y + 1, label, COLOR_WHITE, 1);
+    }
+
+    if (!this->cached_detections_.empty()) {
+      ESP_LOGD(TAG, "Drew %d detection(s)", (int)this->cached_detections_.size());
+    }
+    xSemaphoreGive(this->detections_mutex_);
+  }
+}
     }
 
     if (!this->cached_detections_.empty()) {
