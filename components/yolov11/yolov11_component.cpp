@@ -118,7 +118,9 @@ void YOLOV11Component::init_detector_() {
     return;
   }
 
-  const char *model_type_str = (this->model_type_ == MODEL_TYPE_YOLO26N) ? "yolo26n" : "yolo11";
+  const char *model_type_str = "yolo11";
+  if (this->model_type_ == MODEL_TYPE_YOLO26N) model_type_str = "yolo26n";
+  else if (this->model_type_ == MODEL_TYPE_ESPDET_PICO) model_type_str = "espdet_pico";
   ESP_LOGI(TAG, "Loading %s model (%u bytes)...", model_type_str, (unsigned)model_size);
 
   // ESP32-P4 ESP-DL requires MALLOC_CAP_SIMD memory (separate, smaller pool)
@@ -186,7 +188,16 @@ void YOLOV11Component::init_detector_() {
   this->preprocessor_->enable_letterbox({114, 114, 114});
 
   // Model-specific postprocessor
-  if (this->model_type_ == MODEL_TYPE_YOLO26N) {
+  if (this->model_type_ == MODEL_TYPE_ESPDET_PICO) {
+    this->espdet_postprocessor_ = new dl::detect::ESPDetPostProcessor(
+        this->dl_model_,
+        this->preprocessor_,
+        this->score_threshold_,
+        this->nms_threshold_,
+        10,
+        {{8, 8, 4, 4}, {16, 16, 8, 8}, {32, 32, 16, 16}});
+    ESP_LOGI(TAG, "Using ESPDet-Pico postprocessor (anchor-point, ultra-light)");
+  } else if (this->model_type_ == MODEL_TYPE_YOLO26N) {
     this->yolo26n_postprocessor_ = new Yolo26nPostProcessor(
         this->dl_model_, this->preprocessor_,
         this->score_threshold_, 32);
@@ -370,6 +381,7 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
 #ifdef ESP_DL_MODEL_YOLO11
   if (this->dl_model_ == nullptr) return;
   if (this->model_type_ == MODEL_TYPE_YOLO26N && this->yolo26n_postprocessor_ == nullptr) return;
+  if (this->model_type_ == MODEL_TYPE_ESPDET_PICO && this->espdet_postprocessor_ == nullptr) return;
   if (this->model_type_ == MODEL_TYPE_YOLO11 && this->postprocessor_ == nullptr) return;
 
   dl::image::img_t img;
@@ -409,10 +421,17 @@ void YOLOV11Component::detect_objects_(uint8_t *rgb565_data, uint16_t width,
         this->cached_detections_.push_back(d);
       }
     } else {
-      this->postprocessor_->clear_result();
-      this->postprocessor_->postprocess();
+      // Both yolo11 and espdet_pico use the same DetectPostprocessor interface
+      dl::detect::DetectPostprocessor *pp = nullptr;
+      if (this->model_type_ == MODEL_TYPE_ESPDET_PICO) {
+        pp = this->espdet_postprocessor_;
+      } else {
+        pp = this->postprocessor_;
+      }
+      pp->clear_result();
+      pp->postprocess();
       t3 = esp_log_timestamp();
-      auto &results = this->postprocessor_->get_result(width, height);
+      auto &results = pp->get_result(width, height);
       raw_count = results.size();
       for (auto &result : results) {
         if (!this->is_class_allowed_(result.category)) continue;
@@ -628,6 +647,7 @@ void YOLOV11Component::draw_text_(uint8_t *img_data, uint16_t img_width, uint16_
 void YOLOV11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLOV11:");
   ESP_LOGCONFIG(TAG, "  Model type: %s",
+                this->model_type_ == MODEL_TYPE_ESPDET_PICO ? "espdet_pico" :
                 this->model_type_ == MODEL_TYPE_YOLO26N ? "yolo26n" : "yolo11");
 #ifdef USE_YOLOV11_ESP32_CAMERA
   ESP_LOGCONFIG(TAG, "  Camera: ESP32 Camera (S3)");

@@ -20,6 +20,8 @@ class CameraImage;
 #include "dl_model_base.hpp"
 #include "dl_image_preprocessor.hpp"
 #include "dl_detect_yolo11_postprocessor.hpp"
+#include "dl_detect_espdet_postprocessor.hpp"
+#include "dl_detect_pico_postprocessor.hpp"
 #include "dl_detect_define.hpp"
 #include "dl_image_define.hpp"
 #include "fbs_model.hpp"
@@ -32,6 +34,7 @@ namespace yolov11 {
 enum ModelType {
   MODEL_TYPE_YOLO11 = 0,
   MODEL_TYPE_YOLO26N = 1,
+  MODEL_TYPE_ESPDET_PICO = 2,
 };
 
 struct DetectionResult {
@@ -145,6 +148,7 @@ class YOLOV11Component : public Component {
   dl::Model *dl_model_{nullptr};
   dl::image::ImagePreprocessor *preprocessor_{nullptr};
   dl::detect::yolo11PostProcessor *postprocessor_{nullptr};
+  dl::detect::ESPDetPostProcessor *espdet_postprocessor_{nullptr};
   Yolo26nPostProcessor *yolo26n_postprocessor_{nullptr};
 #endif
   bool detector_initialized_{false};

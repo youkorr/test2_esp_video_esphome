@@ -118,6 +118,7 @@ CONF_DRAW_ENABLED = "draw_enabled"
 # Supported model types
 MODEL_TYPE_YOLO11 = "yolo11"
 MODEL_TYPE_YOLO26N = "yolo26n"
+MODEL_TYPE_ESPDET_PICO = "espdet_pico"
 
 # 80 classes COCO - indices must match model output (0-79)
 DEFAULT_COCO_LABELS = [
@@ -180,7 +181,7 @@ CONFIG_SCHEMA = cv.All(
             cv.Optional(CONF_CANVAS_ID): cv.string,
             cv.Required(CONF_MODEL_ID): cv.use_id(FileData),
             cv.Optional(CONF_MODEL_TYPE, default=MODEL_TYPE_YOLO11): cv.one_of(
-                MODEL_TYPE_YOLO11, MODEL_TYPE_YOLO26N, lower=True
+                MODEL_TYPE_YOLO11, MODEL_TYPE_YOLO26N, MODEL_TYPE_ESPDET_PICO, lower=True
             ),
             cv.Optional(CONF_SCORE_THRESHOLD, default=0.25): cv.float_range(
                 min=0.0, max=1.0
@@ -242,10 +243,12 @@ async def to_code(config):
     model = await cg.get_variable(config[CONF_MODEL_ID])
     cg.add(var.set_model(model))
 
-    # Model type: yolo11 (default) or yolo26n
+    # Model type: yolo11 (default), yolo26n, or espdet_pico
     model_type = config[CONF_MODEL_TYPE]
     if model_type == MODEL_TYPE_YOLO26N:
         cg.add(var.set_model_type(cg.RawExpression("yolov11::MODEL_TYPE_YOLO26N")))
+    elif model_type == MODEL_TYPE_ESPDET_PICO:
+        cg.add(var.set_model_type(cg.RawExpression("yolov11::MODEL_TYPE_ESPDET_PICO")))
 
     # Set thresholds
     cg.add(var.set_score_threshold(config[CONF_SCORE_THRESHOLD]))
