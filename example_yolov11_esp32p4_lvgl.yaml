@@ -104,7 +104,8 @@ yolov11:
   nms_threshold: 0.7
   detection_interval: 1
   draw_enabled: true
-  # detect_classes: [0, 15, 16]   # person, cat, dog (optional filter)
+  # Detect only person (0), cat (15), dog (16) — COCO-80 indices
+  detect_classes: [0, 15, 16]
 
 text_sensor:
   - platform: yolov11
