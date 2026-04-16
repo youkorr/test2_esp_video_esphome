@@ -572,14 +572,6 @@ void YOLOV11Component::draw_results_(uint8_t *img_data, uint16_t width, uint16_t
     xSemaphoreGive(this->detections_mutex_);
   }
 }
-    }
-
-    if (!this->cached_detections_.empty()) {
-      ESP_LOGD(TAG, "Drew %d detection boxes with labels", (int)this->cached_detections_.size());
-    }
-    xSemaphoreGive(this->detections_mutex_);
-  }
-}
 
 void YOLOV11Component::draw_char_(uint8_t *img_data, uint16_t img_width, uint16_t img_height,
                                    int x, int y, char c, uint16_t color, int scale) {
