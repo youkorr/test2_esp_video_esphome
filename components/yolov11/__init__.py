@@ -354,9 +354,8 @@ async def to_code(config):
     for subdir in ESP_DL_INCLUDE_SUBDIRS:
         cg.add_build_flag(f"-I{os.path.join(esp_dl_dir, subdir)}")
 
-    # Register build script
-    build_script = os.path.join(component_dir, "yolov11_build.py")
-    if os.path.exists(build_script):
-        cg.add_platformio_option(
-            "extra_scripts", [f"post:{build_script}"]
-        )
+    # NOTE: yolov11_build.py is NOT registered here. esp-dl sources are
+    # provided and compiled by another external_component (e.g.
+    # face_detection). Running yolov11_build.py would download a SECOND
+    # copy of esp-dl into .espdl_cache/ and compile it with mismatched
+    # headers, causing build failures.
