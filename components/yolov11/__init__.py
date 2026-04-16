@@ -286,27 +286,34 @@ async def to_code(config):
     # own esp-dl sources which ESP-IDF picks up and compiles from
     # <external_components>/<hash>/components/esp-dl/. If we added a -I to a
     # *different* esp-dl version, the compile would fail with signature
-    # mismatches (calloc_aligned 3 vs 4 args, TensorInfo API, etc.).
-    # So search candidate roots for an existing esp-dl first, then the repo
-    # we're in, and only fall back to the pinned GitHub download.
+    # mismatches (calloc_aligned 3 vs 4 args, TensorInfo API, etc.). Worse,
+    # our own download (.espdl_cache/esp-dl/) also has a CMakeLists.txt, so
+    # ESP-IDF ends up compiling BOTH copies with mismatched headers.
+    # Strategy: find any esp-dl already provided by another component and
+    # use ONLY its headers; wipe .espdl_cache/ so nothing else is compiled.
     import glob as _glob
+    import shutil as _shutil
     esp_dl_dir = None
     search_roots = []
     try:
         search_roots.append(os.path.join(CORE.config_dir, ".esphome", "external_components"))
     except Exception:
         pass
+    # Common Docker/CI mount points for ESPHome external_components
     search_roots.append("/data/external_components")
+    search_roots.append("/config/.esphome/external_components")
     search_roots.append(parent_components_dir)  # this repo's components/
 
     for root in search_roots:
         if not root or not os.path.isdir(root):
             continue
-        # .../components/esp-dl/dl/base   OR   .../esp-dl/dl/base
         hits = _glob.glob(os.path.join(root, "**", "esp-dl", "dl", "base"),
                           recursive=True)
         for hit in hits:
             candidate = os.path.dirname(os.path.dirname(hit))  # -> .../esp-dl
+            # Skip our own stale download so we don't re-pin a bad copy
+            if ".espdl_cache" in candidate:
+                continue
             if os.path.exists(os.path.join(candidate, "dl", "model", "include",
                                            "dl_model_base.hpp")):
                 esp_dl_dir = candidate
@@ -314,10 +321,29 @@ async def to_code(config):
         if esp_dl_dir:
             break
 
+    # Always nuke any previous download — if another component provides
+    # esp-dl we must not let ESP-IDF compile the cached copy too.
+    cache_root = os.path.join(str(CORE.build_path), ".espdl_cache")
+    if os.path.isdir(cache_root):
+        try:
+            _shutil.rmtree(cache_root)
+            _LOGGER.info("[YOLOV11] Removed stale .espdl_cache/")
+        except Exception as e:
+            _LOGGER.warning("[YOLOV11] Could not remove %s: %s", cache_root, e)
+
     if esp_dl_dir:
         _LOGGER.info("[YOLOV11] Using existing ESP-DL: %s", esp_dl_dir)
     else:
         esp_dl_dir = _ensure_esp_dl(CORE.build_path)
+        # Neutralize the download's CMakeLists.txt so ESP-IDF doesn't
+        # compile it (we only want its headers).
+        cmake_file = os.path.join(esp_dl_dir, "CMakeLists.txt")
+        if os.path.exists(cmake_file):
+            try:
+                os.rename(cmake_file, cmake_file + ".disabled")
+                _LOGGER.info("[YOLOV11] Disabled CMakeLists.txt in downloaded esp-dl")
+            except Exception as e:
+                _LOGGER.warning("[YOLOV11] Could not disable CMakeLists.txt: %s", e)
         _LOGGER.info("[YOLOV11] Using downloaded ESP-DL: %s", esp_dl_dir)
     _LOGGER.info("[YOLOV11] dl_model_base.hpp exists: %s",
                  os.path.exists(os.path.join(esp_dl_dir, "dl", "model", "include", "dl_model_base.hpp")))
