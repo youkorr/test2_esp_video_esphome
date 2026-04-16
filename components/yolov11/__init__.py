@@ -282,36 +282,56 @@ async def to_code(config):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
     # ESP-DL include paths.
-    # Another external_component (e.g. face_detection) may already ship its
-    # own esp-dl sources which ESP-IDF picks up and compiles from
-    # <external_components>/<hash>/components/esp-dl/. If we added a -I to a
-    # *different* esp-dl version, the compile would fail with signature
-    # mismatches (calloc_aligned 3 vs 4 args, TensorInfo API, etc.). Worse,
-    # our own download (.espdl_cache/esp-dl/) also has a CMakeLists.txt, so
-    # ESP-IDF ends up compiling BOTH copies with mismatched headers.
-    # Strategy: find any esp-dl already provided by another component and
-    # use ONLY its headers; wipe .espdl_cache/ so nothing else is compiled.
+    # esp-dl must be provided by ANOTHER external_component (e.g.
+    # face_detection) — its .cpp files get auto-compiled by ESP-IDF via
+    # that component's CMakeLists.txt, and we only need its headers on
+    # the include path. We never download a second copy: mixing two esp-dl
+    # versions produces signature mismatches (calloc_aligned 3 vs 4 args,
+    # TensorInfo API, etc.) and duplicate symbols.
     import glob as _glob
     import shutil as _shutil
+
+    # First: nuke any previous auto-download so ESP-IDF can never compile
+    # it. Check multiple plausible locations (build_path + project root).
+    for cache_parent in (str(CORE.build_path), os.getcwd(),
+                         os.path.dirname(os.path.abspath(__file__)) + "/../.."):
+        cache_root = os.path.join(cache_parent, ".espdl_cache")
+        if os.path.isdir(cache_root):
+            try:
+                _shutil.rmtree(cache_root)
+                _LOGGER.info("[YOLOV11] Removed stale cache: %s", cache_root)
+            except Exception as e:
+                _LOGGER.warning("[YOLOV11] Could not remove %s: %s", cache_root, e)
+
     esp_dl_dir = None
     search_roots = []
     try:
         search_roots.append(os.path.join(CORE.config_dir, ".esphome", "external_components"))
     except Exception:
         pass
-    # Common Docker/CI mount points for ESPHome external_components
-    search_roots.append("/data/external_components")
-    search_roots.append("/config/.esphome/external_components")
+    # Home Assistant add-on / Docker layouts
+    search_roots.extend([
+        "/data/external_components",
+        "/config/.esphome/external_components",
+        "/config/external_components",
+    ])
+    # Parent of build_path often sits next to external_components
+    try:
+        search_roots.append(os.path.dirname(str(CORE.build_path)))
+        search_roots.append(os.path.dirname(os.path.dirname(str(CORE.build_path))))
+    except Exception:
+        pass
     search_roots.append(parent_components_dir)  # this repo's components/
 
+    tried = set()
     for root in search_roots:
-        if not root or not os.path.isdir(root):
+        if not root or root in tried or not os.path.isdir(root):
             continue
+        tried.add(root)
         hits = _glob.glob(os.path.join(root, "**", "esp-dl", "dl", "base"),
                           recursive=True)
         for hit in hits:
             candidate = os.path.dirname(os.path.dirname(hit))  # -> .../esp-dl
-            # Skip our own stale download so we don't re-pin a bad copy
             if ".espdl_cache" in candidate:
                 continue
             if os.path.exists(os.path.join(candidate, "dl", "model", "include",
@@ -321,32 +341,16 @@ async def to_code(config):
         if esp_dl_dir:
             break
 
-    # Always nuke any previous download — if another component provides
-    # esp-dl we must not let ESP-IDF compile the cached copy too.
-    cache_root = os.path.join(str(CORE.build_path), ".espdl_cache")
-    if os.path.isdir(cache_root):
-        try:
-            _shutil.rmtree(cache_root)
-            _LOGGER.info("[YOLOV11] Removed stale .espdl_cache/")
-        except Exception as e:
-            _LOGGER.warning("[YOLOV11] Could not remove %s: %s", cache_root, e)
+    if not esp_dl_dir:
+        raise cv.Invalid(
+            "yolov11: esp-dl sources not found. Add an external_component "
+            "that provides esp-dl (e.g. https://github.com/youkorr/face_detection) "
+            "to your configuration, or place esp-dl at components/esp-dl/ in "
+            "your project.\n"
+            "Searched: " + ", ".join(sorted(tried))
+        )
 
-    if esp_dl_dir:
-        _LOGGER.info("[YOLOV11] Using existing ESP-DL: %s", esp_dl_dir)
-    else:
-        esp_dl_dir = _ensure_esp_dl(CORE.build_path)
-        # Neutralize the download's CMakeLists.txt so ESP-IDF doesn't
-        # compile it (we only want its headers).
-        cmake_file = os.path.join(esp_dl_dir, "CMakeLists.txt")
-        if os.path.exists(cmake_file):
-            try:
-                os.rename(cmake_file, cmake_file + ".disabled")
-                _LOGGER.info("[YOLOV11] Disabled CMakeLists.txt in downloaded esp-dl")
-            except Exception as e:
-                _LOGGER.warning("[YOLOV11] Could not disable CMakeLists.txt: %s", e)
-        _LOGGER.info("[YOLOV11] Using downloaded ESP-DL: %s", esp_dl_dir)
-    _LOGGER.info("[YOLOV11] dl_model_base.hpp exists: %s",
-                 os.path.exists(os.path.join(esp_dl_dir, "dl", "model", "include", "dl_model_base.hpp")))
+    _LOGGER.info("[YOLOV11] Using ESP-DL: %s", esp_dl_dir)
     for subdir in ESP_DL_INCLUDE_SUBDIRS:
         cg.add_build_flag(f"-I{os.path.join(esp_dl_dir, subdir)}")
 
