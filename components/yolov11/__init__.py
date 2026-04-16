@@ -282,16 +282,40 @@ async def to_code(config):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
     # ESP-DL include paths.
-    # Prefer the esp-dl sources bundled in this repo (components/esp-dl/),
-    # since their API (calloc_aligned signature, TensorInfo::set_inplace_follower_tensor,
-    # etc.) is what our compiled .cpp files expect. Only fall back to the
-    # GitHub download when the local copy is missing — mixing headers from a
-    # different esp-dl version than the one being compiled causes cryptic
-    # signature-mismatch errors.
-    local_esp_dl = os.path.join(parent_components_dir, "esp-dl")
-    if os.path.isdir(os.path.join(local_esp_dl, "dl", "base")):
-        esp_dl_dir = local_esp_dl
-        _LOGGER.info("[YOLOV11] Using bundled ESP-DL: %s", esp_dl_dir)
+    # Another external_component (e.g. face_detection) may already ship its
+    # own esp-dl sources which ESP-IDF picks up and compiles from
+    # <external_components>/<hash>/components/esp-dl/. If we added a -I to a
+    # *different* esp-dl version, the compile would fail with signature
+    # mismatches (calloc_aligned 3 vs 4 args, TensorInfo API, etc.).
+    # So search candidate roots for an existing esp-dl first, then the repo
+    # we're in, and only fall back to the pinned GitHub download.
+    import glob as _glob
+    esp_dl_dir = None
+    search_roots = []
+    try:
+        search_roots.append(os.path.join(CORE.config_dir, ".esphome", "external_components"))
+    except Exception:
+        pass
+    search_roots.append("/data/external_components")
+    search_roots.append(parent_components_dir)  # this repo's components/
+
+    for root in search_roots:
+        if not root or not os.path.isdir(root):
+            continue
+        # .../components/esp-dl/dl/base   OR   .../esp-dl/dl/base
+        hits = _glob.glob(os.path.join(root, "**", "esp-dl", "dl", "base"),
+                          recursive=True)
+        for hit in hits:
+            candidate = os.path.dirname(os.path.dirname(hit))  # -> .../esp-dl
+            if os.path.exists(os.path.join(candidate, "dl", "model", "include",
+                                           "dl_model_base.hpp")):
+                esp_dl_dir = candidate
+                break
+        if esp_dl_dir:
+            break
+
+    if esp_dl_dir:
+        _LOGGER.info("[YOLOV11] Using existing ESP-DL: %s", esp_dl_dir)
     else:
         esp_dl_dir = _ensure_esp_dl(CORE.build_path)
         _LOGGER.info("[YOLOV11] Using downloaded ESP-DL: %s", esp_dl_dir)
