@@ -281,11 +281,20 @@ async def to_code(config):
     if os.path.exists(yolo11_detect_dir):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
-    # ESP-DL: download NOW (during codegen) so -I paths exist at compile time.
-    # No cg.add_library — we manage esp-dl ourselves to avoid PlatformIO
-    # auto-compiling it (which fails due to missing esp_dsp.h).
-    esp_dl_dir = _ensure_esp_dl(CORE.build_path)
-    _LOGGER.info("[YOLOV11] ESP-DL dir: %s", esp_dl_dir)
+    # ESP-DL include paths.
+    # Prefer the esp-dl sources bundled in this repo (components/esp-dl/),
+    # since their API (calloc_aligned signature, TensorInfo::set_inplace_follower_tensor,
+    # etc.) is what our compiled .cpp files expect. Only fall back to the
+    # GitHub download when the local copy is missing — mixing headers from a
+    # different esp-dl version than the one being compiled causes cryptic
+    # signature-mismatch errors.
+    local_esp_dl = os.path.join(parent_components_dir, "esp-dl")
+    if os.path.isdir(os.path.join(local_esp_dl, "dl", "base")):
+        esp_dl_dir = local_esp_dl
+        _LOGGER.info("[YOLOV11] Using bundled ESP-DL: %s", esp_dl_dir)
+    else:
+        esp_dl_dir = _ensure_esp_dl(CORE.build_path)
+        _LOGGER.info("[YOLOV11] Using downloaded ESP-DL: %s", esp_dl_dir)
     _LOGGER.info("[YOLOV11] dl_model_base.hpp exists: %s",
                  os.path.exists(os.path.join(esp_dl_dir, "dl", "model", "include", "dl_model_base.hpp")))
     for subdir in ESP_DL_INCLUDE_SUBDIRS:
