@@ -1406,16 +1406,26 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
 
   // Receive response - read until we have full headers (\r\n\r\n) and full body
   // based on Content-Length (needed for DESCRIBE/SDP which can be > 1 TCP segment).
-  char response[8192];
+  // CRITICAL: allocate on heap (PSRAM) to avoid stack overflow in loopTask.
+  static const size_t RESPONSE_CAP = 8192;
+  char *response = (char *)heap_caps_malloc(RESPONSE_CAP, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (response == nullptr) {
+    response = (char *)malloc(RESPONSE_CAP);
+    if (response == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate RTSP response buffer");
+      return false;
+    }
+  }
   int len = 0;
   int header_end = -1;
   int expected_body = -1;
 
-  while (len < (int)sizeof(response) - 1) {
-    int n = recv(this->rtsp_socket_, response + len, sizeof(response) - 1 - len, 0);
+  while (len < (int)RESPONSE_CAP - 1) {
+    int n = recv(this->rtsp_socket_, response + len, RESPONSE_CAP - 1 - len, 0);
     if (n <= 0) {
       if (len == 0) {
         ESP_LOGE(TAG, "Failed to receive RTSP response");
+        free(response);
         return false;
       }
       break;
@@ -1454,6 +1464,7 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
   // Check status
   if (strstr(response, "200 OK") == nullptr) {
     ESP_LOGE(TAG, "RTSP %s failed: %s", method.c_str(), response);
+    free(response);
     return false;
   }
 
@@ -1472,9 +1483,10 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
 
   // If caller wants the response body (for SDP parsing)
   if (response_body != nullptr) {
-    *response_body = std::string(response);
+    *response_body = std::string(response, len);
   }
 
+  free(response);
   ESP_LOGI(TAG, "RTSP %s OK", method.c_str());
   return true;
 }
