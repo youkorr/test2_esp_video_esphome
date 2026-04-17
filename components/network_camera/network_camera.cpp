@@ -1260,6 +1260,77 @@ bool NetworkCamera::connect_rtsp_stream_() {
     control_url = full_url; // Some cameras use the base URL
   }
 
+  // Warn if codec is not H264 (a=rtpmap:<pt> H264/90000)
+  {
+    size_t rtpmap_pos = sdp_response.find("a=rtpmap:");
+    if (rtpmap_pos != std::string::npos) {
+      size_t eol = sdp_response.find_first_of("\r\n", rtpmap_pos);
+      std::string rtpmap_line = sdp_response.substr(rtpmap_pos, (eol == std::string::npos ? sdp_response.size() : eol) - rtpmap_pos);
+      ESP_LOGI(TAG, "SDP %s", rtpmap_line.c_str());
+      if (rtpmap_line.find("H264") == std::string::npos && rtpmap_line.find("h264") == std::string::npos) {
+        ESP_LOGE(TAG, "⚠ Stream codec is NOT H264 (from SDP). Decoder will fail. Configure the source as H264.");
+      }
+    }
+  }
+
+  // Parse sprop-parameter-sets from SDP to seed SPS/PPS (many cameras/Frigate/go2rtc
+  // only advertise parameter sets in SDP and do NOT send them inline via RTP).
+  // Format: a=fmtp:<pt> ... sprop-parameter-sets=<base64_SPS>,<base64_PPS>;...
+  {
+    size_t sprop_pos = sdp_response.find("sprop-parameter-sets=");
+    if (sprop_pos != std::string::npos) {
+      size_t val_start = sprop_pos + strlen("sprop-parameter-sets=");
+      // Value ends at ';', whitespace, or end of line
+      size_t val_end = sdp_response.find_first_of(";\r\n ", val_start);
+      if (val_end == std::string::npos) val_end = sdp_response.size();
+      std::string sprop = sdp_response.substr(val_start, val_end - val_start);
+
+      // sprop contains one or two comma-separated base64 strings (SPS,PPS)
+      size_t comma = sprop.find(',');
+      std::string sps_b64 = (comma == std::string::npos) ? sprop : sprop.substr(0, comma);
+      std::string pps_b64 = (comma == std::string::npos) ? std::string() : sprop.substr(comma + 1);
+
+      auto decode_and_cache = [&](const std::string &b64, uint8_t *cache, size_t cache_cap,
+                                  size_t &out_len, const char *label) -> bool {
+        if (b64.empty()) return false;
+        uint8_t decoded[128];
+        size_t decoded_len = 0;
+        int rc = mbedtls_base64_decode(decoded, sizeof(decoded), &decoded_len,
+                                       reinterpret_cast<const unsigned char *>(b64.c_str()),
+                                       b64.size());
+        if (rc != 0 || decoded_len == 0) {
+          ESP_LOGW(TAG, "Failed to base64-decode %s (rc=%d, in_len=%u)", label, rc, b64.size());
+          return false;
+        }
+        if (decoded_len + 4 > cache_cap) {
+          ESP_LOGW(TAG, "%s too large (%u bytes) for cache", label, decoded_len);
+          return false;
+        }
+        out_len = 0;
+        cache[out_len++] = 0x00;
+        cache[out_len++] = 0x00;
+        cache[out_len++] = 0x00;
+        cache[out_len++] = 0x01;
+        memcpy(cache + out_len, decoded, decoded_len);
+        out_len += decoded_len;
+        ESP_LOGI(TAG, "✓ Seeded %s from SDP: %u bytes (NAL type %u)",
+                 label, out_len, decoded[0] & 0x1F);
+        return true;
+      };
+
+      if (decode_and_cache(sps_b64, this->sps_cache_, sizeof(this->sps_cache_),
+                           this->sps_len_, "SPS")) {
+        this->has_sps_ = true;
+      }
+      if (decode_and_cache(pps_b64, this->pps_cache_, sizeof(this->pps_cache_),
+                           this->pps_len_, "PPS")) {
+        this->has_pps_ = true;
+      }
+    } else {
+      ESP_LOGI(TAG, "No sprop-parameter-sets in SDP (will rely on inline SPS/PPS)");
+    }
+  }
+
   // SETUP with TCP interleaved transport
   if (!this->send_rtsp_request_("SETUP", control_url, "Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")) {
     this->disconnect_rtsp_stream_();
@@ -1333,13 +1404,51 @@ bool NetworkCamera::send_rtsp_request_(const std::string &method, const std::str
     return false;
   }
 
-  // Receive response
-  char response[4096];  // Increased size for SDP content
-  int len = recv(this->rtsp_socket_, response, sizeof(response) - 1, 0);
-  if (len <= 0) {
-    ESP_LOGE(TAG, "Failed to receive RTSP response");
-    return false;
+  // Receive response - read until we have full headers (\r\n\r\n) and full body
+  // based on Content-Length (needed for DESCRIBE/SDP which can be > 1 TCP segment).
+  char response[8192];
+  int len = 0;
+  int header_end = -1;
+  int expected_body = -1;
+
+  while (len < (int)sizeof(response) - 1) {
+    int n = recv(this->rtsp_socket_, response + len, sizeof(response) - 1 - len, 0);
+    if (n <= 0) {
+      if (len == 0) {
+        ESP_LOGE(TAG, "Failed to receive RTSP response");
+        return false;
+      }
+      break;
+    }
+    len += n;
+    response[len] = '\0';
+
+    if (header_end < 0) {
+      char *hdr_sep = strstr(response, "\r\n\r\n");
+      if (hdr_sep != nullptr) {
+        header_end = (int)(hdr_sep - response) + 4;
+        // Find "Content-Length:" case-insensitively, within the header region.
+        char *cl = nullptr;
+        for (char *p = response; p + 15 <= hdr_sep; ++p) {
+          if (strncasecmp(p, "Content-Length:", 15) == 0) { cl = p; break; }
+        }
+        if (cl != nullptr) {
+          expected_body = atoi(cl + 15);
+          if (expected_body < 0) expected_body = 0;
+        } else {
+          expected_body = 0;
+        }
+      }
+    }
+
+    if (header_end >= 0) {
+      int body_received = len - header_end;
+      if (body_received >= expected_body) {
+        break;  // Complete response
+      }
+    }
   }
+
   response[len] = '\0';
 
   // Check status
@@ -1450,16 +1559,64 @@ bool NetworkCamera::fetch_rtp_frame_() {
       continue;  // Invalid RTP packet
     }
 
-    // RTP header
+    // RTP header parsing (RFC 3550)
+    //  byte 0: V(2)|P(1)|X(1)|CC(4)
+    //  byte 1: M(1)|PT(7)
+    uint8_t rtp_b0 = rtp_packet[0];
+    uint8_t version = (rtp_b0 >> 6) & 0x03;
+    if (version != 2) {
+      static uint32_t bad_version_count = 0;
+      if (bad_version_count++ < 5) {
+        ESP_LOGW(TAG, "Invalid RTP version %u (rtp_len=%u), dropping packet", version, rtp_len);
+      }
+      continue;
+    }
+    bool padding = (rtp_b0 >> 5) & 0x01;
+    bool extension = (rtp_b0 >> 4) & 0x01;
+    uint8_t csrc_count = rtp_b0 & 0x0F;
     uint8_t marker = (rtp_packet[1] >> 7) & 0x01;
 
-    int header_len = 12;  // Basic RTP header
+    // Basic header (12) + CSRC list (CC * 4)
+    int header_len = 12 + (int)csrc_count * 4;
+    if (header_len > rtp_len) {
+      continue;  // Malformed
+    }
 
-    // H264 NAL unit starts after RTP header
+    // Optional extension header: 4 bytes (profile_id + length_words) + length_words * 4
+    if (extension) {
+      if (header_len + 4 > rtp_len) {
+        continue;
+      }
+      uint16_t ext_words = (rtp_packet[header_len + 2] << 8) | rtp_packet[header_len + 3];
+      header_len += 4 + (int)ext_words * 4;
+      if (header_len > rtp_len) {
+        continue;
+      }
+    }
+
+    // H264 NAL unit starts after RTP header (and any CSRC/extension data)
     uint8_t *nal_data = rtp_packet + header_len;
     int nal_len = rtp_len - header_len;
 
+    // Trim RTP padding bytes at end of payload
+    if (padding && nal_len > 0) {
+      uint8_t pad_bytes = rtp_packet[rtp_len - 1];
+      if (pad_bytes <= nal_len) {
+        nal_len -= pad_bytes;
+      }
+    }
+
     if (nal_len <= 0) {
+      continue;
+    }
+
+    // Sanity check: reject frames with forbidden_zero_bit set (malformed NAL)
+    if (nal_data[0] & 0x80) {
+      static uint32_t bad_nal_count = 0;
+      if (bad_nal_count++ < 5) {
+        ESP_LOGW(TAG, "NAL with forbidden_zero_bit set (0x%02X), dropping (rtp_len=%u, hdr_len=%d, X=%d, CC=%u)",
+                 nal_data[0], rtp_len, header_len, extension ? 1 : 0, csrc_count);
+      }
       continue;
     }
 
