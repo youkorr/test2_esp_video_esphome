@@ -1,25 +1,3 @@
-sphere_viz — Jarvis-style 3D voice-reactive sphere for ESPHome + LVGL 9.5.
-Two rendering modes on an ARGB8888 canvas:
-  WIREFRAME  — 3D mesh with meridians/parallels, depth-faded.
-  PARTICLES  — Fibonacci-distributed point cloud.
-YAML usage:
-    sphere_viz:
-      - id: voice_orb
-        page_id: main_page           # optional LVGL page id; else uses active screen
-        x: 312
-        y: 100
-        width: 400
-        height: 400
-        mode: WIREFRAME              # or PARTICLES
-        fps: 30
-        color: 0x00FFAA
-        particles: 800               # only used in PARTICLES mode
-        meridians: 14                # only used in WIREFRAME mode
-        parallels: 9
-Feed the audio level from e.g. a microphone callback:
-    on_...:
-      - lambda: id(voice_orb).set_level(rms_value);
-"""
 from esphome import codegen as cg, config_validation as cv
 from esphome.components.lvgl.types import lv_page_t
 from esphome.const import (
