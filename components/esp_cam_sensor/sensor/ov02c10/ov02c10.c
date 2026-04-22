@@ -15,7 +15,7 @@
  #include "esp_cam_sensor_detect.h"
  #include "ov02c10_settings.h"
  #include "ov02c10.h"
- //#include "../../ov02c10_custom_formats.h"
+ #include "../../ov02c10_custom_formats.h"
 
  typedef struct {
     uint8_t dgain_fine; // digital gain fine
