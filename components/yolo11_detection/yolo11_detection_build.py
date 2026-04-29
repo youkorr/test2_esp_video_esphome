@@ -15,7 +15,6 @@ Import("env")
 try:
     component_dir = os.path.dirname(os.path.abspath(__file__))
 except NameError:
-    # Fallback for very old SCons that doesn't set __file__
     component_dir = Dir('.').srcnode().abspath
 parent_components_dir = os.path.dirname(component_dir)
 
@@ -40,7 +39,6 @@ sources_to_add = []
 # ========================================================================
 esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
 if os.path.exists(esp_dl_dir):
-    # Add include directories
     esp_dl_include_dirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
         "dl/tool/isa/xtensa", "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
@@ -58,7 +56,6 @@ if os.path.exists(esp_dl_dir):
 
     print("[YOLO11 Detection] ESP-DL includes added")
 
-    # ESP-DL source files - YOLO11 only
     esp_dl_source_dirs = [
         "dl/tensor/src",
         "dl/model/src",
@@ -67,16 +64,15 @@ if os.path.exists(esp_dl_dir):
         "dl/math/src",
         "fbs_loader/src",
         "vision/image",
-        "vision/detect",  # Detection base (includes YOLO11)
+        "vision/detect",
     ]
 
     print("[YOLO11 Detection] Including: vision/detect (YOLO11 only)")
 
-    # Files to exclude
     esp_dl_exclude = [
-        "dl_base_dotprod.cpp",       # Use custom implementation
-        "dl_image_jpeg.cpp",         # JPEG not used
-        "dl_image_bmp.cpp",          # BMP not used
+        "dl_base_dotprod.cpp",
+        "dl_image_jpeg.cpp",
+        "dl_image_bmp.cpp",
         "dl_detect_msr_postprocessor.cpp",
         "dl_detect_mnp_postprocessor.cpp",
         "dl_pose_yolo11_postprocessor.cpp",
@@ -135,27 +131,58 @@ if os.path.exists(esp_dl_dir):
         print("[YOLO11 Detection] Added libfbs_model.a")
 
 # ========================================================================
-# Embed YOLO11 Detection Model
+# SD card mode detection
 # ------------------------------------------------------------------------
-# We always (re)generate the embed C file from scratch. The previous
-# implementation tried to cache it via mtime checks, which masked failures
-# when the file wasn't actually present in the build dir SCons enumerated.
+# We need to check the *value* of CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD,
+# not just whether the macro is defined: ESPHome emits both
+#   -DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=0  (flash_rodata mode)
+#   -DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1  (sdcard mode)
+# The previous version triggered SD-card mode in both cases because it
+# only looked for the macro name, which made flash_rodata builds skip
+# the model embedding and fail to link.
 # ========================================================================
+def _flag_value_truthy(value):
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    s = str(value).strip().strip('"').strip("'")
+    return s not in ("", "0", "false", "False", "FALSE")
+
+
 sdcard_mode = False
+sdcard_flag_seen = False
 
+# CPPDEFINES: list of either str names or (name, value) tuples
 for define in env.get("CPPDEFINES", []):
-    if isinstance(define, tuple) and define[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
-        sdcard_mode = (define[1] == "1")
+    if isinstance(define, (tuple, list)) and len(define) >= 1 \
+            and define[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_flag_seen = True
+        sdcard_mode = _flag_value_truthy(define[1] if len(define) >= 2 else None)
+        print(f"[YOLO11 Detection] CPPDEFINES: {define} -> sdcard={sdcard_mode}")
         break
-    elif define == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
-        sdcard_mode = True
+    if isinstance(define, str) and define.split("=", 1)[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_flag_seen = True
+        if "=" in define:
+            sdcard_mode = _flag_value_truthy(define.split("=", 1)[1])
+        else:
+            sdcard_mode = True
+        print(f"[YOLO11 Detection] CPPDEFINES: {define} -> sdcard={sdcard_mode}")
         break
 
-if not sdcard_mode:
-    build_flags = env.get("BUILD_FLAGS", [])
-    for flag in build_flags:
-        if "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD" in str(flag):
-            sdcard_mode = True
+# BUILD_FLAGS: strings like "-DCONFIG_FOO=1"
+if not sdcard_flag_seen:
+    for flag in env.get("BUILD_FLAGS", []):
+        s = str(flag).strip()
+        if s.startswith("-D"):
+            s = s[2:]
+        name, _, value = s.partition("=")
+        if name == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+            sdcard_flag_seen = True
+            sdcard_mode = _flag_value_truthy(value if value else "1")
+            print(f"[YOLO11 Detection] BUILD_FLAGS: {flag} -> sdcard={sdcard_mode}")
             break
 
 if sdcard_mode:
@@ -163,6 +190,9 @@ if sdcard_mode:
 else:
     print("[YOLO11 Detection] Flash rodata mode - embedding model in firmware")
 
+# ========================================================================
+# Embed YOLO11 Detection Model (only when not in SD card mode)
+# ========================================================================
 yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
 print(f"[YOLO11 Detection] yolo11_detect_dir = {yolo11_detect_dir} "
       f"(exists={os.path.exists(yolo11_detect_dir)})")
