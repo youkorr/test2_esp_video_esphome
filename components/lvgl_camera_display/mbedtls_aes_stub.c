@@ -1,6 +1,10 @@
 // Stub implementation of mbedTLS AES functions
 // These satisfy the linker but won't be called since we use unencrypted models (mode == 0)
 // If you need encrypted model support, link the real mbedTLS library instead
+//
+// Functions are marked __attribute__((weak)) so this stub can coexist with
+// another translation unit (e.g. face_detection/mbedtls_aes_stub.c) or
+// the real mbedTLS implementation without causing "multiple definition" errors.
 
 #include <stddef.h>
 #include <stdint.h>
@@ -10,17 +14,20 @@ typedef struct {
     uint8_t dummy[256]; // Placeholder - not used
 } mbedtls_aes_context;
 
+__attribute__((weak))
 void mbedtls_aes_init(mbedtls_aes_context *ctx)
 {
     // Stub - should not be called for unencrypted models
 }
 
+__attribute__((weak))
 int mbedtls_aes_setkey_enc(mbedtls_aes_context *ctx, const unsigned char *key, unsigned int keybits)
 {
     // Stub - should not be called for unencrypted models
     return 0;
 }
 
+__attribute__((weak))
 int mbedtls_aes_crypt_ctr(mbedtls_aes_context *ctx,
                           size_t length,
                           size_t *nc_off,
@@ -33,6 +40,7 @@ int mbedtls_aes_crypt_ctr(mbedtls_aes_context *ctx,
     return 0;
 }
 
+__attribute__((weak))
 void mbedtls_aes_free(mbedtls_aes_context *ctx)
 {
     // Stub - should not be called for unencrypted models
