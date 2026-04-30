@@ -166,7 +166,7 @@ void YOLO11DetectionComponent::detect_objects_(uint8_t *img_data, uint16_t width
     .data = img_data,
     .width = width,
     .height = height,
-    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB888
   };
 
   std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
