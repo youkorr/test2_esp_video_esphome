@@ -886,7 +886,7 @@ static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
              .vts      = 1250,
              .hts      = 1920,
              .gain_def = 0,      // M5Stack value (was 32, caused overexposure)
-             .exp_def  = 0x4dc,  // M5Stack value (1244) - proper exposure
+             .exp_def  = 0x250,  // M5Stack value (1244) - proper exposure
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
     // [2] 1600x1200 RAW8 @ 30fps
