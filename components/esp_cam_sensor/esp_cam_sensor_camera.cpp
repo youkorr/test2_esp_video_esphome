@@ -1214,7 +1214,7 @@ bool MipiDSICamComponent::start_streaming() {
   // IMPORTANT: AWB ne fonctionne PAS sur certains capteurs (Invalid argument)
   // OV5647, SC202CS, OV02C10 gèrent automatiquement la balance des blancs via leurs propres registres et IPA JSON
   if (this->sensor_name_ != "sc202cs" && this->sensor_name_ != "ov5647" && this->sensor_name_ != "ov02c10") {
-    if (this->set_white_balance_mode(true)) {
+    if (this->set_white_balance_mode(false)) {
       ESP_LOGI(TAG, "AWB (Auto White Balance) enabled");
     } else {
       ESP_LOGW(TAG, "Failed to enable AWB, trying manual white balance temperature");
