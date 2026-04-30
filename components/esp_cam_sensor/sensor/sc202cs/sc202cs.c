@@ -52,6 +52,10 @@ struct sc202cs_cam {
 #define delay_ms(ms)        vTaskDelay((ms > portTICK_PERIOD_MS ? ms / portTICK_PERIOD_MS : 1))
 #define SC202CS_SUPPORT_NUM CONFIG_CAMERA_SC202CS_MAX_SUPPORT
 
+#ifndef CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT
+#define CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT 1  // 1280x720 as default (index 0 is 800x600)
+#endif
+
 static const uint32_t s_limited_abs_gain = CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT;
 static size_t s_limited_abs_gain_index;
 static const char *TAG = "sc202cs";
