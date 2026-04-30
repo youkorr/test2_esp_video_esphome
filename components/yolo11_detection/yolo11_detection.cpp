@@ -272,7 +272,7 @@ void YOLO11DetectionComponent::dump_config() {
   ESP_LOGCONFIG(TAG, "  Model location: SD card");
   if (this->sdcard_model_path_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Model path (directory): %s", this->sdcard_model_path_);
-    ESP_LOGCONFIG(TAG, "  Expected file: %s/yolo11_detect_s8_v1.espdl",
+    ESP_LOGCONFIG(TAG, "  Expected file: %s/coco_detect_yolo11n_s8_v1.espdl",
                   this->sdcard_model_path_);
   }
 #else
