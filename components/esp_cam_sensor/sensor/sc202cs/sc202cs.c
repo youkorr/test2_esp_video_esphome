@@ -16,41 +16,6 @@
 #include "sc202cs_settings.h"
 #include "sc202cs.h"
 
-/* =========================================================================
- * SC202CS Configuration Defaults - Match M5Stack Tab5 settings
- * These must be defined BEFORE they are used in the code below.
- * Digital gain priority is recommended to avoid noise in low light.
- * ========================================================================= */
-#ifndef CONFIG_CAMERA_SC202CS
-#define CONFIG_CAMERA_SC202CS 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT
-#define CONFIG_CAMERA_SC202CS_AUTO_DETECT 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR
-#define CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT
-#define CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT 63008  /* M5Stack Tab5 value */
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_MAX_SUPPORT
-#define CONFIG_CAMERA_SC202CS_MAX_SUPPORT 1
-#endif
-
-/* IMPORTANT: Digital gain priority (M5Stack Tab5 config)
- * This MUST be set to avoid green tint issues */
-#ifndef CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY
-#define CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY
-#define CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY 0
-#endif
-
 /*
  * SC202CS camera sensor gain control.
  * Note1: The analog gain only has coarse gain, and no fine gain, so in the adjustment of analog gain.
@@ -92,10 +57,6 @@ struct sc202cs_cam {
 #endif
 #define delay_ms(ms)        vTaskDelay((ms > portTICK_PERIOD_MS ? ms / portTICK_PERIOD_MS : 1))
 #define SC202CS_SUPPORT_NUM CONFIG_CAMERA_SC202CS_MAX_SUPPORT
-
-#ifndef CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT
-#define CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT 1  // 1280x720 as default (index 0 is 800x600)
-#endif
 
 static const uint32_t s_limited_abs_gain = CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT;
 static size_t s_limited_abs_gain_index;
@@ -908,85 +869,53 @@ static const sc202cs_gain_t sc202cs_gain_map[] = {
 #endif  // end CONFIG_ANA_GAIN_PRIORITY
 
 static const esp_cam_sensor_isp_info_t sc202cs_isp_info[] = {
-    // [0] 800x600 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,      // M5Stack value
-             .exp_def  = 0x4dc,  // M5Stack value (1244)
+             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
+                             // format reg_list, the default values ​​are used here.
+             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
-    // [1] 1280x720 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,      // M5Stack value (was 32, caused overexposure)
-             .exp_def  = 0x4dc,  // M5Stack value (1244) - proper exposure
+             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
+                             // format reg_list, the default values ​​are used here.
+             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
-    // [2] 1600x1200 RAW8 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,      // M5Stack value
-             .exp_def  = 0x4dc,  // M5Stack value
+             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
+                             // format reg_list, the default values ​​are used here.
+             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
-    // [3] 1600x1200 RAW10 @ 30fps
     {.isp_v1_info =
          {
              .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
              .pclk     = 72000000,
              .vts      = 1250,
              .hts      = 1920,
-             .gain_def = 0,      // M5Stack value
-             .exp_def  = 0x4dc,  // M5Stack value
-             .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
-         }},
-    // [4] 1600x900 RAW10 @ 30fps
-    {.isp_v1_info =
-         {
-             .version  = SENSOR_ISP_INFO_VERSION_DEFAULT,
-             .pclk     = 72000000,
-             .vts      = 1250,
-             .hts      = 1920,
-             .gain_def = 0,      // M5Stack value
-             .exp_def  = 0x4dc,  // M5Stack value
+             .gain_def = 0,  // gain index, depend on {0x3e06, 0x3e07, 0x3e09}, since these registers are not set in
+                             // format reg_list, the default values ​​are used here.
+             .exp_def    = 0x4dc,  // depend on {0x3e00, 0x3e01, 0x3e02}, see format_reg_list to get the default value.
              .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,
          }},
 };
 
 static const esp_cam_sensor_format_t sc202cs_format_info[] = {
-    // Index 0: 800x600 - Native centered crop mode (NO binning - SC202CS doesn't support it)
-    {
-        .name      = "MIPI_1lane_24Minput_RAW8_800x600_30fps",
-        .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
-        .port      = ESP_CAM_SENSOR_MIPI_CSI,
-        .xclk      = 24000000,
-        .width     = 800,
-        .height    = 600,
-        .regs      = init_reglist_MIPI_1lane_raw8_800x600_30fps,
-        .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_800x600_30fps),
-        .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[0],
-        .mipi_info =
-            {
-                .mipi_clk     = 576000000,
-                .lane_num     = 1,
-                .line_sync_en = false,
-            },
-        .reserved = NULL,
-    },
-    // Index 1: 1280x720 - Standard M5Stack Tab5 mode
     {
         .name      = "MIPI_1lane_24Minput_RAW8_1280x720_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
@@ -997,7 +926,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw8_1280x720_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1280x720_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[1],
+        .isp_info  = &sc202cs_isp_info[0],
         .mipi_info =
             {
                 .mipi_clk     = 576000000,
@@ -1006,7 +935,6 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 2: 1600x1200 RAW8
     {
         .name      = "MIPI_1lane_24Minput_RAW8_1600x1200_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW8,
@@ -1017,7 +945,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw8_1600x1200_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw8_1600x1200_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[2],
+        .isp_info  = &sc202cs_isp_info[1],
         .mipi_info =
             {
                 .mipi_clk     = 576000000,
@@ -1026,7 +954,6 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 3: 1600x1200 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x1200_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1037,7 +964,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw10_1600x1200_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw10_1600x1200_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[3],
+        .isp_info  = &sc202cs_isp_info[2],
         .mipi_info =
             {
                 .mipi_clk     = 720000000,
@@ -1046,7 +973,6 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
             },
         .reserved = NULL,
     },
-    // Index 4: 1600x900 RAW10
     {
         .name      = "MIPI_1lane_24Minput_RAW10_1600x900_30fps",
         .format    = ESP_CAM_SENSOR_PIXFORMAT_RAW10,
@@ -1057,7 +983,7 @@ static const esp_cam_sensor_format_t sc202cs_format_info[] = {
         .regs      = init_reglist_MIPI_1lane_raw10_1600x900_30fps,
         .regs_size = ARRAY_SIZE(init_reglist_MIPI_1lane_raw10_1600x900_30fps),
         .fps       = 30,
-        .isp_info  = &sc202cs_isp_info[4],
+        .isp_info  = &sc202cs_isp_info[3],
         .mipi_info =
             {
                 .mipi_clk     = 720000000,
@@ -1305,7 +1231,7 @@ static esp_err_t sc202cs_set_format(esp_cam_sensor_device_t *dev, const esp_cam_
     /* Depending on the interface type, an available configuration is automatically loaded.
     You can set the output format of the sensor without using query_format().*/
     if (format == NULL) {
-        format = &sc202cs_format_info[CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT];
+        format = &sc202cs_format_info[CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT];
     }
 
     ret = sc202cs_write_array(dev->sccb_handle, (sc202cs_reginfo_t *)format->regs);
@@ -1495,7 +1421,7 @@ esp_cam_sensor_device_t *sc202cs_detect(esp_cam_sensor_config_t *config)
     dev->sensor_port = config->sensor_port;
     dev->ops         = &sc202cs_ops;
     dev->priv        = cam_sc202cs;
-    dev->cur_format  = &sc202cs_format_info[CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DEFAULT];
+    dev->cur_format  = &sc202cs_format_info[CONFIG_CAMERA_SC202CS_MIPI_IF_FORMAT_INDEX_DAFAULT];
     for (size_t i = 0; i < ARRAY_SIZE(sc202cs_abs_gain_val_map); i++) {
         if (sc202cs_abs_gain_val_map[i] > s_limited_abs_gain) {
             s_limited_abs_gain_index = i - 1;
@@ -1510,10 +1436,10 @@ esp_cam_sensor_device_t *sc202cs_detect(esp_cam_sensor_config_t *config)
     }
 
     if (sc202cs_get_sensor_id(dev, &dev->id) != ESP_OK) {
-        ESP_LOGD(TAG, "Get sensor ID failed");
+        ESP_LOGE(TAG, "Get sensor ID failed");
         goto err_free_handler;
     } else if (dev->id.pid != SC202CS_PID) {
-        ESP_LOGD(TAG, "Camera sensor is not SC202CS, PID=0x%x", dev->id.pid);
+        ESP_LOGE(TAG, "Camera sensor is not SC202CS, PID=0x%x", dev->id.pid);
         goto err_free_handler;
     }
     ESP_LOGI(TAG, "Detected Camera sensor PID=0x%x", dev->id.pid);
