@@ -1219,7 +1219,7 @@ bool MipiDSICamComponent::start_streaming() {
     } else {
       ESP_LOGW(TAG, "Failed to enable AWB, trying manual white balance temperature");
       // Fallback: configurer température couleur manuelle (5500K = lumière du jour)
-      this->set_white_balance_temp(4500);
+      this->set_white_balance_temp(5500);
     }
   } else {
     ESP_LOGI(TAG, "%s: Using sensor built-in AWB (V4L2 AWB not supported)", this->sensor_name_.c_str());
