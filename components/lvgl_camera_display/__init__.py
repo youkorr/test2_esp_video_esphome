@@ -11,6 +11,14 @@ CONF_UPDATE_INTERVAL = "update_interval"
 CONF_FACE_DETECTION_ID = "face_detection_id"
 CONF_YOLO11_DETECTION_ID = "yolo11_detection_id"
 CONF_PEDESTRIAN_DETECTION_ID = "pedestrian_detection_id"
+# Hardware PPA-based transforms (size match -> zero-copy as before, mismatch
+# or any of these set -> PPA hardware path, no CPU scaling).
+CONF_MIRROR_X = "mirror_x"
+CONF_MIRROR_Y = "mirror_y"
+CONF_ROTATION = "rotation"
+CONF_FORCE_PPA = "force_ppa"
+
+VALID_ROTATIONS = [0, 90, 180, 270]
 
 lvgl_camera_display_ns = cg.esphome_ns.namespace("lvgl_camera_display")
 LVGLCameraDisplay = lvgl_camera_display_ns.class_("LVGLCameraDisplay", cg.Component)
@@ -35,6 +43,10 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_FACE_DETECTION_ID): cv.use_id(FaceDetectionComponent),
     cv.Optional(CONF_YOLO11_DETECTION_ID): cv.use_id(YOLO11DetectionComponent),
     cv.Optional(CONF_PEDESTRIAN_DETECTION_ID): cv.use_id(PedestrianDetectionComponent),
+    cv.Optional(CONF_MIRROR_X, default=False): cv.boolean,
+    cv.Optional(CONF_MIRROR_Y, default=False): cv.boolean,
+    cv.Optional(CONF_ROTATION, default=0): cv.one_of(*VALID_ROTATIONS, int=True),
+    cv.Optional(CONF_FORCE_PPA, default=False): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -50,6 +62,11 @@ async def to_code(config):
     update_interval_ms = config[CONF_UPDATE_INTERVAL].total_milliseconds
     cg.add(var.set_update_interval(int(update_interval_ms)))
 
+    cg.add(var.set_mirror_x(config[CONF_MIRROR_X]))
+    cg.add(var.set_mirror_y(config[CONF_MIRROR_Y]))
+    cg.add(var.set_rotation(config[CONF_ROTATION]))
+    cg.add(var.set_force_ppa(config[CONF_FORCE_PPA]))
+
     if CONF_FACE_DETECTION_ID in config:
         cg.add_define("USE_FACE_DETECTION")
         face_detect = await cg.get_variable(config[CONF_FACE_DETECTION_ID])
@@ -64,4 +81,3 @@ async def to_code(config):
         cg.add_define("USE_PEDESTRIAN_DETECTION")
         ped_detect = await cg.get_variable(config[CONF_PEDESTRIAN_DETECTION_ID])
         cg.add(var.set_pedestrian_detection(ped_detect))
-
