@@ -30,6 +30,17 @@ class LVGLCameraDisplay : public Component {
   void set_canvas_id(const std::string &canvas_id) { this->canvas_id_ = canvas_id; }
   void set_update_interval(uint32_t interval_ms) { this->update_interval_ = interval_ms; }
   void set_enabled(bool enabled) { this->enabled_ = enabled; }
+
+  // Hardware PPA transform options. When any of these is set, OR when the
+  // canvas size differs from the camera output size, the camera frame is
+  // routed through the ESP32-P4 Pixel Processing Accelerator instead of
+  // being zero-copy aliased into the LVGL canvas. The transform stays in
+  // RGB565 in/out so it does not require LVGL color_depth: 32.
+  void set_mirror_x(bool m) { this->mirror_x_ = m; }
+  void set_mirror_y(bool m) { this->mirror_y_ = m; }
+  void set_rotation(int r) { this->rotation_ = r; }
+  void set_force_ppa(bool f) { this->force_ppa_ = f; }
+
 #ifdef USE_FACE_DETECTION
   void set_face_detection(face_detection::FaceDetectionComponent *face_detect) { this->face_detection_ = face_detect; }
 #endif
@@ -87,6 +98,21 @@ class LVGLCameraDisplay : public Component {
   bool draw_buf_initialized_{false};
   bool is_canvas_{false};  // true if widget is canvas (uses memcpy), false if image (uses zero-copy)
 
+  // Hardware PPA transform state
+  bool mirror_x_{false};
+  bool mirror_y_{false};
+  int rotation_{0};
+  bool force_ppa_{false};
+  // void* to avoid pulling driver/ppa.h into the public header.
+  void *ppa_handle_{nullptr};
+  uint8_t *ppa_out_buf_{nullptr};
+  size_t ppa_out_buf_size_{0};
+  uint16_t ppa_out_w_{0};
+  uint16_t ppa_out_h_{0};
+  bool ppa_inited_{false};
+  bool ppa_logged_{false};
+  bool ppa_path_active_{false};  // resolved on first frame
+
   // Benchmark stats for UI display
   lv_obj_t *stats_label_{nullptr};
   float stats_fps_{0.0f};
@@ -97,6 +123,7 @@ class LVGLCameraDisplay : public Component {
   void update_camera_frame_();
   void update_canvas_();
   void update_stats_label_();
+  bool ensure_ppa_(uint16_t out_w, uint16_t out_h);
 };
 
 }  // namespace lvgl_camera_display
