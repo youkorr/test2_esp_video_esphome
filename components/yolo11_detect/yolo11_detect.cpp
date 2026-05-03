@@ -22,13 +22,21 @@ YOLO11Impl::YOLO11Impl(const char *model_name)
     m_model =
         new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
 #endif
+    // YOLO11 was trained on inputs normalised to [0, 1]: pixel/255.
+    // Using std={1,1,1} (the previous value) effectively disables
+    // normalisation and makes every score collapse near zero -> the
+    // detector returns nothing. Match the official upstream coco_detect:
+    //   ImagePreprocessor(model, mean={0,0,0}, std={255,255,255})
+    //
+    // On ESP32-P4 the MIPI-CSI controller delivers RGB565 little-endian
+    // by default, so we don't pass DL_IMAGE_CAP_RGB565_BIG_ENDIAN. On
+    // S3 / other targets the byte order is reversed, hence the flag.
 #if CONFIG_IDF_TARGET_ESP32P4
-    // Camera produces RGB565 little-endian (CSI_BYTE_SWAP_EN = false)
-    // So we don't use DL_IMAGE_CAP_RGB565_BIG_ENDIAN flag
     m_image_preprocessor =
-        new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+        new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {255, 255, 255});
 #else
-    m_image_preprocessor = new dl::image::ImagePreprocessor(m_model, {0, 0, 0}, {1, 1, 1});
+    m_image_preprocessor = new dl::image::ImagePreprocessor(
+        m_model, {0, 0, 0}, {255, 255, 255}, DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #endif
 
     // YOLO11 postprocessor configuration
