@@ -33,6 +33,43 @@ extern const char sc202cs_ipa_config_json_start[];
 extern const char *sc202cs_ipa_config_json_end;
 extern const size_t sc202cs_ipa_config_json_size;
 
+/* ----------------------------------------------------------------------
+ * Build-time IPA stage toggles
+ *
+ * Some sensor JSONs (notably the SC202CS default tuning shipped by
+ * Espressif's esp_cam_sensor) target a slightly different optical stack
+ * than what M5Stack ships in the Tab5: the CCM in particular ends up
+ * tinting the whole frame green and dropping reds. To let users iterate
+ * without having to recompile the full firmware, each stage can be
+ * disabled at build time:
+ *
+ *   ESP_IPA_DISABLE_CCM      skip CCM application
+ *   ESP_IPA_DISABLE_AWB      skip AWB range application
+ *   ESP_IPA_DISABLE_SHARPEN  skip sharpen application
+ *   ESP_IPA_DISABLE_CONTRAST skip contrast application
+ *
+ * From ESPHome these are added via:
+ *   esp32:
+ *     framework:
+ *       sdkconfig_options:
+ *         ESP_IPA_DISABLE_CCM: "y"
+ *
+ * Or as a build flag:
+ *   CFLAGS=-DESP_IPA_DISABLE_CCM=1
+ * ---------------------------------------------------------------------- */
+#ifndef ESP_IPA_DISABLE_CCM
+#define ESP_IPA_DISABLE_CCM      0
+#endif
+#ifndef ESP_IPA_DISABLE_AWB
+#define ESP_IPA_DISABLE_AWB      0
+#endif
+#ifndef ESP_IPA_DISABLE_SHARPEN
+#define ESP_IPA_DISABLE_SHARPEN  0
+#endif
+#ifndef ESP_IPA_DISABLE_CONTRAST
+#define ESP_IPA_DISABLE_CONTRAST 0
+#endif
+
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
  *
@@ -98,8 +135,6 @@ static esp_err_t parse_ccm_from_json(cJSON *sensor_root, esp_ipa_ccm_config_t *c
 
 /**
  * @brief Parse AWB (Auto White Balance) ranges from JSON
- *
- * Extrait les plages RG/BG optimisées pour une meilleure balance des blancs
  */
 static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *awb_config)
 {
@@ -138,7 +173,6 @@ static esp_err_t parse_awb_from_json(cJSON *sensor_root, esp_ipa_awb_config_t *a
     awb_config->bg_min = (float)bg_min->valuedouble;
     awb_config->bg_max = (float)bg_max->valuedouble;
 
-    // Autres paramètres AWB optionnels
     cJSON *min_counted = cJSON_GetObjectItem(awb, "min_counted");
     awb_config->min_counted = min_counted ? min_counted->valueint : 2000;
 
@@ -167,7 +201,6 @@ static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_con
         return ESP_ERR_NOT_FOUND;
     }
 
-    // Prendre le premier niveau de gain (gain=1)
     cJSON *sharpen_entry = cJSON_GetArrayItem(sharpen, 0);
     if (!sharpen_entry) {
         return ESP_ERR_INVALID_ARG;
@@ -190,7 +223,6 @@ static esp_err_t parse_sharpen_from_json(cJSON *sensor_root, esp_ipa_sharpen_con
     if (h_coeff) sharpen_config->h_coeff = (float)h_coeff->valuedouble;
     if (m_coeff) sharpen_config->m_coeff = (float)m_coeff->valuedouble;
 
-    // Parse sharpen matrix (3x3 = 9 elements)
     if (matrix && cJSON_IsArray(matrix) && cJSON_GetArraySize(matrix) == 9) {
         for (int i = 0; i < 9; i++) {
             cJSON *value = cJSON_GetArrayItem(matrix, i);
@@ -268,7 +300,6 @@ static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_c
         return ESP_ERR_NOT_FOUND;
     }
 
-    // Prendre le premier niveau de gain
     cJSON *contrast_entry = cJSON_GetArrayItem(contrast, 0);
     if (!contrast_entry) {
         return ESP_ERR_INVALID_ARG;
@@ -286,10 +317,6 @@ static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_c
 
 /**
  * @brief Load IPA configuration from embedded JSON
- *
- * @param sensor_name Sensor name (e.g., "OV02C10", "OV5647", "SC202CS")
- * @param ipa_json_config Output structure with parsed JSON config
- * @return ESP_OK on success, error code otherwise
  */
 esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_t *ipa_json_config)
 {
@@ -302,10 +329,6 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
     const char *json_data = NULL;
     size_t json_size = 0;
 
-    // Sélectionner le JSON embarqué selon le capteur. La comparaison
-    // accepte la casse haute et basse pour ne pas être surprise par les
-    // différences de notation entre drivers (cam_dev->name peut sortir
-    // "SC202CS" alors que les Kconfig utilisent "sc202cs").
     if (strcasecmp(sensor_name, "OV02C10") == 0) {
         json_data = ov02c10_ipa_config_json_start;
         json_size = ov02c10_ipa_config_json_size;
@@ -333,17 +356,14 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         return ESP_ERR_NOT_FOUND;
     }
 
-    // Parser le JSON
     cJSON *root = cJSON_Parse(json_data);
     if (!root) {
         ESP_LOGE(TAG, "Failed to parse JSON");
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Trouver la section du capteur (e.g., "OV02C10" ou "ov5647")
     cJSON *sensor_root = cJSON_GetObjectItem(root, sensor_name);
     if (!sensor_root) {
-        // Essayer en minuscules
         char sensor_lower[32];
         strncpy(sensor_lower, sensor_name, sizeof(sensor_lower) - 1);
         sensor_lower[sizeof(sensor_lower) - 1] = '\0';
@@ -353,7 +373,6 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         sensor_root = cJSON_GetObjectItem(root, sensor_lower);
     }
     if (!sensor_root) {
-        // Essayer en majuscules
         char sensor_upper[32];
         strncpy(sensor_upper, sensor_name, sizeof(sensor_upper) - 1);
         sensor_upper[sizeof(sensor_upper) - 1] = '\0';
@@ -371,31 +390,21 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
 
     ESP_LOGI(TAG, "Found sensor section in JSON");
 
-    // Parser chaque section
     esp_err_t ret = ESP_OK;
     memset(ipa_json_config, 0, sizeof(esp_ipa_json_config_t));
 
-    // CCM (Color Correction Matrix) - CRITIQUE pour corriger les couleurs fades
     if (parse_ccm_from_json(sensor_root, &ipa_json_config->ccm) == ESP_OK) {
         ipa_json_config->has_ccm = true;
     }
-
-    // AWB (Auto White Balance) - CRITIQUE pour balance des blancs
     if (parse_awb_from_json(sensor_root, &ipa_json_config->awb) == ESP_OK) {
         ipa_json_config->has_awb = true;
     }
-
-    // Sharpen - Améliore la netteté
     if (parse_sharpen_from_json(sensor_root, &ipa_json_config->sharpen) == ESP_OK) {
         ipa_json_config->has_sharpen = true;
     }
-
-    // Gamma - Améliore le contraste et la luminosité
     if (parse_gamma_from_json(sensor_root, &ipa_json_config->gamma) == ESP_OK) {
         ipa_json_config->has_gamma = true;
     }
-
-    // Contrast
     if (parse_contrast_from_json(sensor_root, &ipa_json_config->contrast) == ESP_OK) {
         ipa_json_config->has_contrast = true;
     }
@@ -414,13 +423,6 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
 
 /**
  * @brief Apply parsed JSON IPA configuration to ISP via V4L2
- *
- * This function applies the calibrated parameters from JSON to the ISP hardware
- * to fix fade/washed out colors and improve image quality.
- *
- * @param isp_fd ISP device file descriptor
- * @param ipa_json_config Parsed JSON configuration
- * @return ESP_OK on success, error code otherwise
  */
 esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa_json_config)
 {
@@ -436,13 +438,17 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
 
     ESP_LOGI(TAG, "Applying JSON IPA parameters to ISP...");
 
-    // 1. Apply CCM (Color Correction Matrix) - CRITICAL for fixing fade colors
+    // 1. CCM (Color Correction Matrix)
+    //
+    // The default JSON tunings are calibrated for Espressif's reference
+    // boards. On boards with a different optical stack (typically the
+    // M5Stack Tab5 with the SC202CS) the resulting CCM tints the image
+    // green and crushes reds. Set ESP_IPA_DISABLE_CCM=1 to skip it.
     if (ipa_json_config->has_ccm) {
-        esp_video_isp_ccm_t ccm = {
-            .enable = true,
-        };
-
-        // Copy calibrated CCM matrix from JSON
+#if ESP_IPA_DISABLE_CCM
+        ESP_LOGW(TAG, "  CCM SKIPPED (ESP_IPA_DISABLE_CCM=1)");
+#else
+        esp_video_isp_ccm_t ccm = { .enable = true };
         memcpy(ccm.matrix, ipa_json_config->ccm.matrix, sizeof(ccm.matrix));
 
         controls.ctrl_class = V4L2_CID_USER_CLASS;
@@ -458,17 +464,21 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
             ESP_LOGE(TAG, "  Failed to apply CCM matrix: errno=%d", errno);
             ret = ESP_FAIL;
         }
+#endif
     }
 
-    // 2. Apply AWB ranges - CRITICAL for white balance
+    // 2. AWB ranges
     if (ipa_json_config->has_awb) {
+#if ESP_IPA_DISABLE_AWB
+        ESP_LOGW(TAG, "  AWB SKIPPED (ESP_IPA_DISABLE_AWB=1)");
+#else
         esp_video_isp_awb_t awb = {
             .enable = true,
             .rg_min = ipa_json_config->awb.rg_min,
             .rg_max = ipa_json_config->awb.rg_max,
             .bg_min = ipa_json_config->awb.bg_min,
             .bg_max = ipa_json_config->awb.bg_max,
-            .green_min = 0,  // Use defaults
+            .green_min = 0,
             .green_max = 255,
         };
 
@@ -486,10 +496,14 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
             ESP_LOGE(TAG, "  Failed to apply AWB ranges: errno=%d", errno);
             ret = ESP_FAIL;
         }
+#endif
     }
 
-    // 3. Apply Sharpen parameters - Improves sharpness
+    // 3. Sharpen
     if (ipa_json_config->has_sharpen) {
+#if ESP_IPA_DISABLE_SHARPEN
+        ESP_LOGW(TAG, "  Sharpen SKIPPED (ESP_IPA_DISABLE_SHARPEN=1)");
+#else
         esp_video_isp_sharpen_t sharpen = {
             .enable = true,
             .h_thresh = ipa_json_config->sharpen.h_thresh,
@@ -498,7 +512,6 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
             .m_coeff = ipa_json_config->sharpen.m_coeff,
         };
 
-        // Use sharpen matrix from JSON if available, otherwise use default
         if (ipa_json_config->sharpen.has_matrix) {
             memcpy(sharpen.matrix, ipa_json_config->sharpen.matrix, sizeof(sharpen.matrix));
         } else {
@@ -518,18 +531,20 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
         } else {
             ESP_LOGE(TAG, "  Failed to apply sharpen: errno=%d", errno);
         }
+#endif
     }
 
-    // 4. Apply Gamma - Improves brightness/contrast
+    // 4. Gamma
     if (ipa_json_config->has_gamma && ipa_json_config->gamma.use_gamma_param) {
-        // Note: V4L2_CID_USER_ESP_ISP_GAMMA requires specific point coordinates
-        // For now, we'll use standard brightness/contrast controls as fallback
         ESP_LOGW(TAG, "  Gamma parameter found but V4L2 gamma control requires point coordinates");
         ESP_LOGW(TAG, "     Using brightness/contrast controls instead");
     }
 
-    // 5. Apply Contrast if available
+    // 5. Contrast
     if (ipa_json_config->has_contrast) {
+#if ESP_IPA_DISABLE_CONTRAST
+        ESP_LOGW(TAG, "  Contrast SKIPPED (ESP_IPA_DISABLE_CONTRAST=1)");
+#else
         controls.ctrl_class = V4L2_CID_USER_CLASS;
         controls.count = 1;
         controls.controls = control;
@@ -542,6 +557,7 @@ esp_err_t esp_ipa_apply_json_to_isp(int isp_fd, const esp_ipa_json_config_t *ipa
         } else {
             ESP_LOGE(TAG, "  Failed to apply contrast: errno=%d", errno);
         }
+#endif
     }
 
     ESP_LOGI(TAG, "JSON IPA application complete: %d/%d parameters applied successfully",
