@@ -4,7 +4,6 @@
 #include "esphome/core/automation.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
 #include "freertos/semphr.h"
 #include <vector>
 #include <list>
@@ -54,10 +53,6 @@ class YOLO11DetectionComponent : public Component {
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_text(uint16_t *buffer, uint16_t width, uint16_t height, int x, int y, const char *text, uint16_t color, int scale);
 
-  // --- Tâche FreeRTOS ---
-  static void detection_task_wrapper(void *arg);
-  void detection_task();
-
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
   YOLO11Detect *object_detector_{nullptr};
@@ -75,15 +70,8 @@ class YOLO11DetectionComponent : public Component {
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
   
-  // Variables pour la tâche asynchrone et la copie du buffer
-  TaskHandle_t detection_task_handle_{nullptr};
-  SemaphoreHandle_t task_signal_{nullptr};
-  uint8_t *ai_buffer_{nullptr};
-  uint16_t current_width_{0};
-  uint16_t current_height_{0};
-  
   bool is_model_loaded_{false};
-  bool is_detecting_{false};
+  bool init_attempted_{false};
 
   // Callbacks
   std::vector<std::function<void(int)>> on_object_detected_callbacks_;
