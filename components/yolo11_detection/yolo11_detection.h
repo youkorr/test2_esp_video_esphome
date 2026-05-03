@@ -18,7 +18,7 @@ namespace yolo11_detection {
 struct DetectionBox {
   int x1, y1, x2, y2;
   float score;
-  int category;  // Object class/category
+  int category;  
 };
 
 class YOLO11DetectionComponent : public Component {
@@ -75,13 +75,13 @@ class YOLO11DetectionComponent : public Component {
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
   
-  // Variables pour la tâche asynchrone
+  // Variables pour la tâche asynchrone et la copie du buffer
   TaskHandle_t detection_task_handle_{nullptr};
   SemaphoreHandle_t task_signal_{nullptr};
-  uint8_t *pending_img_data_{nullptr};
-  uint16_t pending_width_{0};
-  uint16_t pending_height_{0};
-  bool init_triggered_{false}; // Synchronisation au démarrage
+  uint8_t *ai_buffer_{nullptr};
+  uint16_t current_width_{0};
+  uint16_t current_height_{0};
+  
   bool is_model_loaded_{false};
   bool is_detecting_{false};
 
