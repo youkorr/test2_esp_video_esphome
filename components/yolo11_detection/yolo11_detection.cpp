@@ -6,6 +6,7 @@
 #include "freertos/task.h"
 #include "esp_task_wdt.h"
 #include <algorithm>
+#include <vector>
 
 #ifdef ESP_DL_MODEL_YOLO11
 #include "yolo11_detect.hpp"
@@ -260,57 +261,63 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
 #ifdef ESP_DL_MODEL_YOLO11
   if (img_data == nullptr || this->detections_mutex_ == nullptr) return;
 
-  if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
-    const uint16_t COLOR_RED    = 0xF800;
-    const uint16_t COLOR_GREEN  = 0x07E0;
-    const uint16_t COLOR_BLUE   = 0x001F;
-    const uint16_t COLOR_YELLOW = 0xFFE0;
+  // Use the same drawing API as pedestrian_detection / face_detection so the
+  // resulting framing is visually consistent (clean 2-pixel hollow rectangles
+  // via the official ESP-DL drawing routine, instead of our hand-rolled
+  // 4-nested-loop version which produced thicker / fuzzier corners).
+  dl::image::img_t img = {
+    .data = img_data,
+    .width = width,
+    .height = height,
+    .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+  };
 
+  // RGB565 little-endian, 2 bytes per pixel.
+  // category 0  = person  -> red
+  // category 2  = car     -> green
+  // category 16 = dog     -> blue
+  // others                -> yellow
+  static const std::vector<uint8_t> RED    = {0x00, 0xF8};
+  static const std::vector<uint8_t> GREEN  = {0xE0, 0x07};
+  static const std::vector<uint8_t> BLUE   = {0x1F, 0x00};
+  static const std::vector<uint8_t> YELLOW = {0xE0, 0xFF};
+
+  if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
     for (auto &box : this->cached_detections_) {
+      // Clamp identical to pedestrian_detection.cpp
       int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
       int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
       int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
       int y2 = std::max(y1 + 10, std::min((int)box.y2, (int)height - 3));
 
-      uint16_t color;
+      const std::vector<uint8_t> *color = &YELLOW;
       switch (box.category) {
-        case 0:  color = COLOR_RED; break;
-        case 2:  color = COLOR_GREEN; break;
-        case 16: color = COLOR_BLUE; break;
-        default: color = COLOR_YELLOW; break;
+        case 0:  color = &RED;    break;
+        case 2:  color = &GREEN;  break;
+        case 16: color = &BLUE;   break;
+        default: color = &YELLOW; break;
       }
 
-      const int line_width = 2;
-      uint16_t *buffer = (uint16_t *)img_data;
+      dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, *color, 2);
 
-      for (int x = x1; x <= x2; x++) {
-        for (int t = 0; t < line_width; t++) {
-          int top_offset = (y1 + t) * width + x;
-          if (top_offset >= 0 && top_offset < width * height) buffer[top_offset] = color;
-          int bottom_offset = (y2 - t) * width + x;
-          if (bottom_offset >= 0 && bottom_offset < width * height) buffer[bottom_offset] = color;
-        }
-      }
-
-      for (int y = y1; y <= y2; y++) {
-        for (int t = 0; t < line_width; t++) {
-          int left_offset = y * width + (x1 + t);
-          if (left_offset >= 0 && left_offset < width * height) buffer[left_offset] = color;
-          int right_offset = y * width + (x2 - t);
-          if (right_offset >= 0 && right_offset < width * height) buffer[right_offset] = color;
-        }
-      }
-
-      const char* class_name = "Unknown";
+      // Compact label drawn directly above the box. We keep the manual
+      // 5x7 font here because dl::image doesn't ship a text helper.
+      const char *class_name = "Unknown";
       if (box.category >= 0 && box.category < 80) {
-          class_name = COCO_CLASSES[box.category];
+        class_name = COCO_CLASSES[box.category];
       }
       char label[64];
       snprintf(label, sizeof(label), "%s %d%%", class_name, (int)(box.score * 100));
 
+      // Convert std::vector<uint8_t> back to a uint16_t for the text helper.
+      // This also keeps the label colour in sync with the box colour.
+      uint16_t text_color = (uint16_t)((*color)[1] << 8) | (*color)[0];
+
       int text_x = std::max(0, x1);
-      int text_y = std::max(0, y1 - 16); 
-      this->draw_text(buffer, width, height, text_x, text_y, label, color, 2);
+      // 7 px font * scale 1 = 7 px tall, leave a 2 px gap above the box.
+      int text_y = std::max(0, y1 - 9);
+      this->draw_text((uint16_t *)img_data, width, height,
+                      text_x, text_y, label, text_color, 1);
     }
     xSemaphoreGive(this->detections_mutex_);
   }
