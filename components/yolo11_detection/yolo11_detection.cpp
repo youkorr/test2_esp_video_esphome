@@ -127,7 +127,6 @@ void YOLO11DetectionComponent::setup() {
   this->mark_failed();
   return;
 #else
-  // Lancement de la tâche, mais le modèle ne sera chargé qu'à la première frame !
   xTaskCreatePinnedToCore(
       YOLO11DetectionComponent::detection_task_wrapper,
       "yolo_detect",
@@ -149,9 +148,6 @@ void YOLO11DetectionComponent::detection_task_wrapper(void *arg) {
 
 void YOLO11DetectionComponent::detection_task() {
 #ifdef ESP_DL_MODEL_YOLO11
-  // Attente du signal envoyé par loop()
-  // Cela garantit que tous les autres composants (Face, Pedestrian, SD Card)
-  // ont fini leur initialisation et que la RAM est stable.
   ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
   ESP_LOGI(TAG, "Detection task awoken. Initializing YOLO11 model...");
@@ -181,7 +177,7 @@ void YOLO11DetectionComponent::detection_task() {
   ESP_LOGI(TAG, "YOLO11 detector initialized successfully.");
 
   while (true) {
-    // Wait for a new frame signal
+    // Attendre qu'une frame soit disponible
     if (xSemaphoreTake(this->task_signal_, portMAX_DELAY) == pdTRUE) {
       if (this->pending_img_data_ != nullptr) {
         
@@ -192,6 +188,7 @@ void YOLO11DetectionComponent::detection_task() {
           .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
         };
 
+        // Lancement de l'inférence YOLO
         std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
 
         if (xSemaphoreTake(this->detections_mutex_, portMAX_DELAY) == pdTRUE) {
@@ -215,17 +212,19 @@ void YOLO11DetectionComponent::detection_task() {
           }
         }
       }
-      this->is_detecting_ = false; // Mark detection as finished
+      
+      // Indiquer à process_frame_() que nous avons terminé
+      this->is_detecting_ = false;
     }
   }
 #endif
 }
 
 void YOLO11DetectionComponent::loop() {
-  // Déclenche le chargement du modèle une fois que ESPHome commence sa boucle principale
   if (!this->init_triggered_) {
     this->init_triggered_ = true;
     if (this->detection_task_handle_ != nullptr) {
+        // Envoi du signal pour charger le modèle après le setup
         xTaskNotifyGive(this->detection_task_handle_);
     }
     return;
@@ -236,6 +235,7 @@ void YOLO11DetectionComponent::loop() {
 }
 
 void YOLO11DetectionComponent::process_frame_() {
+  // On ne lance une nouvelle détection que si la précédente est complètement terminée
   if (this->is_detecting_) return;
 
   this->frame_counter_++;
@@ -248,13 +248,19 @@ void YOLO11DetectionComponent::process_frame_() {
   uint8_t* img_data = this->camera_->get_buffer_data(buffer);
   
   if (img_data != nullptr) {
-    this->is_detecting_ = true;
+    this->is_detecting_ = true; // Verrouille la boucle
     this->pending_img_data_ = img_data;
     this->pending_width_ = this->camera_->get_image_width();
     this->pending_height_ = this->camera_->get_image_height();
     
-    // Signal the background task to start
+    // Déclenche l'inférence
     xSemaphoreGive(this->task_signal_);
+    
+    // On attend ACTIVE MENT que YOLO termine avant de relâcher le buffer.
+    // Cela bloque ESPHome quelques ms, mais empêche la corruption de mémoire (Load access fault).
+    while (this->is_detecting_) {
+        vTaskDelay(1);
+    }
   }
 
   this->camera_->release_buffer(buffer);
