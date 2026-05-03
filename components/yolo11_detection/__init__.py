@@ -22,7 +22,7 @@ CONF_MODEL_VARIANT = "model_variant"
 MODEL_LOCATION_FLASH = "flash_rodata"
 MODEL_LOCATION_SDCARD = "sdcard"
 
-# Model variants (matching the upstream coco_detect Kconfig names)
+# Model variants
 MODEL_VARIANT_S8_V1 = "s8_v1"
 MODEL_VARIANT_S8_V2 = "s8_v2"
 MODEL_VARIANT_S8_V3 = "s8_v3"
@@ -80,41 +80,37 @@ async def to_code(config):
     cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
     cg.add(var.set_draw_enabled(config[CONF_DRAW_ENABLED]))
 
-    # Setup automations
     for conf in config.get(CONF_ON_OBJECT_DETECTED, []):
         trigger = cg.new_Pvariable(conf[CONF_ID], var)
         await automation.build_automation(trigger, [(cg.int_, "object_count")], conf)
 
-    # ------------------------------------------------------------------
-    # Build flags
-    # ------------------------------------------------------------------
-    # Tell the C++ wrapper which model family it must compile against.
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
-    # Pick exactly ONE YOLO11 variant. The previous version of this file
-    # set several incompatible defines at once (incl. a lowercase
-    # `s8_v3` typo) which made the upstream coco_detect code load the
-    # wrong model header / weights and either return no detections or
-    # crash on ESP32-P4. We now derive the flag from `model_variant`.
     variant = config[CONF_MODEL_VARIANT]
     variant_index = MODEL_VARIANT_INDEX[variant]
 
+    # Map pour COCO_DETECT
     variant_flag_map = {
         MODEL_VARIANT_S8_V1:       "CONFIG_COCO_DETECT_YOLO11N_S8_V1",
         MODEL_VARIANT_S8_V2:       "CONFIG_COCO_DETECT_YOLO11N_S8_V2",
         MODEL_VARIANT_S8_V3:       "CONFIG_COCO_DETECT_YOLO11N_S8_V3",
         MODEL_VARIANT_320_S8_V3:   "CONFIG_COCO_DETECT_YOLO11N_320_S8_V3",
     }
+    
+    # Map pour YOLO11_DETECT (La correction majeure)
+    yolo_variant_flag_map = {
+        MODEL_VARIANT_S8_V1:       "CONFIG_YOLO11_DETECT_S8_V1",
+        MODEL_VARIANT_S8_V2:       "CONFIG_YOLO11_DETECT_S8_V2",
+        MODEL_VARIANT_S8_V3:       "CONFIG_YOLO11_DETECT_S8_V3",
+        MODEL_VARIANT_320_S8_V3:   "CONFIG_YOLO11_DETECT_320_S8_V3",
+    }
+
     cg.add_build_flag(f"-D{variant_flag_map[variant]}=1")
     cg.add_build_flag(f"-DCONFIG_DEFAULT_COCO_DETECT_MODEL={variant_index}")
-    # Mirror the upstream YOLO11_DETECT_* names used by the wrapper.
     cg.add_build_flag(f"-DCONFIG_YOLO11_DETECT_MODEL_TYPE={variant_index}")
-    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_S8_V1=1")
+    cg.add_build_flag(f"-D{yolo_variant_flag_map[variant]}=1")
 
-    # ------------------------------------------------------------------
-    # Model location
-    # ------------------------------------------------------------------
     model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
     if model_location == MODEL_LOCATION_SDCARD:
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1")
@@ -131,9 +127,6 @@ async def to_code(config):
         cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_IN_FLASH_RODATA=1")
         cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_LOCATION=0")
 
-    # ------------------------------------------------------------------
-    # Include paths
-    # ------------------------------------------------------------------
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
@@ -144,28 +137,13 @@ async def to_code(config):
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if os.path.exists(esp_dl_dir):
         esp_dl_includes = [
-            "dl",
-            "dl/tool/include",
-            "dl/tool/isa/esp32p4",
-            "dl/tool/src",
-            "dl/tensor/include",
-            "dl/tensor/src",
-            "dl/base",
-            "dl/base/isa",
-            "dl/base/isa/esp32p4",
-            "dl/math/include",
-            "dl/math/src",
-            "dl/model/include",
-            "dl/model/src",
-            "dl/module/include",
-            "dl/module/src",
-            "fbs_loader/include",
-            "fbs_loader/lib/esp32p4",
-            "fbs_loader/src",
-            "vision/detect",
-            "vision/image",
-            "vision/image/isa",
-            "vision/image/isa/esp32p4",
+            "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/src",
+            "dl/tensor/include", "dl/tensor/src", "dl/base", "dl/base/isa",
+            "dl/base/isa/esp32p4", "dl/math/include", "dl/math/src",
+            "dl/model/include", "dl/model/src", "dl/module/include",
+            "dl/module/src", "fbs_loader/include", "fbs_loader/lib/esp32p4",
+            "fbs_loader/src", "vision/detect", "vision/image",
+            "vision/image/isa", "vision/image/isa/esp32p4",
         ]
         for inc in esp_dl_includes:
             inc_path = os.path.join(esp_dl_dir, inc)
