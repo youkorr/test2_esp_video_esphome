@@ -4,7 +4,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_task_wdt.h"
 #include <algorithm>
 
 #ifdef ESP_DL_MODEL_YOLO11
@@ -128,7 +127,7 @@ void YOLO11DetectionComponent::setup() {
   this->mark_failed();
   return;
 #else
-  // Launch the background task. Initialization will happen inside the task.
+  // Lancement de la tâche, mais le modèle ne sera chargé qu'à la première frame !
   xTaskCreatePinnedToCore(
       YOLO11DetectionComponent::detection_task_wrapper,
       "yolo_detect",
@@ -150,13 +149,18 @@ void YOLO11DetectionComponent::detection_task_wrapper(void *arg) {
 
 void YOLO11DetectionComponent::detection_task() {
 #ifdef ESP_DL_MODEL_YOLO11
-  ESP_LOGI(TAG, "Detection task running. Initializing model...");
-  esp_task_wdt_reset(); // Feed WDT before heavy load
+  // Attente du signal envoyé par loop()
+  // Cela garantit que tous les autres composants (Face, Pedestrian, SD Card)
+  // ont fini leur initialisation et que la RAM est stable.
+  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+  ESP_LOGI(TAG, "Detection task awoken. Initializing YOLO11 model...");
 
 #ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ == nullptr) {
     ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
     vTaskDelete(NULL);
+    return;
   }
   ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
   this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
@@ -165,11 +169,10 @@ void YOLO11DetectionComponent::detection_task() {
   this->object_detector_ = new YOLO11Detect();
 #endif
 
-  esp_task_wdt_reset(); // Feed WDT after load
-
   if (this->object_detector_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to construct YOLO11Detect");
+    ESP_LOGE(TAG, "Failed to construct YOLO11Detect. Out of memory?");
     vTaskDelete(NULL);
+    return;
   }
 
   this->object_detector_->set_score_thr(this->score_threshold_);
@@ -219,12 +222,20 @@ void YOLO11DetectionComponent::detection_task() {
 }
 
 void YOLO11DetectionComponent::loop() {
+  // Déclenche le chargement du modèle une fois que ESPHome commence sa boucle principale
+  if (!this->init_triggered_) {
+    this->init_triggered_ = true;
+    if (this->detection_task_handle_ != nullptr) {
+        xTaskNotifyGive(this->detection_task_handle_);
+    }
+    return;
+  }
+
   if (this->camera_ == nullptr || !this->camera_->is_streaming() || !this->is_model_loaded_) return;
   this->process_frame_();
 }
 
 void YOLO11DetectionComponent::process_frame_() {
-  // If the task is busy, skip this frame
   if (this->is_detecting_) return;
 
   this->frame_counter_++;
@@ -246,8 +257,6 @@ void YOLO11DetectionComponent::process_frame_() {
     xSemaphoreGive(this->task_signal_);
   }
 
-  // Warning: in a real async environment, we shouldn't release the buffer until the task finishes.
-  // Assuming ESP32-P4 camera buffers persist long enough or are handled via psram double-buffering.
   this->camera_->release_buffer(buffer);
 }
 
@@ -283,6 +292,7 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
       const int line_width = 2;
       uint16_t *buffer = (uint16_t *)img_data;
 
+      // Draw box borders
       for (int x = x1; x <= x2; x++) {
         for (int t = 0; t < line_width; t++) {
           int top_offset = (y1 + t) * width + x;
