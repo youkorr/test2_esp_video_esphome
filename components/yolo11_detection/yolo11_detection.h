@@ -3,8 +3,6 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include <vector>
 #include <list>
 
@@ -17,7 +15,7 @@ namespace yolo11_detection {
 struct DetectionBox {
   int x1, y1, x2, y2;
   float score;
-  int category;  
+  int category;  // Object class/category
 };
 
 class YOLO11DetectionComponent : public Component {
@@ -25,7 +23,7 @@ class YOLO11DetectionComponent : public Component {
   void setup() override;
   void loop();
   void dump_config() override;
-  float get_setup_priority() const override { return -200.0f; }
+  float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
@@ -40,7 +38,7 @@ class YOLO11DetectionComponent : public Component {
   int get_detected_count();
   std::vector<DetectionBox> get_detections();
 
-  // Drawing
+  // Drawing (called by lvgl_camera_display if configured)
   void draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height);
 
   // Callbacks
@@ -50,8 +48,8 @@ class YOLO11DetectionComponent : public Component {
 
  protected:
   void process_frame_();
+  void detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
-  void draw_text(uint16_t *buffer, uint16_t width, uint16_t height, int x, int y, const char *text, uint16_t color, int scale);
 
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
@@ -69,14 +67,12 @@ class YOLO11DetectionComponent : public Component {
   uint32_t frame_counter_{0};
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
-  
-  bool is_model_loaded_{false};
-  bool init_attempted_{false};
 
   // Callbacks
   std::vector<std::function<void(int)>> on_object_detected_callbacks_;
 };
 
+// Automation trigger
 class ObjectDetectedTrigger : public Trigger<int> {
  public:
   explicit ObjectDetectedTrigger(YOLO11DetectionComponent *parent) {
