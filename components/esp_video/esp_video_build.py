@@ -128,13 +128,8 @@ esp_ipa_dir = os.path.join(parent_components_dir, "esp_ipa")
 esp_ipa_sources = [
     "src/version.c",              # Config IPA custom (5 IPAs: AWB, denoise, sharpen, gamma, CC - PAS AGC)
     "src/esp_ipa_detect_stubs.c", # Detection array
-    "src/esp_ipa_json_loader.c",  # JSON IPA parser pour charger configs OV02C10/OV5647
+    "src/esp_ipa_json_loader.c",  # JSON IPA parser pour charger configs OV02C10/OV5647/SC202CS
 ]
-
-# print("")
-# print("[ESP-Video Build] ========================================")
-# print("[ESP-Video Build] === COMPILATION ESP_IPA (CONFIG CUSTOM) ===")
-# print("[ESP-Video Build] ========================================")
 
 if os.path.exists(esp_ipa_dir):
     for src in esp_ipa_sources:
@@ -142,15 +137,8 @@ if os.path.exists(esp_ipa_dir):
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
             print(f"[ESP-Video Build] esp_ipa/{src} -> libesp_video_full.a")
-    # print("[ESP-Video Build]")
-    # print("[ESP-Video Build] Ces sources seront dans libesp_video_full.a")
-    # print("[ESP-Video Build] Le linker utilisera version.o custom (pas celui de libesp_ipa.a)")
-    # print("[ESP-Video Build] ========================================")
 else:
     pass
-    # print("[ESP-Video Build]  Répertoire esp_ipa introuvable!")
-
-# print("")
 
 # ========================================================================
 # Sources esp_sccb_intf
@@ -176,10 +164,6 @@ if os.path.exists(esp_sccb_intf_dir):
 # ========================================================================
 # Embarquer les fichiers JSON IPA des capteurs comme binary data
 # ========================================================================
-# print("")
-# print("[ESP-Video Build] ========================================")
-# print("[ESP-Video Build] === EMBEDDING SENSOR JSON CONFIGS ===")
-# print("[ESP-Video Build] ========================================")
 
 # Liste des fichiers JSON à embarquer
 json_files_to_embed = [
@@ -191,10 +175,14 @@ json_files_to_embed = [
         "path": os.path.join(esp_cam_sensor_dir, "sensor/ov02c10/cfg/ov02c10_default.json"),
         "symbol": "ov02c10_ipa_config_json",
     },
-    #{
-        #"path": os.path.join(esp_cam_sensor_dir, "sensor/sc202cs/cfg/sc202cs_default.json"),
-        #"symbol": "sc202cs_ipa_config_json",
-    #},
+    {
+        # Required for the M5Stack Tab5 (SC202CS sensor). Without this entry
+        # the IPA loader falls into "Unknown sensor: SC202CS", the ISP
+        # starts without any tuning (no CCM / AWB / gamma), the colors
+        # come out washed-out and YOLO11 / face-detect see nothing.
+        "path": os.path.join(esp_cam_sensor_dir, "sensor/sc202cs/cfg/sc202cs_default.json"),
+        "symbol": "sc202cs_ipa_config_json",
+    },
     {
         # ESP32-P4 eco4 (rev1.3) — matches current hardware of users reporting SC2336 issues
         "path": os.path.join(esp_cam_sensor_dir, "sensor/sc2336/cfg/sc2336_default_p4_eco4.json"),
@@ -251,11 +239,7 @@ const char {symbol_name}_start[] __attribute__((aligned(4))) =
         except Exception as e:
             print(f"[ESP-Video Build]  Erreur lors de l'embedding de {json_path}: {e}")
     else:
-        pass
-        # print(f"[ESP-Video Build]  Fichier JSON introuvable: {json_path}")
-
-# print("[ESP-Video Build] ========================================")
-# print("")
+        print(f"[ESP-Video Build]  Fichier JSON introuvable: {json_path}")
 
 # ========================================================================
 # Forcer la recompilation en modifiant le timestamp ET supprimant les .o
@@ -345,18 +329,9 @@ if sources_to_add:
     if os.path.exists(esp_ipa_lib_dir):
         env.Append(LIBPATH=[esp_ipa_lib_dir])
         env.Append(LIBS=["esp_ipa"])
-        # print("")
-        # print("[ESP-Video Build] ========================================")
-        # print("[ESP-Video Build] Linking avec libesp_ipa.a (fonctions IPA internes)")
-        # print("[ESP-Video Build]   Ordre de linking:")
-        # print("[ESP-Video Build]   1. libesp_video_full.a (version.o custom)")
-        # print("[ESP-Video Build]   2. libesp_ipa.a (fonctions internes seulement)")
-        # print("[ESP-Video Build] ========================================")
     else:
-        # print("[ESP-Video Build]  libesp_ipa.a introuvable!")
         pass
 else:
-    # print("[ESP-Video Build] Aucune source trouvée!")
     pass
 
 # Message simple final
