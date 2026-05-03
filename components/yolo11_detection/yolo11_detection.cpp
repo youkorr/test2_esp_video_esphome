@@ -4,7 +4,9 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_heap_caps.h"
 #include <algorithm>
+#include <string.h>
 
 #ifdef ESP_DL_MODEL_YOLO11
 #include "yolo11_detect.hpp"
@@ -127,14 +129,52 @@ void YOLO11DetectionComponent::setup() {
   this->mark_failed();
   return;
 #else
+
+  // 1. Initialisation SYNCHRONE du modèle (plus sûr, évite le Load Access Fault)
+#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
+  if (this->sdcard_model_path_ == nullptr) {
+    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
+    this->mark_failed();
+    return;
+  }
+  ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
+  this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
+#else
+  ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata");
+  this->object_detector_ = new YOLO11Detect();
+#endif
+
+  if (this->object_detector_ == nullptr) {
+    ESP_LOGE(TAG, "Failed to construct YOLO11Detect. Out of memory?");
+    this->mark_failed();
+    return;
+  }
+
+  this->object_detector_->set_score_thr(this->score_threshold_);
+  this->object_detector_->set_nms_thr(this->nms_threshold_);
+  this->is_model_loaded_ = true;
+  ESP_LOGI(TAG, "YOLO11 detector initialized successfully.");
+
+  // 2. Allocation du buffer mémoire dédié dans la PSRAM
+  //    (On suppose une résolution max de 1280x720)
+  size_t buffer_size = 1280 * 720 * 2; 
+  this->ai_buffer_ = (uint8_t *)heap_caps_aligned_calloc(64, 1, buffer_size, MALLOC_CAP_SPIRAM);
+  if (this->ai_buffer_ == nullptr) {
+      ESP_LOGE(TAG, "Failed to allocate AI detection buffer in PSRAM");
+      this->mark_failed();
+      return;
+  }
+
+  // 3. Lancement de la tâche d'inférence asynchrone 
+  //    (On utilise 16Ko de stack, 8Ko c'était trop petit et causait le crash)
   xTaskCreatePinnedToCore(
       YOLO11DetectionComponent::detection_task_wrapper,
       "yolo_detect",
-      8192,
+      16384,            // 16 KB Stack
       this,
-      5,
+      5,                // Priorité
       &this->detection_task_handle_,
-      1 // Core 1
+      1                 // Core 1
   );
 
   ESP_LOGI(TAG, "YOLO11 Object Detection background task started.");
@@ -148,94 +188,54 @@ void YOLO11DetectionComponent::detection_task_wrapper(void *arg) {
 
 void YOLO11DetectionComponent::detection_task() {
 #ifdef ESP_DL_MODEL_YOLO11
-  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-
-  ESP_LOGI(TAG, "Detection task awoken. Initializing YOLO11 model...");
-
-#ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
-  if (this->sdcard_model_path_ == nullptr) {
-    ESP_LOGE(TAG, "SD card mode enabled but no model path configured");
-    vTaskDelete(NULL);
-    return;
-  }
-  ESP_LOGI(TAG, "Loading YOLO11 model from SD card: %s", this->sdcard_model_path_);
-  this->object_detector_ = new YOLO11Detect(this->sdcard_model_path_);
-#else
-  ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata");
-  this->object_detector_ = new YOLO11Detect();
-#endif
-
-  if (this->object_detector_ == nullptr) {
-    ESP_LOGE(TAG, "Failed to construct YOLO11Detect. Out of memory?");
-    vTaskDelete(NULL);
-    return;
-  }
-
-  this->object_detector_->set_score_thr(this->score_threshold_);
-  this->object_detector_->set_nms_thr(this->nms_threshold_);
-  this->is_model_loaded_ = true;
-  ESP_LOGI(TAG, "YOLO11 detector initialized successfully.");
-
   while (true) {
-    // Attendre qu'une frame soit disponible
+    // Attendre le signal pour analyser la frame
     if (xSemaphoreTake(this->task_signal_, portMAX_DELAY) == pdTRUE) {
-      if (this->pending_img_data_ != nullptr) {
-        
-        dl::image::img_t img = {
-          .data = this->pending_img_data_,
-          .width = this->pending_width_,
-          .height = this->pending_height_,
-          .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
-        };
+      
+      dl::image::img_t img = {
+        .data = this->ai_buffer_, // On utilise le buffer copié
+        .width = this->current_width_,
+        .height = this->current_height_,
+        .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
+      };
 
-        // Lancement de l'inférence YOLO
-        std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
+      // Inférence YOLO
+      std::list<dl::detect::result_t> &detection_results = this->object_detector_->run(img);
 
-        if (xSemaphoreTake(this->detections_mutex_, portMAX_DELAY) == pdTRUE) {
-          this->cached_detections_.clear();
-          for (auto &result : detection_results) {
-            DetectionBox box;
-            box.x1 = result.box[0];
-            box.y1 = result.box[1];
-            box.x2 = result.box[2];
-            box.y2 = result.box[3];
-            box.score = result.score;
-            box.category = result.category;
-            this->cached_detections_.push_back(box);
-          }
-          xSemaphoreGive(this->detections_mutex_);
+      if (xSemaphoreTake(this->detections_mutex_, portMAX_DELAY) == pdTRUE) {
+        this->cached_detections_.clear();
+        for (auto &result : detection_results) {
+          DetectionBox box;
+          box.x1 = result.box[0];
+          box.y1 = result.box[1];
+          box.x2 = result.box[2];
+          box.y2 = result.box[3];
+          box.score = result.score;
+          box.category = result.category;
+          this->cached_detections_.push_back(box);
         }
+        xSemaphoreGive(this->detections_mutex_);
+      }
 
-        if (detection_results.size() > 0) {
-          for (auto &callback : this->on_object_detected_callbacks_) {
-            callback(detection_results.size());
-          }
+      if (detection_results.size() > 0) {
+        for (auto &callback : this->on_object_detected_callbacks_) {
+          callback(detection_results.size());
         }
       }
       
-      // Indiquer à process_frame_() que nous avons terminé
-      this->is_detecting_ = false;
+      this->is_detecting_ = false; // L'IA a fini
     }
   }
 #endif
 }
 
 void YOLO11DetectionComponent::loop() {
-  if (!this->init_triggered_) {
-    this->init_triggered_ = true;
-    if (this->detection_task_handle_ != nullptr) {
-        // Envoi du signal pour charger le modèle après le setup
-        xTaskNotifyGive(this->detection_task_handle_);
-    }
-    return;
-  }
-
   if (this->camera_ == nullptr || !this->camera_->is_streaming() || !this->is_model_loaded_) return;
   this->process_frame_();
 }
 
 void YOLO11DetectionComponent::process_frame_() {
-  // On ne lance une nouvelle détection que si la précédente est complètement terminée
+  // On ne lance une nouvelle détection que si la précédente est terminée
   if (this->is_detecting_) return;
 
   this->frame_counter_++;
@@ -247,22 +247,19 @@ void YOLO11DetectionComponent::process_frame_() {
 
   uint8_t* img_data = this->camera_->get_buffer_data(buffer);
   
-  if (img_data != nullptr) {
-    this->is_detecting_ = true; // Verrouille la boucle
-    this->pending_img_data_ = img_data;
-    this->pending_width_ = this->camera_->get_image_width();
-    this->pending_height_ = this->camera_->get_image_height();
+  if (img_data != nullptr && this->ai_buffer_ != nullptr) {
+    this->is_detecting_ = true;
+    this->current_width_ = this->camera_->get_image_width();
+    this->current_height_ = this->camera_->get_image_height();
     
-    // Déclenche l'inférence
+    // COPIE de l'image dans le buffer dédié pour éviter la corruption de mémoire
+    memcpy(this->ai_buffer_, img_data, this->current_width_ * this->current_height_ * 2);
+    
+    // Réveille la tâche pour qu'elle analyse l'image copiée
     xSemaphoreGive(this->task_signal_);
-    
-    // On attend ACTIVE MENT que YOLO termine avant de relâcher le buffer.
-    // Cela bloque ESPHome quelques ms, mais empêche la corruption de mémoire (Load access fault).
-    while (this->is_detecting_) {
-        vTaskDelay(1);
-    }
   }
 
+  // On relâche la caméra immédiatement, sans bloquer
   this->camera_->release_buffer(buffer);
 }
 
