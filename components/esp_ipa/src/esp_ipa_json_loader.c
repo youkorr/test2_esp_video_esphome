@@ -29,6 +29,9 @@ extern const size_t ov5647_ipa_config_json_size;
 extern const char sc2336_ipa_config_json_start[];
 extern const char *sc2336_ipa_config_json_end;
 extern const size_t sc2336_ipa_config_json_size;
+extern const char sc202cs_ipa_config_json_start[];
+extern const char *sc202cs_ipa_config_json_end;
+extern const size_t sc202cs_ipa_config_json_size;
 
 /**
  * @brief Parse CCM (Color Correction Matrix) from JSON
@@ -284,7 +287,7 @@ static esp_err_t parse_contrast_from_json(cJSON *sensor_root, esp_ipa_contrast_c
 /**
  * @brief Load IPA configuration from embedded JSON
  *
- * @param sensor_name Sensor name (e.g., "OV02C10", "OV5647")
+ * @param sensor_name Sensor name (e.g., "OV02C10", "OV5647", "SC202CS")
  * @param ipa_json_config Output structure with parsed JSON config
  * @return ESP_OK on success, error code otherwise
  */
@@ -299,21 +302,29 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
     const char *json_data = NULL;
     size_t json_size = 0;
 
-    // Sélectionner le JSON embarqué selon le capteur
-    if (strcmp(sensor_name, "OV02C10") == 0 || strcmp(sensor_name, "ov02c10") == 0) {
+    // Sélectionner le JSON embarqué selon le capteur. La comparaison
+    // accepte la casse haute et basse pour ne pas être surprise par les
+    // différences de notation entre drivers (cam_dev->name peut sortir
+    // "SC202CS" alors que les Kconfig utilisent "sc202cs").
+    if (strcasecmp(sensor_name, "OV02C10") == 0) {
         json_data = ov02c10_ipa_config_json_start;
         json_size = ov02c10_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV02C10 JSON (%zu bytes)", json_size);
-    } else if (strcmp(sensor_name, "OV5647") == 0 || strcmp(sensor_name, "ov5647") == 0) {
+    } else if (strcasecmp(sensor_name, "OV5647") == 0) {
         json_data = ov5647_ipa_config_json_start;
         json_size = ov5647_ipa_config_json_size;
         ESP_LOGI(TAG, "Using OV5647 JSON (%zu bytes)", json_size);
-    } else if (strcmp(sensor_name, "SC2336") == 0 || strcmp(sensor_name, "sc2336") == 0) {
+    } else if (strcasecmp(sensor_name, "SC2336") == 0) {
         json_data = sc2336_ipa_config_json_start;
         json_size = sc2336_ipa_config_json_size;
         ESP_LOGI(TAG, "Using SC2336 JSON (%zu bytes) [ESP32-P4 eco4]", json_size);
+    } else if (strcasecmp(sensor_name, "SC202CS") == 0) {
+        json_data = sc202cs_ipa_config_json_start;
+        json_size = sc202cs_ipa_config_json_size;
+        ESP_LOGI(TAG, "Using SC202CS JSON (%zu bytes) [M5Stack Tab5]", json_size);
     } else {
         ESP_LOGE(TAG, "Unknown sensor: %s", sensor_name);
+        ESP_LOGE(TAG, "Supported sensors: OV02C10, OV5647, SC2336, SC202CS");
         return ESP_ERR_NOT_SUPPORTED;
     }
 
@@ -335,10 +346,21 @@ esp_err_t esp_ipa_load_json_config(const char *sensor_name, esp_ipa_json_config_
         // Essayer en minuscules
         char sensor_lower[32];
         strncpy(sensor_lower, sensor_name, sizeof(sensor_lower) - 1);
+        sensor_lower[sizeof(sensor_lower) - 1] = '\0';
         for (int i = 0; sensor_lower[i]; i++) {
-            sensor_lower[i] = tolower(sensor_lower[i]);
+            sensor_lower[i] = tolower((unsigned char)sensor_lower[i]);
         }
         sensor_root = cJSON_GetObjectItem(root, sensor_lower);
+    }
+    if (!sensor_root) {
+        // Essayer en majuscules
+        char sensor_upper[32];
+        strncpy(sensor_upper, sensor_name, sizeof(sensor_upper) - 1);
+        sensor_upper[sizeof(sensor_upper) - 1] = '\0';
+        for (int i = 0; sensor_upper[i]; i++) {
+            sensor_upper[i] = toupper((unsigned char)sensor_upper[i]);
+        }
+        sensor_root = cJSON_GetObjectItem(root, sensor_upper);
     }
 
     if (!sensor_root) {
