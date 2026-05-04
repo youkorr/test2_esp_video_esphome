@@ -129,7 +129,6 @@ void YOLO11DetectionComponent::setup() {
   this->mark_failed();
   return;
 #else
-  // Launch the background task. Initialization will happen inside the task.
   xTaskCreatePinnedToCore(
       YOLO11DetectionComponent::detection_task_wrapper,
       "yolo_detect",
@@ -137,7 +136,7 @@ void YOLO11DetectionComponent::setup() {
       this,
       5,
       &this->detection_task_handle_,
-      1 // Core 1
+      1 
   );
 
   ESP_LOGI(TAG, "YOLO11 Object Detection background task started.");
@@ -152,7 +151,7 @@ void YOLO11DetectionComponent::detection_task_wrapper(void *arg) {
 void YOLO11DetectionComponent::detection_task() {
 #ifdef ESP_DL_MODEL_YOLO11
   ESP_LOGI(TAG, "Detection task running. Initializing model...");
-  esp_task_wdt_reset(); // Feed WDT before heavy load
+  esp_task_wdt_reset(); 
 
 #ifdef CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
   if (this->sdcard_model_path_ == nullptr) {
@@ -166,7 +165,7 @@ void YOLO11DetectionComponent::detection_task() {
   this->object_detector_ = new YOLO11Detect();
 #endif
 
-  esp_task_wdt_reset(); // Feed WDT after load
+  esp_task_wdt_reset(); 
 
   if (this->object_detector_ == nullptr) {
     ESP_LOGE(TAG, "Failed to construct YOLO11Detect");
@@ -179,7 +178,6 @@ void YOLO11DetectionComponent::detection_task() {
   ESP_LOGI(TAG, "YOLO11 detector initialized successfully.");
 
   while (true) {
-    // Wait for a new frame signal
     if (xSemaphoreTake(this->task_signal_, portMAX_DELAY) == pdTRUE) {
       if (this->pending_img_data_ != nullptr) {
         
@@ -213,7 +211,7 @@ void YOLO11DetectionComponent::detection_task() {
           }
         }
       }
-      this->is_detecting_ = false; // Mark detection as finished
+      this->is_detecting_ = false; 
     }
   }
 #endif
@@ -225,7 +223,6 @@ void YOLO11DetectionComponent::loop() {
 }
 
 void YOLO11DetectionComponent::process_frame_() {
-  // If the task is busy, skip this frame
   if (this->is_detecting_) return;
 
   this->frame_counter_++;
@@ -242,13 +239,9 @@ void YOLO11DetectionComponent::process_frame_() {
     this->pending_img_data_ = img_data;
     this->pending_width_ = this->camera_->get_image_width();
     this->pending_height_ = this->camera_->get_image_height();
-    
-    // Signal the background task to start
     xSemaphoreGive(this->task_signal_);
   }
 
-  // Warning: in a real async environment, we shouldn't release the buffer until the task finishes.
-  // Assuming ESP32-P4 camera buffers persist long enough or are handled via psram double-buffering.
   this->camera_->release_buffer(buffer);
 }
 
@@ -261,10 +254,6 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
 #ifdef ESP_DL_MODEL_YOLO11
   if (img_data == nullptr || this->detections_mutex_ == nullptr) return;
 
-  // Use the same drawing API as pedestrian_detection / face_detection so the
-  // resulting framing is visually consistent (clean 2-pixel hollow rectangles
-  // via the official ESP-DL drawing routine, instead of our hand-rolled
-  // 4-nested-loop version which produced thicker / fuzzier corners).
   dl::image::img_t img = {
     .data = img_data,
     .width = width,
@@ -272,11 +261,6 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
     .pix_type = dl::image::DL_IMAGE_PIX_TYPE_RGB565
   };
 
-  // RGB565 little-endian, 2 bytes per pixel.
-  // category 0  = person  -> red
-  // category 2  = car     -> green
-  // category 16 = dog     -> blue
-  // others                -> yellow
   static const std::vector<uint8_t> RED    = {0x00, 0xF8};
   static const std::vector<uint8_t> GREEN  = {0xE0, 0x07};
   static const std::vector<uint8_t> BLUE   = {0x1F, 0x00};
@@ -284,7 +268,6 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
 
   if (xSemaphoreTake(this->detections_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
     for (auto &box : this->cached_detections_) {
-      // Clamp identical to pedestrian_detection.cpp
       int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
       int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
       int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
@@ -298,10 +281,9 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
         default: color = &YELLOW; break;
       }
 
+      // Dessiner la boite avec sa couleur spécifique
       dl::image::draw_hollow_rectangle(img, x1, y1, x2, y2, *color, 2);
 
-      // Compact label drawn directly above the box. We keep the manual
-      // 5x7 font here because dl::image doesn't ship a text helper.
       const char *class_name = "Unknown";
       if (box.category >= 0 && box.category < 80) {
         class_name = COCO_CLASSES[box.category];
@@ -309,15 +291,16 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
       char label[64];
       snprintf(label, sizeof(label), "%s %d%%", class_name, (int)(box.score * 100));
 
-      // Convert std::vector<uint8_t> back to a uint16_t for the text helper.
-      // This also keeps the label colour in sync with the box colour.
-      uint16_t text_color = (uint16_t)((*color)[1] << 8) | (*color)[0];
-
+      // --- CONFIGURATION TEXTE ---
+      uint16_t text_color_white = 0xFFFF; // Blanc pur en RGB565
+      int text_scale = 2;                 // Taille doublée
       int text_x = std::max(0, x1);
-      // 7 px font * scale 1 = 7 px tall, leave a 2 px gap above the box.
-      int text_y = std::max(0, y1 - 18);
+      
+      // On place le texte 18px au dessus du rectangle (14px de police + 4px marge)
+      int text_y = std::max(0, y1 - 18); 
+
       this->draw_text((uint16_t *)img_data, width, height,
-                      text_x, text_y, label, text_color, 2);
+                      text_x, text_y, label, text_color_white, text_scale);
     }
     xSemaphoreGive(this->detections_mutex_);
   }
