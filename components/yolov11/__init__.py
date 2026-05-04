@@ -22,7 +22,6 @@ the ESP32-S3 has no hardware JPEG decoder and software decode would
 crash inference under 5 fps. Set `pixel_format: rgb565` on your
 esp32_camera block.
 """
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
