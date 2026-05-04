@@ -1,15 +1,14 @@
 """
 Build script for the ESP32-S3 yolov11 ESPHome component.
 
-This is the S3 counterpart to yolo11_detection/yolo11_detection_build.py
-(which targets ESP32-P4). It pulls in the ESP-DL sources, the YOLO11
-wrapper, the dotprod fallback, and embeds the model as flash rodata
-unless YOLOV11_MODEL_FROM_FILE is defined.
+Pulls in the ESP-DL sources for ESP32-S3 and embeds the YOLO11 model
+as flash rodata. The yolo11_detect inner wrapper (.cpp + .hpp) lives
+INSIDE the yolov11/ component now, so it is auto-compiled by ESPHome's
+main src/ pass and we don't have to add it from a sibling directory.
 """
 
 import os
 import glob
-import shutil
 import sys
 
 Import("env")  # noqa: F821 (provided by SCons / PlatformIO)
@@ -156,21 +155,20 @@ if os.path.exists(esp_dl_dir):
         print("[YOLOv11 S3 Build] Linked libfbs_model.a (S3)")
 
 # ---------------------------------------------------------------------------
-# yolo11_detect inner wrapper (reused from the existing components/)
+# yolo11_detect inner wrapper now lives INSIDE this component
+# (yolov11/yolo11_detect.hpp + yolov11/yolo11_detect_inner.cpp), so we
+# don't need to pull anything from the sibling yolo11_detect/ directory.
+# We only need to keep the include path for the .hpp visible to ESPHome's
+# main src/ build, and that's already handled because the file is in
+# the component's own dir.
 # ---------------------------------------------------------------------------
-yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
-if os.path.exists(yolo11_detect_dir):
-    env.Append(CPPPATH=[yolo11_detect_dir])
-    src = os.path.join(yolo11_detect_dir, "yolo11_detect.cpp")
-    if os.path.exists(src):
-        sources_to_add.append(src)
-        print(f"[YOLOv11 S3 Build] + yolo11_detect.cpp")
-else:
-    sys.exit("[YOLOv11 S3 Build] FATAL: yolo11_detect/ component is missing")
 
 # ---------------------------------------------------------------------------
 # Embed model in flash rodata (Option C)
 # Only when YOLOV11_MODEL_FROM_FILE is NOT defined.
+# Also silently skip if the file already exists with the same model
+# (the embed C file lives in component_dir which gets re-used across
+# rebuilds).
 # ---------------------------------------------------------------------------
 def has_define(name):
     for d in env.get("CPPDEFINES", []):
@@ -182,21 +180,22 @@ def has_define(name):
 
 model_from_file = has_define("YOLOV11_MODEL_FROM_FILE")
 if not model_from_file:
-    # Look for any .espdl in components/yolov11/models/ then fall back to
-    # the upstream P4 file (compatible at the binary level for s8_v1).
     candidates = []
     own_dir = os.path.join(component_dir, "models")
     if os.path.isdir(own_dir):
         candidates += sorted(glob.glob(os.path.join(own_dir, "*.espdl")))
-    fallback = os.path.join(yolo11_detect_dir, "models", "p4",
-                            "yolo11_detect_s8_v1.espdl")
+    # Fallback: the model in the sibling yolo11_detect/ external_components
+    # directory. ESPHome syncs the whole repo's components/ folder, so this
+    # path exists at build time even though yolo11_detect itself is not
+    # listed in the user's `components: [...]`.
+    fallback = os.path.join(parent_components_dir, "yolo11_detect", "models",
+                            "p4", "yolo11_detect_s8_v1.espdl")
     if not candidates and os.path.exists(fallback):
         candidates.append(fallback)
 
     if not candidates:
         sys.exit("[YOLOv11 S3 Build] FATAL: no .espdl model found for embedding. "
-                 "Either drop a .espdl in components/yolov11/models/ or use "
-                 "model_id: with the file: platform.")
+                 "Drop a .espdl in components/yolov11/models/.")
 
     model_path = candidates[0]
     embed_c = os.path.join(component_dir, "yolov11_model_embed.c")
@@ -225,15 +224,19 @@ if not model_from_file:
     ]
     with open(embed_c, "w") as f:
         f.write("\n".join(lines))
-    sources_to_add.append(embed_c)
+    # ESPHome auto-compiles every .c in the component dir, so this gets
+    # picked up by the main src/ pass. Don't add it to sources_to_add to
+    # avoid double-compilation.
     print(f"[YOLOv11 S3 Build] Embedded {len(data)} bytes -> "
-          f"{os.path.basename(embed_c)}")
+          f"{os.path.basename(embed_c)} (auto-compiled by main pass)")
 else:
     print("[YOLOv11 S3 Build] YOLOV11_MODEL_FROM_FILE set - skipping flash embed")
 
 # ---------------------------------------------------------------------------
 # Local stub helpers: dotprod (no DSP) + mbedtls AES stub
-# Pull from face_detection if our own components don't ship them.
+# These need to be added to OUR static lib because they reference
+# ESP-DL internals; ESPHome's main src/ pass doesn't have those on
+# its include path automatically.
 # ---------------------------------------------------------------------------
 def _add_or_fallback(local_name, fallback_dir):
     local = os.path.join(component_dir, local_name)
