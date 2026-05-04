@@ -315,9 +315,9 @@ void YOLO11DetectionComponent::draw_results_(uint8_t *img_data, uint16_t width, 
 
       int text_x = std::max(0, x1);
       // 7 px font * scale 1 = 7 px tall, leave a 2 px gap above the box.
-      int text_y = std::max(0, y1 - 9);
+      int text_y = std::max(0, y1 - 18);
       this->draw_text((uint16_t *)img_data, width, height,
-                      text_x, text_y, label, text_color, 1);
+                      text_x, text_y, label, text_color, 2);
     }
     xSemaphoreGive(this->detections_mutex_);
   }
