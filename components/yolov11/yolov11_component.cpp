@@ -1,25 +1,18 @@
 #include "yolov11_component.h"
+#include "yolo11_detect.hpp"
 #include "esphome/core/log.h"
 #include "esphome/core/application.h"
 
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 
-#include <algorithm>
-#include <cstdio>
-#include <cstring>
-
 #ifdef ESP_DL_MODEL_YOLO11
-#include "yolo11_detect.hpp"
 #include "dl_image.hpp"
 #endif
 
-#ifdef YOLOV11_MODEL_FROM_FILE
-// jesserockz/esphome-components file: component
-// Wrapped in try/catch include because the header path may differ across
-// versions.
-#include "esphome/components/file/file.h"
-#endif
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
 
 namespace esphome {
 namespace yolov11 {
@@ -39,6 +32,34 @@ static const char *const COCO_CLASSES[] = {
     "hair_drier", "toothbrush",
 };
 static constexpr int COCO_CLASS_COUNT = sizeof(COCO_CLASSES) / sizeof(COCO_CLASSES[0]);
+
+
+// ---------------------------------------------------------------------------
+// stash_frame_ - shared helper between camera callback variants
+// ---------------------------------------------------------------------------
+// We accept any camera-image-like type via templating because newer
+// ESPHome versions have renamed the parameter type from `CameraImage`
+// to `CameraImageData`. The fields we touch (`get_data_buffer()` and
+// `get_data_length()`) are stable across both.
+namespace {
+template<typename ImagePtr>
+inline void stash_frame_impl(YOLOv11Component *self, const ImagePtr &img,
+                             SemaphoreHandle_t state_mutex,
+                             SemaphoreHandle_t frame_signal,
+                             uint8_t **dst_data, size_t *dst_size) {
+  if (img == nullptr) return;
+  uint8_t *data = img->get_data_buffer();
+  size_t len = img->get_data_length();
+  if (data == nullptr || len == 0) return;
+  if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
+    *dst_data = data;
+    *dst_size = len;
+    xSemaphoreGive(state_mutex);
+    xSemaphoreGive(frame_signal);
+  }
+  (void)self;
+}
+}  // namespace
 
 
 // =========================================================================
@@ -63,12 +84,17 @@ void YOLOv11Component::setup() {
     return;
   }
 
-  // Register on every captured frame. The esp32_camera component
-  // already serialises calls; we just stash the buffer pointer and
-  // signal the inference task.
+  // Register on every captured frame. We use `auto` for the parameter
+  // type so this code compiles unchanged whether ESPHome's
+  // esp32_camera component calls back with CameraImage,
+  // CameraImageData, or anything else exposing get_data_buffer()/
+  // get_data_length() through a shared_ptr.
   this->camera_->add_image_callback(
-      [this](std::shared_ptr<esp32_camera::CameraImage> img) {
-        this->on_camera_image_(img);
+      [this](auto img) {
+        stash_frame_impl(this, img,
+                         this->state_mutex_, this->frame_signal_,
+                         &this->pending_frame_data_,
+                         &this->pending_frame_size_);
       });
 
 #ifdef ESP_DL_MODEL_YOLO11
@@ -103,38 +129,13 @@ void YOLOv11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  NMS threshold:      %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d ms", this->detection_interval_ms_);
   ESP_LOGCONFIG(TAG, "  Max detections:     %d", this->max_detections_);
-#ifdef YOLOV11_MODEL_FROM_FILE
-  ESP_LOGCONFIG(TAG, "  Model source:       file: (runtime buffer)");
-#else
-  ESP_LOGCONFIG(TAG, "  Model source:       flash rodata (build-embedded)");
-#endif
-  ESP_LOGCONFIG(TAG, "  Model ready:        %s", this->model_ready_ ? "yes" : "no");
-}
-
-
-// =========================================================================
-// camera image callback
-// =========================================================================
-void YOLOv11Component::on_camera_image_(
-    const std::shared_ptr<esp32_camera::CameraImage> &img) {
-  if (img == nullptr) return;
-
-  uint8_t *data = img->get_data_buffer();
-  size_t len = img->get_data_length();
-  if (data == nullptr || len == 0) return;
-
-  // Drop frames if the inference task hasn't consumed the previous one
-  // yet. This is the standard "single-slot drop-old" pattern.
-  if (xSemaphoreTake(this->state_mutex_, pdMS_TO_TICKS(2)) == pdTRUE) {
-    this->pending_frame_data_ = data;
-    this->pending_frame_size_ = len;
-    // The esp32_camera reports the configured resolution. The user MUST
-    // set pixel_format: rgb565 in YAML for inference to work; we don't
-    // attempt JPEG decode here.
-    // We'll read width/height from the camera at inference time.
-    xSemaphoreGive(this->state_mutex_);
-    xSemaphoreGive(this->frame_signal_);  // wake the task (no-op if already pending)
+  if (this->external_model_data_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Model source:       file: buffer (%zu bytes @ %p)",
+                  this->external_model_size_, this->external_model_data_);
+  } else {
+    ESP_LOGCONFIG(TAG, "  Model source:       flash rodata (build-embedded)");
   }
+  ESP_LOGCONFIG(TAG, "  Model ready:        %s", this->model_ready_ ? "yes" : "no");
 }
 
 
@@ -147,7 +148,6 @@ void YOLOv11Component::inference_task_trampoline(void *arg) {
 
 void YOLOv11Component::inference_task_loop_() {
 #ifdef ESP_DL_MODEL_YOLO11
-  // Initial model load - several seconds; feed the WDT explicitly.
   esp_task_wdt_reset();
   if (!this->initialise_detector_()) {
     ESP_LOGE(TAG, "Detector initialisation failed; task exiting");
@@ -158,7 +158,6 @@ void YOLOv11Component::inference_task_loop_() {
   esp_task_wdt_reset();
 
   while (true) {
-    // Wait for a new frame signal. portMAX_DELAY blocks until camera fires.
     if (xSemaphoreTake(this->frame_signal_, portMAX_DELAY) != pdTRUE) {
       continue;
     }
@@ -179,71 +178,34 @@ void YOLOv11Component::inference_task_loop_() {
 
 
 // =========================================================================
-// initialise_detector_ - constructs ESP-DL Model + preprocessor + postproc.
+// initialise_detector_ - constructs the ESP-DL YOLO11Detect wrapper.
+//
+// We always use the built-in YOLO11Detect (which loads from the
+// _binary_yolo11_detect_espdl_start symbol). When the user supplied an
+// `external_model_data_` buffer we still rely on the build-embedded
+// model for the actual inference - the file: integration will be a
+// no-op in this revision (logged so the user knows). Future work: pass
+// the buffer to a dl::Model in-memory constructor.
 // =========================================================================
 bool YOLOv11Component::initialise_detector_() {
 #ifdef ESP_DL_MODEL_YOLO11
-  ESP_LOGI(TAG, "Loading YOLO11 model...");
+  ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata...");
 
-#ifdef YOLOV11_MODEL_FROM_FILE
-  // ----- model from file: -----
-  if (this->model_file_ == nullptr) {
-    ESP_LOGE(TAG, "model_id was set but the file: pointer is null");
-    return false;
+  if (this->external_model_data_ != nullptr) {
+    ESP_LOGW(TAG, "model_id was provided (%zu bytes) but runtime swapping is not",
+             this->external_model_size_);
+    ESP_LOGW(TAG, "implemented yet - using the build-embedded model instead.");
   }
-  esphome::file::File *f = reinterpret_cast<esphome::file::File *>(this->model_file_);
-  // The file: API exposes .data() and .size() (pattern used by the
-  // jesserockz component). If your version uses different names, adjust
-  // here.
-  const uint8_t *bytes = f->data();
-  size_t nbytes = f->size();
-  if (!bytes || !nbytes) {
-    ESP_LOGE(TAG, "file: returned empty buffer");
-    return false;
-  }
-  ESP_LOGI(TAG, "Loading model from file: buffer %p (%zu bytes)", bytes, nbytes);
-  // dl::Model has a constructor that takes a raw pointer + size for the
-  // in-memory case. We use location 0 (flash rodata) to skip any partition
-  // / SD-card path lookup.
-  this->model_ = new dl::Model(reinterpret_cast<const char *>(bytes),
-                               static_cast<fbs::model_location_type_t>(0));
-#else
-  // ----- model from flash rodata (Option C, embedded at build) -----
-  ESP_LOGI(TAG, "Loading model from flash rodata (built-in)");
-  // The yolo11_detect upstream wrapper handles the
-  // _binary_yolo11_detect_espdl_start symbol for us.
-  this->model_ = nullptr;  // we use YOLO11Detect below instead of raw Model
-#endif
 
-  // Create the YOLO11 wrapper (handles preprocessor + postprocessor).
-  YOLO11Detect *detector = nullptr;
-#ifdef YOLOV11_MODEL_FROM_FILE
-  // When loading from file, we need a flavour of YOLO11Impl that takes
-  // an existing dl::Model. The upstream wrapper doesn't expose that
-  // path directly, so we construct it via the standard ctor and the
-  // build flags ensure flash_rodata is used internally; the model_
-  // member above was just an early validation of the file: bytes.
-  // For the actual inference we let YOLO11Detect resolve the model
-  // internally - this means the file: source effectively only works
-  // when the build-embedded model name matches the file content.
-  // Future work: extend YOLO11Detect to accept a (data,size) pair.
-  detector = new YOLO11Detect();
-#else
-  detector = new YOLO11Detect();
-#endif
+  YOLO11Detect *detector = new YOLO11Detect();
   if (detector == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate YOLO11Detect");
     return false;
   }
   detector->set_score_thr(this->score_threshold_);
   detector->set_nms_thr(this->nms_threshold_);
-
-  // Stash the detector through the dl::Model alias so we can free it
-  // later. We keep it in a void* via reinterpret to avoid leaking
-  // YOLO11Detect into the public header.
   this->model_ = reinterpret_cast<dl::Model *>(detector);
-
-  ESP_LOGI(TAG, "YOLO11 model loaded (score=%.2f nms=%.2f)",
+  ESP_LOGI(TAG, "YOLO11 detector initialised (score=%.2f nms=%.2f)",
            this->score_threshold_, this->nms_threshold_);
   return true;
 #else
@@ -269,14 +231,11 @@ void YOLOv11Component::run_one_inference_() {
   }
   if (!frame || !frame_size) return;
 
-  // Read camera resolution. esp32_camera reports the configured size.
   uint16_t w = this->camera_->get_max_horizontal_resolution();
   uint16_t h = this->camera_->get_max_vertical_resolution();
   if (w == 0 || h == 0) return;
 
-  // Sanity check: RGB565 means 2 bytes per pixel.
   if (frame_size < (size_t) w * h * 2) {
-    // Probably JPEG. Tell the user once and bail.
     static bool warned = false;
     if (!warned) {
       ESP_LOGE(TAG, "Frame size %zu < expected %u for RGB565 %ux%u - "
@@ -297,7 +256,6 @@ void YOLOv11Component::run_one_inference_() {
 
   std::list<dl::detect::result_t> &results = detector->run(img);
 
-  // Build the cached detection vector.
   std::vector<DetectionBox> dets;
   dets.reserve(results.size());
   for (const auto &r : results) {
@@ -316,14 +274,12 @@ void YOLOv11Component::run_one_inference_() {
 
   std::string summary = build_summary_(dets, this->max_detections_);
 
-  // Publish under the mutex so the text_sensor reading code stays consistent.
   if (xSemaphoreTake(this->state_mutex_, pdMS_TO_TICKS(20)) == pdTRUE) {
     this->cached_detections_ = dets;
     this->last_summary_ = summary;
     xSemaphoreGive(this->state_mutex_);
   }
 
-  // Notify listeners (text_sensor) and trigger callbacks (automation).
   for (auto *l : this->listeners_) {
     l->on_detections(dets, summary);
   }
@@ -334,9 +290,6 @@ void YOLOv11Component::run_one_inference_() {
 }
 
 
-// =========================================================================
-// build_summary_ - "person:87,car:62,..." format. max_items entries max.
-// =========================================================================
 std::string YOLOv11Component::build_summary_(
     const std::vector<DetectionBox> &dets, int max_items) {
   if (dets.empty()) return std::string("none");
@@ -355,11 +308,7 @@ std::string YOLOv11Component::build_summary_(
 }
 
 
-// =========================================================================
-// Public API
-// =========================================================================
 void YOLOv11Component::trigger_inference() {
-  // Force the inference task to wake even if interval hasn't elapsed.
   this->last_inference_ms_ = 0;
   if (this->frame_signal_) xSemaphoreGive(this->frame_signal_);
 }
