@@ -1,4 +1,5 @@
 #include "dl_tool_cache.hpp"
+#include <cstdio>
 
 namespace dl {
 namespace tool {
@@ -108,17 +109,12 @@ void autoload_func(uint32_t addr1, uint32_t size1, uint32_t addr2, uint32_t size
         uint8_t input1_enable = (addr1 < SOC_EXTRAM_DATA_HIGH) ? 1 : 0;
         uint8_t input2_enable = (addr2 < SOC_EXTRAM_DATA_HIGH) ? 1 : 0;
         struct autoload_config config = {
-            CACHE_AUTOLOAD_POSITIVE,
-            autoload_trigger,
-            input1_enable,
-            input2_enable,
-            addr1,
-            size1, // autoload max size 0x03FFFFFF
-            addr2,
-            size2, // autoload max size 0x03FFFFFF
+            autoload_enable,                // ena
+            CACHE_AUTOLOAD_POSITIVE,        // order
+            autoload_trigger,               // trigger
+            autoload_linesize,              // size
         };
         Cache_Config_DCache_Autoload(&config);
-        REG_SET_FIELD(EXTMEM_DCACHE_AUTOLOAD_CTRL_REG, EXTMEM_DCACHE_AUTOLOAD_SIZE, autoload_linesize); // default 0
         Cache_Enable_DCache_Autoload();
         // printf("autoload_start!\n");
     }
@@ -147,17 +143,12 @@ void autoload_func(uint32_t addr1, uint32_t size1)
         Cache_Disable_DCache_Autoload();
         uint8_t input1_enable = (addr1 < SOC_EXTRAM_DATA_HIGH) ? 1 : 0;
         struct autoload_config config = {
-            CACHE_AUTOLOAD_POSITIVE,
-            autoload_trigger,
-            input1_enable,
-            0,
-            addr1,
-            size1, // autoload max size 0x03FFFFFF
-            addr1,
-            size1, // autoload max size 0x03FFFFFF
+            autoload_enable,                // ena
+            CACHE_AUTOLOAD_POSITIVE,        // order
+            autoload_trigger,               // trigger
+            autoload_linesize,              // size
         };
         Cache_Config_DCache_Autoload(&config);
-        REG_SET_FIELD(EXTMEM_DCACHE_AUTOLOAD_CTRL_REG, EXTMEM_DCACHE_AUTOLOAD_SIZE, autoload_linesize); // default 0
         Cache_Enable_DCache_Autoload();
         // printf("autoload_start!\n");
     }
