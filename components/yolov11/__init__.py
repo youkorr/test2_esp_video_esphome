@@ -181,13 +181,15 @@ async def to_code(config):
         for inc in [
             "dl",
             "dl/tool/include",
-            "dl/tool/isa/esp32s3",
+            "dl/tool/isa/tie728",
+            "dl/tool/isa/xtensa",
             "dl/tool/src",
             "dl/tensor/include",
             "dl/tensor/src",
             "dl/base",
             "dl/base/isa",
-            "dl/base/isa/esp32s3",
+            "dl/base/isa/tie728",
+            "dl/base/isa/xtensa",
             "dl/math/include",
             "dl/math/src",
             "dl/model/include",
@@ -195,12 +197,10 @@ async def to_code(config):
             "dl/module/include",
             "dl/module/src",
             "fbs_loader/include",
-            "fbs_loader/lib/esp32s3",
             "fbs_loader/src",
             "vision/detect",
             "vision/image",
             "vision/image/isa",
-            "vision/image/isa/esp32s3",
         ]:
             inc_path = os.path.join(esp_dl_dir, inc)
             if os.path.exists(inc_path):
