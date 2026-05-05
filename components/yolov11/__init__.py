@@ -9,21 +9,9 @@ Camera input must be RGB565 - JPEG is NOT supported (the ESP32-S3 has
 no hardware JPEG decoder and software decode would crash inference
 under 5 fps). Set `pixel_format: rgb565` on your `esp32_camera:` block.
 
-YAML triggers:
-  - `on_object_detected:` (legacy name)
-  - `on_detection:`        (preferred, same trigger)
-Both fire after each successful inference with arguments
-(int object_count, std::string summary). The summary is a comma-
-separated list of "label:score%" entries.
-
-Action:
-  - `yolov11.inference` forces a one-shot inference on the latest frame.
-
 Model selection:
   - `model_path: ./my_model.espdl`  -> picks ANY .espdl file the user
-    drops next to the YAML and embeds it at build time. This is how to
-    use coco_detect_yolo11n_320_s8_v3.espdl or any other ESP-DL YOLO11
-    blob (s8_v1, 320_s8_v3, etc.) without rebuilding the component.
+    drops next to the YAML and embeds it at build time.
   - omitted: falls back to the bundled yolo11_detect_s8_v1.espdl model.
 """
 
@@ -64,7 +52,6 @@ esp32_camera_ns = cg.esphome_ns.namespace("esp32_camera")
 ESP32Camera = esp32_camera_ns.class_("ESP32Camera", cg.Component)
 
 
-# Trigger schema reused for both `on_detection:` and `on_object_detected:`.
 _TRIGGER_SCHEMA = automation.validate_automation(
     {
         cv.GenerateID(): cv.declare_id(ObjectDetectedTrigger),
@@ -88,17 +75,23 @@ def _validate_model_path(value):
     return value
 
 
+def _posix(p):
+    """Normalise a path to forward slashes so gcc -I flags work on Windows.
+
+    cg.add_build_flag(f"-I{path}") goes through platformio.ini's build_flags
+    which on Windows can mishandle backslash-laden paths (gcc treats `\\` as
+    line-continuation in some contexts and `\d` as an escape in others).
+    Using forward slashes is safe on every host OS - mingw and msys gcc
+    accept them on Windows just like on Linux.
+    """
+    return p.replace("\\", "/")
+
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(YOLOv11Component),
         cv.Required(CONF_ESP32_CAMERA_ID): cv.use_id(ESP32Camera),
-        # Path to a .espdl model file (relative to YAML, like images/fonts).
-        # When present, this file is embedded in flash rodata at build
-        # time and replaces the default yolo11_detect_s8_v1.espdl. Use it
-        # to drop in coco_detect_yolo11n_320_s8_v3.espdl (S3-optimised).
         cv.Optional(CONF_MODEL_PATH): _validate_model_path,
-        # Optional buffer reference (jesserockz file: -> const uint8_t[N]).
-        # Currently not used at runtime - the build-embedded model wins.
         cv.Optional(CONF_MODEL_ID): cv.use_id(cg.uint8),
         cv.Optional(CONF_SCORE_THRESHOLD, default=0.30): cv.float_range(min=0.0, max=1.0),
         cv.Optional(CONF_NMS_THRESHOLD, default=0.50): cv.float_range(min=0.0, max=1.0),
@@ -126,16 +119,14 @@ async def to_code(config):
     cg.add(var.set_inference_task_stack_size(config[CONF_INFERENCE_TASK_STACK_SIZE]))
     cg.add(var.set_inference_task_priority(config[CONF_INFERENCE_TASK_PRIORITY]))
 
-    # Forward model_path to the build script via an environment variable
-    # because PIO post-scripts can't easily read ESPHome config. Stored
-    # on cg.add_platformio_option as build_flags is the cleanest path.
     if CONF_MODEL_PATH in config:
         model_path = config[CONF_MODEL_PATH]
         if not os.path.isabs(model_path):
             model_path = os.path.join(CORE.config_dir, model_path)
-        # Use a CPP define to pass the path to yolov11_build.py via the
-        # CPPDEFINES env var. The build script reads it back.
-        cg.add_build_flag(f'-DYOLOV11_USER_MODEL_PATH="{model_path}"')
+        # Forward to the build script via a CPP define. Forward-slash the
+        # path so gcc on Windows doesn't choke on backslashes in the
+        # macro value.
+        cg.add_build_flag(f'-DYOLOV11_USER_MODEL_PATH="{_posix(model_path)}"')
 
     if CONF_MODEL_ID in config:
         model_arr = await cg.get_variable(config[CONF_MODEL_ID])
@@ -159,11 +150,25 @@ async def to_code(config):
     cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_LOCATION=0")
 
     # ------------------------------------------------------------------
-    # ESP-DL include paths (S3 variants) - made GLOBAL so ESPHome's
-    # main src/ files (yolov11_component.cpp et al) find them.
+    # ESP-DL include paths (S3 variants) - GLOBAL via PlatformIO build
+    # flags so ESPHome's main src/ pass (yolov11_component.cpp,
+    # yolo11_detect_inner.cpp, yolov11_text_sensor.cpp) finds the headers.
+    #
+    # IMPORTANT: ALL paths must be forward-slashed on Windows. gcc
+    # accepts forward slashes on every platform, while a raw Windows
+    # path like `C:\Users\foo\esp-dl\dl\base` written as `-IC:\Users\foo\
+    # esp-dl\dl\base` after platformio.ini parsing has unpredictable
+    # results: backslashes can be eaten as line-continuations or
+    # interpreted as escape sequences (\d, \t, \n, \U, ...). Forward
+    # slashes sidestep all of that.
     # ------------------------------------------------------------------
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
+
+    # Add the component's own dir + the parent dir so #include "..." for
+    # sibling headers (yolo11_detect.hpp lives next to yolov11_component.cpp)
+    # always works.
+    cg.add_build_flag(f"-I{_posix(component_dir)}")
 
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if os.path.exists(esp_dl_dir):
@@ -193,7 +198,7 @@ async def to_code(config):
         ]:
             inc_path = os.path.join(esp_dl_dir, inc)
             if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
+                cg.add_build_flag(f"-I{_posix(inc_path)}")
 
     # ------------------------------------------------------------------
     # Triggers (both yaml keys go through the same class)
@@ -210,17 +215,15 @@ async def to_code(config):
         )
 
     # ------------------------------------------------------------------
-    # Build script (post: extra_scripts) - compiles ESP-DL S3 sources
-    # and embeds the flash-rodata model.
+    # Build script (post: extra_scripts)
     # ------------------------------------------------------------------
     build_script = os.path.join(component_dir, "yolov11_build.py")
     if os.path.exists(build_script):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script}"])
+        cg.add_platformio_option("extra_scripts", [f"post:{_posix(build_script)}"])
 
 
 # ============================================================================
 # Action: yolov11.inference
-# Force a one-shot inference on the latest camera frame.
 # ============================================================================
 INFERENCE_ACTION_SCHEMA = cv.Schema(
     {
