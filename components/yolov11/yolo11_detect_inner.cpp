@@ -63,7 +63,7 @@ YOLO11Impl::YOLO11Impl(const char *model_name)
 #else
     // ESP32-S3 path - DVP camera delivers RGB565 big-endian
     m_image_preprocessor = new dl::image::ImagePreprocessor(
-        m_model, {0, 0, 0}, {255, 255, 255}, DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
+        m_model, {0, 0, 0}, {255, 255, 255}, dl::image::DL_IMAGE_CAP_RGB565_BIG_ENDIAN);
 #endif
 
     m_postprocessor =
