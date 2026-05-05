@@ -13,204 +13,6 @@
 namespace dl {
 
 /**
- * @brief Exponent info for per-tensor / per-channel quantization.
- *
- * Per-tensor: m_exponent only, zero heap allocation.
- * Per-channel: heap-allocated m_exponents array.
- * Provides operator int() so existing `DL_SCALE(tensor->exponent)` code works unchanged.
- */
-class ExponentInfo {
-private:
-    int m_exponent;
-    int *m_exponents;
-    int m_size;
-
-public:
-    /**
-     * @brief Construct a per-tensor ExponentInfo with a single exponent value.
-     * @param exponent The exponent value for per-tensor quantization. Default is 0.
-     */
-    ExponentInfo(int exponent = 0) : m_exponent(exponent), m_exponents(nullptr), m_size(1) {}
-
-    /**
-     * @brief Construct an ExponentInfo from a vector of exponents.
-     * @param exponents Vector of exponent values. If size <= 1, uses per-tensor mode;
-     *                  otherwise uses per-channel mode with heap allocation.
-     */
-    ExponentInfo(const std::vector<int> &exponents) : m_exponents(nullptr), m_size(1)
-    {
-        if (exponents.size() <= 1) {
-            m_exponent = exponents.empty() ? 0 : exponents[0];
-        } else {
-            m_size = exponents.size();
-            m_exponents = new int[m_size];
-            for (int i = 0; i < m_size; i++) {
-                m_exponents[i] = exponents[i];
-            }
-            m_exponent = 0;
-        }
-    }
-
-    /**
-     * @brief Destroy the ExponentInfo object and free heap-allocated memory.
-     */
-    ~ExponentInfo()
-    {
-        delete[] m_exponents;
-        m_exponents = nullptr;
-    }
-
-    /**
-     * @brief Copy constructor.
-     * @param other The ExponentInfo object to copy from.
-     */
-    ExponentInfo(const ExponentInfo &other) : m_exponent(other.m_exponent), m_exponents(nullptr), m_size(other.m_size)
-    {
-        if (other.m_exponents && m_size > 1) {
-            m_exponents = new int[m_size];
-            for (int i = 0; i < m_size; i++) {
-                m_exponents[i] = other.m_exponents[i];
-            }
-        }
-    }
-
-    /**
-     * @brief Copy assignment operator.
-     * @param other The ExponentInfo object to assign from.
-     * @return Reference to this object.
-     */
-    ExponentInfo &operator=(const ExponentInfo &other)
-    {
-        if (this != &other) {
-            delete[] m_exponents;
-            m_exponent = other.m_exponent;
-            m_size = other.m_size;
-            if (other.m_exponents && m_size > 1) {
-                m_exponents = new int[m_size];
-                for (int i = 0; i < m_size; i++) {
-                    m_exponents[i] = other.m_exponents[i];
-                }
-            } else {
-                m_exponents = nullptr;
-            }
-        }
-        return *this;
-    }
-
-    /**
-     * @brief Move constructor.
-     * @param other The ExponentInfo object to move from.
-     */
-    ExponentInfo(ExponentInfo &&other) noexcept :
-        m_exponent(other.m_exponent), m_exponents(other.m_exponents), m_size(other.m_size)
-    {
-        other.m_exponents = nullptr;
-        other.m_size = 1;
-    }
-
-    /**
-     * @brief Move assignment operator.
-     * @param other The ExponentInfo object to move from.
-     * @return Reference to this object.
-     */
-    ExponentInfo &operator=(ExponentInfo &&other) noexcept
-    {
-        if (this != &other) {
-            delete[] m_exponents;
-            m_exponent = other.m_exponent;
-            m_exponents = other.m_exponents;
-            m_size = other.m_size;
-            other.m_exponents = nullptr;
-            other.m_size = 1;
-        }
-        return *this;
-    }
-
-    /**
-     * @brief Assign a single integer value as per-tensor exponent.
-     * @param value The exponent value to assign.
-     * @return Reference to this object.
-     */
-    ExponentInfo &operator=(int value)
-    {
-        delete[] m_exponents;
-        m_exponents = nullptr;
-        m_size = 1;
-        m_exponent = value;
-        return *this;
-    }
-
-    /**
-     * @brief Get exponent value.
-     * @param ch  Channel index. -1 (default) returns per-tensor value.
-     *            ch >= 0 returns per-channel value if available, otherwise per-tensor.
-     * @return The exponent value for the specified channel or per-tensor exponent.
-     */
-    int get(int ch = -1) const
-    {
-        if (ch < 0 || !m_exponents) {
-            return m_exponent;
-        }
-        return m_exponents[ch];
-    }
-
-    /**
-     * @brief Implicit conversion to int, returns the per-tensor exponent value.
-     * @return The per-tensor exponent value.
-     */
-    operator int() const { return m_exponent; }
-
-    /**
-     * @brief Check if using per-channel quantization.
-     * @return true if per-channel exponents are stored, false otherwise.
-     */
-    bool is_per_channel() const { return m_exponents != nullptr && m_size > 1; }
-
-    /**
-     * @brief Get the number of channels.
-     * @return Number of channels for per-channel mode, or 1 for per-tensor mode.
-     */
-    int channel_size() const { return m_size; }
-
-    /**
-     * @brief Get pointer to exponent data.
-     * @return Pointer to per-channel exponents array if available, otherwise pointer to per-tensor exponent.
-     */
-    const int *data() const { return m_exponents ? m_exponents : &m_exponent; }
-
-    /**
-     * @brief Compare two ExponentInfo objects for equality.
-     * @param other The ExponentInfo object to compare with.
-     * @return true if both have the same exponent values, false otherwise.
-     */
-    bool operator==(const ExponentInfo &other) const
-    {
-        if (!this->is_per_channel() && !other.is_per_channel()) {
-            return this->m_exponent == other.m_exponent;
-        }
-        if (this->is_per_channel() != other.is_per_channel()) {
-            return false;
-        }
-        if (this->m_size != other.m_size) {
-            return false;
-        }
-        for (int i = 0; i < this->m_size; i++) {
-            if (this->m_exponents[i] != other.m_exponents[i]) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * @brief Compare two ExponentInfo objects for inequality.
-     * @param other The ExponentInfo object to compare with.
-     * @return true if exponent values differ, false if equal.
-     */
-    bool operator!=(const ExponentInfo &other) const { return !(*this == other); }
-};
-
-/**
  * @brief The data type of esp-dl is same as flatbuffer's data type.
  */
 typedef enum {
@@ -255,7 +57,7 @@ size_t dtype_sizeof(dtype_t dtype);
 const char *dtype_to_string(dtype_t dtype);
 
 /**
- * @brief Return activation type string
+ * @brief Return acivation type string
  */
 const char *activation_type_to_string(activation_type_t type);
 
@@ -299,7 +101,7 @@ public:
     int size;                     ///< size of element including padding
     std::vector<int> shape;       ///< shape of Tensor
     dtype_t dtype;                ///< data type of element
-    ExponentInfo exponent;        ///< exponent of element (per-tensor or per-channel)
+    int exponent;                 ///< exponent of element
     bool auto_free;               ///< free element when object destroy
     std::vector<int> axis_offset; ///< element offset of each axis
     void *data;                   ///< data pointer
@@ -324,50 +126,6 @@ public:
                bool deep = true,
                uint32_t caps = MALLOC_CAP_DEFAULT);
 
-#if CONFIG_IDF_TARGET_ESP32S3
-    /**
-     * @brief Construct a TensorBase object (unsigned long caps overload for ABI compatibility
-     *        with pre-compiled libfbs_model.a on Xtensa where uint32_t != unsigned long)
-     */
-    TensorBase(std::vector<int> shape,
-               const void *element,
-               int exponent,
-               dtype_t dtype,
-               bool deep,
-               unsigned long caps);
-#endif
-
-    /**
-     * @brief Construct a TensorBase object with per-channel exponents
-     *
-     * @param shape     Shape of tensor
-     * @param element   Pointer of data
-     * @param exponents Per-channel exponents
-     * @param dtype     Data type of element, default is float
-     * @param deep      True: malloc memory and copy data, false: use the pointer directly
-     * @param caps      Bitwise OR of MALLOC_CAP_* flags indicating the type of memory to be returned
-     *
-     */
-    TensorBase(std::vector<int> shape,
-               const void *element,
-               const std::vector<int> &exponents,
-               dtype_t dtype = DATA_TYPE_FLOAT,
-               bool deep = true,
-               uint32_t caps = MALLOC_CAP_DEFAULT);
-
-#if CONFIG_IDF_TARGET_ESP32S3
-    /**
-     * @brief Construct a TensorBase object with per-channel exponents (unsigned long caps overload
-     *        for ABI compatibility with pre-compiled libfbs_model.a on Xtensa where uint32_t != unsigned long)
-     */
-    TensorBase(std::vector<int> shape,
-               const void *element,
-               const std::vector<int> &exponents,
-               dtype_t dtype,
-               bool deep,
-               unsigned long caps);
-#endif
-
     /**
      * @brief Destroy the TensorBase object.
      */
@@ -380,7 +138,7 @@ public:
     }
 
 #if CONFIG_SPIRAM
-    void *operator new(size_t size) { return tool::malloc_aligned(size, MALLOC_CAP_SPIRAM); }
+    void *operator new(size_t size) { return heap_caps_malloc(size, MALLOC_CAP_SPIRAM); }
 
     void operator delete(void *ptr) { heap_caps_free(ptr); }
 #endif
@@ -390,7 +148,7 @@ public:
      *
      * @param tensor
      *
-     * @return true if assign successfully, otherwise false.
+     * @return ture if assign successfully, otherwise false.
      */
     bool assign(TensorBase *tensor);
 
@@ -402,7 +160,7 @@ public:
      * @param exponent
      * @param dtype
      *
-     * @return true if assign successfully, otherwise false.
+     * @return ture if assign successfully, otherwise false.
      */
     bool assign(std::vector<int> shape, const void *element, int exponent, dtype_t dtype);
 
@@ -547,7 +305,7 @@ public:
      * @brief Reverse or permute the axes of the input Tensor
      *
      * @param input the input Tensor
-     * @param perm the new arrangement of the dims. if perm == {}, the dims arrangement will be reversed.
+     * @param perm the new arangement of the dims. if perm == {}, the dims arangement will be reversed.
      * @return TensorBase *self
      */
     TensorBase *transpose(TensorBase *input, std::vector<int> perm = {});
@@ -558,7 +316,7 @@ public:
      * @param input_element the input data pointer
      * @param input_shape   the input data shape
      * @param input_axis_offset the input data axis offset
-     * @param perm the new arrangement of the dims. if perm == {}, the dims arrangement will be reversed.
+     * @param perm the new arangement of the dims. if perm == {}, the dims arangement will be reversed.
      *
      * @return TensorBase *self
      */
@@ -703,21 +461,6 @@ public:
      */
     template <typename T>
     T get_element(const std::vector<int> &axis_index);
-
-    /**
-     * @brief Set a element of Tensor by index
-     *
-     * @param value  The value of element
-     */
-    void memset(int value);
-
-    /**
-     * @brief Fill tensor data with random bytes from hardware RNG.
-     *
-     * Uses esp_fill_random() to fill the tensor's internal buffer with random bytes.
-     * Requires ESP-IDF (esp_random.h).
-     */
-    void rand();
 
     /**
      * @brief Set preload address of Tensor
