@@ -249,6 +249,42 @@ HEAP_IRAM_ATTR void *calloc_aligned(size_t n, size_t size, uint32_t caps)
     return ret;
 }
 
+HEAP_IRAM_ATTR void *malloc_aligned(unsigned int size, unsigned int alignment, unsigned long caps)
+{
+    void *ret = heap_caps_aligned_alloc(alignment, size, (uint32_t)caps);
+    if (!ret) {
+        int largest_free_block = heap_caps_get_largest_free_block((uint32_t)caps);
+        if (largest_free_block < size) {
+            ESP_LOGE(DL_LOG_TAG,
+                     "Failed to alloc %.2fKB memory, largest available block size %.2fKB. ",
+                     size / 1024.f,
+                     largest_free_block / 1024.f);
+        } else {
+            ESP_LOGE(
+                DL_LOG_TAG, "Input cap=0x%lx can not allocate with alignment %u, please try other caps.", caps, alignment);
+        }
+    }
+    return ret;
+}
+
+HEAP_IRAM_ATTR void *calloc_aligned(unsigned int n, unsigned int size, unsigned int alignment, unsigned long caps)
+{
+    void *ret = heap_caps_aligned_calloc(alignment, n, size, (uint32_t)caps);
+    if (!ret) {
+        int largest_free_block = heap_caps_get_largest_free_block((uint32_t)caps);
+        if (largest_free_block < (int)(n * size)) {
+            ESP_LOGE(DL_LOG_TAG,
+                     "Failed to alloc %.2fKB memory, largest available block size %.2fKB. ",
+                     (n * size) / 1024.f,
+                     largest_free_block / 1024.f);
+        } else {
+            ESP_LOGE(
+                DL_LOG_TAG, "Input cap=0x%lx can not callocate with alignment %u, please try other caps.", caps, alignment);
+        }
+    }
+    return ret;
+}
+
 size_t get_aligned_size(size_t size, int alignment)
 {
     assert(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of 2");
