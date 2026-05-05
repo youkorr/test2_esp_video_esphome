@@ -37,6 +37,8 @@ CONF_ON_DETECTION = "on_detection"
 CONF_INFERENCE_TASK_STACK_SIZE = "inference_task_stack_size"
 CONF_INFERENCE_TASK_PRIORITY = "inference_task_priority"
 CONF_MAX_DETECTIONS = "max_detections"
+CONF_FRAME_WIDTH = "frame_width"
+CONF_FRAME_HEIGHT = "frame_height"
 
 # ----- C++ namespaces -----
 yolov11_ns = cg.esphome_ns.namespace("yolov11")
@@ -99,6 +101,8 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_MAX_DETECTIONS, default=10): cv.int_range(min=1, max=50),
         cv.Optional(CONF_INFERENCE_TASK_STACK_SIZE, default=8192): cv.int_range(min=4096, max=32768),
         cv.Optional(CONF_INFERENCE_TASK_PRIORITY, default=5): cv.int_range(min=1, max=10),
+        cv.Optional(CONF_FRAME_WIDTH, default=320): cv.int_range(min=96, max=2560),
+        cv.Optional(CONF_FRAME_HEIGHT, default=240): cv.int_range(min=96, max=1920),
         cv.Optional(CONF_ON_OBJECT_DETECTED): _TRIGGER_SCHEMA,
         cv.Optional(CONF_ON_DETECTION): _TRIGGER_SCHEMA,
     }
@@ -118,6 +122,8 @@ async def to_code(config):
     cg.add(var.set_max_detections(config[CONF_MAX_DETECTIONS]))
     cg.add(var.set_inference_task_stack_size(config[CONF_INFERENCE_TASK_STACK_SIZE]))
     cg.add(var.set_inference_task_priority(config[CONF_INFERENCE_TASK_PRIORITY]))
+    cg.add(var.set_frame_width(config[CONF_FRAME_WIDTH]))
+    cg.add(var.set_frame_height(config[CONF_FRAME_HEIGHT]))
 
     if CONF_MODEL_PATH in config:
         model_path = config[CONF_MODEL_PATH]
