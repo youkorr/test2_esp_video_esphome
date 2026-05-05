@@ -1,6 +1,7 @@
 #include "dl_tensor_base.hpp"
 #include "dl_base_pad.hpp"
 #include "dl_base_requantize_linear.hpp"
+#include "esp_random.h"
 #include <iostream>
 namespace dl {
 
@@ -146,7 +147,7 @@ TensorBase::TensorBase(
     if (element) {
         if (deep) {
             this->auto_free = true;
-            this->data = tool::calloc_aligned(16, aligned_size, dtype_bytes, caps);
+            this->data = tool::calloc_aligned(aligned_size, dtype_bytes, caps);
             tool::copy_memory(this->data, const_cast<void *>(element), this->get_size() * dtype_bytes);
         } else {
             this->auto_free = false;
@@ -154,7 +155,7 @@ TensorBase::TensorBase(
         }
     } else {
         this->auto_free = true;
-        this->data = tool::calloc_aligned(16, aligned_size, dtype_bytes, caps);
+        this->data = tool::calloc_aligned(aligned_size, dtype_bytes, caps);
     }
     if ((!element || deep) && !this->data) {
         ESP_LOGE(
@@ -167,9 +168,86 @@ TensorBase::TensorBase(
     this->caps = caps;
 }
 
+TensorBase::TensorBase(std::vector<int> shape,
+                       const void *element,
+                       const std::vector<int> &exponents,
+                       dtype_t dtype,
+                       bool deep,
+                       uint32_t caps)
+{
+    this->set_shape(shape);
+    this->exponent = ExponentInfo(exponents);
+    this->dtype = dtype;
+    this->cache = nullptr;
+    size_t dtype_bytes = this->get_dtype_bytes();
+    size_t aligned_size = this->get_aligned_size();
+    if (element) {
+        if (deep) {
+            this->auto_free = true;
+            this->data = tool::calloc_aligned(aligned_size, dtype_bytes, caps);
+            tool::copy_memory(this->data, const_cast<void *>(element), this->get_size() * dtype_bytes);
+        } else {
+            this->auto_free = false;
+            this->data = const_cast<void *>(element);
+        }
+    } else {
+        this->auto_free = true;
+        this->data = tool::calloc_aligned(aligned_size, dtype_bytes, caps);
+    }
+    if ((!element || deep) && !this->data) {
+        ESP_LOGE(
+            "TensorBase",
+            "Failed to alloc %.2fKB RAM, largest available PSRAM block size %.2fKB, internal RAM block size %.2fKB",
+            size / 1024.f,
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024.f,
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024.f);
+    }
+    this->caps = caps;
+}
+
+TensorBase::TensorBase(std::vector<int> shape,
+                       const void *element,
+                       int exponent,
+                       dtype_t dtype,
+                       bool deep,
+                       unsigned long caps)
+    : TensorBase(shape, element, exponent, dtype, deep, (uint32_t)caps)
+{
+}
+
+TensorBase::TensorBase(std::vector<int> shape,
+                       const void *element,
+                       const std::vector<int> &exponents,
+                       dtype_t dtype,
+                       bool deep,
+                       unsigned long caps)
+    : TensorBase(shape, element, exponents, dtype, deep, (uint32_t)caps)
+{
+}
+
 bool TensorBase::assign(TensorBase *tensor)
 {
     if (tensor == nullptr || this->get_size() != tensor->get_size()) {
+        return false;
+    }
+
+    // Only the weights may use per-channel quantization.
+    bool this_per_channel = this->exponent.is_per_channel();
+    bool tensor_per_channel = tensor->exponent.is_per_channel();
+
+    if (this_per_channel || tensor_per_channel) {
+        if (this->exponent == tensor->exponent && this->dtype == tensor->dtype) {
+            tool::copy_memory(this->data, tensor->data, this->get_bytes());
+            return true;
+        }
+        ESP_LOGE("TensorBase::assign",
+                 "Per-channel tensor assign failed: exponent or dtype mismatch. "
+                 "this->exponent.is_per_channel=%d, tensor->exponent.is_per_channel=%d, "
+                 "this->dtype=%s, tensor->dtype=%s",
+                 this_per_channel,
+                 tensor_per_channel,
+                 dtype_to_string(this->dtype),
+                 dtype_to_string(tensor->dtype));
         return false;
     }
 
@@ -406,7 +484,7 @@ void TensorBase::reset_bias_layout(quant_type_t op_quant_type, bool is_depthwise
         memory_size_needed = memory_size_needed % align == 0 ? memory_size_needed
                                                              : memory_size_needed + align - memory_size_needed % align;
         int32_t *src_ptr = static_cast<int32_t *>(this->data);
-        int8_t *dst_ptr = static_cast<int8_t *>(tool::calloc_aligned(16, memory_size_needed, dtype_bytes, this->caps));
+        int8_t *dst_ptr = static_cast<int8_t *>(tool::calloc_aligned(memory_size_needed, dtype_bytes, this->caps));
         assert(dst_ptr);
         int8_t *dst_ptr_head = dst_ptr;
 
@@ -455,8 +533,7 @@ void TensorBase::reset_bias_layout(quant_type_t op_quant_type, bool is_depthwise
         }
 
         int64_t *src_ptr = static_cast<int64_t *>(this->data);
-        int8_t *dst_ptr =
-            static_cast<int8_t *>(tool::calloc_aligned(16, data_num, this->get_dtype_bytes(), this->caps));
+        int8_t *dst_ptr = static_cast<int8_t *>(tool::calloc_aligned(data_num, this->get_dtype_bytes(), this->caps));
         int8_t *dst_ptr_head = dst_ptr;
         // 0x000000AAAAAAAAAA000000BBBBBBBBBB ==> 0xAAAAAAAAAABBBBBBBBBB
         for (int i = 0; i < align_num; i++) {
@@ -559,7 +636,7 @@ void TensorBase::print(bool print_data)
              "shape: %s, dtype: %s, exponent: %d, auto_free: %d, data: %p",
              vector_to_string(get_shape()).c_str(),
              dtype_to_string(get_dtype()),
-             this->exponent,
+             (int)this->exponent,
              this->auto_free,
              this->data);
 
@@ -881,7 +958,7 @@ bool TensorBase::equal(TensorBase *tensor, float epsilon, bool verbose)
     // compare tensor element
     if (this->exponent != tensor->exponent) {
         if (verbose) {
-            ESP_LOGE(__FUNCTION__, "exponent not equal: %d != %d", this->exponent, tensor->exponent);
+            ESP_LOGE(__FUNCTION__, "exponent not equal: %d != %d", (int)this->exponent, (int)tensor->exponent);
         }
         return false;
     }
@@ -957,7 +1034,7 @@ void _slice(TensorBase *input,
     std::vector<int> loop_start(dims, 0);
     std::vector<int> loop_end = input_shape;
     std::vector<int> loop_step(dims, 1);
-    std::vector<int> fliped;
+    std::vector<int> flipped;
 
     int last_axis = start.size() - 1;
     for (int i = 0; i < start.size(); i++) {
@@ -975,7 +1052,7 @@ void _slice(TensorBase *input,
             step_i = step[i];
         }
         if (step_i < 0) {
-            fliped.push_back(axis);
+            flipped.push_back(axis);
             start_i = -start_i - 1;
             end_i = -end_i - 1;
             step_i = -step_i;
@@ -1057,8 +1134,8 @@ void _slice(TensorBase *input,
         }
     }
 
-    if (!fliped.empty()) {
-        _flip<T>(output, fliped);
+    if (!flipped.empty()) {
+        _flip<T>(output, flipped);
     }
 }
 
@@ -1231,6 +1308,18 @@ TensorBase *TensorBase::pad(TensorBase *input,
     }
 
     return this;
+}
+
+void TensorBase::memset(int value)
+{
+    ::memset(this->data, value, this->get_bytes());
+}
+
+void TensorBase::rand()
+{
+    if (this->data) {
+        esp_fill_random(this->data, this->get_bytes());
+    }
 }
 
 } // namespace dl
