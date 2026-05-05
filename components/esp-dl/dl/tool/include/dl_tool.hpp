@@ -146,55 +146,25 @@ void copy_memory(void *dst, void *src, const size_t n);
 memory_addr_type_t memory_addr_type(void *address);
 
 /**
- * @brief Same as heap_caps_malloc, only skip TCM in esp32p4.
+ * @brief Same as heap_caps_aligned_alloc, only skip TCM in esp32p4.
  *
- * @param size
- * @param caps
- * @return void*
- */
-void *malloc_aligned(size_t size, uint32_t caps);
-
-/**
- * @brief Aligned malloc with explicit alignment parameter.
- * This overload matches the ABI expected by the pre-compiled libfbs_model.a.
- *
- * @param size
  * @param alignment
+ * @param size
  * @param caps
  * @return void*
  */
-void *malloc_aligned(unsigned int size, unsigned int alignment, unsigned long caps);
+void *malloc_aligned(size_t alignment, size_t size, uint32_t caps);
 
 /**
  * @brief Same as heap_caps_aligned_calloc, only skip TCM in esp32p4.
  *
+ * @param alignment
  * @param n
  * @param size
  * @param caps
  * @return void*
  */
-void *calloc_aligned(size_t n, size_t size, uint32_t caps);
-
-/**
- * @brief Aligned calloc with explicit alignment parameter.
- * This overload matches the ABI expected by the pre-compiled libfbs_model.a.
- *
- * @param n
- * @param size
- * @param alignment
- * @param caps
- * @return void*
- */
-void *calloc_aligned(unsigned int n, unsigned int size, unsigned int alignment, unsigned long caps);
-
-/**
- * @brief Get the aligned size; it is aligned to 16 bytes by default.
- *
- * @param size
- * @param alignment
- * @return size_t
- */
-size_t get_aligned_size(size_t size, int alignment = 16);
+void *calloc_aligned(size_t alignment, size_t n, size_t size, uint32_t caps);
 
 template <typename T>
 struct PSRAMAllocator {
@@ -217,7 +187,7 @@ struct PSRAMAllocator {
         if (n > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
             return nullptr;
         }
-        if (auto p = static_cast<T *>(tool::malloc_aligned(n * sizeof(T), MALLOC_CAP_SPIRAM))) {
+        if (auto p = static_cast<T *>(heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM))) {
             return p;
         }
         return nullptr;
@@ -555,7 +525,7 @@ public:
      * @brief Log latency info.
      *
      * @param prefix TAG of ESP_LOGI
-     * @param key    format str of ESP_LOGI
+     * @param key    fomat str of ESP_LOGI
      */
     void print(const char *prefix, const char *key)
     {
@@ -589,4 +559,5 @@ public:
 };
 } // namespace tool
 } // namespace dl
+
 
