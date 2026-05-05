@@ -103,25 +103,25 @@ static int font_index_for(char c) {
 }
 
 
-namespace {
-template<typename ImagePtr>
-inline void stash_frame_impl(YOLOv11Component *self, const ImagePtr &img,
-                             SemaphoreHandle_t state_mutex,
-                             SemaphoreHandle_t frame_signal,
-                             uint8_t **dst_data, size_t *dst_size) {
-  if (img == nullptr) return;
-  uint8_t *data = img->get_data_buffer();
-  size_t len = img->get_data_length();
+
+
+
+
+
+// CameraListener callback - called each time the camera produces a new frame.
+void YOLOv11Component::on_camera_image(const std::shared_ptr<camera::CameraImage> &image) {
+  if (image == nullptr) return;
+  uint8_t *data = image->get_data_buffer();
+  size_t len = image->get_data_length();
   if (data == nullptr || len == 0) return;
-  if (xSemaphoreTake(state_mutex, pdMS_TO_TICKS(2)) == pdTRUE) {
-    *dst_data = data;
-    *dst_size = len;
-    xSemaphoreGive(state_mutex);
-    xSemaphoreGive(frame_signal);
+  if (this->state_mutex_ == nullptr) return;
+  if (xSemaphoreTake(this->state_mutex_, pdMS_TO_TICKS(2)) == pdTRUE) {
+    this->pending_frame_data_ = data;
+    this->pending_frame_size_ = len;
+    xSemaphoreGive(this->state_mutex_);
+    if (this->frame_signal_) xSemaphoreGive(this->frame_signal_);
   }
-  (void)self;
 }
-}  // namespace
 
 
 void YOLOv11Component::setup() {
@@ -141,13 +141,8 @@ void YOLOv11Component::setup() {
     return;
   }
 
-  this->camera_->add_image_callback(
-      [this](auto img) {
-        stash_frame_impl(this, img,
-                         this->state_mutex_, this->frame_signal_,
-                         &this->pending_frame_data_,
-                         &this->pending_frame_size_);
-      });
+  // Register ourselves as a CameraListener to receive frames.
+  this->camera_->add_listener(this);
 
 #ifdef ESP_DL_MODEL_YOLO11
   BaseType_t ok = xTaskCreatePinnedToCore(
@@ -264,8 +259,8 @@ void YOLOv11Component::run_one_inference_() {
   }
   if (!frame || !frame_size) return;
 
-  uint16_t w = this->camera_->get_max_horizontal_resolution();
-  uint16_t h = this->camera_->get_max_vertical_resolution();
+  uint16_t w = this->frame_width_;
+  uint16_t h = this->frame_height_;
   if (w == 0 || h == 0) return;
 
   if (frame_size < (size_t) w * h * 2) {
