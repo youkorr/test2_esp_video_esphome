@@ -1,5 +1,6 @@
 #include "dl_tool.hpp"
 #include <string.h>
+#include "soc/soc_caps.h"
 
 extern "C" {
 #if CONFIG_XTENSA_BOOST
@@ -169,8 +170,12 @@ void copy_memory(void *dst, void *src, const size_t n)
 
 memory_addr_type_t memory_addr_type(void *address)
 {
-#if CONFIG_IDF_TARGET_ESP32P4
+#if defined(SOC_MEM_TCM_SUPPORTED)
     if (esp_ptr_in_tcm(address)) {
+        return MEMORY_ADDR_TCM;
+    }
+#elif defined(SOC_MEM_SPM_SUPPORTED)
+    if (esp_ptr_in_spm(address)) {
         return MEMORY_ADDR_TCM;
     }
 #endif
@@ -198,30 +203,56 @@ memory_addr_type_t memory_addr_type(void *address)
     }
 }
 
-HEAP_IRAM_ATTR void *malloc_aligned(size_t alignment, size_t size, uint32_t caps)
+HEAP_IRAM_ATTR void *malloc_aligned(size_t size, uint32_t caps)
 {
-    void *ret = heap_caps_aligned_alloc(alignment, size, caps);
-#if CONFIG_IDF_TARGET_ESP32P4
-    if (ret && !(caps & MALLOC_CAP_TCM) && esp_ptr_in_tcm(ret)) {
-        // skip TCM
-        heap_caps_free(ret);
-        ret = heap_caps_aligned_alloc(alignment, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    }
+#if SOC_SIMD_INSTRUCTION_SUPPORTED
+    void *ret = heap_caps_aligned_alloc(16, size, caps | MALLOC_CAP_SIMD);
+#else
+    void *ret = heap_caps_aligned_alloc(16, size, caps);
 #endif
+    if (!ret) {
+        int largest_free_block = heap_caps_get_largest_free_block(caps);
+        if (largest_free_block < size) {
+            ESP_LOGE(DL_LOG_TAG,
+                     "Failed to alloc %.2fKB memory, largest available block size %.2fKB. ",
+                     size / 1024.f,
+                     largest_free_block / 1024.f);
+        } else {
+            ESP_LOGE(
+                DL_LOG_TAG, "Input cap=0x%lx can not callocate with MALLOC_CAP_SIMD, please try other caps.", caps);
+        }
+    }
+
     return ret;
 }
 
-HEAP_IRAM_ATTR void *calloc_aligned(size_t alignment, size_t n, size_t size, uint32_t caps)
+HEAP_IRAM_ATTR void *calloc_aligned(size_t n, size_t size, uint32_t caps)
 {
-    void *ret = heap_caps_aligned_calloc(alignment, n, size, caps);
-#if CONFIG_IDF_TARGET_ESP32P4
-    if (ret && !(caps & MALLOC_CAP_TCM) && esp_ptr_in_tcm(ret)) {
-        // skip TCM
-        heap_caps_free(ret);
-        ret = heap_caps_aligned_calloc(alignment, n, size, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    }
+#if SOC_SIMD_INSTRUCTION_SUPPORTED
+    void *ret = heap_caps_aligned_calloc(16, n, size, caps | MALLOC_CAP_SIMD);
+#else
+    void *ret = heap_caps_aligned_calloc(16, n, size, caps);
 #endif
+    if (!ret) {
+        int largest_free_block = heap_caps_get_largest_free_block(caps);
+        if (largest_free_block < size) {
+            ESP_LOGE(DL_LOG_TAG,
+                     "Failed to alloc %.2fKB memory, largest available block size %.2fKB. ",
+                     size / 1024.f,
+                     largest_free_block / 1024.f);
+        } else {
+            ESP_LOGE(
+                DL_LOG_TAG, "Input cap=0x%lx can not callocate with MALLOC_CAP_SIMD, please try other caps.", caps);
+        }
+    }
+
     return ret;
+}
+
+size_t get_aligned_size(size_t size, int alignment)
+{
+    assert(alignment > 0 && (alignment & (alignment - 1)) == 0 && "alignment must be a power of 2");
+    return (size + alignment - 1) & ~(alignment - 1);
 }
 
 float *gen_lut_8bit(float *table, int exponent, std::function<float(float)> func)
