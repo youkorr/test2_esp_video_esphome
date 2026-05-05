@@ -18,11 +18,19 @@ separated list of "label:score%" entries.
 
 Action:
   - `yolov11.inference` forces a one-shot inference on the latest frame.
+
+Model selection:
+  - `model_path: ./my_model.espdl`  -> picks ANY .espdl file the user
+    drops next to the YAML and embeds it at build time. This is how to
+    use coco_detect_yolo11n_320_s8_v3.espdl or any other ESP-DL YOLO11
+    blob (s8_v1, 320_s8_v3, etc.) without rebuilding the component.
+  - omitted: falls back to the bundled yolo11_detect_s8_v1.espdl model.
 """
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
+from esphome.core import CORE
 from esphome import automation
 import os
 
@@ -32,6 +40,7 @@ DEPENDENCIES = ["esp32_camera"]
 # ----- yaml keys -----
 CONF_ESP32_CAMERA_ID = "esp32_camera_id"
 CONF_MODEL_ID = "model_id"
+CONF_MODEL_PATH = "model_path"
 CONF_SCORE_THRESHOLD = "score_threshold"
 CONF_NMS_THRESHOLD = "nms_threshold"
 CONF_DETECTION_INTERVAL_MS = "detection_interval_ms"
@@ -63,15 +72,33 @@ _TRIGGER_SCHEMA = automation.validate_automation(
 )
 
 
+def _validate_model_path(value):
+    """Validate that the .espdl file exists on disk, relative to YAML."""
+    value = cv.string(value)
+    if not value:
+        raise cv.Invalid("model_path must not be empty")
+    abs_path = value
+    if not os.path.isabs(abs_path):
+        abs_path = os.path.join(CORE.config_dir, value)
+    if not os.path.isfile(abs_path):
+        raise cv.Invalid(
+            f"model_path: file not found at {abs_path}\n"
+            f"Place your .espdl model next to your YAML and use a relative path."
+        )
+    return value
+
+
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(YOLOv11Component),
         cv.Required(CONF_ESP32_CAMERA_ID): cv.use_id(ESP32Camera),
-        # If model_id is provided, the buffer is recorded and a warning
-        # is logged at runtime - see yolov11_component.cpp. Currently
-        # the build-embedded model is always used for inference.
-        # `cg.uint8` matches what jesserockz's file: platform declares
-        # the symbol as (a `const uint8_t[]` array).
+        # Path to a .espdl model file (relative to YAML, like images/fonts).
+        # When present, this file is embedded in flash rodata at build
+        # time and replaces the default yolo11_detect_s8_v1.espdl. Use it
+        # to drop in coco_detect_yolo11n_320_s8_v3.espdl (S3-optimised).
+        cv.Optional(CONF_MODEL_PATH): _validate_model_path,
+        # Optional buffer reference (jesserockz file: -> const uint8_t[N]).
+        # Currently not used at runtime - the build-embedded model wins.
         cv.Optional(CONF_MODEL_ID): cv.use_id(cg.uint8),
         cv.Optional(CONF_SCORE_THRESHOLD, default=0.30): cv.float_range(min=0.0, max=1.0),
         cv.Optional(CONF_NMS_THRESHOLD, default=0.50): cv.float_range(min=0.0, max=1.0),
@@ -79,7 +106,6 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_MAX_DETECTIONS, default=10): cv.int_range(min=1, max=50),
         cv.Optional(CONF_INFERENCE_TASK_STACK_SIZE, default=8192): cv.int_range(min=4096, max=32768),
         cv.Optional(CONF_INFERENCE_TASK_PRIORITY, default=5): cv.int_range(min=1, max=10),
-        # Both yaml keys map to the same trigger class.
         cv.Optional(CONF_ON_OBJECT_DETECTED): _TRIGGER_SCHEMA,
         cv.Optional(CONF_ON_DETECTION): _TRIGGER_SCHEMA,
     }
@@ -100,10 +126,18 @@ async def to_code(config):
     cg.add(var.set_inference_task_stack_size(config[CONF_INFERENCE_TASK_STACK_SIZE]))
     cg.add(var.set_inference_task_priority(config[CONF_INFERENCE_TASK_PRIORITY]))
 
+    # Forward model_path to the build script via an environment variable
+    # because PIO post-scripts can't easily read ESPHome config. Stored
+    # on cg.add_platformio_option as build_flags is the cleanest path.
+    if CONF_MODEL_PATH in config:
+        model_path = config[CONF_MODEL_PATH]
+        if not os.path.isabs(model_path):
+            model_path = os.path.join(CORE.config_dir, model_path)
+        # Use a CPP define to pass the path to yolov11_build.py via the
+        # CPPDEFINES env var. The build script reads it back.
+        cg.add_build_flag(f'-DYOLOV11_USER_MODEL_PATH="{model_path}"')
+
     if CONF_MODEL_ID in config:
-        # jesserockz's file: declares the symbol as `const uint8_t arr[N]`.
-        # We pass the array (decays to const uint8_t*) and sizeof(arr)
-        # to the C++ side.
         model_arr = await cg.get_variable(config[CONF_MODEL_ID])
         cg.add(var.set_model_buffer(model_arr, cg.RawExpression(f"sizeof({model_arr})")))
         cg.add_define("YOLOV11_MODEL_FROM_FILE")
