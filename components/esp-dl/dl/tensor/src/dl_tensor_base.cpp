@@ -205,6 +205,7 @@ TensorBase::TensorBase(std::vector<int> shape,
     this->caps = caps;
 }
 
+#if CONFIG_IDF_TARGET_ESP32S3
 TensorBase::TensorBase(std::vector<int> shape,
                        const void *element,
                        int exponent,
@@ -224,6 +225,7 @@ TensorBase::TensorBase(std::vector<int> shape,
     : TensorBase(shape, element, exponents, dtype, deep, (uint32_t)caps)
 {
 }
+#endif
 
 bool TensorBase::assign(TensorBase *tensor)
 {
