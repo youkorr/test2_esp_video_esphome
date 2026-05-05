@@ -35,12 +35,75 @@ static constexpr int COCO_CLASS_COUNT = sizeof(COCO_CLASSES) / sizeof(COCO_CLASS
 
 
 // ---------------------------------------------------------------------------
+// 5x7 bitmap font - same glyph set as in the P4 yolo11_detection so the
+// labels look identical on both platforms. Letters A..Z, digits 0..9,
+// then space / : / , / % / . / -
+// ---------------------------------------------------------------------------
+static const uint8_t FONT_5X7[][7] = {
+  {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // A
+  {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E}, // B
+  {0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E}, // C
+  {0x1E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x1E}, // D
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F}, // E
+  {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10}, // F
+  {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0F}, // G
+  {0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11}, // H
+  {0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E}, // I
+  {0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C}, // J
+  {0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11}, // K
+  {0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F}, // L
+  {0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11}, // M
+  {0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11}, // N
+  {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // O
+  {0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10}, // P
+  {0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D}, // Q
+  {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11}, // R
+  {0x0E, 0x11, 0x10, 0x0E, 0x01, 0x11, 0x0E}, // S
+  {0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04}, // T
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E}, // U
+  {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04}, // V
+  {0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A}, // W
+  {0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11}, // X
+  {0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04}, // Y
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F}, // Z
+  {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E}, // 0
+  {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E}, // 1
+  {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F}, // 2
+  {0x0E, 0x11, 0x01, 0x06, 0x01, 0x11, 0x0E}, // 3
+  {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02}, // 4
+  {0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x0E}, // 5
+  {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E}, // 6
+  {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08}, // 7
+  {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E}, // 8
+  {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C}, // 9
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // Space
+  {0x00, 0x00, 0x04, 0x00, 0x04, 0x00, 0x00}, // : (colon)
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x08}, // , (comma)
+  {0x11, 0x11, 0x09, 0x01, 0x12, 0x12, 0x0C}, // % (percent)
+  {0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00}, // . (dot)
+  {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}, // - (hyphen)
+  {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, // _ (underscore as space)
+};
+
+// Map a character to its index in FONT_5X7. Returns -1 if not drawable.
+static int font_index_for(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a';
+  if (c >= '0' && c <= '9') return c - '0' + 26;
+  if (c == ' ') return 36;
+  if (c == ':') return 37;
+  if (c == ',') return 38;
+  if (c == '%') return 39;
+  if (c == '.') return 40;
+  if (c == '-') return 41;
+  if (c == '_') return 42;
+  return -1;
+}
+
+
+// ---------------------------------------------------------------------------
 // stash_frame_ - shared helper between camera callback variants
 // ---------------------------------------------------------------------------
-// We accept any camera-image-like type via templating because newer
-// ESPHome versions have renamed the parameter type from `CameraImage`
-// to `CameraImageData`. The fields we touch (`get_data_buffer()` and
-// `get_data_length()`) are stable across both.
 namespace {
 template<typename ImagePtr>
 inline void stash_frame_impl(YOLOv11Component *self, const ImagePtr &img,
@@ -63,9 +126,7 @@ inline void stash_frame_impl(YOLOv11Component *self, const ImagePtr &img,
 
 
 // =========================================================================
-// setup() - register a frame callback on the esp32_camera and spin up the
-// background inference task. Note: ESP-DL model load is deferred to the
-// task itself to keep the watchdog happy.
+// setup()
 // =========================================================================
 void YOLOv11Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up YOLOv11 (ESP32-S3)...");
@@ -84,11 +145,6 @@ void YOLOv11Component::setup() {
     return;
   }
 
-  // Register on every captured frame. We use `auto` for the parameter
-  // type so this code compiles unchanged whether ESPHome's
-  // esp32_camera component calls back with CameraImage,
-  // CameraImageData, or anything else exposing get_data_buffer()/
-  // get_data_length() through a shared_ptr.
   this->camera_->add_image_callback(
       [this](auto img) {
         stash_frame_impl(this, img,
@@ -98,8 +154,6 @@ void YOLOv11Component::setup() {
       });
 
 #ifdef ESP_DL_MODEL_YOLO11
-  // Spin up the background inference task on core 1 (esp32_camera and
-  // ESPHome main loop run on core 0).
   BaseType_t ok = xTaskCreatePinnedToCore(
       &YOLOv11Component::inference_task_trampoline, "yolov11_inf",
       this->task_stack_size_, this,
@@ -119,9 +173,7 @@ void YOLOv11Component::setup() {
 #endif
 }
 
-void YOLOv11Component::loop() {
-  // Nothing to do on the main task; everything lives in the inference task.
-}
+void YOLOv11Component::loop() {}
 
 void YOLOv11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "YOLOv11 detector:");
@@ -129,6 +181,7 @@ void YOLOv11Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  NMS threshold:      %.2f", this->nms_threshold_);
   ESP_LOGCONFIG(TAG, "  Detection interval: %d ms", this->detection_interval_ms_);
   ESP_LOGCONFIG(TAG, "  Max detections:     %d", this->max_detections_);
+  ESP_LOGCONFIG(TAG, "  Draw enabled:       %s", this->draw_enabled_ ? "yes" : "no");
   if (this->external_model_data_ != nullptr) {
     ESP_LOGCONFIG(TAG, "  Model source:       file: buffer (%zu bytes @ %p)",
                   this->external_model_size_, this->external_model_data_);
@@ -161,14 +214,11 @@ void YOLOv11Component::inference_task_loop_() {
     if (xSemaphoreTake(this->frame_signal_, portMAX_DELAY) != pdTRUE) {
       continue;
     }
-
     uint32_t now = millis();
     if ((now - this->last_inference_ms_) < (uint32_t) this->detection_interval_ms_) {
-      // Frame came in too soon after the previous inference; throttle.
       continue;
     }
     this->last_inference_ms_ = now;
-
     this->run_one_inference_();
   }
 #else
@@ -177,26 +227,14 @@ void YOLOv11Component::inference_task_loop_() {
 }
 
 
-// =========================================================================
-// initialise_detector_ - constructs the ESP-DL YOLO11Detect wrapper.
-//
-// We always use the built-in YOLO11Detect (which loads from the
-// _binary_yolo11_detect_espdl_start symbol). When the user supplied an
-// `external_model_data_` buffer we still rely on the build-embedded
-// model for the actual inference - the file: integration will be a
-// no-op in this revision (logged so the user knows). Future work: pass
-// the buffer to a dl::Model in-memory constructor.
-// =========================================================================
 bool YOLOv11Component::initialise_detector_() {
 #ifdef ESP_DL_MODEL_YOLO11
   ESP_LOGI(TAG, "Loading YOLO11 model from flash rodata...");
-
   if (this->external_model_data_ != nullptr) {
     ESP_LOGW(TAG, "model_id was provided (%zu bytes) but runtime swapping is not",
              this->external_model_size_);
     ESP_LOGW(TAG, "implemented yet - using the build-embedded model instead.");
   }
-
   YOLO11Detect *detector = new YOLO11Detect();
   if (detector == nullptr) {
     ESP_LOGE(TAG, "Failed to allocate YOLO11Detect");
@@ -214,13 +252,9 @@ bool YOLOv11Component::initialise_detector_() {
 }
 
 
-// =========================================================================
-// run_one_inference_ - single inference pass on the latest pending frame.
-// =========================================================================
 void YOLOv11Component::run_one_inference_() {
 #ifdef ESP_DL_MODEL_YOLO11
-  if (this->model_ == nullptr) return;
-  if (this->camera_ == nullptr) return;
+  if (this->model_ == nullptr || this->camera_ == nullptr) return;
 
   uint8_t *frame = nullptr;
   size_t frame_size = 0;
@@ -329,6 +363,119 @@ int YOLOv11Component::get_detected_count() {
     xSemaphoreGive(this->state_mutex_);
   }
   return n;
+}
+
+
+// =========================================================================
+// draw_text_ - 5x7 bitmap font, used for class label + score above box.
+// =========================================================================
+void YOLOv11Component::draw_text_(uint16_t *buffer, uint16_t width, uint16_t height,
+                                   int x, int y, const char *text,
+                                   uint16_t color, int scale) {
+  if (buffer == nullptr || text == nullptr || scale < 1) return;
+  while (*text) {
+    int idx = font_index_for(*text);
+    if (idx >= 0) {
+      const uint8_t *glyph = FONT_5X7[idx];
+      for (int row = 0; row < 7; row++) {
+        uint8_t row_data = glyph[row];
+        for (int col = 0; col < 5; col++) {
+          if (row_data & (1 << (4 - col))) {
+            for (int sy = 0; sy < scale; sy++) {
+              for (int sx = 0; sx < scale; sx++) {
+                int px = x + (col * scale) + sx;
+                int py = y + (row * scale) + sy;
+                if (px >= 0 && px < width && py >= 0 && py < height) {
+                  buffer[py * width + px] = color;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    x += 6 * scale;
+    text++;
+  }
+}
+
+
+// =========================================================================
+// draw_on_frame - public API. Mirrors yolo11_detection (P4 / MIPI-CSI).
+//
+// 2-pixel hollow rectangle in a category-specific colour, white 5x7
+// "label score%" text right above the box.
+// =========================================================================
+void YOLOv11Component::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
+  if (!this->draw_enabled_) return;
+  if (img_data == nullptr || width == 0 || height == 0) return;
+  if (this->state_mutex_ == nullptr) return;
+
+  // Snapshot the cached detections under the mutex.
+  std::vector<DetectionBox> dets;
+  if (xSemaphoreTake(this->state_mutex_, pdMS_TO_TICKS(5)) == pdTRUE) {
+    dets = this->cached_detections_;
+    xSemaphoreGive(this->state_mutex_);
+  }
+  if (dets.empty()) return;
+
+  uint16_t *buffer = reinterpret_cast<uint16_t *>(img_data);
+
+  // RGB565 colour table (little-endian / "swap_bytes: false" buffer).
+  // Same convention as the P4 yolo11_detection.
+  const uint16_t COLOR_RED    = 0xF800;  // person  (cat 0)
+  const uint16_t COLOR_GREEN  = 0x07E0;  // car     (cat 2)
+  const uint16_t COLOR_BLUE   = 0x001F;  // dog     (cat 16)
+  const uint16_t COLOR_YELLOW = 0xFFE0;  // others
+  const uint16_t COLOR_WHITE  = 0xFFFF;  // class label text
+
+  const int line_width = 2;
+
+  for (const auto &box : dets) {
+    int x1 = std::max(2, std::min((int)box.x1, (int)width - 3));
+    int y1 = std::max(2, std::min((int)box.y1, (int)height - 3));
+    int x2 = std::max(x1 + 10, std::min((int)box.x2, (int)width - 3));
+    int y2 = std::max(y1 + 10, std::min((int)box.y2, (int)height - 3));
+
+    uint16_t color;
+    switch (box.category) {
+      case 0:  color = COLOR_RED;    break;
+      case 2:  color = COLOR_GREEN;  break;
+      case 16: color = COLOR_BLUE;   break;
+      default: color = COLOR_YELLOW; break;
+    }
+
+    // Top + bottom horizontal lines
+    for (int x = x1; x <= x2; x++) {
+      for (int t = 0; t < line_width; t++) {
+        int top = (y1 + t) * width + x;
+        if (top >= 0 && top < (int)(width * height)) buffer[top] = color;
+        int bot = (y2 - t) * width + x;
+        if (bot >= 0 && bot < (int)(width * height)) buffer[bot] = color;
+      }
+    }
+    // Left + right vertical lines
+    for (int y = y1; y <= y2; y++) {
+      for (int t = 0; t < line_width; t++) {
+        int left  = y * width + (x1 + t);
+        if (left  >= 0 && left  < (int)(width * height)) buffer[left]  = color;
+        int right = y * width + (x2 - t);
+        if (right >= 0 && right < (int)(width * height)) buffer[right] = color;
+      }
+    }
+
+    // Build "person 87%" label; draw it in WHITE just above the box.
+    char label[64];
+    const char *cls = (box.category >= 0 && box.category < COCO_CLASS_COUNT)
+                          ? COCO_CLASSES[box.category]
+                          : "unknown";
+    snprintf(label, sizeof(label), "%s %d%%", cls,
+             static_cast<int>(box.score * 100));
+
+    int text_x = std::max(0, x1);
+    int text_y = std::max(0, y1 - 9);  // 7 px font + 2 px gap
+    draw_text_(buffer, width, height, text_x, text_y, label, COLOR_WHITE, 1);
+  }
 }
 
 }  // namespace yolov11
