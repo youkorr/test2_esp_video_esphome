@@ -324,9 +324,10 @@ public:
                bool deep = true,
                uint32_t caps = MALLOC_CAP_DEFAULT);
 
+#if CONFIG_IDF_TARGET_ESP32S3
     /**
      * @brief Construct a TensorBase object (unsigned long caps overload for ABI compatibility
-     *        with pre-compiled libfbs_model.a)
+     *        with pre-compiled libfbs_model.a on Xtensa where uint32_t != unsigned long)
      */
     TensorBase(std::vector<int> shape,
                const void *element,
@@ -334,6 +335,7 @@ public:
                dtype_t dtype,
                bool deep,
                unsigned long caps);
+#endif
 
     /**
      * @brief Construct a TensorBase object with per-channel exponents
@@ -353,9 +355,10 @@ public:
                bool deep = true,
                uint32_t caps = MALLOC_CAP_DEFAULT);
 
+#if CONFIG_IDF_TARGET_ESP32S3
     /**
      * @brief Construct a TensorBase object with per-channel exponents (unsigned long caps overload
-     *        for ABI compatibility with pre-compiled libfbs_model.a)
+     *        for ABI compatibility with pre-compiled libfbs_model.a on Xtensa where uint32_t != unsigned long)
      */
     TensorBase(std::vector<int> shape,
                const void *element,
@@ -363,6 +366,7 @@ public:
                dtype_t dtype,
                bool deep,
                unsigned long caps);
+#endif
 
     /**
      * @brief Destroy the TensorBase object.
@@ -765,3 +769,4 @@ public:
     virtual void print(bool print_data = false);
 };
 } // namespace dl
+
