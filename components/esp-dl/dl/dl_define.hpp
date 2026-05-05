@@ -4,18 +4,6 @@
 #include "sdkconfig.h"
 #include <string>
 #include "soc/soc_caps.h"
-#include "esp_heap_caps.h"
-
-// MALLOC_CAP_SIMD was added in ESP-IDF 5.3+; define it as 0 on older
-// versions so that the bitwise OR in dl_tool.cpp is harmless.
-#ifndef MALLOC_CAP_SIMD
-#define MALLOC_CAP_SIMD 0
-#endif
-
-// HEAP_IRAM_ATTR may not exist on all platforms.
-#ifndef HEAP_IRAM_ATTR
-#define HEAP_IRAM_ATTR
-#endif
 
 #define DL_LOG_TAG "esp-dl"
 
