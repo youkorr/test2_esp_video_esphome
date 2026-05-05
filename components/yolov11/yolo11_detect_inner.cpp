@@ -1,7 +1,12 @@
-// Self-contained copy of yolo11_detect.cpp. See the matching .hpp for
-// rationale. We keep the SD-card path branch even though yolov11
-// targets flash-rodata only; with CONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1
-// the SD branch compiles out, so it's free.
+// Self-contained copy of yolo11_detect.cpp with one extension: a
+// runtime model-data override. By default the model bytes come from
+// the build-embedded `_binary_yolo11_detect_espdl_start` symbol, but
+// before the YOLO11Detect / YOLO11Impl constructors are called the
+// outer YOLOv11Component can swap that pointer for a buffer loaded at
+// runtime (e.g. from jesserockz's `file:` platform). This is what
+// lets users fine-tune YOLO on their own dataset and drop the new
+// .espdl on the device without reflashing the firmware.
+
 #include "yolo11_detect.hpp"
 #include "esp_log.h"
 #include <string.h>
@@ -10,21 +15,46 @@
 
 #if CONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA
 extern const uint8_t yolo11_detect_espdl[] asm("_binary_yolo11_detect_espdl_start");
-static const char *path = (const char *)yolo11_detect_espdl;
+static const uint8_t *flash_rodata_default = yolo11_detect_espdl;
 #elif CONFIG_YOLO11_DETECT_MODEL_IN_FLASH_PARTITION
-static const char *path = "yolo11_detect";
+static const uint8_t *flash_rodata_default = nullptr;
+static const char *partition_name = "yolo11_detect";
 #endif
+
+// Runtime override (nullable). When non-null, YOLO11Impl will load the
+// model from this buffer instead of the build-embedded one. Set via
+// yolov11_set_runtime_model_data() before constructing YOLO11Detect.
+static const uint8_t *runtime_model_data = nullptr;
+
+extern "C" void yolov11_set_runtime_model_data(const uint8_t *data) {
+    runtime_model_data = data;
+    if (data) {
+        ESP_LOGI("yolo11_detect", "runtime model override set: %p", data);
+    } else {
+        ESP_LOGI("yolo11_detect", "runtime model override cleared (using flash rodata)");
+    }
+}
 
 namespace yolo11_detect {
 
 YOLO11Impl::YOLO11Impl(const char *model_name)
 {
 #if !CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD
+    // Pick the runtime override if present, otherwise the build-embedded
+    // flash rodata buffer.
+    const uint8_t *bytes = runtime_model_data ? runtime_model_data
+                                              : flash_rodata_default;
+    if (bytes == nullptr) {
+        ESP_LOGE("yolo11_detect", "no model data available (neither flash "
+                                  "rodata nor runtime override)");
+    }
     m_model = new dl::Model(
-        path, model_name, static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
+        reinterpret_cast<const char *>(bytes), model_name,
+        static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
 #else
-    m_model =
-        new dl::Model(model_name, static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
+    m_model = new dl::Model(
+        model_name,
+        static_cast<fbs::model_location_type_t>(CONFIG_YOLO11_DETECT_MODEL_LOCATION));
 #endif
 
 #if CONFIG_IDF_TARGET_ESP32P4
