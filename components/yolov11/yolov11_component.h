@@ -5,6 +5,13 @@
 #include "esphome/core/helpers.h"
 #include "esphome/components/esp32_camera/esp32_camera.h"
 
+// Include the actual ESP-DL type definitions so that img_t/result_t are
+// complete types in every translation unit that includes this header.
+// Forward-declaring them as "struct" conflicts with the typedef'd
+// struct definitions in the ESP-DL headers.
+#include "dl_image_define.hpp"
+#include "dl_detect_define.hpp"
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -16,17 +23,15 @@
 #include <string>
 #include <vector>
 
-// Forward decl - ESP-DL types stay opaque in the public header
+// Forward decl - only types whose full definition is NOT needed here
 namespace dl {
+class Model;
 namespace image {
-struct img_t;
 class ImagePreprocessor;
 }
 namespace detect {
 class yolo11PostProcessor;
-struct result_t;
 }
-class Model;
 }
 
 namespace esphome {
@@ -49,13 +54,16 @@ class YOLOv11Listener {
 };
 
 
-class YOLOv11Component : public Component {
+class YOLOv11Component : public Component, public camera::CameraListener {
  public:
   // ---------- ESPHome lifecycle ----------
   void setup() override;
   void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
+
+  // ---------- CameraListener interface ----------
+  void on_camera_image(const std::shared_ptr<camera::CameraImage> &image) override;
 
   // ---------- YAML setters ----------
   void set_camera(esp32_camera::ESP32Camera *cam) { this->camera_ = cam; }
@@ -66,6 +74,11 @@ class YOLOv11Component : public Component {
   void set_inference_task_stack_size(int v) { this->task_stack_size_ = v; }
   void set_inference_task_priority(int v) { this->task_priority_ = v; }
   void set_draw_enabled(bool v) { this->draw_enabled_ = v; }
+
+  // Resolution setters - called from the YAML codegen since there are
+  // no public getters on ESP32Camera for these values.
+  void set_frame_width(uint16_t w) { this->frame_width_ = w; }
+  void set_frame_height(uint16_t h) { this->frame_height_ = h; }
 
   // Model-from-file path (alternative to flash-rodata embed).
   void set_model_buffer(const uint8_t *data, size_t size) {
@@ -127,6 +140,10 @@ class YOLOv11Component : public Component {
   int task_priority_{5};
   bool draw_enabled_{true};
 
+  // Frame resolution (set from YAML config or inferred from frame data).
+  uint16_t frame_width_{320};
+  uint16_t frame_height_{240};
+
   // ESP-DL state - opaque in the public header.
   dl::Model *model_{nullptr};
   bool model_ready_{false};
@@ -174,3 +191,5 @@ class RunInferenceAction : public Action<Ts...>, public Parented<YOLOv11Componen
 
 }  // namespace yolov11
 }  // namespace esphome
+
+
