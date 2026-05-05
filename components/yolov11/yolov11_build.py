@@ -14,6 +14,14 @@ Model selection priority (first match wins):
   3. Sibling yolo11_detect/models/p4/yolo11_detect_s8_v1.espdl
      (the upstream P4 model, which is binary-compatible with S3 for
      the s8_v1 quantized variant)
+
+ESP32-S3 ISA mapping (from the official CMakeLists.txt):
+  - dl/base/isa/tie728  -> TIE728 SIMD kernels (.S files)
+  - dl/base/isa/xtensa  -> Xtensa fallback kernels (.S files)
+  - dl/tool/isa/tie728  -> TIE728 mem utilities (.S files)
+  - dl/tool/isa/xtensa  -> Xtensa mem utilities (.S files)
+  Note: there is NO dl/base/isa/esp32s3/ directory. The ESP32-S3 uses
+  the tie728 and xtensa ISA directories.
 """
 
 import os
@@ -47,10 +55,12 @@ sources_to_add = []
 # ---------------------------------------------------------------------------
 esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
 if os.path.exists(esp_dl_dir):
+    # Include dirs matching the official CMakeLists.txt for ESP32-S3:
+    #   dl/base/isa/tie728, dl/base/isa/xtensa (NOT esp32s3/)
+    #   dl/tool/isa/tie728, dl/tool/isa/xtensa
     esp_dl_include_dirs = [
         "dl",
         "dl/tool/include",
-        "dl/tool/isa/esp32s3",
         "dl/tool/isa/tie728",
         "dl/tool/isa/xtensa",
         "dl/tool/src",
@@ -58,7 +68,6 @@ if os.path.exists(esp_dl_dir):
         "dl/tensor/src",
         "dl/base",
         "dl/base/isa",
-        "dl/base/isa/esp32s3",
         "dl/base/isa/tie728",
         "dl/base/isa/xtensa",
         "dl/math/include",
@@ -68,12 +77,10 @@ if os.path.exists(esp_dl_dir):
         "dl/module/include",
         "dl/module/src",
         "fbs_loader/include",
-        "fbs_loader/lib/esp32s3",
         "fbs_loader/src",
         "vision/detect",
         "vision/image",
         "vision/image/isa",
-        "vision/image/isa/esp32s3",
     ]
     for inc in esp_dl_include_dirs:
         inc_path = os.path.join(esp_dl_dir, inc)
@@ -81,6 +88,7 @@ if os.path.exists(esp_dl_dir):
             env.Append(CPPPATH=[inc_path])
     print("[YOLOv11 S3 Build] ESP-DL include paths added")
 
+    # C++ source directories (core library code)
     esp_dl_source_dirs = [
         "dl/tensor/src",
         "dl/model/src",
@@ -102,7 +110,7 @@ if os.path.exists(esp_dl_dir):
         "dl_detect_pico_postprocessor.cpp",
     ]
 
-    counts = {"base": 0, "isa": 0, "core": 0, "vision": 0}
+    counts = {"base": 0, "isa_S": 0, "isa_cpp": 0, "core": 0, "vision": 0}
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
         if not os.path.exists(src_dir_path):
@@ -122,6 +130,7 @@ if os.path.exists(esp_dl_dir):
                 sources_to_add.append(src_file)
                 counts["core"] += 1
 
+    # dl/base/*.cpp (Conv, Pool, etc.)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
     for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
         if os.path.basename(src_file) in esp_dl_exclude:
@@ -129,31 +138,56 @@ if os.path.exists(esp_dl_dir):
         sources_to_add.append(src_file)
         counts["base"] += 1
 
+    # -----------------------------------------------------------------------
+    # ESP32-S3 ISA assembly files (.S) and any .cpp in ISA dirs
+    # These are the actual directories that exist in the repository,
+    # matching the official CMakeLists.txt for CONFIG_IDF_TARGET_ESP32S3:
+    #   dl/tool/isa/xtensa  -> dl_xtensa_bzero.S
+    #   dl/tool/isa/tie728  -> dl_tie728_bzero.S, dl_tie728_memcpy.S, dl_tie728_memset.S
+    #   dl/base/isa/xtensa  -> dl_xtensa_s16_block.S
+    #   dl/base/isa/tie728  -> 48 assembly files (convolution, pooling, etc.)
+    # -----------------------------------------------------------------------
     s3_isa_dirs = [
-        ("dl/base/isa/esp32s3", "*.S"),
-        ("dl/base/isa/esp32s3", "*.cpp"),
-        ("dl/tool/isa/esp32s3", "*.S"),
-        ("dl/tool/isa/esp32s3", "*.cpp"),
-        ("vision/image/isa/esp32s3", "*.S"),
-        ("vision/image/isa/esp32s3", "*.cpp"),
+        # Tool ISA (memory operations)
+        ("dl/tool/isa/xtensa", "*.S"),
+        ("dl/tool/isa/xtensa", "*.cpp"),
+        ("dl/tool/isa/tie728", "*.S"),
+        ("dl/tool/isa/tie728", "*.cpp"),
+        # Base ISA (neural network kernels)
+        ("dl/base/isa/xtensa", "*.S"),
+        ("dl/base/isa/xtensa", "*.cpp"),
+        ("dl/base/isa/tie728", "*.S"),
+        ("dl/base/isa/tie728", "*.cpp"),
     ]
     for sub, pattern in s3_isa_dirs:
         path = os.path.join(esp_dl_dir, sub)
         if not os.path.exists(path):
+            print(f"[YOLOv11 S3 Build] WARN: ISA dir not found: {sub}")
             continue
-        for f in glob.glob(os.path.join(path, pattern)):
+        matched = glob.glob(os.path.join(path, pattern))
+        for f in matched:
             sources_to_add.append(f)
-            counts["isa"] += 1
+            if pattern == "*.S":
+                counts["isa_S"] += 1
+            else:
+                counts["isa_cpp"] += 1
 
     print(f"[YOLOv11 S3 Build] ESP-DL: base:{counts['base']} "
-          f"isa:{counts['isa']} core:{counts['core']} vision:{counts['vision']}")
+          f"isa_asm:{counts['isa_S']} isa_cpp:{counts['isa_cpp']} "
+          f"core:{counts['core']} vision:{counts['vision']}")
 
+    # -----------------------------------------------------------------------
+    # Link pre-compiled libfbs_model.a for ESP32-S3
+    # -----------------------------------------------------------------------
     fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32s3")
     fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
     if os.path.exists(fbs_lib):
         env.Append(LIBPATH=[fbs_lib_dir])
         env.Prepend(LIBS=["fbs_model"])
         print("[YOLOv11 S3 Build] Linked libfbs_model.a (S3)")
+    else:
+        print(f"[YOLOv11 S3 Build] WARNING: libfbs_model.a not found at {fbs_lib}")
+        print("[YOLOv11 S3 Build] FbsModel symbols will be unresolved!")
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +207,7 @@ def get_define_string(name):
     for d in env.get("CPPDEFINES", []):
         if isinstance(d, (tuple, list)) and len(d) >= 2 and d[0] == name:
             v = str(d[1])
-            return v.strip('"\\')
+            return v.strip('"\\\'')
     for flag in env.get("BUILD_FLAGS", []):
         s = str(flag).strip()
         if s.startswith("-D"):
@@ -181,7 +215,7 @@ def get_define_string(name):
         if "=" in s:
             k, v = s.split("=", 1)
             if k == name:
-                return v.strip('"\\')
+                return v.strip('"\\\'')
     return None
 
 
@@ -292,3 +326,4 @@ if sources_to_add:
         print(f"[YOLOv11 S3 Build] {len(sources_to_add)} sources -> libyolov11_s3.a")
 
 print("[YOLOv11 S3 Build] Build script completed")
+
