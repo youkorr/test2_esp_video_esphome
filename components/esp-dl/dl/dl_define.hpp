@@ -3,6 +3,21 @@
 #include "dl_define_private.hpp"
 #include "sdkconfig.h"
 #include <string>
+#include "soc/soc_caps.h"
+#include "esp_heap_caps.h"
+
+// MALLOC_CAP_SIMD was added in ESP-IDF 5.3+; define it as 0 on older
+// versions so that the bitwise OR in dl_tool.cpp is harmless.
+#ifndef MALLOC_CAP_SIMD
+#define MALLOC_CAP_SIMD 0
+#endif
+
+// HEAP_IRAM_ATTR may not exist on all platforms.
+#ifndef HEAP_IRAM_ATTR
+#define HEAP_IRAM_ATTR
+#endif
+
+#define DL_LOG_TAG "esp-dl"
 
 #define DL_LOG_MODULE_NAME 0   /*!< - 1: save the module name */
                                /*!< - 0: empty module name */
@@ -13,8 +28,7 @@
 #define DL_LOG_CACHE_COUNT 0   /*!< - 1: print the cache hit/miss count only for esp32p4 */
                                /*!< - 0: mute */
 
-#if CONFIG_SPIRAM_SUPPORT || CONFIG_ESP32_SPIRAM_SUPPORT || CONFIG_ESP32S2_SPIRAM_SUPPORT || \
-    CONFIG_ESP32S3_SPIRAM_SUPPORT || CONFIG_SPIRAM
+#if CONFIG_SPIRAM_SUPPORT || CONFIG_SPIRAM
 #define DL_SPIRAM_SUPPORT 1
 #else
 #define DL_SPIRAM_SUPPORT 0
