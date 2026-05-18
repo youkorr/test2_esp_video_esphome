@@ -871,3 +871,49 @@ esp_err_t esp_video_deinit(void)
 
     return ESP_OK;
 }
+
+esp_err_t esp_video_reconfigure_isp_pipeline(const char *sensor_name)
+{
+#if CONFIG_ESP_VIDEO_ENABLE_ISP_PIPELINE_CONTROLLER
+    if (sensor_name == NULL) {
+        ESP_LOGE(TAG, "esp_video_reconfigure_isp_pipeline: sensor_name is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (esp_video_isp_pipeline_is_initialized()) {
+        esp_err_t deinit_ret = esp_video_isp_pipeline_deinit();
+        if (deinit_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to deinit ISP pipeline before reconfigure: %s",
+                     esp_err_to_name(deinit_ret));
+            return deinit_ret;
+        }
+    }
+
+    const esp_ipa_config_t *ipa_config = esp_ipa_pipeline_get_config(sensor_name);
+    if (ipa_config == NULL) {
+        ESP_LOGW(TAG, "No IPA config for sensor '%s' - ISP pipeline left torn down",
+                 sensor_name);
+        return ESP_OK;
+    }
+
+    esp_video_isp_config_t isp_config = {
+        .cam_dev = ESP_VIDEO_MIPI_CSI_DEVICE_NAME,
+        .isp_dev = ESP_VIDEO_ISP1_DEVICE_NAME,
+        .ipa_config = ipa_config,
+        .sensor_name = sensor_name,
+    };
+
+    ESP_LOGI(TAG, "Re-initializing ISP pipeline for sensor '%s'", sensor_name);
+    esp_err_t init_ret = esp_video_isp_pipeline_init(&isp_config);
+    if (init_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to re-init ISP pipeline: %s", esp_err_to_name(init_ret));
+        return init_ret;
+    }
+    ESP_LOGI(TAG, "ISP pipeline re-initialized for sensor '%s'", sensor_name);
+    return ESP_OK;
+#else
+    (void)sensor_name;
+    ESP_LOGW(TAG, "ISP pipeline controller is disabled - reconfigure is a no-op");
+    return ESP_OK;
+#endif
+}

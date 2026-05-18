@@ -791,6 +791,15 @@ bool MipiDSICamComponent::start_streaming() {
         ESP_LOGE(TAG, "Sensor stays on its default format, downstream ioctls will likely fail");
       } else {
         custom_format_applied = true;
+        // ISP demosaic/bayer blocks were configured at boot for the sensor's
+        // default format (Format[0] = RAW8). When switching to a different
+        // bit depth or timing (e.g. RAW10 1280x960), the pipeline must be
+        // torn down and re-initialised, otherwise colour is wrong (grayscale).
+        esp_err_t reinit_ret = esp_video_reconfigure_isp_pipeline("OV5647");
+        if (reinit_ret != ESP_OK) {
+          ESP_LOGW(TAG, "ISP pipeline re-init failed: %s - colours may be off",
+                   esp_err_to_name(reinit_ret));
+        }
       }
     } else {
       ESP_LOGE(TAG, "No native OV5647 format matches %ux%u. Supported sizes:", width, height);
