@@ -1060,8 +1060,9 @@ bool MipiDSICamComponent::start_streaming() {
 
   // 3. Allouer NUM_BUFFERS buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
-  // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
-  const size_t cache_line_size = 64;
+  // ESP32-P4 cache line can be 64B (L2_CACHE_LINE_64B) or 128B (L2_CACHE_LINE_128B).
+  // Aligning to 128 satisfies both configurations.
+  const size_t cache_line_size = 128;
 
   ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
   ESP_LOGI(TAG, "  Buffers: %d × %u bytes = %u KB total",
