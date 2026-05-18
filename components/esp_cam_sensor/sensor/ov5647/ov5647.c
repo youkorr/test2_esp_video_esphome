@@ -40,7 +40,7 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .pclk = 81666700,
             .vts = 1896,
             .hts = 984,
-            .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Effective pattern after H-mirror (0x3821=0x03); BGGR caused desaturated/B&W output. Red tint is fixed separately by disabling cc.linear in the IPA pipeline.
         }
     },
     {
@@ -49,7 +49,7 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .pclk = 81666700,
             .vts = 1896,
             .hts = 984,
-            .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Effective pattern after H-mirror (0x3821=0x03); BGGR caused desaturated/B&W output. Red tint is fixed separately by disabling cc.linear in the IPA pipeline.
         }
     },
     {
@@ -58,7 +58,7 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .pclk = 81666700,
             .vts = 1896,
             .hts = 984,
-            .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Effective pattern after H-mirror (0x3821=0x03); BGGR caused desaturated/B&W output. Red tint is fixed separately by disabling cc.linear in the IPA pipeline.
         }
     },
     {
@@ -67,7 +67,7 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .pclk = 81666700,
             .vts = 1104,
             .hts = 2416,
-            .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Effective pattern after H-mirror (0x3821=0x03); BGGR caused desaturated/B&W output. Red tint is fixed separately by disabling cc.linear in the IPA pipeline.
         }
     },
     {
@@ -76,7 +76,7 @@ static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
             .pclk = 88333333,
             .vts = 1796,
             .hts = 1093,
-            .bayer_type = ESP_CAM_SENSOR_BAYER_BGGR,  // Changed from GBRG to fix red tint
+            .bayer_type = ESP_CAM_SENSOR_BAYER_GBRG,  // Effective pattern after H-mirror (0x3821=0x03); BGGR caused desaturated/B&W output. Red tint is fixed separately by disabling cc.linear in the IPA pipeline.
         }
     },
 };
