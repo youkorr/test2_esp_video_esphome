@@ -1398,8 +1398,15 @@ esp_err_t esp_video_isp_pipeline_deinit(void)
 
     ESP_RETURN_ON_FALSE(s_esp_video_isp, ESP_FAIL, TAG, "ISP controller is not initialized");
 
+    // Best-effort STREAMOFF: some integrations keep streaming user-controlled
+    // and never call STREAMON on the META device, so STREAMOFF here returns
+    // an error. Log and continue so the task is deleted, fds are closed and
+    // s_esp_video_isp is cleared - otherwise a subsequent re-init leaks the
+    // old pipeline.
     ret = ioctl(isp->isp_fd, VIDIOC_STREAMOFF, &type);
-    ESP_RETURN_ON_FALSE(ret == 0, ESP_FAIL, TAG, "failed to stop stream");
+    if (ret != 0) {
+        ESP_LOGW(TAG, "VIDIOC_STREAMOFF returned %d during deinit (META stream may not be active) - continuing", errno);
+    }
     vTaskDelay(ISP_METADATA_BUFFER_COUNT * 50 / portTICK_PERIOD_MS);
 
     vTaskDelete(isp->task_handler);
