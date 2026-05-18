@@ -4,6 +4,25 @@
  * SPDX-License-Identifier: ESPRESSIF MIT
  */
 
+/* FORCE_REBUILD_MARKER: disable CSI backup buffer - 2026-05-18 */
+
+/*
+ * Force-disable the MIPI-CSI driver's "backup buffer" allocation.
+ * Defined before includes so it wins over sdkconfig.h via the
+ * compiler's include order. Re-asserted after includes because
+ * esp_log.h / esp_check.h pull in sdkconfig.h which can clear it.
+ *
+ * Why: for large resolutions like 1920x1080 RGB565 (~4MB), the IDF
+ * backup-buffer alloc fails ("no mem for backup buffer") and
+ * VIDIOC_STREAMON returns ESP_ERR_NO_MEM. V4L2 USERPTR with two
+ * pre-allocated SPIRAM buffers already covers double-buffering, so
+ * the backup is redundant. The same flag in the project CMakeLists
+ * does not always propagate through ESPHome's build, so we redefine
+ * here as well.
+ */
+#undef CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER
+#define CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER 1
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -22,6 +41,11 @@
 #if CONFIG_ESP_VIDEO_ENABLE_SWAP_SHORT
 #include "esp_video_swap_short.h"
 #endif
+
+/* Re-assert after all includes - sdkconfig.h pulled in by esp_log.h /
+ * esp_check.h would otherwise undefine the flag set above. */
+#undef CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER
+#define CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER 1
 
 #define CSI_NAME                    "MIPI-CSI"
 
