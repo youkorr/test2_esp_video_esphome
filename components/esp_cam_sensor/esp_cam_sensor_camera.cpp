@@ -768,36 +768,9 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   bool custom_format_applied = false;
 
-  if (this->sensor_name_ == "ov5647") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    // Sélectionner le format selon la résolution demandée
-    if (width == 640 && height == 480) {
-      custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
-    } else if (width == 800 && height == 600) {
-      custom_format = &ov5647_format_800x600_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
-    } else if (width == 800 && height == 640) {
-      custom_format = &ov5647_format_800x640_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
-    } else if (width == 1024 && height == 600) {
-      custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
-    }
-
-    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-      } else {
-        ESP_LOGI(TAG, "Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
-        custom_format_applied = true;
-      }
-    }
-  }
+  // OV5647: utiliser les formats natifs du driver (ov5647.c) via VIDIOC_S_FMT standard.
+  // Résolutions natives supportées: 800x640, 800x800, 800x1280 (RAW8 50fps),
+  // 1280x960 (RAW10 45fps), 1920x1080 (RAW10 30fps). L'ISP convertit RAW→RGB565.
   // ============================================================================
 
   // ============================================================================
