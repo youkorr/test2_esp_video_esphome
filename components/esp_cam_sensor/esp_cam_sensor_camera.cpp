@@ -19,6 +19,7 @@
 extern "C" {
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_types.h"
+#include "ov5647.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "esp_video_ioctl.h"
@@ -768,9 +769,37 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   bool custom_format_applied = false;
 
-  // OV5647: utiliser les formats natifs du driver (ov5647.c) via VIDIOC_S_FMT standard.
-  // Résolutions natives supportées: 800x640, 800x800, 800x1280 (RAW8 50fps),
-  // 1280x960 (RAW10 45fps), 1920x1080 (RAW10 30fps). L'ISP convertit RAW→RGB565.
+  // OV5647: switch the sensor to a matching native format via VIDIOC_S_SENSOR_FMT.
+  // Native formats are owned by the driver (ov5647.c) and exposed through
+  // ov5647_get_format_info(). Supported sizes: 800x640, 800x800, 800x1280 (RAW8 50fps),
+  // 1280x960 (RAW10 45fps), 1920x1080 (RAW10 30fps). The ISP then converts RAW->RGB565.
+  if (this->sensor_name_ == "ov5647") {
+    size_t format_count = 0;
+    const esp_cam_sensor_format_t *natives = ov5647_get_format_info(&format_count);
+    const esp_cam_sensor_format_t *match = nullptr;
+    for (size_t i = 0; i < format_count; i++) {
+      if (natives[i].width == (uint16_t)width && natives[i].height == (uint16_t)height) {
+        match = &natives[i];
+        ESP_LOGI(TAG, "Using NATIVE OV5647 format[%u]: %s (%ufps)",
+                 (unsigned)i, natives[i].name, natives[i].fps);
+        break;
+      }
+    }
+    if (match != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, match) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
+        ESP_LOGE(TAG, "Sensor stays on its default format, downstream ioctls will likely fail");
+      } else {
+        custom_format_applied = true;
+      }
+    } else {
+      ESP_LOGE(TAG, "No native OV5647 format matches %ux%u. Supported sizes:", width, height);
+      for (size_t i = 0; i < format_count; i++) {
+        ESP_LOGE(TAG, "  - %ux%u @ %ufps (%s)",
+                 natives[i].width, natives[i].height, natives[i].fps, natives[i].name);
+      }
+    }
+  }
   // ============================================================================
 
   // ============================================================================
