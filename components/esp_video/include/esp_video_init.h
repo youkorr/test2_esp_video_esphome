@@ -207,6 +207,26 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config);
  */
 esp_err_t esp_video_deinit(void);
 
+/**
+ * @brief Tear down and re-initialize the ISP pipeline for the named sensor.
+ *
+ * Call this after VIDIOC_S_SENSOR_FMT switches the sensor to a different
+ * native format (especially when the new format has a different bit depth,
+ * e.g. RAW8 -> RAW10). The ISP demosaic/bayer blocks are configured once at
+ * esp_video_init() from the sensor's boot format and do not automatically
+ * follow runtime format changes, so colour comes out wrong after a switch
+ * unless the pipeline is rebuilt.
+ *
+ * Must be called before VIDIOC_STREAMON. The user's open file descriptor on
+ * /dev/video0 remains valid across the call.
+ *
+ * @param[in] sensor_name Upper-case sensor name as registered (e.g. "OV5647").
+ * @return
+ *      - ESP_OK on success
+ *      - Others if failed
+ */
+esp_err_t esp_video_reconfigure_isp_pipeline(const char *sensor_name);
+
 #ifdef __cplusplus
 }
 #endif
