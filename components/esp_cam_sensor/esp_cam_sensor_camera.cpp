@@ -799,6 +799,17 @@ bool MipiDSICamComponent::start_streaming() {
         if (reinit_ret != ESP_OK) {
           ESP_LOGW(TAG, "ISP pipeline re-init failed: %s - colours may be off",
                    esp_err_to_name(reinit_ret));
+        } else {
+          // The ISP re-init opens/closes its own internal fd on /dev/video0,
+          // which resets the V4L2 device's cur_format back to Format[0]
+          // (800x1280). Our user fd then sees the stale state and the next
+          // VIDIOC_S_FMT is rejected by csi_video as "width or height is
+          // invalid". Re-apply VIDIOC_S_SENSOR_FMT on our fd to re-sync the
+          // device with the sensor's actual format.
+          if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, match) != 0) {
+            ESP_LOGW(TAG, "Re-apply VIDIOC_S_SENSOR_FMT after ISP re-init failed: %s",
+                     strerror(errno));
+          }
         }
       }
     } else {
