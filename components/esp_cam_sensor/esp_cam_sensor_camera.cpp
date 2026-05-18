@@ -29,6 +29,7 @@ extern "C" {
 #include "linux/videodev2.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
+#include "esp_private/esp_cache_private.h"  // Pour esp_cache_get_alignment() (détection dynamique cache line)
 }
 
 // Custom format configurations for all sensors
@@ -1060,8 +1061,10 @@ bool MipiDSICamComponent::start_streaming() {
 
   // 3. Allouer NUM_BUFFERS buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
-  // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
-  const size_t cache_line_size = 64;
+  // Détection dynamique de la cache line (64B ou 128B selon L2_CACHE_LINE_SIZE configuré)
+  size_t cache_line_size = 64;
+  esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &cache_line_size);
+  if (cache_line_size < 64) cache_line_size = 64;
 
   ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
   ESP_LOGI(TAG, "  Buffers: %d × %u bytes = %u KB total",
