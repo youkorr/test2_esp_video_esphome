@@ -22,6 +22,18 @@ extern "C" {
  */
 esp_cam_sensor_device_t *ov5647_detect(esp_cam_sensor_config_t *config);
 
+/**
+ * @brief Get the array of native sensor formats supported by the OV5647 driver.
+ *
+ * The returned pointer is valid for the lifetime of the program (the array is
+ * static const). Use one of the entries with VIDIOC_S_SENSOR_FMT to switch the
+ * sensor to a different native resolution/format.
+ *
+ * @param[out] count Number of entries in the returned array (may be NULL).
+ * @return Pointer to the first element of the native format array.
+ */
+const esp_cam_sensor_format_t *ov5647_get_format_info(size_t *count);
+
 #ifdef __cplusplus
 }
 #endif
