@@ -33,22 +33,6 @@
 
 static const char *TAG = "ov5647";
 
-/*
- * Per-device runtime state. Holds the last gain/exposure values written to
- * the sensor so that get_para_value() can return them without re-reading
- * the registers each frame (the IPA AGC algorithm polls these often).
- * Modelled on the SC2336 / OV02C10 drivers in this tree.
- */
-typedef struct ov5647_para {
-    uint32_t exposure_val;  /* last value written to OV5647_REG_AEC_EXPO (line count, low 4 bits fractional treated as zero) */
-    uint32_t gain_val;      /* last value written to OV5647_REG_AGC_GAIN (raw register, 10-bit) */
-    bool     aec_agc_manual; /* true once we've forced the sensor into manual AEC/AGC mode */
-} ov5647_para_t;
-
-struct ov5647_cam {
-    ov5647_para_t ov5647_para;
-};
-
 static const esp_cam_sensor_isp_info_t ov5647_isp_info[] = {
     {
         .isp_v1_info = {
@@ -352,78 +336,6 @@ static esp_err_t ov5647_set_AE_target(esp_cam_sensor_device_t *dev, int target)
 }
 
 
-/*
- * Set the sensor to fully manual AEC/AGC.
- * Bit0 of OV5647_REG_AEC_AGC = AGC manual, bit1 = AEC manual.
- * Required before the IPA AGC algorithm starts driving exposure/gain
- * so the sensor's own AEC loop doesn't fight back.
- */
-static esp_err_t ov5647_set_aec_agc_manual(esp_cam_sensor_device_t *dev)
-{
-    struct ov5647_cam *cam = (struct ov5647_cam *)dev->priv;
-    if (cam == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (cam->ov5647_para.aec_agc_manual) {
-        return ESP_OK;
-    }
-    esp_err_t ret = ov5647_write(dev->sccb_handle, OV5647_REG_AEC_AGC, 0x03);
-    if (ret == ESP_OK) {
-        cam->ov5647_para.aec_agc_manual = true;
-        ESP_LOGI(TAG, "AEC/AGC switched to manual (IPA will drive)");
-    }
-    return ret;
-}
-
-/*
- * Write a new exposure value. The hardware register is 20 bits where the
- * bottom 4 bits are fractions of a line, so we shift the V4L2-style value
- * left by 4 (same as Linux mainline drivers/media/i2c/ov5647.c).
- */
-static esp_err_t ov5647_set_exp_val(esp_cam_sensor_device_t *dev, uint32_t value)
-{
-    struct ov5647_cam *cam = (struct ov5647_cam *)dev->priv;
-    if (cam == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (value < OV5647_EXPOSURE_MIN) value = OV5647_EXPOSURE_MIN;
-    if (value > OV5647_EXPOSURE_MAX) value = OV5647_EXPOSURE_MAX;
-
-    uint32_t reg = value << 4;  /* low 4 bits are fractional */
-    esp_err_t ret = ov5647_set_aec_agc_manual(dev);
-    if (ret != ESP_OK) return ret;
-    ret  = ov5647_write(dev->sccb_handle, OV5647_REG_AEC_EXPO_H, (reg >> 16) & 0x0F);
-    ret |= ov5647_write(dev->sccb_handle, OV5647_REG_AEC_EXPO_M, (reg >> 8) & 0xFF);
-    ret |= ov5647_write(dev->sccb_handle, OV5647_REG_AEC_EXPO_L, reg & 0xFF);
-    if (ret == ESP_OK) {
-        cam->ov5647_para.exposure_val = value;
-    }
-    return ret;
-}
-
-/*
- * Write a new analog gain value (10-bit register, units of 1/16).
- * Min=16 -> 1.0x, Max=1023 -> ~64x.
- */
-static esp_err_t ov5647_set_gain_val(esp_cam_sensor_device_t *dev, uint32_t value)
-{
-    struct ov5647_cam *cam = (struct ov5647_cam *)dev->priv;
-    if (cam == NULL) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    if (value < OV5647_GAIN_MIN) value = OV5647_GAIN_MIN;
-    if (value > OV5647_GAIN_MAX) value = OV5647_GAIN_MAX;
-
-    esp_err_t ret = ov5647_set_aec_agc_manual(dev);
-    if (ret != ESP_OK) return ret;
-    ret  = ov5647_write(dev->sccb_handle, OV5647_REG_AGC_GAIN_H, (value >> 8) & 0x03);
-    ret |= ov5647_write(dev->sccb_handle, OV5647_REG_AGC_GAIN_L, value & 0xFF);
-    if (ret == ESP_OK) {
-        cam->ov5647_para.gain_val = value;
-    }
-    return ret;
-}
-
 static esp_err_t ov5647_query_para_desc(esp_cam_sensor_device_t *dev, esp_cam_sensor_param_desc_t *qdesc)
 {
     esp_err_t ret = ESP_OK;
@@ -437,21 +349,11 @@ static esp_err_t ov5647_query_para_desc(esp_cam_sensor_device_t *dev, esp_cam_se
         qdesc->default_value = 0;
         break;
     case ESP_CAM_SENSOR_EXPOSURE_VAL:
-        /* Bounds from Linux mainline drivers/media/i2c/ov5647.c. */
         qdesc->type = ESP_CAM_SENSOR_PARAM_TYPE_NUMBER;
-        qdesc->number.minimum = OV5647_EXPOSURE_MIN;
-        qdesc->number.maximum = OV5647_EXPOSURE_MAX;
-        qdesc->number.step = OV5647_EXPOSURE_STEP;
-        qdesc->default_value = OV5647_EXPOSURE_DEFAULT;
-        break;
-    case ESP_CAM_SENSOR_GAIN:
-        /* Bounds from Linux mainline drivers/media/i2c/ov5647.c.
-         * Register is 10 bits in units of 1/16 (min 16 = 1.0x, max 1023 ~ 64x). */
-        qdesc->type = ESP_CAM_SENSOR_PARAM_TYPE_NUMBER;
-        qdesc->number.minimum = OV5647_GAIN_MIN;
-        qdesc->number.maximum = OV5647_GAIN_MAX;
-        qdesc->number.step = OV5647_GAIN_STEP;
-        qdesc->default_value = OV5647_GAIN_DEFAULT;
+        qdesc->number.minimum = 2;
+        qdesc->number.maximum = 235;
+        qdesc->number.step = 1;
+        qdesc->default_value = OV5647_AE_TARGET_DEFAULT;
         break;
     default: {
         ESP_LOGD(TAG, "id=%"PRIx32" is not supported", qdesc->id);
@@ -464,20 +366,7 @@ static esp_err_t ov5647_query_para_desc(esp_cam_sensor_device_t *dev, esp_cam_se
 
 static esp_err_t ov5647_get_para_value(esp_cam_sensor_device_t *dev, uint32_t id, void *arg, size_t size)
 {
-    struct ov5647_cam *cam = (struct ov5647_cam *)dev->priv;
-    if (cam == NULL || arg == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    switch (id) {
-    case ESP_CAM_SENSOR_EXPOSURE_VAL:
-        *(uint32_t *)arg = cam->ov5647_para.exposure_val;
-        return ESP_OK;
-    case ESP_CAM_SENSOR_GAIN:
-        *(uint32_t *)arg = cam->ov5647_para.gain_val;
-        return ESP_OK;
-    default:
-        return ESP_ERR_NOT_SUPPORTED;
-    }
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 static esp_err_t ov5647_set_para_value(esp_cam_sensor_device_t *dev, uint32_t id, const void *arg, size_t size)
@@ -498,19 +387,9 @@ static esp_err_t ov5647_set_para_value(esp_cam_sensor_device_t *dev, uint32_t id
         break;
     }
     case ESP_CAM_SENSOR_EXPOSURE_VAL: {
-        /* V4L2-standard exposure value (line count). Writes the AEC_EXPO
-         * registers and forces the sensor into manual mode so the IPA
-         * AGC algorithm can drive it. The legacy "AE target" semantics
-         * (a brightness target in [2,235] for the sensor's built-in AEC
-         * loop) is no longer mapped here - the upper layer now uses the
-         * IPA AGC + JSON-tunable target band instead. */
-        uint32_t value = *(uint32_t *)arg;
-        ret = ov5647_set_exp_val(dev, value);
-        break;
-    }
-    case ESP_CAM_SENSOR_GAIN: {
-        uint32_t value = *(uint32_t *)arg;
-        ret = ov5647_set_gain_val(dev, value);
+        int *value = (int *)arg;
+
+        ret = ov5647_set_AE_target(dev, *value);
         break;
     }
     default: {
@@ -837,10 +716,6 @@ static esp_err_t ov5647_delete(esp_cam_sensor_device_t *dev)
 {
     ESP_LOGD(TAG, "del ov5647 (%p)", dev);
     if (dev) {
-        if (dev->priv) {
-            free(dev->priv);
-            dev->priv = NULL;
-        }
         free(dev);
         dev = NULL;
     }
@@ -888,18 +763,6 @@ esp_cam_sensor_device_t *ov5647_detect(esp_cam_sensor_config_t *config)
         ESP_LOGE(TAG, "Not support DVP port");
     }
 
-    /* Allocate the private state used by the AEC/AGC plumbing. Without it
-     * get_para_value / set_para_value for EXPOSURE_VAL and GAIN cannot
-     * cache the current values that the IPA AGC algorithm reads back. */
-    dev->priv = calloc(1, sizeof(struct ov5647_cam));
-    if (dev->priv == NULL) {
-        ESP_LOGE(TAG, "No memory for ov5647 priv state");
-        free(dev);
-        return NULL;
-    }
-    ((struct ov5647_cam *)dev->priv)->ov5647_para.exposure_val = OV5647_EXPOSURE_DEFAULT;
-    ((struct ov5647_cam *)dev->priv)->ov5647_para.gain_val = OV5647_GAIN_DEFAULT;
-
     // Configure sensor power, clock, and SCCB port
     if (ov5647_power_on(dev) != ESP_OK) {
         ESP_LOGE(TAG, "Camera power on failed");
@@ -925,10 +788,6 @@ esp_cam_sensor_device_t *ov5647_detect(esp_cam_sensor_config_t *config)
 
 err_free_handler:
     ov5647_power_off(dev);
-    if (dev->priv) {
-        free(dev->priv);
-        dev->priv = NULL;
-    }
     free(dev);
 
     return NULL;
