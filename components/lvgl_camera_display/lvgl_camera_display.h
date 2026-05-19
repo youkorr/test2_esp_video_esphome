@@ -4,10 +4,6 @@
 #include "esphome/components/lvgl/lvgl_esphome.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
 
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-#include "driver/ppa.h"
-#endif
-
 // Forward declarations
 namespace esphome {
 namespace face_detection {
@@ -90,23 +86,6 @@ class LVGLCameraDisplay : public Component {
   lv_draw_buf_t camera_draw_buf_{};
   bool draw_buf_initialized_{false};
   bool is_canvas_{false};  // true if widget is canvas (uses memcpy), false if image (uses zero-copy)
-
-  // PPA pre-resize: when canvas size differs from camera size we hardware-scale
-  // the camera frame into a display-sized intermediate buffer before LVGL sees
-  // it. LVGL then renders zero-copy (no software resize), unblocking the FPS
-  // cap caused by a per-frame software resize.
-#ifdef CONFIG_IDF_TARGET_ESP32P4
-  ppa_client_handle_t ppa_srm_client_{nullptr};
-#endif
-  uint8_t *display_buf_data_{nullptr};
-  uint16_t display_buf_w_{0};
-  uint16_t display_buf_h_{0};
-  bool ppa_resize_enabled_{false};
-  bool ppa_setup_attempted_{false};
-  uint32_t ppa_error_count_{0};
-
-  bool setup_ppa_resize_(uint16_t cam_w, uint16_t cam_h, uint16_t canvas_w, uint16_t canvas_h);
-  bool do_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16_t src_h);
 
   // Benchmark stats for UI display
   lv_obj_t *stats_label_{nullptr};
