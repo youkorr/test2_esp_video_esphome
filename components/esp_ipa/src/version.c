@@ -63,9 +63,13 @@ void esp_ipa_print_version(void)
  */
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
-    // Configuration pour OV5647 : CCM désactivée pour éviter teinte rouge
+    // Configuration pour OV5647 : CCM désactivée pour éviter teinte rouge.
+    // agc.threshold ajouté pour stabiliser le framerate (sinon l'AEC built-in
+    // du capteur fait osciller l'exposition et le framerate selon la
+    // luminosité - cf. config Waveshare SC2336 qui utilise la même approche).
     static const char *ipa_names_ov5647[] = {
         "awb.gray",                /* Auto White Balance */
+        "agc.threshold",           /* Auto-Gain/Exposure Control with luma deadband */
         "denoising.gain_feedback", /* Réduction bruit */
         "sharpen.freq_feedback",   /* Netteté */
         "gamma.lumma_feedback",    /* Correction gamma */
@@ -73,7 +77,7 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
     };
 
     static const esp_ipa_config_t ipa_config_ov5647 = {
-        .ipa_nums = 4,     /* 4 IPAs (CCM disabled to fix red tint) */
+        .ipa_nums = 5,     /* 5 IPAs: awb + agc + denoising + sharpen + gamma (CCM disabled to fix red tint) */
         .ipa_names = ipa_names_ov5647,
     };
 
