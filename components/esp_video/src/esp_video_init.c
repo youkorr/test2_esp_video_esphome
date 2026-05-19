@@ -544,13 +544,13 @@ esp_err_t esp_video_init(const esp_video_init_config_t *config)
                         .sensor_name = cam_dev->name
                     };
 
-                    ESP_LOGI(TAG, "Initializing ISP pipeline with IPA for sensor '%s'", cam_dev->name);
+                    ESP_LOGW(TAG, "Initializing ISP pipeline with IPA for sensor '%s'", cam_dev->name);
                     ret = esp_video_isp_pipeline_init(&isp_config);
                     if (ret != ESP_OK) {
                         ESP_LOGE(TAG, "Failed to initialize ISP pipeline: %s", esp_err_to_name(ret));
                         return ret;
                     }
-                    ESP_LOGI(TAG, "ISP pipeline initialized successfully");
+                    ESP_LOGW(TAG, "ISP pipeline initialized successfully (5 algos for OV5647)");
                 } else {
                     ESP_LOGW(TAG, "No IPA config found for sensor '%s' - ISP will use defaults", cam_dev->name);
                 }
