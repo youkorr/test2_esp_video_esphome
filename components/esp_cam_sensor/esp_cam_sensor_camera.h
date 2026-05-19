@@ -222,7 +222,7 @@ class MipiDSICamComponent : public Component {
   int isp_fd_{-1};         // /dev/video20 (ISP) pour contrôles V4L2 (brightness, contrast, etc.)
 
   // Buffer pool system (V4L2_MEMORY_USERPTR - zero-copy to SPIRAM)
-  static constexpr int NUM_BUFFERS = 3;  // Triple buffering: lets the camera keep capturing while LVGL processes a frame and a third one is in-flight, avoids DMA frame drops when LVGL takes longer than the sensor frame period (e.g. when canvas size != camera size and a PPA resize is required per frame).
+  static constexpr int NUM_BUFFERS = 2;  // Double buffering: matches Espressif/Waveshare upstream V4L2 USERPTR setups. With the PPA pre-resize in lvgl_camera_display, the camera buffer is released as soon as the PPA copy completes, so two buffers are sufficient.
   SimpleBufferElement simple_buffers_[NUM_BUFFERS];
   int current_buffer_index_{-1};  // Index du buffer actuellement capturé (-1 = aucun)
   portMUX_TYPE buffer_mutex_;  // Spinlock pour thread-safety (initialisé dans setup)

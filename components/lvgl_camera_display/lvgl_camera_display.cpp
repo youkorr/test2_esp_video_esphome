@@ -3,6 +3,9 @@
 #include "esphome/core/application.h"
 #include <cstring>
 #include "esp_cache.h"
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#include "esp_heap_caps.h"
+#endif
 // Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
 #include "esphome/components/face_detection/face_detection.h"
@@ -265,13 +268,46 @@ void LVGLCameraDisplay::update_canvas_() {
   esp_cache_msync(img_data, buf_size_bytes,
                   ESP_CACHE_MSYNC_FLAG_DIR_C2M | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-  // Detect widget type on first update
+  // Detect widget type and possibly set up PPA pre-resize on the first update.
+  // The canvas widget may not have a final size before the first redraw, so
+  // we re-try the PPA setup on every update until canvas dimensions are valid
+  // (capped by ppa_setup_attempted_ once we've made a decision).
   if (this->first_update_) {
     this->is_canvas_ = lv_obj_check_type(this->canvas_obj_, &lv_canvas_class);
     ESP_LOGI(TAG, "Premier update - Widget type: %s", this->is_canvas_ ? "CANVAS" : "IMAGE");
-    ESP_LOGI(TAG, "   Dimensions: %ux%u", width, height);
+    ESP_LOGI(TAG, "   Dimensions camera: %ux%u", width, height);
     ESP_LOGI(TAG, "   Buffer: %p (index=%u)", img_data, this->camera_->get_buffer_index(buffer));
   }
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  if (!this->ppa_setup_attempted_) {
+    lv_coord_t canvas_w = lv_obj_get_width(this->canvas_obj_);
+    lv_coord_t canvas_h = lv_obj_get_height(this->canvas_obj_);
+    if (canvas_w > 0 && canvas_h > 0) {
+      this->ppa_setup_attempted_ = true;
+      if ((uint16_t)canvas_w != width || (uint16_t)canvas_h != height) {
+        this->setup_ppa_resize_(width, height, (uint16_t)canvas_w, (uint16_t)canvas_h);
+      } else {
+        ESP_LOGI(TAG, "Canvas size matches camera (%ux%u) - PPA pre-resize not needed", width, height);
+      }
+    }
+  }
+#endif
+
+  // PPA pre-resize: hardware-scale the camera frame into the display buffer.
+  // Switches img_data/width/height to the resized buffer so LVGL renders
+  // zero-copy at the canvas's exact size.
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  if (this->ppa_resize_enabled_ && this->do_ppa_scale_(img_data, width, height)) {
+    // PPA copy is done - release the camera buffer immediately so the CSI
+    // DMA can refill it. The display buffer is private to this component
+    // and stays valid for the LVGL render that follows.
+    this->camera_->release_buffer(buffer);
+    buffer = nullptr;
+    img_data = this->display_buf_data_;
+    width = this->display_buf_w_;
+    height = this->display_buf_h_;
+  }
+#endif
 
   // LVGL 9.4 ZERO-COPY MODE
   // Camera buffer stride = width * 2 (RGB565, no padding between rows)
@@ -310,9 +346,103 @@ void LVGLCameraDisplay::update_canvas_() {
 
   this->first_update_ = false;
 
-  // Tracker ce buffer pour le liberer au prochain update
+  // Tracker ce buffer pour le liberer au prochain update.
+  // If PPA pre-resize ran, buffer is already nullptr (released immediately
+  // after the PPA copy completed) and there is nothing to track.
   this->displayed_buffer_ = buffer;
 }
+
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+bool LVGLCameraDisplay::setup_ppa_resize_(uint16_t cam_w, uint16_t cam_h,
+                                          uint16_t canvas_w, uint16_t canvas_h) {
+  if (this->ppa_srm_client_ != nullptr) {
+    return true;
+  }
+
+  ppa_client_config_t cfg = {};
+  cfg.oper_type = PPA_OPERATION_SRM;
+  cfg.max_pending_trans_num = 1;
+  esp_err_t ret = ppa_register_client(&cfg, &this->ppa_srm_client_);
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG, "ppa_register_client failed (%s) - falling back to LVGL software resize",
+             esp_err_to_name(ret));
+    this->ppa_srm_client_ = nullptr;
+    return false;
+  }
+
+  size_t buf_size = (size_t)canvas_w * (size_t)canvas_h * 2;  // RGB565
+  this->display_buf_data_ = (uint8_t *)heap_caps_aligned_alloc(64, buf_size, MALLOC_CAP_SPIRAM);
+  if (this->display_buf_data_ == nullptr) {
+    ESP_LOGW(TAG, "Failed to allocate %u KB display buffer in SPIRAM - PPA resize disabled",
+             (unsigned)(buf_size / 1024));
+    ppa_unregister_client(this->ppa_srm_client_);
+    this->ppa_srm_client_ = nullptr;
+    return false;
+  }
+
+  this->display_buf_w_ = canvas_w;
+  this->display_buf_h_ = canvas_h;
+  this->ppa_resize_enabled_ = true;
+  this->draw_buf_initialized_ = false;  // reinit lv_draw_buf_t for the new size
+
+  ESP_LOGI(TAG, "PPA pre-resize ENABLED: %ux%u (camera) -> %ux%u (canvas)",
+           cam_w, cam_h, canvas_w, canvas_h);
+  ESP_LOGI(TAG, "   Intermediate buffer: %p (%u KB SPIRAM, 64-byte aligned)",
+           this->display_buf_data_, (unsigned)(buf_size / 1024));
+  return true;
+}
+
+bool LVGLCameraDisplay::do_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16_t src_h) {
+  ppa_in_pic_blk_config_t in = {};
+  in.buffer = (void *)src;
+  in.pic_w = src_w;
+  in.pic_h = src_h;
+  in.block_w = src_w;
+  in.block_h = src_h;
+  in.block_offset_x = 0;
+  in.block_offset_y = 0;
+  in.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  ppa_out_pic_blk_config_t out = {};
+  out.buffer = this->display_buf_data_;
+  out.buffer_size = (size_t)this->display_buf_w_ * (size_t)this->display_buf_h_ * 2;
+  out.pic_w = this->display_buf_w_;
+  out.pic_h = this->display_buf_h_;
+  out.block_offset_x = 0;
+  out.block_offset_y = 0;
+  out.srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+
+  ppa_srm_oper_config_t cfg = {};
+  cfg.in = in;
+  cfg.out = out;
+  cfg.rotation_angle = PPA_SRM_ROTATION_ANGLE_0;
+  cfg.scale_x = (float)this->display_buf_w_ / (float)src_w;
+  cfg.scale_y = (float)this->display_buf_h_ / (float)src_h;
+  cfg.mirror_x = false;
+  cfg.mirror_y = false;
+  cfg.rgb_swap = 0;
+  cfg.byte_swap = 0;
+  cfg.mode = PPA_TRANS_MODE_BLOCKING;
+
+  esp_err_t ret = ppa_do_scale_rotate_mirror(this->ppa_srm_client_, &cfg);
+  if (ret != ESP_OK) {
+    if (this->ppa_error_count_ < 5) {
+      ESP_LOGW(TAG, "PPA scale failed: %s - falling back to camera buffer for this frame",
+               esp_err_to_name(ret));
+      this->ppa_error_count_++;
+    }
+    return false;
+  }
+
+  // PPA wrote to display_buf_data_ via DMA. Invalidate CPU cache for that
+  // region so LVGL reads the freshly produced pixels instead of stale lines
+  // that may still be sitting in cache.
+  esp_cache_msync(this->display_buf_data_,
+                  (size_t)this->display_buf_w_ * (size_t)this->display_buf_h_ * 2,
+                  ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
+  return true;
+}
+#endif  // CONFIG_IDF_TARGET_ESP32P4
 
 void LVGLCameraDisplay::configure_canvas(lv_obj_t *canvas) {
   this->canvas_obj_ = canvas;
