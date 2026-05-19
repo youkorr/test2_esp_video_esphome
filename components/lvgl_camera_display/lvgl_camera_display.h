@@ -103,7 +103,11 @@ class LVGLCameraDisplay : public Component {
   // - no PPA wait happens in the LVGL task, so contention with LVGL's own
   // PPA usage (display rotation) doesn't stall the render loop.
 #ifdef CONFIG_IDF_TARGET_ESP32P4
-  static constexpr int NUM_DISPLAY_BUFS = 3;
+  // Minimum viable ping-pong: producer writes to one buffer while consumer
+  // shows the other. Two is enough to keep both decoupled without DMA
+  // contention. Going higher only buys latency, not throughput, while
+  // each extra slot costs canvas_w * canvas_h * 2 bytes of SPIRAM.
+  static constexpr int NUM_DISPLAY_BUFS = 2;
 
   ppa_client_handle_t ppa_srm_client_{nullptr};
   uint8_t *display_bufs_[NUM_DISPLAY_BUFS]{};
