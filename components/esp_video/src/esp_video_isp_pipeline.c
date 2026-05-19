@@ -1305,7 +1305,7 @@ esp_err_t esp_video_isp_pipeline_init(const esp_video_isp_config_t *config)
                       fail_0, TAG, "failed to create IPA pipeline");
 
     // Print loaded IPA algorithms for verification
-    ESP_LOGI(TAG, "IPA Pipeline created - verifying loaded algorithms:");
+    ESP_LOGW(TAG, "IPA Pipeline created - verifying loaded algorithms:");
     esp_ipa_pipeline_print(isp->ipa_pipeline);
 
     ESP_GOTO_ON_ERROR(init_cam_dev(config, isp), fail_1, TAG, "failed to initialize camera device");
