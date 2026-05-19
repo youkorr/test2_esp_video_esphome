@@ -326,9 +326,19 @@ void Mp4Player::setup() {
             this->video_width_ = sinfo.stream_info.video_info.width;
             this->video_height_ = sinfo.stream_info.video_info.height;
             this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->video_format_ = sinfo.stream_info.video_info.format;
             this->total_duration_ms_ = sinfo.duration;
-            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+            const char *fmt_str = (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG"
+                                : (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264)  ? "H264"
+                                                                                        : "UNKNOWN";
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms, format: %s",
+                     this->video_width_, this->video_height_, this->video_fps_,
+                     this->total_duration_ms_, fmt_str);
+            if (this->video_format_ != EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+              ESP_LOGE(TAG, "Unsupported video codec (only MJPEG is supported on ESP32-P4 HW decoder).");
+              ESP_LOGE(TAG, "Re-encode with: ffmpeg -i input.mp4 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -an output.mp4");
+              ESP_LOGE(TAG, "  (or with audio: ffmpeg -i input.mp4 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -c:a aac -b:a 128k output.mp4)");
+            }
           }
         }
         // Audio info
@@ -719,6 +729,17 @@ void Mp4Player::playback_task_(void *arg) {
           uint32_t fps = sinfo.stream_info.video_info.fps;
           player->video_fps_ = fps > 0 ? fps : 25;
           player->total_duration_ms_ = sinfo.duration;
+          player->video_format_ = sinfo.stream_info.video_info.format;
+
+          // Abort if video is not MJPEG (only format supported by ESP32-P4 HW JPEG decoder)
+          if (player->video_format_ != EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+            const char *fmt_str = (player->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264) ? "H264" : "UNKNOWN";
+            ESP_LOGE(TAG, "Cannot play: video codec is %s, only MJPEG is supported.", fmt_str);
+            ESP_LOGE(TAG, "Re-encode with: ffmpeg -i \"%s\" -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -c:a aac -b:a 128k output.mp4",
+                     player->file_path_.c_str());
+            esp_extractor_close(ext);
+            break;
+          }
 
           uint32_t actual_w = sinfo.stream_info.video_info.width;
           uint32_t actual_h = sinfo.stream_info.video_info.height;
@@ -2271,9 +2292,14 @@ void Mp4Player::play_file(const std::string &path) {
             this->video_width_ = sinfo.stream_info.video_info.width;
             this->video_height_ = sinfo.stream_info.video_info.height;
             this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->video_format_ = sinfo.stream_info.video_info.format;
             this->total_duration_ms_ = sinfo.duration;
-            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+            const char *fmt_str = (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG"
+                                : (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264)  ? "H264"
+                                                                                        : "UNKNOWN";
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms, format: %s",
+                     this->video_width_, this->video_height_, this->video_fps_,
+                     this->total_duration_ms_, fmt_str);
           }
         }
         uint16_t anum = 0;
