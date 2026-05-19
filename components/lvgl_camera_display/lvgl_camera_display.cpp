@@ -5,6 +5,9 @@
 #include "esp_cache.h"
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "esp_heap_caps.h"
+#include "esp_private/esp_cache_private.h"  // esp_cache_get_alignment() - PPA requires the
+                                            // output buffer addr AND size to be aligned to
+                                            // the SPIRAM cache line (128B on L2_CACHE_LINE_128B).
 #endif
 // Conditionally include detection components only if they exist
 #ifdef USE_FACE_DETECTION
@@ -370,11 +373,21 @@ bool LVGLCameraDisplay::setup_ppa_resize_(uint16_t cam_w, uint16_t cam_h,
     return false;
   }
 
+  size_t cache_line_size = 64;
+  esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &cache_line_size);
+  if (cache_line_size < 64) cache_line_size = 64;
+
+  // PPA refuses the operation unless BOTH the output buffer address and the
+  // output buffer size are aligned to the SPIRAM cache line. heap_caps_aligned_alloc
+  // guarantees the address; we round the requested size up to the next cache
+  // line multiple so the size constraint is also satisfied. The extra padding
+  // is unused but never read by LVGL (it only walks display_buf_w_ * display_buf_h_).
   size_t buf_size = (size_t)canvas_w * (size_t)canvas_h * 2;  // RGB565
-  this->display_buf_data_ = (uint8_t *)heap_caps_aligned_alloc(64, buf_size, MALLOC_CAP_SPIRAM);
+  size_t aligned_size = (buf_size + cache_line_size - 1) & ~(cache_line_size - 1);
+  this->display_buf_data_ = (uint8_t *)heap_caps_aligned_alloc(cache_line_size, aligned_size, MALLOC_CAP_SPIRAM);
   if (this->display_buf_data_ == nullptr) {
     ESP_LOGW(TAG, "Failed to allocate %u KB display buffer in SPIRAM - PPA resize disabled",
-             (unsigned)(buf_size / 1024));
+             (unsigned)(aligned_size / 1024));
     ppa_unregister_client(this->ppa_srm_client_);
     this->ppa_srm_client_ = nullptr;
     return false;
@@ -382,13 +395,14 @@ bool LVGLCameraDisplay::setup_ppa_resize_(uint16_t cam_w, uint16_t cam_h,
 
   this->display_buf_w_ = canvas_w;
   this->display_buf_h_ = canvas_h;
+  this->display_buf_size_ = aligned_size;
   this->ppa_resize_enabled_ = true;
   this->draw_buf_initialized_ = false;  // reinit lv_draw_buf_t for the new size
 
   ESP_LOGI(TAG, "PPA pre-resize ENABLED: %ux%u (camera) -> %ux%u (canvas)",
            cam_w, cam_h, canvas_w, canvas_h);
-  ESP_LOGI(TAG, "   Intermediate buffer: %p (%u KB SPIRAM, 64-byte aligned)",
-           this->display_buf_data_, (unsigned)(buf_size / 1024));
+  ESP_LOGI(TAG, "   Intermediate buffer: %p (%u KB SPIRAM, %u-byte aligned addr+size)",
+           this->display_buf_data_, (unsigned)(aligned_size / 1024), (unsigned)cache_line_size);
   return true;
 }
 
@@ -405,7 +419,7 @@ bool LVGLCameraDisplay::do_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16
 
   ppa_out_pic_blk_config_t out = {};
   out.buffer = this->display_buf_data_;
-  out.buffer_size = (size_t)this->display_buf_w_ * (size_t)this->display_buf_h_ * 2;
+  out.buffer_size = this->display_buf_size_;  // cache-line aligned (PPA requirement)
   out.pic_w = this->display_buf_w_;
   out.pic_h = this->display_buf_h_;
   out.block_offset_x = 0;
@@ -436,9 +450,9 @@ bool LVGLCameraDisplay::do_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16
 
   // PPA wrote to display_buf_data_ via DMA. Invalidate CPU cache for that
   // region so LVGL reads the freshly produced pixels instead of stale lines
-  // that may still be sitting in cache.
-  esp_cache_msync(this->display_buf_data_,
-                  (size_t)this->display_buf_w_ * (size_t)this->display_buf_h_ * 2,
+  // that may still be sitting in cache. The size passed must also be
+  // cache-aligned, so we use the aligned allocation size.
+  esp_cache_msync(this->display_buf_data_, this->display_buf_size_,
                   ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
   return true;
 }
