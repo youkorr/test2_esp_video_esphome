@@ -71,6 +71,7 @@ class Mp4Player : public Component {
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
+  void add_on_close_callback(std::function<void()> &&callback) { on_close_callbacks_.add(std::move(callback)); }
 
   void setup() override;
   void loop() override;
@@ -93,6 +94,13 @@ class Mp4Player : public Component {
   void exit_fullscreen();
   void toggle_fullscreen();
   bool is_fullscreen() const { return fullscreen_active_; }
+
+  // Close the player UI (browser + viewers) and fire `on_close`.
+  // Useful when the user dismisses a media-browser overlay.
+  void close();
+  // Free heavy PSRAM buffers (display, jpeg, audio). Safe to call when
+  // stopped — buffers are re-allocated on the next play_file().
+  void release_resources();
 
  protected:
   // UI
@@ -347,6 +355,7 @@ class Mp4Player : public Component {
   // Automation triggers
   CallbackManager<void()> on_play_callbacks_;
   CallbackManager<void()> on_stop_callbacks_;
+  CallbackManager<void()> on_close_callbacks_;
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<Mp4Player> {
@@ -379,6 +388,21 @@ template<typename... Ts> class ToggleFullscreenAction : public Action<Ts...>, pu
   void play(const Ts &...x) override { this->parent_->toggle_fullscreen(); }
 };
 
+template<typename... Ts> class CloseAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->close(); }
+};
+
+template<typename... Ts> class ReleaseResourcesAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->release_resources(); }
+};
+
+template<typename... Ts> class ShowBrowserAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->show_file_browser(); }
+};
+
 class PlayTrigger : public Trigger<> {
  public:
   explicit PlayTrigger(Mp4Player *player) { player->add_on_play_callback([this]() { this->trigger(); }); }
@@ -387,6 +411,11 @@ class PlayTrigger : public Trigger<> {
 class StopTrigger : public Trigger<> {
  public:
   explicit StopTrigger(Mp4Player *player) { player->add_on_stop_callback([this]() { this->trigger(); }); }
+};
+
+class CloseTrigger : public Trigger<> {
+ public:
+  explicit CloseTrigger(Mp4Player *player) { player->add_on_close_callback([this]() { this->trigger(); }); }
 };
 
 }  // namespace mp4_player

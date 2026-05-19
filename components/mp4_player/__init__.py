@@ -4,6 +4,8 @@ from esphome.const import CONF_ID, CONF_TRIGGER_ID
 from esphome import automation
 from esphome.components import speaker
 
+CONF_ON_CLOSE = "on_close"
+
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
@@ -19,10 +21,14 @@ StopAction = mp4_player_ns.class_("StopAction", automation.Action)
 EnterFullscreenAction = mp4_player_ns.class_("EnterFullscreenAction", automation.Action)
 ExitFullscreenAction = mp4_player_ns.class_("ExitFullscreenAction", automation.Action)
 ToggleFullscreenAction = mp4_player_ns.class_("ToggleFullscreenAction", automation.Action)
+CloseAction = mp4_player_ns.class_("CloseAction", automation.Action)
+ReleaseResourcesAction = mp4_player_ns.class_("ReleaseResourcesAction", automation.Action)
+ShowBrowserAction = mp4_player_ns.class_("ShowBrowserAction", automation.Action)
 
 # Triggers
 PlayTrigger = mp4_player_ns.class_("PlayTrigger", automation.Trigger.template())
 StopTrigger = mp4_player_ns.class_("StopTrigger", automation.Trigger.template())
+CloseTrigger = mp4_player_ns.class_("CloseTrigger", automation.Trigger.template())
 
 CONF_FILE_PATH = "file_path"
 CONF_PARENT_ID = "parent_id"
@@ -52,6 +58,9 @@ CONFIG_SCHEMA = cv.Schema({
     ),
     cv.Optional(CONF_ON_STOP): automation.validate_automation(
         {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(StopTrigger)}, single=True
+    ),
+    cv.Optional(CONF_ON_CLOSE): automation.validate_automation(
+        {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(CloseTrigger)}, single=True
     ),
     cv.Optional(CONF_MEDIA_DIRECTORIES, default=["/usb", "/sdcard"]): cv.ensure_list(cv.string),
     cv.Optional(CONF_FULLSCREEN_ON_TOUCH, default=False): cv.boolean,
@@ -96,6 +105,10 @@ async def to_code(config):
     if CONF_ON_STOP in config:
         trigger = cg.new_Pvariable(config[CONF_ON_STOP][automation.CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [], config[CONF_ON_STOP])
+
+    if CONF_ON_CLOSE in config:
+        trigger = cg.new_Pvariable(config[CONF_ON_CLOSE][automation.CONF_TRIGGER_ID], var)
+        await automation.build_automation(trigger, [], config[CONF_ON_CLOSE])
 
     import os
     component_dir = os.path.dirname(__file__)
@@ -197,6 +210,31 @@ async def exit_fullscreen_action_to_code(config, action_id, template_arg, args):
     "mp4_player.toggle_fullscreen", ToggleFullscreenAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
 )
 async def toggle_fullscreen_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action("mp4_player.close", CloseAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
+async def close_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action(
+    "mp4_player.release_resources", ReleaseResourcesAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
+)
+async def release_resources_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action(
+    "mp4_player.show_browser", ShowBrowserAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
+)
+async def show_browser_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var

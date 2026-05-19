@@ -2036,6 +2036,110 @@ void Mp4Player::toggle_fullscreen() {
 }
 
 // ============================================================================
+// Close (hide UI, fire on_close) — does NOT free buffers, see release_resources
+// ============================================================================
+void Mp4Player::close() {
+  ESP_LOGI(TAG, "Closing player UI");
+
+  // Stop any playback (without re-opening the browser)
+  if (this->state_ != PlayerState::STOPPED) {
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  // Hide / destroy all UI elements
+  this->destroy_image_viewer_();
+  if (this->audio_only_mode_) this->destroy_spectrum_ui_();
+  this->destroy_file_browser_();
+
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) {
+    lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    this->controls_visible_ = false;
+  }
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  this->on_close_callbacks_.call();
+}
+
+// ============================================================================
+// Release heavy PSRAM buffers (display, jpeg, audio)
+// Safe to call when stopped — buffers will be re-allocated on next play.
+// ============================================================================
+void Mp4Player::release_resources() {
+  // Ensure playback is fully stopped before freeing buffers
+  if (this->state_ != PlayerState::STOPPED) {
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+  // Display buffers
+  for (int i = 0; i < 2; i++) {
+    if (this->display_buffer_[i]) {
+      heap_caps_free(this->display_buffer_[i]);
+      this->display_buffer_[i] = nullptr;
+    }
+  }
+  this->display_buffer_size_ = 0;
+
+  // JPEG input buffer
+  if (this->jpeg_buffer_) {
+    heap_caps_free(this->jpeg_buffer_);
+    this->jpeg_buffer_ = nullptr;
+  }
+
+  // JPEG decoder
+  if (this->jpeg_decoder_) {
+    jpeg_del_decoder_engine(this->jpeg_decoder_);
+    this->jpeg_decoder_ = nullptr;
+  }
+  this->jpeg_hw_error_logged_ = false;
+  this->jpeg_hw_error_count_ = 0;
+
+  // Audio PCM scratch buffer
+  if (this->audio_pcm_buffer_) {
+    heap_caps_free(this->audio_pcm_buffer_);
+    this->audio_pcm_buffer_ = nullptr;
+    this->audio_pcm_buffer_size_ = 0;
+  }
+
+  // Audio ring buffer
+  if (this->audio_ring_buffer_) {
+    heap_caps_free(this->audio_ring_buffer_);
+    this->audio_ring_buffer_ = nullptr;
+    this->audio_ring_size_ = 0;
+    this->audio_ring_read_ = 0;
+    this->audio_ring_write_ = 0;
+  }
+
+  // Audio decoder
+  if (this->audio_decoder_) {
+    esp_audio_simple_dec_close(this->audio_decoder_);
+    this->audio_decoder_ = nullptr;
+  }
+  this->audio_decoder_ready_ = false;
+
+  // Audio frame queue (encoded frames waiting to be decoded)
+  if (this->audio_frame_queue_) {
+    AudioFrameItem item;
+    while (xQueueReceive(this->audio_frame_queue_, &item, 0) == pdTRUE) {
+      if (item.data) free(item.data);
+    }
+    vQueueDelete(this->audio_frame_queue_);
+    this->audio_frame_queue_ = nullptr;
+  }
+
+  size_t after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  ESP_LOGI(TAG, "Resources released: PSRAM %u KB -> %u KB (freed %d KB)",
+           before / 1024, after / 1024, (int)((after - before) / 1024));
+}
+
+// ============================================================================
 // File Browser - browse USB/SD card for video files
 // ============================================================================
 FileType Mp4Player::get_file_type_(const std::string &name) {
@@ -3886,7 +3990,9 @@ void Mp4Player::back_btn_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
 
   if (player->current_browse_path_.empty()) {
-    return;  // Already at root
+    // At root level: close the browser entirely (fires on_close)
+    player->close();
+    return;
   }
 
   // Go up one level
