@@ -180,3 +180,4 @@ typedef struct {
     uint32_t latency; /*!< module latency */
 } module_info;        /*!< module info */
 } // namespace dl
+

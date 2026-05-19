@@ -3,6 +3,9 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/components/esp_cam_sensor/esp_cam_sensor_camera.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <vector>
 #include <list>
 
@@ -23,7 +26,7 @@ class YOLO11DetectionComponent : public Component {
   void setup() override;
   void loop();
   void dump_config() override;
-  float get_setup_priority() const override { return -200.0f; }  // Setup after SD card (very low priority)
+  float get_setup_priority() const override { return -200.0f; } // Setup after SD card
 
   // Configuration setters
   void set_camera(esp_cam_sensor::MipiDSICamComponent *camera) { this->camera_ = camera; }
@@ -38,7 +41,7 @@ class YOLO11DetectionComponent : public Component {
   int get_detected_count();
   std::vector<DetectionBox> get_detections();
 
-  // Drawing (called by lvgl_camera_display if configured)
+  // Drawing
   void draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height);
 
   // Callbacks
@@ -48,8 +51,12 @@ class YOLO11DetectionComponent : public Component {
 
  protected:
   void process_frame_();
-  void detect_objects_(uint8_t *img_data, uint16_t width, uint16_t height);
   void draw_results_(uint8_t *img_data, uint16_t width, uint16_t height);
+  void draw_text(uint16_t *buffer, uint16_t width, uint16_t height, int x, int y, const char *text, uint16_t color, int scale);
+
+  // --- Tâche FreeRTOS ---
+  static void detection_task_wrapper(void *arg);
+  void detection_task();
 
   // Components
   esp_cam_sensor::MipiDSICamComponent *camera_{nullptr};
@@ -67,12 +74,20 @@ class YOLO11DetectionComponent : public Component {
   uint32_t frame_counter_{0};
   std::vector<DetectionBox> cached_detections_;
   SemaphoreHandle_t detections_mutex_{nullptr};
+  
+  // Variables pour la tâche asynchrone
+  TaskHandle_t detection_task_handle_{nullptr};
+  SemaphoreHandle_t task_signal_{nullptr};
+  uint8_t *pending_img_data_{nullptr};
+  uint16_t pending_width_{0};
+  uint16_t pending_height_{0};
+  bool is_model_loaded_{false};
+  bool is_detecting_{false};
 
   // Callbacks
   std::vector<std::function<void(int)>> on_object_detected_callbacks_;
 };
 
-// Automation trigger
 class ObjectDetectedTrigger : public Trigger<int> {
  public:
   explicit ObjectDetectedTrigger(YOLO11DetectionComponent *parent) {

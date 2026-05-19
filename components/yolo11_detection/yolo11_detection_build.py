@@ -1,51 +1,20 @@
-"""
-Build script for YOLO11 Detection component
-Compiles optimized ESP-DL sources for YOLO11 object detection
-"""
-
 import os
 import glob
-import subprocess
+import sys
 Import("env")
 
-script_dir = Dir('.').srcnode().abspath
-component_dir = script_dir
+try:
+    component_dir = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    component_dir = Dir('.').srcnode().abspath
 parent_components_dir = os.path.dirname(component_dir)
 
-print("[YOLO11 Detection] Build script running...")
-print("[YOLO11 Detection] Model type: yolo11")
-
-# ========================================================================
-# Helper function for caching
-# ========================================================================
-def needs_rebuild(output_file, input_files):
-    """Check if output_file needs to be rebuilt."""
-    if not os.path.exists(output_file):
-        return True
-    output_mtime = os.path.getmtime(output_file)
-    for input_file in input_files:
-        if os.path.exists(input_file):
-            if os.path.getmtime(input_file) > output_mtime:
-                return True
-    return False
-
-# ========================================================================
-# Add CONFIG defines for YOLO11 detection
-# ========================================================================
-env.Append(CPPDEFINES=[
-    ("CONFIG_IDF_TARGET_ESP32P4", "1"),
-])
-
-print("[YOLO11 Detection] CONFIG defines added")
+env.Append(CPPDEFINES=[("CONFIG_IDF_TARGET_ESP32P4", "1")])
 
 sources_to_add = []
 
-# ========================================================================
-# ESP-DL Sources - Optimized for YOLO11 only
-# ========================================================================
 esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
 if os.path.exists(esp_dl_dir):
-    # Add include directories
     esp_dl_include_dirs = [
         "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/isa/tie728",
         "dl/tool/isa/xtensa", "dl/tool/src", "dl/tensor/include", "dl/tensor/src",
@@ -61,9 +30,6 @@ if os.path.exists(esp_dl_dir):
         if os.path.exists(inc_path):
             env.Append(CPPPATH=[inc_path])
 
-    print("[YOLO11 Detection] ESP-DL includes added")
-
-    # ESP-DL source files - YOLO11 only
     esp_dl_source_dirs = [
         "dl/tensor/src",
         "dl/model/src",
@@ -72,57 +38,39 @@ if os.path.exists(esp_dl_dir):
         "dl/math/src",
         "fbs_loader/src",
         "vision/image",
-        "vision/detect",  # Detection base (includes YOLO11)
+        "vision/detect",
     ]
 
-    print("[YOLO11 Detection] Including: vision/detect (YOLO11 only)")
-
-    # Files to exclude
     esp_dl_exclude = [
-        "dl_base_dotprod.cpp",       # Use custom implementation
-        "dl_image_jpeg.cpp",         # JPEG not used
-        "dl_image_bmp.cpp",          # BMP not used
-        # Exclude face detection postprocessors
-        "dl_detect_msr_postprocessor.cpp",      # Face detection specific
-        "dl_detect_mnp_postprocessor.cpp",      # Face detection specific
-        # Exclude pose detection postprocessors
-        "dl_pose_yolo11_postprocessor.cpp",     # Pose detection specific
-        # Exclude other detection models
-        "dl_detect_espdet_postprocessor.cpp",   # EspDet only
-        "dl_detect_pico_postprocessor.cpp",     # Pico only
+        "dl_base_dotprod.cpp",
+        "dl_image_jpeg.cpp",
+        "dl_image_bmp.cpp",
+        "dl_detect_msr_postprocessor.cpp",
+        "dl_detect_mnp_postprocessor.cpp",
+        "dl_pose_yolo11_postprocessor.cpp",
+        "dl_detect_espdet_postprocessor.cpp",
+        "dl_detect_pico_postprocessor.cpp",
     ]
 
-    print("[YOLO11 Detection] Excluding: face/pose/espdet/pico postprocessors (YOLO11 only)")
-
-    # Count files by category for better visibility
-    sources_count = {"base": 0, "isa": 0, "core": 0, "vision": 0}
-
-    # Add sources from specific directories
     for src_dir in esp_dl_source_dirs:
         src_dir_path = os.path.join(esp_dl_dir, src_dir)
         if os.path.exists(src_dir_path):
-            # Use recursive glob for vision/* directories to get files in subdirectories
             if src_dir.startswith("vision/"):
                 pattern = os.path.join(src_dir_path, "**", "*.cpp")
                 for src_file in glob.glob(pattern, recursive=True):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
-                        sources_count["vision"] += 1
             else:
                 for src_file in glob.glob(os.path.join(src_dir_path, "*.cpp")):
                     if os.path.basename(src_file) not in esp_dl_exclude:
                         sources_to_add.append(src_file)
-                        sources_count["core"] += 1
 
-    # Add ALL dl/base/*.cpp files (required for neural network operations)
     dl_base_dir = os.path.join(esp_dl_dir, "dl", "base")
     if os.path.exists(dl_base_dir):
         for src_file in glob.glob(os.path.join(dl_base_dir, "*.cpp")):
             if os.path.basename(src_file) not in esp_dl_exclude:
                 sources_to_add.append(src_file)
-                sources_count["base"] += 1
 
-    # Add ESP32P4 ISA files (optimized assembly for ESP32P4)
     isa_dirs = [
         ("dl/base/isa/esp32p4", "*.S"),
         ("dl/base/isa/esp32p4", "*.cpp"),
@@ -135,108 +83,84 @@ if os.path.exists(esp_dl_dir):
         if os.path.exists(isa_path):
             for asm_file in glob.glob(os.path.join(isa_path, pattern)):
                 sources_to_add.append(asm_file)
-                sources_count["isa"] += 1
 
-    esp_dl_total = sum(sources_count.values())
-    print(f"[YOLO11 Detection] ESP-DL: {esp_dl_total} files (base:{sources_count['base']} isa:{sources_count['isa']} core:{sources_count['core']} vision:{sources_count['vision']})")
-
-    # Add prebuilt FBS library
     fbs_lib_dir = os.path.join(esp_dl_dir, "fbs_loader", "lib", "esp32p4")
     fbs_lib = os.path.join(fbs_lib_dir, "libfbs_model.a")
     if os.path.exists(fbs_lib):
         env.Append(LIBPATH=[fbs_lib_dir])
         env.Prepend(LIBS=["fbs_model"])
-        print("[YOLO11 Detection] Added libfbs_model.a")
 
-# ========================================================================
-# Pack and Embed YOLO11 Detection Model
-# ========================================================================
-# Check if SD card mode is enabled (check both CPPDEFINES and BUILD_FLAGS)
+def _flag_value_truthy(value):
+    if value is None:
+        return False
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    s = str(value).strip().strip('"').strip("'")
+    return s not in ("", "0", "false", "False", "FALSE")
+
 sdcard_mode = False
+sdcard_flag_seen = False
 
-# Method 1: Check CPPDEFINES
 for define in env.get("CPPDEFINES", []):
-    if isinstance(define, tuple) and define[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
-        sdcard_mode = (define[1] == "1")
-        print(f"[YOLO11 Detection] Found CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD in CPPDEFINES: {define}")
+    if isinstance(define, (tuple, list)) and len(define) >= 1 \
+            and define[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_flag_seen = True
+        sdcard_mode = _flag_value_truthy(define[1] if len(define) >= 2 else None)
         break
-    elif define == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
-        sdcard_mode = True
-        print("[YOLO11 Detection] Found CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD in CPPDEFINES")
+    if isinstance(define, str) and define.split("=", 1)[0] == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+        sdcard_flag_seen = True
+        if "=" in define:
+            sdcard_mode = _flag_value_truthy(define.split("=", 1)[1])
+        else:
+            sdcard_mode = True
         break
 
-# Method 2: Check BUILD_FLAGS (fallback)
-if not sdcard_mode:
-    build_flags = env.get("BUILD_FLAGS", [])
-    for flag in build_flags:
-        if "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD" in str(flag):
-            sdcard_mode = True
-            print(f"[YOLO11 Detection] Found CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD in BUILD_FLAGS: {flag}")
+if not sdcard_flag_seen:
+    for flag in env.get("BUILD_FLAGS", []):
+        s = str(flag).strip()
+        if s.startswith("-D"):
+            s = s[2:]
+        name, _, value = s.partition("=")
+        if name == "CONFIG_YOLO11_DETECT_MODEL_IN_SDCARD":
+            sdcard_flag_seen = True
+            sdcard_mode = _flag_value_truthy(value if value else "1")
             break
 
-if sdcard_mode:
-    print("[YOLO11 Detection] ✅ SD card mode enabled - skipping model embedding")
-    print("[YOLO11 Detection] Model will be loaded from SD card at runtime")
-else:
-    print("[YOLO11 Detection] Flash rodata mode - embedding model in firmware")
-
 yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
-if os.path.exists(yolo11_detect_dir) and not sdcard_mode:
-    models_dir = os.path.join(yolo11_detect_dir, "models", "p4")
-    pack_script = os.path.join(yolo11_detect_dir, "pack_model.py")
 
-    if os.path.exists(models_dir) and os.path.exists(pack_script):
-        yolo11_model = os.path.join(models_dir, "yolo11_detect_s8_v1.espdl")
+if not sdcard_mode:
+    if not os.path.exists(yolo11_detect_dir):
+        sys.exit(f"[YOLO11 Detection] FATAL: yolo11_detect dir not found at {yolo11_detect_dir}")
 
-        if os.path.exists(yolo11_model):
-            packed_model = os.path.join(component_dir, "yolo11_detect.espdl")
-            embed_c_file = os.path.join(component_dir, "yolo11_detect_espdl_embed.c")
+    yolo11_model = os.path.join(yolo11_detect_dir, "models", "p4", "yolo11_detect_s8_v1.espdl")
 
-            if needs_rebuild(embed_c_file, [yolo11_model, pack_script]):
-                print("[YOLO11 Detection] Packing yolo11_detect model...")
-                try:
-                    cmd = [
-                        "python3", pack_script,
-                        "--model_path", yolo11_model,
-                        "--out_file", packed_model
-                    ]
-                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-                    if result.returncode == 0 and os.path.exists(packed_model):
-                        with open(packed_model, 'rb') as f:
-                            model_data = f.read()
+    embed_c_file = os.path.join(component_dir, "yolo11_detect_espdl_embed.c")
 
-                        c_content = '''// Auto-generated - embedded yolo11_detect model
-#include <stddef.h>
-#include <stdint.h>
+    with open(yolo11_model, "rb") as f:
+        model_data = f.read()
 
-__attribute__((aligned(16)))
-const uint8_t _binary_yolo11_detect_espdl_start[] = {
-'''
-                        for i in range(0, len(model_data), 16):
-                            chunk = model_data[i:i+16]
-                            hex_bytes = ', '.join(f'0x{b:02x}' for b in chunk)
-                            c_content += f'    {hex_bytes},\n'
+    c_lines = [
+        "// Auto-generated - embedded yolo11_detect model",
+        "#include <stddef.h>",
+        "#include <stdint.h>",
+        "",
+        "__attribute__((aligned(16)))",
+        "const uint8_t _binary_yolo11_detect_espdl_start[] = {",
+    ]
+    for i in range(0, len(model_data), 16):
+        chunk = model_data[i:i + 16]
+        c_lines.append("    " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
+    c_lines.append("};")
+    c_lines.append(f"const uint8_t *const _binary_yolo11_detect_espdl_end = _binary_yolo11_detect_espdl_start + {len(model_data)};")
+    c_lines.append(f"const size_t _binary_yolo11_detect_espdl_size = {len(model_data)};")
 
-                        c_content += f'''}};
+    with open(embed_c_file, "w") as f:
+        f.write("\n".join(c_lines))
 
-const uint8_t *_binary_yolo11_detect_espdl_end = _binary_yolo11_detect_espdl_start + {len(model_data)};
-const size_t _binary_yolo11_detect_espdl_size = {len(model_data)};
-'''
-                        with open(embed_c_file, 'w') as f:
-                            f.write(c_content)
-                        print(f"[YOLO11 Detection] Model embedded: {len(model_data)} bytes")
-                except Exception as e:
-                    print(f"[YOLO11 Detection] Error packing model: {e}")
-            else:
-                print("[YOLO11 Detection] yolo11_detect model cached (skip)")
+    sources_to_add.append(embed_c_file)
 
-            if os.path.exists(embed_c_file):
-                sources_to_add.append(embed_c_file)
-
-# ========================================================================
-# Add yolo11_detect wrapper sources
-# ========================================================================
-yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
 if os.path.exists(yolo11_detect_dir):
     env.Append(CPPPATH=[yolo11_detect_dir])
     yolo11_sources = ["yolo11_detect.cpp"]
@@ -244,42 +168,17 @@ if os.path.exists(yolo11_detect_dir):
         src_path = os.path.join(yolo11_detect_dir, src)
         if os.path.exists(src_path):
             sources_to_add.append(src_path)
-            print(f"[YOLO11 Detection] + {src}")
 
-# ========================================================================
-# Add local stub files (if needed)
-# ========================================================================
-# Custom dotprod implementation (no DSP version)
 dotprod_file = os.path.join(component_dir, "dl_base_dotprod_no_dsp.cpp")
 if os.path.exists(dotprod_file):
     sources_to_add.append(dotprod_file)
-    print("[YOLO11 Detection] + dl_base_dotprod_no_dsp.cpp")
-else:
-    # Try to get it from face_detection component
-    face_detection_dir = os.path.join(parent_components_dir, "face_detection")
-    dotprod_file_alt = os.path.join(face_detection_dir, "dl_base_dotprod_no_dsp.cpp")
-    if os.path.exists(dotprod_file_alt):
-        sources_to_add.append(dotprod_file_alt)
-        print("[YOLO11 Detection] + dl_base_dotprod_no_dsp.cpp (from face_detection)")
 
-# mbedTLS stub (if exists)
 mbedtls_stub = os.path.join(component_dir, "mbedtls_aes_stub.c")
 if os.path.exists(mbedtls_stub):
     sources_to_add.append(mbedtls_stub)
-    print("[YOLO11 Detection] + mbedtls_aes_stub.c")
-else:
-    # Try to get it from face_detection component
-    face_detection_dir = os.path.join(parent_components_dir, "face_detection")
-    mbedtls_stub_alt = os.path.join(face_detection_dir, "mbedtls_aes_stub.c")
-    if os.path.exists(mbedtls_stub_alt):
-        sources_to_add.append(mbedtls_stub_alt)
-        print("[YOLO11 Detection] + mbedtls_aes_stub.c (from face_detection)")
 
 env.Append(CPPPATH=[component_dir])
 
-# ========================================================================
-# Compile sources
-# ========================================================================
 if sources_to_add:
     objects = []
     for src_file in sources_to_add:
@@ -287,7 +186,7 @@ if sources_to_add:
             obj = env.Object(src_file)
             objects.extend(obj)
         except Exception as e:
-            print(f"[YOLO11 Detection] Failed to compile {os.path.basename(src_file)}: {e}")
+            pass
 
     if objects:
         lib = env.StaticLibrary(
@@ -296,7 +195,3 @@ if sources_to_add:
         )
         env.Prepend(LIBS=[lib])
         env['_LIBFLAGS'] = '-Wl,--start-group ' + env['_LIBFLAGS'] + ' -Wl,--end-group'
-        print(f"[YOLO11 Detection] {len(sources_to_add)} source files compiled")
-        print("[YOLO11 Detection] libyolo11_detection.a created")
-
-print("[YOLO11 Detection] Build script completed")

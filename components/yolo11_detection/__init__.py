@@ -16,10 +16,24 @@ CONF_DRAW_ENABLED = "draw_enabled"
 CONF_ON_OBJECT_DETECTED = "on_object_detected"
 CONF_MODEL_LOCATION = "model_location"
 CONF_MODEL_PATH = "model_path"
+CONF_MODEL_VARIANT = "model_variant"
 
 # Model location types
 MODEL_LOCATION_FLASH = "flash_rodata"
 MODEL_LOCATION_SDCARD = "sdcard"
+
+# Model variants
+MODEL_VARIANT_S8_V1 = "s8_v1"
+MODEL_VARIANT_S8_V2 = "s8_v2"
+MODEL_VARIANT_S8_V3 = "s8_v3"
+MODEL_VARIANT_320_S8_V3 = "320_s8_v3"
+
+MODEL_VARIANT_INDEX = {
+    MODEL_VARIANT_S8_V1: 0,
+    MODEL_VARIANT_S8_V2: 1,
+    MODEL_VARIANT_S8_V3: 2,
+    MODEL_VARIANT_320_S8_V3: 3,
+}
 
 yolo11_detection_ns = cg.esphome_ns.namespace("yolo11_detection")
 YOLO11DetectionComponent = yolo11_detection_ns.class_("YOLO11DetectionComponent", cg.Component)
@@ -38,6 +52,9 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_NMS_THRESHOLD, default=0.5): cv.float_range(min=0.0, max=1.0),
     cv.Optional(CONF_DETECTION_INTERVAL, default=8): cv.int_range(min=1, max=600),
     cv.Optional(CONF_DRAW_ENABLED, default=True): cv.boolean,
+    cv.Optional(CONF_MODEL_VARIANT, default=MODEL_VARIANT_S8_V1): cv.one_of(
+        *MODEL_VARIANT_INDEX.keys(), lower=True
+    ),
     cv.Optional(CONF_MODEL_LOCATION, default=MODEL_LOCATION_FLASH): cv.one_of(
         MODEL_LOCATION_FLASH, MODEL_LOCATION_SDCARD, lower=True
     ),
@@ -63,83 +80,76 @@ async def to_code(config):
     cg.add(var.set_detection_interval(config[CONF_DETECTION_INTERVAL]))
     cg.add(var.set_draw_enabled(config[CONF_DRAW_ENABLED]))
 
-    # Setup automations
     for conf in config.get(CONF_ON_OBJECT_DETECTED, []):
         trigger = cg.new_Pvariable(conf[CONF_ID], var)
         await automation.build_automation(trigger, [(cg.int_, "object_count")], conf)
 
-    # Set build flag for YOLO11 model
     cg.add_build_flag("-DESP_DL_MODEL_YOLO11=1")
     cg.add_build_flag("-DCONFIG_IDF_TARGET_ESP32P4=1")
 
-    # YOLO11 detection configuration
-    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_S8_V1=1")
-    cg.add_build_flag("-DCONFIG_COCO_DETECT_YOLO11N_320_s8_v3=1")
-    cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_TYPE=0")
+    variant = config[CONF_MODEL_VARIANT]
+    variant_index = MODEL_VARIANT_INDEX[variant]
 
-    # Model location configuration
+    # Map pour COCO_DETECT
+    variant_flag_map = {
+        MODEL_VARIANT_S8_V1:       "CONFIG_COCO_DETECT_YOLO11N_S8_V1",
+        MODEL_VARIANT_S8_V2:       "CONFIG_COCO_DETECT_YOLO11N_S8_V2",
+        MODEL_VARIANT_S8_V3:       "CONFIG_COCO_DETECT_YOLO11N_S8_V3",
+        MODEL_VARIANT_320_S8_V3:   "CONFIG_COCO_DETECT_YOLO11N_320_S8_V3",
+    }
+    
+    # Map pour YOLO11_DETECT (La correction majeure)
+    yolo_variant_flag_map = {
+        MODEL_VARIANT_S8_V1:       "CONFIG_YOLO11_DETECT_S8_V1",
+        MODEL_VARIANT_S8_V2:       "CONFIG_YOLO11_DETECT_S8_V2",
+        MODEL_VARIANT_S8_V3:       "CONFIG_YOLO11_DETECT_S8_V3",
+        MODEL_VARIANT_320_S8_V3:   "CONFIG_YOLO11_DETECT_320_S8_V3",
+    }
+
+    cg.add_build_flag(f"-D{variant_flag_map[variant]}=1")
+    cg.add_build_flag(f"-DCONFIG_DEFAULT_COCO_DETECT_MODEL={variant_index}")
+    cg.add_build_flag(f"-DCONFIG_YOLO11_DETECT_MODEL_TYPE={variant_index}")
+    cg.add_build_flag(f"-D{yolo_variant_flag_map[variant]}=1")
+
     model_location = config.get(CONF_MODEL_LOCATION, MODEL_LOCATION_FLASH)
-
     if model_location == MODEL_LOCATION_SDCARD:
-        # SD card mode
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=1")
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=0")
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=2")
-
-        # Pass SD card path to C++ component
-        if CONF_MODEL_PATH in config:
-            cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{config[CONF_MODEL_PATH]}"')))
-        else:
-            # Default SD card path
-            cg.add(var.set_sdcard_model_path(cg.RawExpression('"/sdcard"')))
+        cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_IN_SDCARD=1")
+        cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_LOCATION=2")
+        sd_path = config.get(CONF_MODEL_PATH, "/sdcard")
+        cg.add(var.set_sdcard_model_path(cg.RawExpression(f'"{sd_path}"')))
     else:
-        # Flash rodata mode (default)
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_FLASH_RODATA=1")
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_IN_SDCARD=0")
         cg.add_build_flag("-DCONFIG_YOLO11_DETECT_MODEL_LOCATION=0")
+        cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_IN_FLASH_RODATA=1")
+        cg.add_build_flag("-DCONFIG_COCO_DETECT_MODEL_LOCATION=0")
 
-    # Add include paths
     component_dir = os.path.dirname(__file__)
     parent_components_dir = os.path.dirname(component_dir)
 
-    # Add yolo11_detect include path
     yolo11_detect_dir = os.path.join(parent_components_dir, "yolo11_detect")
     if os.path.exists(yolo11_detect_dir):
         cg.add_build_flag(f"-I{yolo11_detect_dir}")
 
-    # Add ESP-DL include paths
     esp_dl_dir = os.path.join(parent_components_dir, "esp-dl")
     if os.path.exists(esp_dl_dir):
         esp_dl_includes = [
-            "dl",
-            "dl/tool/include",
-            "dl/tool/isa/esp32p4",
-            "dl/tool/src",
-            "dl/tensor/include",
-            "dl/tensor/src",
-            "dl/base",
-            "dl/base/isa",
-            "dl/base/isa/esp32p4",
-            "dl/math/include",
-            "dl/math/src",
-            "dl/model/include",
-            "dl/model/src",
-            "dl/module/include",
-            "dl/module/src",
-            "fbs_loader/include",
-            "fbs_loader/lib/esp32p4",
-            "fbs_loader/src",
-            "vision/detect",
-            "vision/image",
-            "vision/image/isa",
-            "vision/image/isa/esp32p4",
+            "dl", "dl/tool/include", "dl/tool/isa/esp32p4", "dl/tool/src",
+            "dl/tensor/include", "dl/tensor/src", "dl/base", "dl/base/isa",
+            "dl/base/isa/esp32p4", "dl/math/include", "dl/math/src",
+            "dl/model/include", "dl/model/src", "dl/module/include",
+            "dl/module/src", "fbs_loader/include", "fbs_loader/lib/esp32p4",
+            "fbs_loader/src", "vision/detect", "vision/image",
+            "vision/image/isa", "vision/image/isa/esp32p4",
         ]
         for inc in esp_dl_includes:
             inc_path = os.path.join(esp_dl_dir, inc)
             if os.path.exists(inc_path):
                 cg.add_build_flag(f"-I{inc_path}")
 
-    # Add build script for compiling ESP-DL sources
     build_script_path = os.path.join(component_dir, "yolo11_detection_build.py")
     if os.path.exists(build_script_path):
         cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])

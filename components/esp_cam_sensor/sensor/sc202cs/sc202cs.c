@@ -1,9 +1,3 @@
-/*
- * SPDX-FileCopyrightText: 2024 Espressif Systems (Shanghai) CO LTD
- *
- * SPDX-License-Identifier: Apache-2.0
- */
-
 #include <string.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -15,41 +9,6 @@
 #include "esp_cam_sensor_detect.h"
 #include "sc202cs_settings.h"
 #include "sc202cs.h"
-
-/* =========================================================================
- * SC202CS Configuration Defaults - Match M5Stack Tab5 settings
- * These must be defined BEFORE they are used in the code below.
- * Digital gain priority is recommended to avoid noise in low light.
- * ========================================================================= */
-#ifndef CONFIG_CAMERA_SC202CS
-#define CONFIG_CAMERA_SC202CS 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT
-#define CONFIG_CAMERA_SC202CS_AUTO_DETECT 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR
-#define CONFIG_CAMERA_SC202CS_AUTO_DETECT_MIPI_INTERFACE_SENSOR 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT
-#define CONFIG_CAMERA_SC202CS_ABSOLUTE_GAIN_LIMIT 63008  /* M5Stack Tab5 value */
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_MAX_SUPPORT
-#define CONFIG_CAMERA_SC202CS_MAX_SUPPORT 1
-#endif
-
-/* IMPORTANT: Digital gain priority (M5Stack Tab5 config)
- * This MUST be set to avoid green tint issues */
-#ifndef CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY
-#define CONFIG_CAMERA_SC202CS_DIG_GAIN_PRIORITY 1
-#endif
-
-#ifndef CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY
-#define CONFIG_CAMERA_SC202CS_ANA_GAIN_PRIORITY 0
-#endif
 
 /*
  * SC202CS camera sensor gain control.

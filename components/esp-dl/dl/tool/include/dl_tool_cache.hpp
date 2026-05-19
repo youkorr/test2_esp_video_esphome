@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstdio>
 #include <stdint.h>
 
 #if CONFIG_IDF_TARGET_ESP32S3
+#include "esp_idf_version.h"
 #include "esp32s3/rom/cache.h"
 #include "soc/extmem_reg.h"
 #endif
@@ -43,7 +45,7 @@ void preload_func(uint32_t addr, uint32_t size);
  *                  - 2: both,TODO:@yuanjiong
  * @param line_size the number of cache lines to be autoloaded
  * @return status,
- *         - 1: Initialize sucessfully
+ *         - 1: Initialize successfully
  *         - 0: Initialize suceesfully, preload has been turned off
  *         - -1: Initialize failed, the chip does not support autoload
  */

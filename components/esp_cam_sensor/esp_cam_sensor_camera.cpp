@@ -19,6 +19,7 @@
 extern "C" {
 #include "esp_cam_sensor.h"
 #include "esp_cam_sensor_types.h"
+#include "ov5647.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
 #include "esp_video_ioctl.h"
@@ -29,6 +30,7 @@ extern "C" {
 #include "linux/videodev2.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"  // Pour esp_timer_get_time() (profiling)
+#include "esp_private/esp_cache_private.h"  // Pour esp_cache_get_alignment() (détection dynamique cache line)
 }
 
 // Custom format configurations for all sensors
@@ -767,33 +769,54 @@ bool MipiDSICamComponent::start_streaming() {
   // ============================================================================
   bool custom_format_applied = false;
 
+  // OV5647: switch the sensor to a matching native format via VIDIOC_S_SENSOR_FMT.
+  // Native formats are owned by the driver (ov5647.c) and exposed through
+  // ov5647_get_format_info(). Supported sizes: 800x640, 800x800, 800x1280 (RAW8 50fps),
+  // 1280x960 (RAW10 45fps), 1920x1080 (RAW10 30fps). The ISP then converts RAW->RGB565.
   if (this->sensor_name_ == "ov5647") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    // Sélectionner le format selon la résolution demandée
-    if (width == 640 && height == 480) {
-      custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
-    } else if (width == 800 && height == 600) {
-      custom_format = &ov5647_format_800x600_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
-    } else if (width == 800 && height == 640) {
-      custom_format = &ov5647_format_800x640_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
-    } else if (width == 1024 && height == 600) {
-      custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
+    size_t format_count = 0;
+    const esp_cam_sensor_format_t *natives = ov5647_get_format_info(&format_count);
+    const esp_cam_sensor_format_t *match = nullptr;
+    for (size_t i = 0; i < format_count; i++) {
+      if (natives[i].width == (uint16_t)width && natives[i].height == (uint16_t)height) {
+        match = &natives[i];
+        ESP_LOGI(TAG, "Using NATIVE OV5647 format[%u]: %s (%ufps)",
+                 (unsigned)i, natives[i].name, natives[i].fps);
+        break;
+      }
     }
-
-    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
+    if (match != nullptr) {
+      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, match) != 0) {
         ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
+        ESP_LOGE(TAG, "Sensor stays on its default format, downstream ioctls will likely fail");
       } else {
-        ESP_LOGI(TAG, "Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
         custom_format_applied = true;
+        // ISP demosaic/bayer blocks were configured at boot for the sensor's
+        // default format (Format[0] = RAW8). When switching to a different
+        // bit depth or timing (e.g. RAW10 1280x960), the pipeline must be
+        // torn down and re-initialised, otherwise colour is wrong (grayscale).
+        esp_err_t reinit_ret = esp_video_reconfigure_isp_pipeline("OV5647");
+        if (reinit_ret != ESP_OK) {
+          ESP_LOGW(TAG, "ISP pipeline re-init failed: %s - colours may be off",
+                   esp_err_to_name(reinit_ret));
+        } else {
+          // The ISP re-init opens/closes its own internal fd on /dev/video0,
+          // which resets the V4L2 device's cur_format back to Format[0]
+          // (800x1280). Our user fd then sees the stale state and the next
+          // VIDIOC_S_FMT is rejected by csi_video as "width or height is
+          // invalid". Re-apply VIDIOC_S_SENSOR_FMT on our fd to re-sync the
+          // device with the sensor's actual format.
+          if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, match) != 0) {
+            ESP_LOGW(TAG, "Re-apply VIDIOC_S_SENSOR_FMT after ISP re-init failed: %s",
+                     strerror(errno));
+          }
+        }
+      }
+    } else {
+      ESP_LOGE(TAG, "No native OV5647 format matches %ux%u. Supported sizes:", width, height);
+      for (size_t i = 0; i < format_count; i++) {
+        ESP_LOGE(TAG, "  - %ux%u @ %ufps (%s)",
+                 natives[i].width, natives[i].height, natives[i].fps, natives[i].name);
       }
     }
   }
@@ -1060,8 +1083,10 @@ bool MipiDSICamComponent::start_streaming() {
 
   // 3. Allouer NUM_BUFFERS buffers SPIRAM AVANT de les passer à V4L2 (mode USERPTR)
   // ★ CRITICAL: Utiliser V4L2_MEMORY_USERPTR pour éviter memcpy vers SPIRAM (comme Waveshare)
-  // ESP32-P4 cache line size is 64 bytes (standard for RISC-V with L1/L2 cache)
-  const size_t cache_line_size = 64;
+  // Détection dynamique de la cache line (64B ou 128B selon L2_CACHE_LINE_SIZE configuré)
+  size_t cache_line_size = 64;
+  esp_cache_get_alignment(MALLOC_CAP_SPIRAM, &cache_line_size);
+  if (cache_line_size < 64) cache_line_size = 64;
 
   ESP_LOGI(TAG, "Allocating cache-aligned SPIRAM buffers for V4L2 USERPTR mode:");
   ESP_LOGI(TAG, "  Buffers: %d × %u bytes = %u KB total",

@@ -13,7 +13,6 @@
 namespace dl {
 namespace base {
 
-// C reference implementation for int8_t
 __attribute__((weak)) void dotprod_c(int8_t *input0_ptr, int8_t *input1_ptr,
                                      int16_t *output_ptr, int length, int shift)
 {
@@ -25,7 +24,6 @@ __attribute__((weak)) void dotprod_c(int8_t *input0_ptr, int8_t *input1_ptr,
     dl::tool::truncate(*output_ptr, tool::round(result * scale));
 }
 
-// C reference implementation for int8_t * int16_t
 __attribute__((weak)) void dotprod_c(int8_t *input0_ptr, int16_t *input1_ptr,
                                      int16_t *output_ptr, int length, int shift)
 {
@@ -37,7 +35,6 @@ __attribute__((weak)) void dotprod_c(int8_t *input0_ptr, int16_t *input1_ptr,
     dl::tool::truncate(*output_ptr, tool::round(result * scale));
 }
 
-// C reference implementation for int16_t
 __attribute__((weak)) void dotprod_c(int16_t *input0_ptr, int16_t *input1_ptr,
                                      int16_t *output_ptr, int length, int shift)
 {
@@ -49,7 +46,6 @@ __attribute__((weak)) void dotprod_c(int16_t *input0_ptr, int16_t *input1_ptr,
     dl::tool::truncate(*output_ptr, tool::round(result * scale));
 }
 
-// Optimized version for int8_t (uses ESP32-P4 SIMD if available)
 __attribute__((weak)) void dotprod(int8_t *input0_ptr, int8_t *input1_ptr,
                                    int16_t *output_ptr, int length, int shift)
 {
@@ -65,7 +61,6 @@ __attribute__((weak)) void dotprod(int8_t *input0_ptr, int8_t *input1_ptr,
     }
 }
 
-// Optimized version for int8_t * int16_t
 __attribute__((weak)) void dotprod(int8_t *input0_ptr, int16_t *input1_ptr,
                                    int16_t *output_ptr, int length, int shift)
 {
@@ -81,7 +76,6 @@ __attribute__((weak)) void dotprod(int8_t *input0_ptr, int16_t *input1_ptr,
     }
 }
 
-// Optimized version for int16_t
 __attribute__((weak)) void dotprod(int16_t *input0_ptr, int16_t *input1_ptr,
                                    int16_t *output_ptr, int length, int shift)
 {
@@ -97,7 +91,6 @@ __attribute__((weak)) void dotprod(int16_t *input0_ptr, int16_t *input1_ptr,
     }
 }
 
-// Manual implementation for float (replaces dsps_dotprod_f32 from ESP-DSP)
 __attribute__((weak)) void dotprod(float *input0_ptr, float *input1_ptr,
                                    float *output_ptr, int length, int shift)
 {

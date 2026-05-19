@@ -238,3 +238,4 @@ float *gen_lut_8bit(float *table, int exponent, std::function<float(float)> func
 
 } // namespace tool
 } // namespace dl
+

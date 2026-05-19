@@ -41,4 +41,17 @@ idf_component_register(SRCS ${srcs}
 # This is safe for all sensors - the code detects sensor type at runtime
 idf_component_optional_requires(PRIVATE "esp_ipa")
 
+# Disable the MIPI-CSI driver "backup buffer" allocation.
+# The CSI driver normally allocates a full-frame DMA-capable buffer as a
+# fallback when no user buffer is queued in time. For larger resolutions
+# (e.g. 1920x1080 RGB565 = ~4MB) this alloc fails because the suitable
+# heap region is too small or fragmented, and VIDIOC_STREAMON returns
+# ESP_ERR_NO_MEM ("no mem for backup buffer"). V4L2 USERPTR with two
+# pre-allocated SPIRAM buffers already covers double-buffering, so the
+# backup is redundant. Disabling it unblocks 1920x1080 and saves one
+# frame worth of internal RAM on every resolution.
+target_compile_definitions(${COMPONENT_LIB} PUBLIC
+    CONFIG_ESP_VIDEO_DISABLE_MIPI_CSI_DRIVER_BACKUP_BUFFER=1
+)
+
 

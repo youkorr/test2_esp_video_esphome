@@ -64,4 +64,3 @@ async def to_code(config):
         cg.add_define("USE_PEDESTRIAN_DETECTION")
         ped_detect = await cg.get_variable(config[CONF_PEDESTRIAN_DETECTION_ID])
         cg.add(var.set_pedestrian_detection(ped_detect))
-
