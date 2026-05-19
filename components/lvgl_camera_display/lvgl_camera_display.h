@@ -101,7 +101,6 @@ class LVGLCameraDisplay : public Component {
   uint8_t *display_buf_data_{nullptr};
   uint16_t display_buf_w_{0};
   uint16_t display_buf_h_{0};
-  size_t display_buf_size_{0};  // cache-line-aligned, may be > w * h * 2
   bool ppa_resize_enabled_{false};
   bool ppa_setup_attempted_{false};
   uint32_t ppa_error_count_{0};
