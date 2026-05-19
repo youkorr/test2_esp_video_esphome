@@ -16,6 +16,9 @@ Mp4Player = mp4_player_ns.class_("Mp4Player", cg.Component)
 PlayAction = mp4_player_ns.class_("PlayAction", automation.Action)
 PauseAction = mp4_player_ns.class_("PauseAction", automation.Action)
 StopAction = mp4_player_ns.class_("StopAction", automation.Action)
+EnterFullscreenAction = mp4_player_ns.class_("EnterFullscreenAction", automation.Action)
+ExitFullscreenAction = mp4_player_ns.class_("ExitFullscreenAction", automation.Action)
+ToggleFullscreenAction = mp4_player_ns.class_("ToggleFullscreenAction", automation.Action)
 
 # Triggers
 PlayTrigger = mp4_player_ns.class_("PlayTrigger", automation.Trigger.template())
@@ -31,6 +34,8 @@ CONF_SHOW_CONTROLS = "show_controls"
 CONF_ON_PLAY = "on_play"
 CONF_ON_STOP = "on_stop"
 CONF_MEDIA_DIRECTORIES = "media_directories"
+CONF_FULLSCREEN_ON_TOUCH = "fullscreen_on_touch"
+CONF_FULLSCREEN_ANIM_MS = "fullscreen_anim_ms"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
@@ -49,6 +54,8 @@ CONFIG_SCHEMA = cv.Schema({
         {cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(StopTrigger)}, single=True
     ),
     cv.Optional(CONF_MEDIA_DIRECTORIES, default=["/usb", "/sdcard"]): cv.ensure_list(cv.string),
+    cv.Optional(CONF_FULLSCREEN_ON_TOUCH, default=False): cv.boolean,
+    cv.Optional(CONF_FULLSCREEN_ANIM_MS, default=350): cv.int_range(min=50, max=2000),
 }).extend(cv.COMPONENT_SCHEMA)
 
 
@@ -67,6 +74,8 @@ async def to_code(config):
     cg.add(var.set_loop(config[CONF_LOOP]))
     cg.add(var.set_auto_play(config[CONF_AUTO_PLAY]))
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
+    cg.add(var.set_fullscreen_on_touch(config[CONF_FULLSCREEN_ON_TOUCH]))
+    cg.add(var.set_fullscreen_anim_ms(config[CONF_FULLSCREEN_ANIM_MS]))
 
     if CONF_USB_MEDIA_STORAGE_ID in config:
         usb_storage = await cg.get_variable(config[CONF_USB_MEDIA_STORAGE_ID])
@@ -161,6 +170,33 @@ async def pause_action_to_code(config, action_id, template_arg, args):
 
 @automation.register_action("mp4_player.stop", StopAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
 async def stop_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action(
+    "mp4_player.enter_fullscreen", EnterFullscreenAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
+)
+async def enter_fullscreen_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action(
+    "mp4_player.exit_fullscreen", ExitFullscreenAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
+)
+async def exit_fullscreen_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+@automation.register_action(
+    "mp4_player.toggle_fullscreen", ToggleFullscreenAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True
+)
+async def toggle_fullscreen_action_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg)
     await cg.register_parented(var, config[CONF_ID])
     return var
