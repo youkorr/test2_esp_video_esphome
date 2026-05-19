@@ -6,6 +6,10 @@
 
 #ifdef CONFIG_IDF_TARGET_ESP32P4
 #include "driver/ppa.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "freertos/semphr.h"
 #endif
 
 // Forward declarations
@@ -91,23 +95,44 @@ class LVGLCameraDisplay : public Component {
   bool draw_buf_initialized_{false};
   bool is_canvas_{false};  // true if widget is canvas (uses memcpy), false if image (uses zero-copy)
 
-  // PPA pre-resize: when canvas size differs from camera size we hardware-scale
-  // the camera frame into a display-sized intermediate buffer before LVGL sees
-  // it. LVGL then renders zero-copy (no software resize), unblocking the FPS
-  // cap caused by a per-frame software resize.
+  // Async PPA pre-resize pipeline (à la Waveshare). When canvas != camera
+  // size, a dedicated producer task pulls camera frames, submits a PPA SRM
+  // scale in NON_BLOCKING mode, waits on a semaphore that the PPA done
+  // callback gives, then pushes the resized buffer to a queue. The LVGL
+  // timer callback only pops the latest ready buffer and hands it to LVGL
+  // - no PPA wait happens in the LVGL task, so contention with LVGL's own
+  // PPA usage (display rotation) doesn't stall the render loop.
 #ifdef CONFIG_IDF_TARGET_ESP32P4
+  static constexpr int NUM_DISPLAY_BUFS = 3;
+
   ppa_client_handle_t ppa_srm_client_{nullptr};
-#endif
-  uint8_t *display_buf_data_{nullptr};
+  uint8_t *display_bufs_[NUM_DISPLAY_BUFS]{};
   uint16_t display_buf_w_{0};
   uint16_t display_buf_h_{0};
-  size_t display_buf_size_{0};  // cache-line-aligned, may be > w * h * 2
-  bool ppa_resize_enabled_{false};
+  size_t display_buf_size_{0};   // cache-line-aligned size, may be > w*h*2
+
+  QueueHandle_t free_queue_{nullptr};    // free display buffers (producer pulls from here)
+  QueueHandle_t filled_queue_{nullptr};  // ready display buffers (consumer pulls from here)
+  SemaphoreHandle_t ppa_done_sem_{nullptr};
+  TaskHandle_t producer_task_handle_{nullptr};
+  volatile bool producer_should_run_{false};
+
+  uint8_t *async_displayed_buf_{nullptr};  // the buffer LVGL currently shows; returned to free_queue on next swap
+
+  bool ppa_async_enabled_{false};
   bool ppa_setup_attempted_{false};
   uint32_t ppa_error_count_{0};
+#endif
 
-  bool setup_ppa_resize_(uint16_t cam_w, uint16_t cam_h, uint16_t canvas_w, uint16_t canvas_h);
-  bool do_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16_t src_h);
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+  bool setup_ppa_async_pipeline_(uint16_t cam_w, uint16_t cam_h,
+                                  uint16_t canvas_w, uint16_t canvas_h);
+  void teardown_ppa_async_pipeline_();
+  bool submit_ppa_scale_(const uint8_t *src, uint16_t src_w, uint16_t src_h, uint8_t *dst);
+  static bool ppa_trans_done_cb_(ppa_client_handle_t client, ppa_event_data_t *event_data, void *user_data);
+  static void producer_task_entry_(void *arg);
+  void producer_loop_();
+#endif
 
   // Benchmark stats for UI display
   lv_obj_t *stats_label_{nullptr};
