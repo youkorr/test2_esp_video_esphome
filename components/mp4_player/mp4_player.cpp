@@ -326,9 +326,19 @@ void Mp4Player::setup() {
             this->video_width_ = sinfo.stream_info.video_info.width;
             this->video_height_ = sinfo.stream_info.video_info.height;
             this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->video_format_ = sinfo.stream_info.video_info.format;
             this->total_duration_ms_ = sinfo.duration;
-            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+            const char *fmt_str = (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG"
+                                : (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264)  ? "H264"
+                                                                                        : "UNKNOWN";
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms, format: %s",
+                     this->video_width_, this->video_height_, this->video_fps_,
+                     this->total_duration_ms_, fmt_str);
+            if (this->video_format_ != EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+              ESP_LOGE(TAG, "Unsupported video codec (only MJPEG is supported on ESP32-P4 HW decoder).");
+              ESP_LOGE(TAG, "Re-encode with: ffmpeg -i input.mp4 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -an output.mp4");
+              ESP_LOGE(TAG, "  (or with audio: ffmpeg -i input.mp4 -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -c:a aac -b:a 128k output.mp4)");
+            }
           }
         }
         // Audio info
@@ -363,21 +373,34 @@ void Mp4Player::setup() {
 
   // Allocate display buffers (RGB565 double buffer)
   // JPEG hardware decoder aligns output to 16-byte boundaries, so allocate with aligned dimensions
+  // ESP32-P4 JPEG HW requires DMA-aligned buffers - use jpeg_alloc_decoder_mem() to guarantee
+  // both pointer alignment and size alignment to the cache line (required by jpeg_decoder_process)
   uint32_t aligned_w = (this->video_width_ + 15) & ~15;
   uint32_t aligned_h = (this->video_height_ + 15) & ~15;
-  this->display_buffer_size_ = aligned_w * aligned_h * 2;
-  ESP_LOGI(TAG, "Display buffer: %ux%u (aligned %ux%u), %u bytes",
-           this->video_width_, this->video_height_, aligned_w, aligned_h, this->display_buffer_size_);
-  for (int i = 0; i < 2; i++) {
-    this->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(
-        64, this->display_buffer_size_, MALLOC_CAP_SPIRAM);
-    if (!this->display_buffer_[i]) {
-      ESP_LOGE(TAG, "Failed to allocate display buffer %d", i);
-      this->mark_failed();
-      return;
-    }
-    memset(this->display_buffer_[i], 0, this->display_buffer_size_);
+  uint32_t requested_size = aligned_w * aligned_h * 2;
+  jpeg_decode_memory_alloc_cfg_t out_mem_cfg = {
+    .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+  };
+  size_t alloc_size_0 = 0;
+  this->display_buffer_[0] = (uint8_t *)jpeg_alloc_decoder_mem(requested_size, &out_mem_cfg, &alloc_size_0);
+  if (!this->display_buffer_[0]) {
+    ESP_LOGE(TAG, "Failed to allocate display buffer 0 (%u bytes)", requested_size);
+    this->mark_failed();
+    return;
   }
+  size_t alloc_size_1 = 0;
+  this->display_buffer_[1] = (uint8_t *)jpeg_alloc_decoder_mem(requested_size, &out_mem_cfg, &alloc_size_1);
+  if (!this->display_buffer_[1]) {
+    ESP_LOGE(TAG, "Failed to allocate display buffer 1 (%u bytes)", requested_size);
+    this->mark_failed();
+    return;
+  }
+  this->display_buffer_size_ = (alloc_size_0 < alloc_size_1) ? alloc_size_0 : alloc_size_1;
+  memset(this->display_buffer_[0], 0, this->display_buffer_size_);
+  memset(this->display_buffer_[1], 0, this->display_buffer_size_);
+  ESP_LOGI(TAG, "Display buffer: %ux%u (aligned %ux%u), %u bytes (requested %u)",
+           this->video_width_, this->video_height_, aligned_w, aligned_h,
+           this->display_buffer_size_, requested_size);
 
   // Setup audio decoder if audio track found (or probe skipped) and speaker configured
   if ((this->has_audio_ || probe_skipped) && this->speaker_) {
@@ -706,6 +729,17 @@ void Mp4Player::playback_task_(void *arg) {
           uint32_t fps = sinfo.stream_info.video_info.fps;
           player->video_fps_ = fps > 0 ? fps : 25;
           player->total_duration_ms_ = sinfo.duration;
+          player->video_format_ = sinfo.stream_info.video_info.format;
+
+          // Abort if video is not MJPEG (only format supported by ESP32-P4 HW JPEG decoder)
+          if (player->video_format_ != EXTRACTOR_VIDEO_FORMAT_MJPEG) {
+            const char *fmt_str = (player->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264) ? "H264" : "UNKNOWN";
+            ESP_LOGE(TAG, "Cannot play: video codec is %s, only MJPEG is supported.", fmt_str);
+            ESP_LOGE(TAG, "Re-encode with: ffmpeg -i \"%s\" -c:v mjpeg -pix_fmt yuvj420p -q:v 3 -c:a aac -b:a 128k output.mp4",
+                     player->file_path_.c_str());
+            esp_extractor_close(ext);
+            break;
+          }
 
           uint32_t actual_w = sinfo.stream_info.video_info.width;
           uint32_t actual_h = sinfo.stream_info.video_info.height;
@@ -718,26 +752,30 @@ void Mp4Player::playback_task_(void *arg) {
           if (needed_size > player->display_buffer_size_) {
             ESP_LOGW(TAG, "Video %ux%u needs %u bytes but buffer is %u, reallocating",
                      actual_w, actual_h, needed_size, player->display_buffer_size_);
+            jpeg_decode_memory_alloc_cfg_t out_mem_cfg = {
+              .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+            };
+            size_t actual_sizes[2] = {0, 0};
             for (int i = 0; i < 2; i++) {
               if (player->display_buffer_[i]) {
                 heap_caps_free(player->display_buffer_[i]);
                 player->display_buffer_[i] = nullptr;
               }
-              player->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(
-                  64, needed_size, MALLOC_CAP_SPIRAM);
+              player->display_buffer_[i] = (uint8_t *)jpeg_alloc_decoder_mem(
+                  needed_size, &out_mem_cfg, &actual_sizes[i]);
               if (!player->display_buffer_[i]) {
                 ESP_LOGE(TAG, "Failed to reallocate display buffer %d (%u bytes)", i, needed_size);
                 break;
               }
-              memset(player->display_buffer_[i], 0, needed_size);
+              memset(player->display_buffer_[i], 0, actual_sizes[i]);
             }
             if (player->display_buffer_[0] && player->display_buffer_[1]) {
-              player->display_buffer_size_ = needed_size;
+              player->display_buffer_size_ = (actual_sizes[0] < actual_sizes[1]) ? actual_sizes[0] : actual_sizes[1];
               player->video_width_ = actual_w;
               player->video_height_ = actual_h;
               player->dimensions_changed_ = true;
               ESP_LOGI(TAG, "Display buffers reallocated: %ux%u (aligned %ux%u), %u bytes",
-                       actual_w, actual_h, aligned_w, aligned_h, needed_size);
+                       actual_w, actual_h, aligned_w, aligned_h, player->display_buffer_size_);
             } else {
               ESP_LOGE(TAG, "Buffer reallocation failed, playback may fail");
             }
@@ -2254,9 +2292,14 @@ void Mp4Player::play_file(const std::string &path) {
             this->video_width_ = sinfo.stream_info.video_info.width;
             this->video_height_ = sinfo.stream_info.video_info.height;
             this->video_fps_ = sinfo.stream_info.video_info.fps > 0 ? sinfo.stream_info.video_info.fps : 25;
+            this->video_format_ = sinfo.stream_info.video_info.format;
             this->total_duration_ms_ = sinfo.duration;
-            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms",
-                     this->video_width_, this->video_height_, this->video_fps_, this->total_duration_ms_);
+            const char *fmt_str = (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_MJPEG) ? "MJPEG"
+                                : (this->video_format_ == EXTRACTOR_VIDEO_FORMAT_H264)  ? "H264"
+                                                                                        : "UNKNOWN";
+            ESP_LOGI(TAG, "Video: %ux%u @ %u fps, duration: %u ms, format: %s",
+                     this->video_width_, this->video_height_, this->video_fps_,
+                     this->total_duration_ms_, fmt_str);
           }
         }
         uint16_t anum = 0;
@@ -2283,23 +2326,28 @@ void Mp4Player::play_file(const std::string &path) {
   }
 
   // Allocate or reallocate display buffers
+  // ESP32-P4 JPEG HW requires DMA-aligned buffers - use jpeg_alloc_decoder_mem()
   uint32_t aligned_w = (this->video_width_ + 15) & ~15;
   uint32_t aligned_h = (this->video_height_ + 15) & ~15;
   uint32_t needed = aligned_w * aligned_h * 2;
   if (needed > this->display_buffer_size_) {
+    jpeg_decode_memory_alloc_cfg_t out_mem_cfg = {
+      .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+    };
+    size_t actual_sizes[2] = {0, 0};
     for (int i = 0; i < 2; i++) {
       if (this->display_buffer_[i]) {
         heap_caps_free(this->display_buffer_[i]);
         this->display_buffer_[i] = nullptr;
       }
-      this->display_buffer_[i] = (uint8_t *)heap_caps_aligned_alloc(64, needed, MALLOC_CAP_SPIRAM);
+      this->display_buffer_[i] = (uint8_t *)jpeg_alloc_decoder_mem(needed, &out_mem_cfg, &actual_sizes[i]);
       if (!this->display_buffer_[i]) {
-        ESP_LOGE(TAG, "Failed to allocate display buffer %d", i);
+        ESP_LOGE(TAG, "Failed to allocate display buffer %d (%u bytes)", i, needed);
         return;
       }
-      memset(this->display_buffer_[i], 0, needed);
+      memset(this->display_buffer_[i], 0, actual_sizes[i]);
     }
-    this->display_buffer_size_ = needed;
+    this->display_buffer_size_ = (actual_sizes[0] < actual_sizes[1]) ? actual_sizes[0] : actual_sizes[1];
   }
 
   // Setup audio if needed
@@ -2655,15 +2703,21 @@ bool Mp4Player::show_jpeg_image_(const std::string &path) {
   }
 
   // Allocate decode output buffer (RGB565, aligned for HW decoder)
+  // ESP32-P4 JPEG HW requires DMA-aligned buffers - use jpeg_alloc_decoder_mem()
   uint32_t aligned_w = (img_w + 15) & ~15;
   uint32_t aligned_h = (img_h + 15) & ~15;
   size_t decode_buf_size = aligned_w * aligned_h * 2;
-  uint8_t *decode_buf = (uint8_t *)heap_caps_aligned_alloc(64, decode_buf_size, MALLOC_CAP_SPIRAM);
+  jpeg_decode_memory_alloc_cfg_t out_mem_cfg = {
+    .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+  };
+  size_t actual_decode_buf_size = 0;
+  uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &out_mem_cfg, &actual_decode_buf_size);
   if (!decode_buf) {
     ESP_LOGE(TAG, "Failed to allocate decode buffer (%u x %u = %u bytes)", aligned_w, aligned_h, decode_buf_size);
     heap_caps_free(img_jpeg_buf);
     return false;
   }
+  decode_buf_size = actual_decode_buf_size;
 
   jpeg_decode_cfg_t decode_cfg = {
     .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,

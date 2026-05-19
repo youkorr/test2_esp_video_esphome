@@ -216,6 +216,7 @@ class Mp4Player : public Component {
   uint32_t video_width_{0};
   uint32_t video_height_{0};
   uint32_t video_fps_{25};
+  extractor_video_format_t video_format_{EXTRACTOR_VIDEO_FORMAT_NONE};
   bool has_audio_{false};
 
   // JPEG decoder
