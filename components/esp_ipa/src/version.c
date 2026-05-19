@@ -64,24 +64,23 @@ void esp_ipa_print_version(void)
 const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
 {
     // Configuration pour OV5647 : CCM désactivée pour éviter teinte rouge.
-    // agc.threshold ré-activé après l'ajout du support V4L2_CID_GAIN dans
-    // le driver ov5647.c (ports des registres 0x350A/350B + 0x3500-3502
-    // + 0x3503 manual mode, repris du driver Linux mainline). Le sensor
-    // passe en mode manual AEC/AGC dès le premier set_exp_val ou
-    // set_gain_val, et l'algo IPA AGC pilote ensuite l'exposition/gain
-    // avec le deadband configuré dans ov5647_default.json - même
-    // approche que SC2336 chez Waveshare.
+    //
+    // Note historique: une tentative d'ajouter "agc.threshold" pour stabiliser
+    // l'exposition (comme le SC2336 chez Waveshare) a échoué car le driver
+    // OV5647 ne supporte pas V4L2_CID_GAIN via VIDIOC_QUERY_EXT_CTRL.
+    // L'algo AGC se charge mais crashe à la première mise à jour de gain avec
+    // "ISP: failed to query gain". Donc on garde l'AEC built-in du capteur.
     static const char *ipa_names_ov5647[] = {
         "awb.gray",                /* Auto White Balance */
-        "agc.threshold",           /* Auto-Gain/Exposure Control with luma deadband */
         "denoising.gain_feedback", /* Réduction bruit */
         "sharpen.freq_feedback",   /* Netteté */
         "gamma.lumma_feedback",    /* Correction gamma */
         // "cc.linear" DISABLED for OV5647: CCM causes red tint (amplifies red 2.0x)
+        // "agc.threshold" DISABLED for OV5647: requires V4L2_CID_GAIN support which the driver lacks
     };
 
     static const esp_ipa_config_t ipa_config_ov5647 = {
-        .ipa_nums = 5,     /* 5 IPAs: awb + agc + denoising + sharpen + gamma (CCM disabled) */
+        .ipa_nums = 4,     /* 4 IPAs: awb + denoising + sharpen + gamma (CCM and AGC disabled) */
         .ipa_names = ipa_names_ov5647,
     };
 
@@ -102,12 +101,11 @@ const esp_ipa_config_t *esp_ipa_pipeline_get_config(const char *cam_name)
     // Sélection conditionnelle par capteur
     if (cam_name) {
         if (strcmp(cam_name, "OV5647") == 0 || strcmp(cam_name, "ov5647") == 0) {
-            ESP_LOGW(TAG, "IPA config for %s: AWB+AGC+Denoise+Sharpen+Gamma (5 algos, CCM disabled)", cam_name);
+            ESP_LOGW(TAG, "IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled)", cam_name);
             return &ipa_config_ov5647;
         } else if (strcmp(cam_name, "SC202CS") == 0 || strcmp(cam_name, "sc202cs") == 0) {
-            // SC202CS shares the same 5-algo config (including AGC) - the SC202CS
-            // driver also exposes V4L2_CID_GAIN/EXPOSURE via its query/get/set_para_value.
-            ESP_LOGW(TAG, "IPA config for %s: AWB+AGC+Denoise+Sharpen+Gamma (5 algos, CCM disabled - fixes green tint)", cam_name);
+            // SC202CS: Désactiver CCM pour éviter le fond vert (même config que OV5647)
+            ESP_LOGW(TAG, "IPA config for %s: AWB+Denoise+Sharpen+Gamma (4 algos, CCM disabled - fixes green tint)", cam_name);
             return &ipa_config_ov5647;
         } else {
             ESP_LOGW(TAG, "IPA config for %s: AWB+Denoise+Sharpen+Gamma+CCM (5 algos, full pipeline)", cam_name);
