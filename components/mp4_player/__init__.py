@@ -2,6 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_TRIGGER_ID
 from esphome import automation
+from esphome.automation import maybe_simple_id
 from esphome.components import speaker
 
 CONF_ON_CLOSE = "on_close"
@@ -176,10 +177,13 @@ async def to_code(config):
         await _setup_player(player_cfg)
 
 
-# Action schemas
-MP4_PLAYER_ACTION_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.use_id(Mp4Player),
-})
+# Action schemas - wrapped with maybe_simple_id to accept shorthand form:
+# e.g. mp4_player.release_resources: my_player_id
+MP4_PLAYER_ACTION_SCHEMA = maybe_simple_id(
+    {
+        cv.GenerateID(): cv.use_id(Mp4Player),
+    }
+)
 
 
 @automation.register_action("mp4_player.play", PlayAction, MP4_PLAYER_ACTION_SCHEMA, synchronous=True)
