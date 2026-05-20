@@ -119,8 +119,16 @@ async def to_code(config):
     # BMP: built-in BMP decoder
     cg.add_build_flag("-DLV_USE_LODEPNG=1")
     cg.add_build_flag("-DLV_USE_BMP=1")
-    # Enable Montserrat 16 font for mp4_player UI
-    cg.add_build_flag("-DLV_FONT_MONTSERRAT_16=1")
+
+    # Register Montserrat 16 with the LVGL component so it gets compiled in.
+    # The LVGL component uses helpers.lv_fonts_used to decide which built-in
+    # fonts to enable via df.add_define("LV_FONT_MONTSERRAT_16").
+    try:
+        from esphome.components.lvgl import helpers as lv_helpers
+        lv_helpers.lv_fonts_used.add("montserrat_16")
+    except ImportError:
+        # Fallback: if the LVGL helpers module isn't available, use a raw define
+        cg.add_define("LV_FONT_MONTSERRAT_16")
 
     # esp_extractor include paths and libraries
     esp_extractor_dir = os.path.join(component_dir, "components", "esp_extractor")
