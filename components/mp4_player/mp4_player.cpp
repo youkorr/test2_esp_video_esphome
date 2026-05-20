@@ -1830,7 +1830,313 @@ void Mp4Player::hide_timer_cb_(lv_timer_t *timer) {
 
 void Mp4Player::touch_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  // If fullscreen-on-touch is enabled AND the player is embedded in a custom
+  // parent (not the active screen), a tap toggles fullscreen instead of just
+  // toggling controls. The controls toggle is still kept for the screen mode.
+  if (p->fullscreen_on_touch_ && p->parent_ != nullptr) {
+    p->toggle_fullscreen();
+    return;
+  }
   if (p->controls_visible_) p->hide_controls_(); else p->show_controls_();
+}
+
+// ============================================================================
+// Fullscreen animation helpers
+// ============================================================================
+void Mp4Player::fs_anim_x_cb_(void *obj, int32_t v) {
+  lv_obj_set_x(static_cast<lv_obj_t *>(obj), (lv_coord_t)v);
+}
+void Mp4Player::fs_anim_y_cb_(void *obj, int32_t v) {
+  lv_obj_set_y(static_cast<lv_obj_t *>(obj), (lv_coord_t)v);
+}
+void Mp4Player::fs_anim_w_cb_(void *obj, int32_t v) {
+  lv_obj_set_width(static_cast<lv_obj_t *>(obj), (lv_coord_t)v);
+}
+void Mp4Player::fs_anim_h_cb_(void *obj, int32_t v) {
+  lv_obj_set_height(static_cast<lv_obj_t *>(obj), (lv_coord_t)v);
+}
+
+void Mp4Player::animate_geometry_(lv_obj_t *target,
+                                  lv_coord_t x0, lv_coord_t y0, lv_coord_t w0, lv_coord_t h0,
+                                  lv_coord_t x1, lv_coord_t y1, lv_coord_t w1, lv_coord_t h1,
+                                  uint32_t duration_ms,
+                                  lv_anim_ready_cb_t ready_cb) {
+  if (!target) return;
+
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, target);
+  lv_anim_set_time(&a, duration_ms);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+
+  // X
+  lv_anim_set_values(&a, x0, x1);
+  lv_anim_set_exec_cb(&a, fs_anim_x_cb_);
+  lv_anim_set_ready_cb(&a, nullptr);
+  lv_anim_start(&a);
+
+  // Y
+  lv_anim_set_values(&a, y0, y1);
+  lv_anim_set_exec_cb(&a, fs_anim_y_cb_);
+  lv_anim_start(&a);
+
+  // W
+  lv_anim_set_values(&a, w0, w1);
+  lv_anim_set_exec_cb(&a, fs_anim_w_cb_);
+  lv_anim_start(&a);
+
+  // H — attach the "ready" callback on the LAST animation so we know when done
+  lv_anim_set_values(&a, h0, h1);
+  lv_anim_set_exec_cb(&a, fs_anim_h_cb_);
+  lv_anim_set_ready_cb(&a, ready_cb);
+  lv_anim_set_user_data(&a, this);
+  lv_anim_start(&a);
+}
+
+void Mp4Player::fs_anim_ready_enter_cb_(lv_anim_t *a) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_anim_get_user_data(a));
+  if (!p) return;
+  ESP_LOGI(TAG, "Fullscreen animation completed (enter)");
+  // Re-show controls if enabled, now that we are at fullscreen size
+  if (p->controls_enabled_) p->show_controls_();
+}
+
+void Mp4Player::fs_anim_ready_exit_cb_(lv_anim_t *a) {
+  Mp4Player *p = static_cast<Mp4Player *>(lv_anim_get_user_data(a));
+  if (!p) return;
+  ESP_LOGI(TAG, "Fullscreen animation completed (exit)");
+  // After animating back to original size, return the canvas to its
+  // original parent. The canvas was originally centered via lv_obj_center(),
+  // so we restore that alignment instead of using saved screen coords.
+  if (p->canvas_ && p->fs_orig_parent_) {
+    lv_obj_set_parent(p->canvas_, p->fs_orig_parent_);
+    lv_obj_set_size(p->canvas_, p->fs_orig_w_, p->fs_orig_h_);
+    lv_obj_align(p->canvas_, LV_ALIGN_CENTER, 0, 0);
+  }
+  if (p->touch_layer_ && p->fs_orig_parent_) {
+    lv_obj_set_parent(p->touch_layer_, p->fs_orig_parent_);
+    lv_obj_set_size(p->touch_layer_, p->fs_orig_w_, p->fs_orig_h_);
+    lv_obj_align(p->touch_layer_, LV_ALIGN_CENTER, 0, 0);
+  }
+  // Controls back inside the original parent too (kept hidden by default
+  // when embedded — user can still tap to open fullscreen again).
+  if (p->controls_container_) {
+    lv_obj_add_flag(p->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    p->controls_visible_ = false;
+  }
+  p->fullscreen_active_ = false;
+}
+
+void Mp4Player::enter_fullscreen() {
+  if (this->fullscreen_active_) return;
+  if (!this->canvas_) return;
+
+  lv_obj_t *cur_parent = lv_obj_get_parent(this->canvas_);
+  if (!cur_parent) return;
+
+  // Make sure layout is up to date before sampling coordinates
+  lv_obj_update_layout(this->canvas_);
+
+  // Save the original parent and the canvas's current actual size.
+  // We rely on lv_obj_center() to restore alignment on exit, not on raw x/y
+  // (because the canvas may have been centered, in which case x/y are
+  // alignment offsets, not absolute positions).
+  this->fs_orig_parent_ = cur_parent;
+  this->fs_orig_x_ = 0;  // unused, lv_obj_align is used on exit
+  this->fs_orig_y_ = 0;
+  this->fs_orig_w_ = lv_obj_get_width(this->canvas_);
+  this->fs_orig_h_ = lv_obj_get_height(this->canvas_);
+
+  // Translate the current position to screen coordinates
+  lv_area_t coords;
+  lv_obj_get_coords(this->canvas_, &coords);
+
+  lv_obj_t *scr = lv_scr_act();
+  lv_coord_t scr_w = lv_obj_get_width(scr);
+  lv_coord_t scr_h = lv_obj_get_height(scr);
+
+  // Reparent the canvas (and touch layer) to the active screen so it can
+  // grow above other widgets. Keep its absolute position visually unchanged.
+  lv_obj_set_parent(this->canvas_, scr);
+  lv_obj_set_pos(this->canvas_, coords.x1, coords.y1);
+  lv_obj_set_size(this->canvas_, this->fs_orig_w_, this->fs_orig_h_);
+  // Make sure it's on top
+  lv_obj_move_foreground(this->canvas_);
+
+  if (this->touch_layer_) {
+    lv_obj_set_parent(this->touch_layer_, scr);
+    lv_obj_set_pos(this->touch_layer_, coords.x1, coords.y1);
+    lv_obj_set_size(this->touch_layer_, this->fs_orig_w_, this->fs_orig_h_);
+    lv_obj_move_foreground(this->touch_layer_);
+  }
+
+  // Controls stay hidden during the transition
+  if (this->controls_container_) {
+    lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    this->controls_visible_ = false;
+  }
+
+  this->fullscreen_active_ = true;
+
+  // Animate to fullscreen
+  this->animate_geometry_(this->canvas_,
+                          coords.x1, coords.y1, this->fs_orig_w_, this->fs_orig_h_,
+                          0, 0, scr_w, scr_h,
+                          this->fullscreen_anim_ms_, fs_anim_ready_enter_cb_);
+  if (this->touch_layer_) {
+    this->animate_geometry_(this->touch_layer_,
+                            coords.x1, coords.y1, this->fs_orig_w_, this->fs_orig_h_,
+                            0, 0, scr_w, scr_h,
+                            this->fullscreen_anim_ms_, nullptr);
+  }
+  ESP_LOGI(TAG, "Entering fullscreen: %dx%d -> %dx%d", this->fs_orig_w_, this->fs_orig_h_, scr_w, scr_h);
+}
+
+void Mp4Player::exit_fullscreen() {
+  if (!this->fullscreen_active_) return;
+  if (!this->canvas_ || !this->fs_orig_parent_) return;
+
+  // Hide controls during the transition
+  if (this->controls_container_) {
+    lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    this->controls_visible_ = false;
+  }
+
+  // Compute the target absolute position so that the canvas ends up centered
+  // in its original parent (matching the lv_obj_center() applied at create).
+  lv_obj_update_layout(this->fs_orig_parent_);
+  lv_area_t parent_coords;
+  lv_obj_get_coords(this->fs_orig_parent_, &parent_coords);
+  lv_coord_t parent_w = parent_coords.x2 - parent_coords.x1 + 1;
+  lv_coord_t parent_h = parent_coords.y2 - parent_coords.y1 + 1;
+  lv_coord_t target_x = parent_coords.x1 + (parent_w - this->fs_orig_w_) / 2;
+  lv_coord_t target_y = parent_coords.y1 + (parent_h - this->fs_orig_h_) / 2;
+
+  lv_coord_t cur_x = lv_obj_get_x(this->canvas_);
+  lv_coord_t cur_y = lv_obj_get_y(this->canvas_);
+  lv_coord_t cur_w = lv_obj_get_width(this->canvas_);
+  lv_coord_t cur_h = lv_obj_get_height(this->canvas_);
+
+  this->animate_geometry_(this->canvas_,
+                          cur_x, cur_y, cur_w, cur_h,
+                          target_x, target_y, this->fs_orig_w_, this->fs_orig_h_,
+                          this->fullscreen_anim_ms_, fs_anim_ready_exit_cb_);
+  if (this->touch_layer_) {
+    this->animate_geometry_(this->touch_layer_,
+                            cur_x, cur_y, cur_w, cur_h,
+                            target_x, target_y, this->fs_orig_w_, this->fs_orig_h_,
+                            this->fullscreen_anim_ms_, nullptr);
+  }
+  ESP_LOGI(TAG, "Exiting fullscreen: -> %dx%d", this->fs_orig_w_, this->fs_orig_h_);
+}
+
+void Mp4Player::toggle_fullscreen() {
+  if (this->fullscreen_active_) this->exit_fullscreen();
+  else this->enter_fullscreen();
+}
+
+// ============================================================================
+// Close (hide UI, fire on_close) — does NOT free buffers, see release_resources
+// ============================================================================
+void Mp4Player::close() {
+  ESP_LOGI(TAG, "Closing player UI");
+
+  // Stop any playback (without re-opening the browser)
+  if (this->state_ != PlayerState::STOPPED) {
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  // Hide / destroy all UI elements
+  this->destroy_image_viewer_();
+  if (this->audio_only_mode_) this->destroy_spectrum_ui_();
+  this->destroy_file_browser_();
+
+  if (this->canvas_) lv_obj_add_flag(this->canvas_, LV_OBJ_FLAG_HIDDEN);
+  if (this->touch_layer_) lv_obj_add_flag(this->touch_layer_, LV_OBJ_FLAG_HIDDEN);
+  if (this->controls_container_) {
+    lv_obj_add_flag(this->controls_container_, LV_OBJ_FLAG_HIDDEN);
+    this->controls_visible_ = false;
+  }
+  if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
+
+  this->on_close_callbacks_.call();
+}
+
+// ============================================================================
+// Release heavy PSRAM buffers (display, jpeg, audio)
+// Safe to call when stopped — buffers will be re-allocated on next play.
+// ============================================================================
+void Mp4Player::release_resources() {
+  // Ensure playback is fully stopped before freeing buffers
+  if (this->state_ != PlayerState::STOPPED) {
+    auto saved_dirs = std::move(this->media_directories_);
+    this->stop();
+    this->media_directories_ = std::move(saved_dirs);
+  }
+
+  size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+
+  // Display buffers
+  for (int i = 0; i < 2; i++) {
+    if (this->display_buffer_[i]) {
+      heap_caps_free(this->display_buffer_[i]);
+      this->display_buffer_[i] = nullptr;
+    }
+  }
+  this->display_buffer_size_ = 0;
+
+  // JPEG input buffer
+  if (this->jpeg_buffer_) {
+    heap_caps_free(this->jpeg_buffer_);
+    this->jpeg_buffer_ = nullptr;
+  }
+
+  // JPEG decoder
+  if (this->jpeg_decoder_) {
+    jpeg_del_decoder_engine(this->jpeg_decoder_);
+    this->jpeg_decoder_ = nullptr;
+  }
+  this->jpeg_hw_error_logged_ = false;
+  this->jpeg_hw_error_count_ = 0;
+
+  // Audio PCM scratch buffer
+  if (this->audio_pcm_buffer_) {
+    heap_caps_free(this->audio_pcm_buffer_);
+    this->audio_pcm_buffer_ = nullptr;
+    this->audio_pcm_buffer_size_ = 0;
+  }
+
+  // Audio ring buffer
+  if (this->audio_ring_buffer_) {
+    heap_caps_free(this->audio_ring_buffer_);
+    this->audio_ring_buffer_ = nullptr;
+    this->audio_ring_size_ = 0;
+    this->audio_ring_read_ = 0;
+    this->audio_ring_write_ = 0;
+  }
+
+  // Audio decoder
+  if (this->audio_decoder_) {
+    esp_audio_simple_dec_close(this->audio_decoder_);
+    this->audio_decoder_ = nullptr;
+  }
+  this->audio_decoder_ready_ = false;
+
+  // Audio frame queue (encoded frames waiting to be decoded)
+  if (this->audio_frame_queue_) {
+    AudioFrameItem item;
+    while (xQueueReceive(this->audio_frame_queue_, &item, 0) == pdTRUE) {
+      if (item.data) free(item.data);
+    }
+    vQueueDelete(this->audio_frame_queue_);
+    this->audio_frame_queue_ = nullptr;
+  }
+
+  size_t after = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  ESP_LOGI(TAG, "Resources released: PSRAM %u KB -> %u KB (freed %d KB)",
+           before / 1024, after / 1024, (int)((after - before) / 1024));
 }
 
 // ============================================================================
@@ -3684,7 +3990,9 @@ void Mp4Player::back_btn_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
 
   if (player->current_browse_path_.empty()) {
-    return;  // Already at root
+    // At root level: close the browser entirely (fires on_close)
+    player->close();
+    return;
   }
 
   // Go up one level

@@ -66,9 +66,12 @@ class Mp4Player : public Component {
   void set_show_controls(bool show) { controls_enabled_ = show; }
   void set_usb_storage(Component *usb_storage) { usb_storage_ = usb_storage; }
   void add_media_directory(const std::string &dir) { media_directories_.push_back(dir); }
+  void set_fullscreen_on_touch(bool en) { fullscreen_on_touch_ = en; }
+  void set_fullscreen_anim_ms(uint32_t ms) { fullscreen_anim_ms_ = ms; }
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
+  void add_on_close_callback(std::function<void()> &&callback) { on_close_callbacks_.add(std::move(callback)); }
 
   void setup() override;
   void loop() override;
@@ -83,6 +86,21 @@ class Mp4Player : public Component {
   bool is_playing() const { return state_ == PlayerState::PLAYING; }
   bool is_paused() const { return state_ == PlayerState::PAUSED; }
   bool is_browser_active() const { return browser_active_; }
+
+  // Fullscreen toggle (animated). When the player has an embedded parent
+  // (e.g. a dashboard card), this animates the canvas to the screen size
+  // and back, so a touch can "open" the animation full-screen.
+  void enter_fullscreen();
+  void exit_fullscreen();
+  void toggle_fullscreen();
+  bool is_fullscreen() const { return fullscreen_active_; }
+
+  // Close the player UI (browser + viewers) and fire `on_close`.
+  // Useful when the user dismisses a media-browser overlay.
+  void close();
+  // Free heavy PSRAM buffers (display, jpeg, audio). Safe to call when
+  // stopped — buffers are re-allocated on the next play_file().
+  void release_resources();
 
  protected:
   // UI
@@ -311,9 +329,33 @@ class Mp4Player : public Component {
   bool controls_visible_{true};
   uint32_t hide_delay_ms_{5000};
 
+  // Fullscreen animation state
+  bool fullscreen_on_touch_{false};
+  bool fullscreen_active_{false};
+  uint32_t fullscreen_anim_ms_{350};
+  // Saved geometry of the embedded canvas before going fullscreen
+  lv_obj_t *fs_orig_parent_{nullptr};
+  lv_coord_t fs_orig_x_{0};
+  lv_coord_t fs_orig_y_{0};
+  lv_coord_t fs_orig_w_{0};
+  lv_coord_t fs_orig_h_{0};
+  // Animation callbacks for canvas geometry
+  static void fs_anim_x_cb_(void *obj, int32_t v);
+  static void fs_anim_y_cb_(void *obj, int32_t v);
+  static void fs_anim_w_cb_(void *obj, int32_t v);
+  static void fs_anim_h_cb_(void *obj, int32_t v);
+  static void fs_anim_ready_enter_cb_(lv_anim_t *a);
+  static void fs_anim_ready_exit_cb_(lv_anim_t *a);
+  void animate_geometry_(lv_obj_t *target,
+                         lv_coord_t x0, lv_coord_t y0, lv_coord_t w0, lv_coord_t h0,
+                         lv_coord_t x1, lv_coord_t y1, lv_coord_t w1, lv_coord_t h1,
+                         uint32_t duration_ms,
+                         lv_anim_ready_cb_t ready_cb);
+
   // Automation triggers
   CallbackManager<void()> on_play_callbacks_;
   CallbackManager<void()> on_stop_callbacks_;
+  CallbackManager<void()> on_close_callbacks_;
 };
 
 template<typename... Ts> class PlayAction : public Action<Ts...>, public Parented<Mp4Player> {
@@ -331,6 +373,36 @@ template<typename... Ts> class StopAction : public Action<Ts...>, public Parente
   void play(const Ts &...x) override { this->parent_->stop(); }
 };
 
+template<typename... Ts> class EnterFullscreenAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->enter_fullscreen(); }
+};
+
+template<typename... Ts> class ExitFullscreenAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->exit_fullscreen(); }
+};
+
+template<typename... Ts> class ToggleFullscreenAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->toggle_fullscreen(); }
+};
+
+template<typename... Ts> class CloseAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->close(); }
+};
+
+template<typename... Ts> class ReleaseResourcesAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->release_resources(); }
+};
+
+template<typename... Ts> class ShowBrowserAction : public Action<Ts...>, public Parented<Mp4Player> {
+ public:
+  void play(const Ts &...x) override { this->parent_->show_file_browser(); }
+};
+
 class PlayTrigger : public Trigger<> {
  public:
   explicit PlayTrigger(Mp4Player *player) { player->add_on_play_callback([this]() { this->trigger(); }); }
@@ -339,6 +411,11 @@ class PlayTrigger : public Trigger<> {
 class StopTrigger : public Trigger<> {
  public:
   explicit StopTrigger(Mp4Player *player) { player->add_on_stop_callback([this]() { this->trigger(); }); }
+};
+
+class CloseTrigger : public Trigger<> {
+ public:
+  explicit CloseTrigger(Mp4Player *player) { player->add_on_close_callback([this]() { this->trigger(); }); }
 };
 
 }  // namespace mp4_player
