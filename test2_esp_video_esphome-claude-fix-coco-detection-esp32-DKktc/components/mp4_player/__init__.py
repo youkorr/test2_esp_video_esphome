@@ -97,7 +97,7 @@ async def to_code(config):
 
     if CONF_PARENT_ID in config:
         parent = await cg.get_variable(config[CONF_PARENT_ID])
-        cg.add(var.set_parent(parent.obj))
+        cg.add(var.set_parent(parent))
 
     if CONF_SPEAKER in config:
         spk = await cg.get_variable(config[CONF_SPEAKER])
