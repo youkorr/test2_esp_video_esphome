@@ -147,10 +147,18 @@ async def _setup_player(config):
         usb_storage = await cg.get_variable(config[CONF_USB_MEDIA_STORAGE_ID])
         cg.add(var.set_usb_storage(usb_storage))
 
-    if CONF_PARENT_ID in config:
-        parent = await cg.get_variable(config[CONF_PARENT_ID])
-        cg.add(var.set_parent(parent.obj))
 
+    if CONF_PARENT_ID in config:
+        from esphome.components.lvgl.types import LvCompound
+        parent = await cg.get_variable(config[CONF_PARENT_ID])
+        # Check if the parent type inherits from LvCompound (pages, tabview, etc.)
+        # If so, access ->obj. Otherwise use the variable directly (it's already lv_obj_t*).
+        parent_type = config[CONF_PARENT_ID].type
+        if hasattr(parent_type, 'inherits_from') and parent_type.inherits_from(LvCompound):
+            cg.add(var.set_parent(parent.obj))
+        else:
+            cg.add(var.set_parent(parent))
+    
     if CONF_SPEAKER in config:
         spk = await cg.get_variable(config[CONF_SPEAKER])
         cg.add(var.set_speaker(spk))
