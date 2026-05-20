@@ -8,6 +8,16 @@ from esphome.components import speaker
 DEPENDENCIES = ["lvgl"]
 CODEOWNERS = ["@youkorr"]
 
+# Register Montserrat 16 at module-load time (before LVGL's to_code writes lv_conf.h).
+# LVGL iterates helpers.lv_fonts_used in its to_code() to generate LV_FONT_MONTSERRAT_*
+# defines. Since mp4_player depends on lvgl, LVGL's to_code() runs first, so we MUST
+# add the font before that — i.e. at import time.
+try:
+    from esphome.components.lvgl import helpers as _lv_helpers
+    _lv_helpers.lv_fonts_used.add("montserrat_16")
+except (ImportError, AttributeError):
+    pass
+
 CONF_USB_MEDIA_STORAGE_ID = "usb_media_storage_id"
 
 mp4_player_ns = cg.esphome_ns.namespace("mp4_player")
@@ -120,15 +130,6 @@ async def to_code(config):
     cg.add_build_flag("-DLV_USE_LODEPNG=1")
     cg.add_build_flag("-DLV_USE_BMP=1")
 
-    # Register Montserrat 16 with the LVGL component so it gets compiled in.
-    # The LVGL component uses helpers.lv_fonts_used to decide which built-in
-    # fonts to enable via df.add_define("LV_FONT_MONTSERRAT_16").
-    try:
-        from esphome.components.lvgl import helpers as lv_helpers
-        lv_helpers.lv_fonts_used.add("montserrat_16")
-    except ImportError:
-        # Fallback: if the LVGL helpers module isn't available, use a raw define
-        cg.add_define("LV_FONT_MONTSERRAT_16")
 
     # esp_extractor include paths and libraries
     esp_extractor_dir = os.path.join(component_dir, "components", "esp_extractor")
