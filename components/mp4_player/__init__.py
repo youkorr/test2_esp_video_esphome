@@ -43,7 +43,7 @@ CONF_MEDIA_DIRECTORIES = "media_directories"
 CONF_FULLSCREEN_ON_TOUCH = "fullscreen_on_touch"
 CONF_FULLSCREEN_ANIM_MS = "fullscreen_anim_ms"
 
-CONFIG_SCHEMA = cv.Schema({
+_PLAYER_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
     cv.Optional(CONF_FILE_PATH): cv.string,
     cv.Optional(CONF_USB_MEDIA_STORAGE_ID): cv.use_id(cg.Component),
@@ -67,8 +67,64 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_FULLSCREEN_ANIM_MS, default=350): cv.int_range(min=50, max=2000),
 }).extend(cv.COMPONENT_SCHEMA)
 
+# Accept BOTH a single dict (legacy) and a list of dicts (multi-instance)
+CONFIG_SCHEMA = cv.Any(
+    cv.ensure_list(_PLAYER_SCHEMA),
+    _PLAYER_SCHEMA,
+)
 
-async def to_code(config):
+
+def _add_global_build_flags():
+    import os
+    component_dir = os.path.dirname(__file__)
+    parent_components_dir = os.path.dirname(component_dir)
+
+    # Add build script
+    build_script_path = os.path.join(component_dir, "mp4_player_build.py")
+    if os.path.exists(build_script_path):
+        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+
+    # Enable LVGL built-in image decoders for file browser image viewing
+    cg.add_build_flag("-DLV_USE_LODEPNG=1")
+    cg.add_build_flag("-DLV_USE_BMP=1")
+
+    # esp_extractor include paths and libraries
+    esp_extractor_dir = os.path.join(component_dir, "components", "esp_extractor")
+    if os.path.exists(esp_extractor_dir):
+        inc_path = os.path.join(esp_extractor_dir, "include")
+        if os.path.exists(inc_path):
+            cg.add_build_flag(f"-I{inc_path}")
+        lib_dir = os.path.join(esp_extractor_dir, "lib", "esp32p4")
+        if os.path.exists(lib_dir):
+            cg.add_build_flag(f"-L{lib_dir}")
+            cg.add_build_flag("-lesp_extractor")
+
+    # esp_audio_codec for AAC/MP3 decoding
+    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
+    if os.path.exists(esp_audio_codec_dir):
+        audio_inc_paths = [
+            os.path.join(esp_audio_codec_dir, "include"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder"),
+            os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
+            os.path.join(esp_audio_codec_dir, "include", "simple_dec"),
+            os.path.join(esp_audio_codec_dir, "include", "simple_dec", "impl"),
+        ]
+        for inc_path in audio_inc_paths:
+            if os.path.exists(inc_path):
+                cg.add_build_flag(f"-I{inc_path}")
+        lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
+        if os.path.exists(lib_dir):
+            cg.add_build_flag(f"-L{lib_dir}")
+            cg.add_build_flag("-lesp_audio_codec")
+            cg.add_build_flag("-lesp_audio_simple_dec")
+
+    # Include the main directory for app_extractor.h and app_stream_adapter.h
+    main_dir = os.path.join(component_dir, "main")
+    if os.path.exists(main_dir):
+        cg.add_build_flag(f"-I{main_dir}")
+
+
+async def _setup_player(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
@@ -110,55 +166,14 @@ async def to_code(config):
         trigger = cg.new_Pvariable(config[CONF_ON_CLOSE][automation.CONF_TRIGGER_ID], var)
         await automation.build_automation(trigger, [], config[CONF_ON_CLOSE])
 
-    import os
-    component_dir = os.path.dirname(__file__)
-    parent_components_dir = os.path.dirname(component_dir)
 
-    # Add build script
-    build_script_path = os.path.join(component_dir, "mp4_player_build.py")
-    if os.path.exists(build_script_path):
-        cg.add_platformio_option("extra_scripts", [f"post:{build_script_path}"])
+async def to_code(config):
+    _add_global_build_flags()
 
-    # Enable LVGL built-in image decoders for file browser image viewing
-    # LODEPNG: built-in PNG decoder (part of LVGL source, no external lib needed)
-    # BMP: built-in BMP decoder
-    cg.add_build_flag("-DLV_USE_LODEPNG=1")
-    cg.add_build_flag("-DLV_USE_BMP=1")
-
-    # esp_extractor include paths and libraries
-    esp_extractor_dir = os.path.join(component_dir, "components", "esp_extractor")
-    if os.path.exists(esp_extractor_dir):
-        inc_path = os.path.join(esp_extractor_dir, "include")
-        if os.path.exists(inc_path):
-            cg.add_build_flag(f"-I{inc_path}")
-        lib_dir = os.path.join(esp_extractor_dir, "lib", "esp32p4")
-        if os.path.exists(lib_dir):
-            cg.add_build_flag(f"-L{lib_dir}")
-            cg.add_build_flag("-lesp_extractor")
-
-    # esp_audio_codec for AAC/MP3 decoding
-    esp_audio_codec_dir = os.path.join(parent_components_dir, "esp_audio_codec")
-    if os.path.exists(esp_audio_codec_dir):
-        audio_inc_paths = [
-            os.path.join(esp_audio_codec_dir, "include"),
-            os.path.join(esp_audio_codec_dir, "include", "decoder"),
-            os.path.join(esp_audio_codec_dir, "include", "decoder", "impl"),
-            os.path.join(esp_audio_codec_dir, "include", "simple_dec"),
-            os.path.join(esp_audio_codec_dir, "include", "simple_dec", "impl"),
-        ]
-        for inc_path in audio_inc_paths:
-            if os.path.exists(inc_path):
-                cg.add_build_flag(f"-I{inc_path}")
-        lib_dir = os.path.join(esp_audio_codec_dir, "lib", "esp32p4")
-        if os.path.exists(lib_dir):
-            cg.add_build_flag(f"-L{lib_dir}")
-            cg.add_build_flag("-lesp_audio_codec")
-            cg.add_build_flag("-lesp_audio_simple_dec")
-
-    # Include the main directory for app_extractor.h and app_stream_adapter.h
-    main_dir = os.path.join(component_dir, "main")
-    if os.path.exists(main_dir):
-        cg.add_build_flag(f"-I{main_dir}")
+    # Normalize: schema accepts a single dict or a list of dicts
+    players = config if isinstance(config, list) else [config]
+    for player_cfg in players:
+        await _setup_player(player_cfg)
 
 
 # Action schemas
