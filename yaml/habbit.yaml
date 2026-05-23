@@ -193,14 +193,14 @@ external_components:
   - source:
       type: git
       url: https://github.com/youkorr/lvgl_9.5
-      ref: main #claude/add-animated-svg-support-gTGAz #claude/fix-callback-timing-MAJoa #claude/fix-lvgl-widgets-Ag1yK #claude/fix-lvgl-rendering-performance-xauVV
+      ref: claude/review-lvgl-display-adapter-xyWYk #claude/add-animated-svg-support-gTGAz #claude/fix-callback-timing-MAJoa #claude/fix-lvgl-widgets-Ag1yK #claude/fix-lvgl-rendering-performance-xauVV
     components: [lvgl, image, font]
     refresh: always    
 
   - source:
       type: git
       url: https://github.com/youkorr/test2_esp_video_esphome
-      ref: main #claude/fix-coco-detection-esp32-DKktc #claude/fix-cache-line-size-8vT5R #claude/fix-coco-detection-esp32-DKktc #claude/yolo-esp32-camera-support-Ian86  #claude/fix-camera-h264-Grgbl #claude/yolo-esp32-camera-support-Ian86 #claude/add-webp-storage-support-BtuK2 #claude/usb-media-storage-zNT22 #claude/fix-mp4-stuttering-QWMcU #claude/fix-esphome-ff-header-LUVh2  #claude/optimize-face-detection-memory-0mKRM #claude/decouple-esp-video-Hr7PK
+      ref: claude/fix-coco-detection-esp32-DKktc #claude/fix-coco-detection-esp32-DKktc #claude/fix-cache-line-size-8vT5R #claude/fix-coco-detection-esp32-DKktc #claude/yolo-esp32-camera-support-Ian86  #claude/fix-camera-h264-Grgbl #claude/yolo-esp32-camera-support-Ian86 #claude/add-webp-storage-support-BtuK2 #claude/usb-media-storage-zNT22 #claude/fix-mp4-stuttering-QWMcU #claude/fix-esphome-ff-header-LUVh2  #claude/optimize-face-detection-memory-0mKRM #claude/decouple-esp-video-Hr7PK
     components: [esp_video, esp_cam_sensor, sd_mmc_card, webdavbox3, storage]
     refresh: always 
 http_request:
