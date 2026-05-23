@@ -315,7 +315,26 @@ async def setup_sd_image_component(config, parent_storage):
     
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
-    
+
+    # Register image metadata so LVGL (and other consumers) can look it up by id.
+    # SD images are loaded at runtime so dimensions/type come from the YAML hints.
+    if hasattr(image, "add_metadata"):
+        fmt = config[CONF_OUTPUT_FORMAT]
+        if fmt == "RGB565":
+            meta_type = "RGB565"
+        elif fmt == "RGB888":
+            meta_type = "RGB"
+        elif fmt == "RGBA":
+            meta_type = "RGB"
+        else:
+            meta_type = "RGB565"
+        if CONF_RESIZE in config:
+            meta_w, meta_h = config[CONF_RESIZE][0], config[CONF_RESIZE][1]
+        else:
+            meta_w, meta_h = 0, 0
+        transparency = "alpha_channel" if fmt == "RGBA" else "opaque"
+        image.add_metadata(config[CONF_ID], meta_w, meta_h, meta_type, transparency)
+
     return var
 
 # Encodeur personnalisé pour les images SD
