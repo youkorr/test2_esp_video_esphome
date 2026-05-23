@@ -145,21 +145,6 @@ class SdImageComponent : public Component, public image::Image {
   void prev_frame();
   uint16_t get_frame_delay() const;
 
-  // LVGL Canvas drawing support
-  #ifdef USE_LVGL
-  // Draw current frame directly to an LVGL canvas
-  // canvas: pointer to lv_obj_t canvas widget
-  // x, y: position on canvas to draw
-  void draw_to_canvas(lv_obj_t *canvas, int x = 0, int y = 0);
-
-  // Update canvas with current animation frame (call this in interval)
-  // Returns true if frame was updated
-  bool update_canvas_animation(lv_obj_t *canvas, int x = 0, int y = 0);
-
-  // Clear canvas area with background color (for transparency support)
-  void clear_canvas_area(lv_obj_t *canvas, int x = 0, int y = 0);
-  #endif
-
   // Debug info
   std::string get_debug_info() const;
 
