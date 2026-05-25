@@ -364,7 +364,7 @@ lvgl_camera_display:
   canvas_id: camera_canvas
   update_interval: 33ms
   face_detection_id: face_detect
-  yolov11_id: my_yolo
+  #yolov11_id: my_yolo
 
 # Detection de visages (garde actif pour les boutons, draw desactive)
 face_detection:
