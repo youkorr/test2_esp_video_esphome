@@ -10,6 +10,10 @@
 # Par défaut: CONFIG_LWIP_MAX_SOCKETS=10
 #CONFIG_LWIP_MAX_SOCKETS=16
 
+# FreeRTOS main task stack - must match esp-idf/sdkconfig.defaults
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+
 # ESP-Video ISP Pipeline Controller - CRITICAL for JSON IPA loading
 # This enables the ISP pipeline initialization code in esp_video_init.c
 # which loads and applies the JSON IPA configuration (AWB, CCM, sharpen, etc.)
