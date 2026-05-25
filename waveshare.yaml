@@ -363,7 +363,7 @@ lvgl_camera_display:
   camera_id: tab5_cam
   canvas_id: camera_canvas
   update_interval: 33ms
-  #face_detection_id: face_detect
+  face_detection_id: face_detect
   yolov11_id: my_yolo
 
 # Detection de visages (garde actif pour les boutons, draw desactive)
@@ -375,10 +375,10 @@ face_detection:
   score_threshold: 0.3
   nms_threshold: 0.5
   detection_interval: 5
-  draw_enabled: false
+  draw_enabled: true
   recognition_enabled: true
   face_db_path: "/sdcard/reconnaisance_faciale/faces.db"
-  recognition_threshold: 0.83
+  recognition_threshold: 0.85
 
 
 # ============================================================================
