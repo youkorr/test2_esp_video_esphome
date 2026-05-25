@@ -27,6 +27,9 @@ CONF_USE_HEAP_ALLOCATOR = "use_heap_allocator"
 CONF_XCLK_PIN = "xclk_pin"
 CONF_XCLK_FREQ = "xclk_freq"
 CONF_ENABLE_XCLK_INIT = "enable_xclk_init"
+CONF_I2C_PORT = "i2c_port"
+CONF_SDA_PIN = "sda_pin"
+CONF_SCL_PIN = "scl_pin"
 
 # Constante pour indiquer qu'il n'y a pas d'horloge externe contrôlée par GPIO
 # Utilisez xclk_pin: -1 pour les cartes avec oscillateur externe sur le PCB
@@ -69,6 +72,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_XCLK_FREQ, default=24000000): cv.int_range(min=1000000, max=40000000),  # 1-40 MHz
         # Enable XCLK initialization via LEDC (for non-M5Stack boards)
         cv.Optional(CONF_ENABLE_XCLK_INIT, default=False): cv.boolean,
+        cv.Optional(CONF_I2C_PORT, default=0): cv.int_range(min=0, max=1),
+        cv.Optional(CONF_SDA_PIN, default=7): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_SCL_PIN, default=8): cv.int_range(min=0, max=48),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -128,6 +134,13 @@ async def to_code(config):
     cg.add(var.set_xclk_pin(cg.RawExpression(f"static_cast<gpio_num_t>({xclk_pin})")))
     cg.add(var.set_xclk_freq(xclk_freq))
     cg.add(var.set_enable_xclk_init(config[CONF_ENABLE_XCLK_INIT]))
+
+    # I2C port and pin configuration for camera
+    cg.add(var.set_i2c_port(config[CONF_I2C_PORT]))
+    sda_pin = config[CONF_SDA_PIN]
+    scl_pin = config[CONF_SCL_PIN]
+    cg.add(var.set_sda_pin(cg.RawExpression(f"static_cast<gpio_num_t>({sda_pin})")))
+    cg.add(var.set_scl_pin(cg.RawExpression(f"static_cast<gpio_num_t>({scl_pin})")))
 
     # Logs silencieux sauf erreurs
     logging.debug(f"[ESP-Video] I2C bus: '{config[CONF_I2C_ID]}'")
