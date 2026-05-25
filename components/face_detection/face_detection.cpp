@@ -262,6 +262,14 @@ void FaceDetectionComponent::process_frame_() {
 void FaceDetectionComponent::draw_on_frame(uint8_t *img_data, uint16_t width, uint16_t height) {
   if (img_data == nullptr) return;
 
+  static uint32_t call_count = 0;
+  call_count++;
+  if (call_count % 100 == 1) {
+    ESP_LOGI(TAG, "DIAG draw_on_frame: draw_enabled=%d, cached_faces=%d, mutex=%p",
+             this->draw_enabled_, (int)this->cached_face_results_.size(),
+             this->face_results_mutex_);
+  }
+
   if (this->draw_enabled_) {
     this->draw_results_(img_data, width, height);
   }

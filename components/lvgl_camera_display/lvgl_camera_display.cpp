@@ -245,10 +245,19 @@ void LVGLCameraDisplay::update_canvas_() {
   esp_cache_msync(img_data, frame_size,
                   ESP_CACHE_MSYNC_FLAG_DIR_M2C | ESP_CACHE_MSYNC_FLAG_TYPE_DATA);
 
-  // Optional: draw detection results if configured
+  // Draw detection results on frame
 #ifdef USE_FACE_DETECTION
   if (this->face_detection_ != nullptr) {
+    if (this->frame_count_ % 100 == 1) {
+      ESP_LOGI(TAG, "DIAG: face_detection_ ptr=%p, calling draw_on_frame(%ux%u)", this->face_detection_, width, height);
+    }
     this->face_detection_->draw_on_frame(img_data, width, height);
+  } else if (this->frame_count_ % 100 == 1) {
+    ESP_LOGW(TAG, "DIAG: face_detection_ is NULL (USE_FACE_DETECTION defined but not wired)");
+  }
+#else
+  if (this->frame_count_ % 100 == 1) {
+    ESP_LOGW(TAG, "DIAG: USE_FACE_DETECTION not defined at compile time");
   }
 #endif
 #ifdef USE_YOLO11_DETECTION
