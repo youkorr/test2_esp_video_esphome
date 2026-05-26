@@ -173,12 +173,21 @@ static bool jpeg_apply_quality_(int quality) {
 #ifndef V4L2_CID_JPEG_COMPRESSION_QUALITY
 #define V4L2_CID_JPEG_COMPRESSION_QUALITY (V4L2_CID_JPEG_CLASS_BASE+1)
 #endif
-  struct v4l2_control ctrl;
-  memset(&ctrl, 0, sizeof(ctrl));
-  ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
-  ctrl.value = quality;
 
-  (void)safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(JPEG_QUALITY)");
+  // The JPEG device only registers set_ext_ctrl (not set_ctrl),
+  // so VIDIOC_S_CTRL returns EINVAL. Use VIDIOC_S_EXT_CTRLS instead.
+  struct v4l2_ext_control ext_ctrl;
+  memset(&ext_ctrl, 0, sizeof(ext_ctrl));
+  ext_ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
+  ext_ctrl.value = quality;
+
+  struct v4l2_ext_controls ext_ctrls;
+  memset(&ext_ctrls, 0, sizeof(ext_ctrls));
+  ext_ctrls.ctrl_class = V4L2_CTRL_CLASS_JPEG;
+  ext_ctrls.count = 1;
+  ext_ctrls.controls = &ext_ctrl;
+
+  (void)safe_ioctl_(fd, VIDIOC_S_EXT_CTRLS, &ext_ctrls, "VIDIOC_S_EXT_CTRLS(JPEG_QUALITY)");
 
   close_fd_(fd);
   return true;
