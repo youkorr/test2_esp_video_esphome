@@ -168,6 +168,16 @@ class Mp4Player : public Component {
   static void back_btn_cb_(lv_event_t *e);
   static void refresh_btn_cb_(lv_event_t *e);
 
+  // Deferred navigation. LVGL tree surgery (lv_obj_clean / lv_obj_del) must
+  // NOT run inside a widget's own event callback: the widget being clicked is
+  // a child of browser_list_/browser_container_/spectrum_container_, so
+  // deleting it there leaves LVGL dereferencing freed memory once the callback
+  // returns (Load access fault). The callback records the request via
+  // schedule_nav_(); loop() executes it after the event dispatch completes.
+  enum class PendingNav { NONE, NAVIGATE, OPEN_FILE, CLOSE, STOP, NEXT_TRACK, PREV_TRACK };
+  void schedule_nav_(PendingNav action, const std::string &path = "",
+                     FileType type = FileType::UNKNOWN);
+
   struct FileEntry {
     std::string full_path;
     std::string name;
@@ -179,6 +189,11 @@ class Mp4Player : public Component {
   std::vector<std::string> media_directories_;
   std::string current_browse_path_;
   bool browser_active_{false};
+
+  // Pending deferred-navigation request (set by schedule_nav_, run in loop())
+  volatile PendingNav pending_nav_{PendingNav::NONE};
+  std::string pending_nav_path_;
+  FileType pending_nav_type_{FileType::UNKNOWN};
   lv_obj_t *browser_container_{nullptr};
   lv_obj_t *browser_list_{nullptr};
   lv_obj_t *browser_title_{nullptr};

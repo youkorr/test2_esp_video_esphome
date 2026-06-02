@@ -524,6 +524,37 @@ void Mp4Player::loop() {
     if (this->browser_container_)
       lv_obj_clear_flag(this->browser_container_, LV_OBJ_FLAG_HIDDEN);
   }
+
+  // Deferred navigation / stop requested from an LVGL button callback.
+  // Running it here (outside the event dispatch) means deleting the browser
+  // list / spectrum UI no longer frees the widget whose click is in flight.
+  if (this->pending_nav_ != PendingNav::NONE) {
+    PendingNav action = this->pending_nav_;
+    this->pending_nav_ = PendingNav::NONE;
+    switch (action) {
+      case PendingNav::NAVIGATE:
+        this->navigate_to_directory_(this->pending_nav_path_);
+        break;
+      case PendingNav::OPEN_FILE:
+        this->open_media_file_(this->pending_nav_path_, this->pending_nav_type_);
+        break;
+      case PendingNav::CLOSE:
+        this->close();
+        break;
+      case PendingNav::STOP:
+        this->stop();
+        break;
+      case PendingNav::NEXT_TRACK:
+        this->play_next_track_();
+        break;
+      case PendingNav::PREV_TRACK:
+        this->play_prev_track_();
+        break;
+      case PendingNav::NONE:
+      default:
+        break;
+    }
+  }
 }
 
 // ============================================================================
@@ -1654,7 +1685,10 @@ void Mp4Player::stop_btn_cb_(lv_event_t *e) {
 
 void Mp4Player::spectrum_stop_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  p->stop();  // stop() destroys spectrum UI and returns to browser
+  if (!p) return;
+  // stop() destroys the spectrum UI, including this very button. Defer it so
+  // LVGL isn't left holding a freed widget when this callback returns.
+  p->schedule_nav_(PendingNav::STOP);
 }
 
 void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
@@ -1676,12 +1710,16 @@ void Mp4Player::spectrum_playpause_cb_(lv_event_t *e) {
 
 void Mp4Player::spectrum_next_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  p->play_next_track_();
+  if (!p) return;
+  // At end of playlist this calls stop(), which destroys the spectrum UI
+  // (this button included), so defer out of the event callback.
+  p->schedule_nav_(PendingNav::NEXT_TRACK);
 }
 
 void Mp4Player::spectrum_prev_cb_(lv_event_t *e) {
   Mp4Player *p = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  p->play_prev_track_();
+  if (!p) return;
+  p->schedule_nav_(PendingNav::PREV_TRACK);
 }
 
 void Mp4Player::play_next_track_() {
@@ -2716,6 +2754,16 @@ void Mp4Player::play_file(const std::string &path) {
   this->play();
 }
 
+// Record a navigation/stop request to be executed from loop(), i.e. *after*
+// the current LVGL event finishes dispatching. Doing the tree surgery inline
+// would delete the very widget whose event is running -> use-after-free crash.
+// (Same deferral pattern as image_viewer_close_pending_.)
+void Mp4Player::schedule_nav_(PendingNav action, const std::string &path, FileType type) {
+  this->pending_nav_ = action;
+  this->pending_nav_path_ = path;
+  this->pending_nav_type_ = type;
+}
+
 void Mp4Player::file_item_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
   if (!player) return;
@@ -2730,30 +2778,28 @@ void Mp4Player::file_item_cb_(lv_event_t *e) {
     return;
   }
 
-  // Copy values before navigate may clear file_entries_
+  // Copy values now; the deferred action may clear file_entries_.
   std::string path = player->file_entries_[idx].full_path;
   FileType type = player->file_entries_[idx].file_type;
 
-  // Verify the path is accessible before navigating
+  // Verify the path is accessible, then DEFER the actual navigation/open so
+  // we don't delete this button while its CLICKED event is still dispatching.
   if (type == FileType::DIRECTORY) {
     DIR *d = opendir(path.c_str());
     if (!d) {
       ESP_LOGW(TAG, "Directory not accessible: %s", path.c_str());
-      // Refresh the view to update status
-      player->file_entries_.clear();
-      player->navigate_to_directory_("");
+      player->schedule_nav_(PendingNav::NAVIGATE, "");  // back to root
       return;
     }
     closedir(d);
-    player->navigate_to_directory_(path);
+    player->schedule_nav_(PendingNav::NAVIGATE, path);
   } else {
-    // Verify file exists before opening
     struct stat st;
     if (stat(path.c_str(), &st) != 0) {
       ESP_LOGW(TAG, "File not accessible: %s", path.c_str());
       return;
     }
-    player->open_media_file_(path, type);
+    player->schedule_nav_(PendingNav::OPEN_FILE, path, type);
   }
 }
 
@@ -3988,22 +4034,23 @@ void Mp4Player::update_spectrum_() {
 
 void Mp4Player::back_btn_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
+  if (!player) return;
 
+  // All branches delete widgets (close() destroys the whole browser, navigate
+  // rebuilds the list) so everything is deferred out of this event callback.
   if (player->current_browse_path_.empty()) {
     // At root level: close the browser entirely (fires on_close)
-    player->close();
+    player->schedule_nav_(PendingNav::CLOSE);
     return;
   }
 
   // Go up one level
   size_t last_slash = player->current_browse_path_.rfind('/');
   if (last_slash == std::string::npos || last_slash == 0) {
-    // Back to root (media directory list)
-    player->file_entries_.clear();
-    player->navigate_to_directory_("");
+    player->schedule_nav_(PendingNav::NAVIGATE, "");  // back to root
   } else {
     std::string parent = player->current_browse_path_.substr(0, last_slash);
-    // Check if parent is one of the media directories (go to root if so)
+    // If parent is at/above a media directory, go to root instead.
     bool is_media_root = false;
     for (const auto &dir : player->media_directories_) {
       if (parent == dir || parent.length() < dir.length()) {
@@ -4011,19 +4058,14 @@ void Mp4Player::back_btn_cb_(lv_event_t *e) {
         break;
       }
     }
-    if (is_media_root) {
-      player->file_entries_.clear();
-      player->navigate_to_directory_("");
-    } else {
-      player->navigate_to_directory_(parent);
-    }
+    player->schedule_nav_(PendingNav::NAVIGATE, is_media_root ? std::string("") : parent);
   }
 }
 
 void Mp4Player::refresh_btn_cb_(lv_event_t *e) {
   Mp4Player *player = static_cast<Mp4Player *>(lv_event_get_user_data(e));
-  player->file_entries_.clear();
-  player->navigate_to_directory_(player->current_browse_path_);
+  if (!player) return;
+  player->schedule_nav_(PendingNav::NAVIGATE, player->current_browse_path_);
 }
 
 }  // namespace mp4_player
