@@ -180,7 +180,10 @@ async def to_code(config):
 
 
 # Action schemas
-MP4_PLAYER_ACTION_SCHEMA = cv.Schema({
+# maybe_simple_id allows both forms:
+#   mp4_player.close: my_video_player           (shorthand)
+#   mp4_player.close: { id: my_video_player }   (long form)
+MP4_PLAYER_ACTION_SCHEMA = automation.maybe_simple_id({
     cv.GenerateID(): cv.use_id(Mp4Player),
 })
 
