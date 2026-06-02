@@ -2100,6 +2100,14 @@ void Mp4Player::close() {
   if (this->loading_label_) lv_obj_add_flag(this->loading_label_, LV_OBJ_FLAG_HIDDEN);
 
   this->on_close_callbacks_.call();
+
+  // Reclaim the heavy PSRAM buffers (display/jpeg/audio, ~3 MB) when the user
+  // leaves the player. Disable with release_on_close: false to keep them
+  // cached for a faster next playback. release_resources() is idempotent, so
+  // an additional on_close: -> mp4_player.release_resources is harmless.
+  if (this->release_on_close_) {
+    this->release_resources();
+  }
 }
 
 // ============================================================================

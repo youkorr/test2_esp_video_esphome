@@ -68,6 +68,7 @@ class Mp4Player : public Component {
   void add_media_directory(const std::string &dir) { media_directories_.push_back(dir); }
   void set_fullscreen_on_touch(bool en) { fullscreen_on_touch_ = en; }
   void set_fullscreen_anim_ms(uint32_t ms) { fullscreen_anim_ms_ = ms; }
+  void set_release_on_close(bool en) { release_on_close_ = en; }
 
   void add_on_play_callback(std::function<void()> &&callback) { on_play_callbacks_.add(std::move(callback)); }
   void add_on_stop_callback(std::function<void()> &&callback) { on_stop_callbacks_.add(std::move(callback)); }
@@ -237,6 +238,9 @@ class Mp4Player : public Component {
   bool auto_play_{true};
   bool controls_enabled_{true};
   uint8_t volume_level_{60};
+  // When true (default), close() frees the heavy PSRAM buffers via
+  // release_resources() so leaving the player page reclaims ~3 MB.
+  bool release_on_close_{true};
 
   // USB storage (optional - when set, ensures USB is mounted before file access)
   Component *usb_storage_{nullptr};

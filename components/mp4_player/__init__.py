@@ -42,6 +42,7 @@ CONF_ON_STOP = "on_stop"
 CONF_MEDIA_DIRECTORIES = "media_directories"
 CONF_FULLSCREEN_ON_TOUCH = "fullscreen_on_touch"
 CONF_FULLSCREEN_ANIM_MS = "fullscreen_anim_ms"
+CONF_RELEASE_ON_CLOSE = "release_on_close"
 
 _PLAYER_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Mp4Player),
@@ -65,6 +66,7 @@ _PLAYER_SCHEMA = cv.Schema({
     cv.Optional(CONF_MEDIA_DIRECTORIES, default=["/usb", "/sdcard"]): cv.ensure_list(cv.string),
     cv.Optional(CONF_FULLSCREEN_ON_TOUCH, default=False): cv.boolean,
     cv.Optional(CONF_FULLSCREEN_ANIM_MS, default=350): cv.int_range(min=50, max=2000),
+    cv.Optional(CONF_RELEASE_ON_CLOSE, default=True): cv.boolean,
 }).extend(cv.COMPONENT_SCHEMA)
 
 # Accept BOTH a single dict (legacy) and a list of dicts (multi-instance)
@@ -141,6 +143,7 @@ async def _setup_player(config):
     cg.add(var.set_show_controls(config[CONF_SHOW_CONTROLS]))
     cg.add(var.set_fullscreen_on_touch(config[CONF_FULLSCREEN_ON_TOUCH]))
     cg.add(var.set_fullscreen_anim_ms(config[CONF_FULLSCREEN_ANIM_MS]))
+    cg.add(var.set_release_on_close(config[CONF_RELEASE_ON_CLOSE]))
 
     if CONF_USB_MEDIA_STORAGE_ID in config:
         usb_storage = await cg.get_variable(config[CONF_USB_MEDIA_STORAGE_ID])
