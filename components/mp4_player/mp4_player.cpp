@@ -882,6 +882,7 @@ void Mp4Player::playback_task_(void *arg) {
             player->audio_ring_read_ = 0;
             player->audio_ring_write_ = 0;
             player->audio_task_running_ = true;
+            player->audio_task_exited_ = false;
             xTaskCreatePinnedToCore(
                 audio_output_task_, "audio_out", 4096, player, 15,
                 &player->audio_task_handle_, 1);
@@ -894,6 +895,7 @@ void Mp4Player::playback_task_(void *arg) {
           if (player->audio_frame_queue_) {
             player->audio_decoder_ready_ = true;
             player->audio_decode_task_running_ = true;
+            player->audio_decode_task_exited_ = false;
             xTaskCreatePinnedToCore(
                 audio_decode_task_, "audio_dec", 8192, player, 13,
                 &player->audio_decode_task_handle_, 0);
@@ -1041,15 +1043,23 @@ void Mp4Player::playback_task_(void *arg) {
         }
       }
 
-      // Stop audio decode task first (it produces data for the ring buffer)
+      // Stop audio decode task first (it reads the queue and writes the ring
+      // buffer). WAIT for it to actually exit before deleting the queue or
+      // freeing the ring buffer, otherwise we get a use-after-free.
       if (player->audio_decode_task_handle_) {
         player->audio_decode_task_running_ = false;
-        // Give the decode task time to process its current frame and exit
-        vTaskDelay(pdMS_TO_TICKS(200));
+        int wait_ms = 0;
+        while (!player->audio_decode_task_exited_ && wait_ms < 1500) {
+          vTaskDelay(pdMS_TO_TICKS(5));
+          wait_ms += 5;
+        }
+        if (!player->audio_decode_task_exited_) {
+          ESP_LOGW(TAG, "Audio decode task did not exit in time");
+        }
         player->audio_decode_task_handle_ = nullptr;
       }
 
-      // Delete audio frame queue (drain any remaining items)
+      // Delete audio frame queue (decode task has exited: safe to drain+delete)
       if (player->audio_frame_queue_) {
         AudioFrameItem item;
         while (xQueueReceive(player->audio_frame_queue_, &item, 0) == pdTRUE) {
@@ -1060,10 +1070,19 @@ void Mp4Player::playback_task_(void *arg) {
       }
       audio_queue_active = false;
 
-      // Stop audio output task (it consumes from ring buffer → speaker)
+      // Stop audio output task (consumes from ring buffer → speaker). WAIT for
+      // real exit so a later release_resources() can't free the ring buffer
+      // while this task is still reading it (Load access fault on core 1).
       if (player->audio_task_handle_) {
         player->audio_task_running_ = false;
-        vTaskDelay(pdMS_TO_TICKS(50));  // Let audio task drain and exit
+        int wait_ms = 0;
+        while (!player->audio_task_exited_ && wait_ms < 1500) {
+          vTaskDelay(pdMS_TO_TICKS(5));
+          wait_ms += 5;
+        }
+        if (!player->audio_task_exited_) {
+          ESP_LOGW(TAG, "Audio output task did not exit in time");
+        }
         player->audio_task_handle_ = nullptr;
       }
 
@@ -1395,12 +1414,14 @@ void Mp4Player::audio_decode_task_(void *arg) {
     if (esp_audio_simple_dec_open(&dec_cfg, &audio_dec) != ESP_AUDIO_ERR_OK) {
       ESP_LOGE(TAG, "Audio decode task: failed to open decoder");
       player->audio_decode_task_running_ = false;
+      player->audio_decode_task_exited_ = true;
       vTaskDelete(nullptr);
       return;
     }
   } else {
     ESP_LOGE(TAG, "Audio decode task: unsupported format %d", player->audio_format_);
     player->audio_decode_task_running_ = false;
+    player->audio_decode_task_exited_ = true;
     vTaskDelete(nullptr);
     return;
   }
@@ -1412,6 +1433,7 @@ void Mp4Player::audio_decode_task_(void *arg) {
     ESP_LOGE(TAG, "Audio decode task: failed to allocate PCM buffer");
     esp_audio_simple_dec_close(audio_dec);
     player->audio_decode_task_running_ = false;
+    player->audio_decode_task_exited_ = true;
     vTaskDelete(nullptr);
     return;
   }
@@ -1478,6 +1500,7 @@ void Mp4Player::audio_decode_task_(void *arg) {
   esp_audio_simple_dec_close(audio_dec);
   ESP_LOGI(TAG, "Audio decode task exiting");
   player->audio_decode_task_running_ = false;
+  player->audio_decode_task_exited_ = true;
   vTaskDelete(nullptr);
 }
 
@@ -1493,6 +1516,7 @@ void Mp4Player::audio_output_task_(void *arg) {
   if (!chunk) {
     ESP_LOGE(TAG, "Audio output task: failed to allocate chunk buffer");
     player->audio_task_running_ = false;
+    player->audio_task_exited_ = true;
     vTaskDelete(nullptr);
     return;
   }
@@ -1647,6 +1671,7 @@ void Mp4Player::audio_output_task_(void *arg) {
   } else {
     ESP_LOGI(TAG, "Audio output task exiting");
   }
+  player->audio_task_exited_ = true;
   vTaskDelete(nullptr);
 }
 
@@ -2770,6 +2795,11 @@ void Mp4Player::schedule_nav_(PendingNav action, const std::string &path, FileTy
   this->pending_nav_ = action;
   this->pending_nav_path_ = path;
   this->pending_nav_type_ = type;
+}
+
+void Mp4Player::request_close() {
+  // Run close() from loop(), never inline in an LVGL event callback.
+  this->schedule_nav_(PendingNav::CLOSE);
 }
 
 void Mp4Player::file_item_cb_(lv_event_t *e) {

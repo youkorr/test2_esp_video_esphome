@@ -99,6 +99,10 @@ class Mp4Player : public Component {
   // Close the player UI (browser + viewers) and fire `on_close`.
   // Useful when the user dismisses a media-browser overlay.
   void close();
+  // Request a close from an LVGL event context (e.g. the on_swipe_up action).
+  // Defers the real close() to loop() so we neither delete widgets nor block
+  // while LVGL is still dispatching the gesture/touch event.
+  void request_close();
   // Free heavy PSRAM buffers (display, jpeg, audio). Safe to call when
   // stopped — buffers are re-allocated on the next play_file().
   void release_resources();
@@ -321,6 +325,9 @@ class Mp4Player : public Component {
   static void audio_decode_task_(void *arg);
   TaskHandle_t audio_decode_task_handle_{nullptr};
   volatile bool audio_decode_task_running_{false};
+  // Set true by the task right before it vTaskDelete()s itself, so teardown
+  // can confirm the task has really exited before any buffer it touches is freed.
+  volatile bool audio_decode_task_exited_{false};
 
   // Audio ring buffer for decoupling decode from speaker output
   uint8_t *audio_ring_buffer_{nullptr};
@@ -332,6 +339,7 @@ class Mp4Player : public Component {
   static void audio_output_task_(void *arg);
   TaskHandle_t audio_task_handle_{nullptr};
   volatile bool audio_task_running_{false};
+  volatile bool audio_task_exited_{false};  // see audio_decode_task_exited_
 
   size_t audio_ring_available_() const;
   size_t audio_ring_free_() const;
@@ -409,7 +417,9 @@ template<typename... Ts> class ToggleFullscreenAction : public Action<Ts...>, pu
 
 template<typename... Ts> class CloseAction : public Action<Ts...>, public Parented<Mp4Player> {
  public:
-  void play(const Ts &...x) override { this->parent_->close(); }
+  // Deferred: the action often fires from an LVGL gesture (on_swipe_up), so
+  // close() must not run inside the event dispatch. See request_close().
+  void play(const Ts &...x) override { this->parent_->request_close(); }
 };
 
 template<typename... Ts> class ReleaseResourcesAction : public Action<Ts...>, public Parented<Mp4Player> {
