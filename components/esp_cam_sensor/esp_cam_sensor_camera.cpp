@@ -170,15 +170,22 @@ static bool jpeg_apply_quality_(int quality) {
   int fd = -1;
   if (!open_node_(ESP_VIDEO_JPEG_DEVICE_NAME, &fd)) return false;
 
-#ifndef V4L2_CID_JPEG_COMPRESSION_QUALITY
-#define V4L2_CID_JPEG_COMPRESSION_QUALITY (V4L2_CID_JPEG_CLASS_BASE+1)
-#endif
-  struct v4l2_control ctrl;
+  // Le pilote esp_video n'implémente PAS VIDIOC_S_CTRL : son dispatcher d'ioctl
+  // ne connaît que VIDIOC_S_EXT_CTRLS, donc VIDIOC_S_CTRL retombe sur le cas
+  // "default" et renvoie EINVAL (errno=22, "Invalid argument"). On passe donc
+  // par les "extended controls", comme le device JPEG (jpeg_video_set_ext_ctrl).
+  struct v4l2_ext_control ctrl;
   memset(&ctrl, 0, sizeof(ctrl));
   ctrl.id = V4L2_CID_JPEG_COMPRESSION_QUALITY;
   ctrl.value = quality;
 
-  (void)safe_ioctl_(fd, VIDIOC_S_CTRL, &ctrl, "VIDIOC_S_CTRL(JPEG_QUALITY)");
+  struct v4l2_ext_controls ctrls;
+  memset(&ctrls, 0, sizeof(ctrls));
+  ctrls.ctrl_class = V4L2_CID_JPEG_CLASS;
+  ctrls.count = 1;
+  ctrls.controls = &ctrl;
+
+  (void)safe_ioctl_(fd, VIDIOC_S_EXT_CTRLS, &ctrls, "VIDIOC_S_EXT_CTRLS(JPEG_QUALITY)");
 
   close_fd_(fd);
   return true;
