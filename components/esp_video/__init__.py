@@ -30,6 +30,15 @@ CONF_ENABLE_XCLK_INIT = "enable_xclk_init"
 CONF_I2C_PORT = "i2c_port"
 CONF_SDA_PIN = "sda_pin"
 CONF_SCL_PIN = "scl_pin"
+CONF_OV5647_FORMAT_INDEX = "ov5647_format_index"
+
+# OV5647 native format indices (from sensor driver)
+#   0 = 800x1280  RAW8  @ 50fps
+#   1 = 800x640   RAW8  @ 50fps
+#   2 = 800x800   RAW8  @ 50fps
+#   3 = 1920x1080 RAW10 @ 30fps
+#   4 = 1280x960  RAW10 @ 45fps (2x binning)
+OV5647_FORMAT_INDEX_MAX = 4
 
 # Constante pour indiquer qu'il n'y a pas d'horloge externe contrôlée par GPIO
 # Utilisez xclk_pin: -1 pour les cartes avec oscillateur externe sur le PCB
@@ -75,6 +84,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_I2C_PORT, default=0): cv.int_range(min=0, max=1),
         cv.Optional(CONF_SDA_PIN, default=7): cv.int_range(min=0, max=48),
         cv.Optional(CONF_SCL_PIN, default=8): cv.int_range(min=0, max=48),
+        cv.Optional(CONF_OV5647_FORMAT_INDEX, default=1): cv.int_range(min=0, max=OV5647_FORMAT_INDEX_MAX),
     }).extend(cv.COMPONENT_SCHEMA),
     validate_esp_video_config
 )
@@ -229,15 +239,17 @@ async def to_code(config):
         "-DCONFIG_CAMERA_SC202CS_MAX_SUPPORT=1",
     ])
 
-    # OV5647
+    # OV5647 - native format index is configurable from YAML
+    ov5647_idx = config[CONF_OV5647_FORMAT_INDEX]
     flags.extend([
         "-DCONFIG_CAMERA_OV5647=1",
         "-DCONFIG_CAMERA_OV5647_AUTO_DETECT=1",
         "-DCONFIG_CAMERA_OV5647_AUTO_DETECT_MIPI_INTERFACE_SENSOR=1",
         "-DCONFIG_CAMERA_OV5647_CSI_LINESYNC_ENABLE=0",
-        "-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT=0",
+        f"-DCONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT={ov5647_idx}",
         "-DCONFIG_CAMERA_OV5647_DEFAULT_IPA_JSON_CONFIGURATION_FILE=0",  # Disabled: CCM in JSON causes red tint (matrix amplifies red 2.0x)
     ])
+    logging.info(f"[ESP-Video] OV5647 native format index: {ov5647_idx}")
 
     # OV02C10
     flags.extend([

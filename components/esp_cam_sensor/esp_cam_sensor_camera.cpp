@@ -768,34 +768,16 @@ bool MipiDSICamComponent::start_streaming() {
   bool custom_format_applied = false;
 
   if (this->sensor_name_ == "ov5647") {
-    const esp_cam_sensor_format_t *custom_format = nullptr;
-
-    // Sélectionner le format selon la résolution demandée
-    if (width == 640 && height == 480) {
-      custom_format = &ov5647_format_640x480_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: VGA 640x480 RAW8 @ 30fps (OV5647)");
-    } else if (width == 800 && height == 600) {
-      custom_format = &ov5647_format_800x600_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x600 RAW8 @ 50fps (OV5647)");
-    } else if (width == 800 && height == 640) {
-      custom_format = &ov5647_format_800x640_raw8_50fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 800x640 RAW8 @ 50fps (OV5647)");
-    } else if (width == 1024 && height == 600) {
-      custom_format = &ov5647_format_1024x600_raw8_30fps;
-      ESP_LOGI(TAG, "Using CUSTOM format: 1024x600 RAW8 @ 30fps (OV5647)");
-    }
-
-    // Appliquer le format custom via VIDIOC_S_SENSOR_FMT
-    if (custom_format != nullptr) {
-      if (ioctl(this->video_fd_, VIDIOC_S_SENSOR_FMT, custom_format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed: %s", strerror(errno));
-        ESP_LOGE(TAG, "Custom format not supported, falling back to standard format");
-      } else {
-        ESP_LOGI(TAG, "Custom format applied successfully!");
-        ESP_LOGI(TAG, "   Sensor registers configured for %ux%u", width, height);
-        custom_format_applied = true;
-      }
-    }
+    // OV5647 uses its native format set at sensor init time via build flag
+    // CONFIG_CAMERA_OV5647_MIPI_IF_FORMAT_INDEX_DEFAULT
+    //   0 = 800x1280 RAW8 @ 50fps
+    //   1 = 800x640  RAW8 @ 50fps
+    //   2 = 800x800  RAW8 @ 50fps
+    //   3 = 1920x1080 RAW10 @ 30fps
+    //   4 = 1280x960  RAW10 @ 45fps (2x binning)
+    // The requested resolution in YAML MUST match the native format set at build time.
+    ESP_LOGI(TAG, "OV5647: using native format (index from build flag); requested %ux%u", width, height);
+    custom_format_applied = true;  // skip the v4l2 size override below
   }
   // ============================================================================
 
