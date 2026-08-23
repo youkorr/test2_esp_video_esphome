@@ -7,10 +7,10 @@
 #include "driver/jpeg_decode.h"
 
 // H264 decoder
-extern "C" {
-#include "esp_h264_dec.h"
-#include "esp_h264_dec_sw.h"
-}
+//extern "C" {
+//#include "esp_h264_dec.h"
+//#include "esp_h264_dec_sw.h"
+//}
 
 #include <sys/socket.h>
 #include <netinet/in.h>
