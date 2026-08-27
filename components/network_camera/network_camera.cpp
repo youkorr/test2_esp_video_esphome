@@ -456,24 +456,8 @@ bool NetworkCamera::init_jpeg_decoder_() {
 }
 
 bool NetworkCamera::init_h264_decoder_() {
-  esp_h264_dec_cfg_sw_t dec_cfg = {};
-  dec_cfg.pic_type = ESP_H264_RAW_FMT_I420;
-  dec_cfg.profile_idc = ESP_H264_PROFILE_AUTO;  // openh264 supports all profiles - auto-detect
-
-  esp_h264_err_t ret = esp_h264_dec_sw_new(&dec_cfg, &this->h264_decoder_);
-  if (ret != ESP_H264_ERR_OK) {
-    ESP_LOGE(TAG, "Failed to create H264 decoder: %d", ret);
-    return false;
-  }
-
-  ret = esp_h264_dec_open(this->h264_decoder_);
-  if (ret != ESP_H264_ERR_OK) {
-    ESP_LOGE(TAG, "Failed to open H264 decoder: %d", ret);
-    return false;
-  }
-
-  ESP_LOGI(TAG, "H264 decoder initialized (openh264 supports Baseline/Main/High profiles)");
-  return true;
+  ESP_LOGE(TAG, "H264 decoding is no longer supported in this build.");
+  return false;
 }
 
 // ============================================================================
@@ -1638,74 +1622,9 @@ bool NetworkCamera::fetch_rtp_frame_() {
 }
 
 bool NetworkCamera::decode_h264_to_yuv_() {
-  if (this->h264_data_len_ == 0 || this->h264_decoder_ == nullptr) {
-    return false;
-  }
-
-  esp_h264_dec_in_frame_t in_frame = {};
-  in_frame.raw_data.buffer = this->h264_buffer_;
-  in_frame.raw_data.len = this->h264_data_len_;
-
-  esp_h264_dec_out_frame_t out_frame = {};
-
-  // Process all NAL units in the buffer
-  bool frame_decoded = false;
-  static bool first_decode_success = false;
-
-  while (in_frame.raw_data.len > 0) {
-    esp_h264_err_t ret = esp_h264_dec_process(this->h264_decoder_, &in_frame, &out_frame);
-    if (ret != ESP_H264_ERR_OK) {
-      // Log decode error for debugging
-      static uint32_t error_count = 0;
-      error_count++;
-      if (error_count <= 10 || error_count % 100 == 0) {
-        ESP_LOGE(TAG, "H264 decode error: %d (NAL size: %u bytes, error #%u)",
-                 ret, in_frame.raw_data.len, error_count);
-
-        // Explain error code
-        if (ret == -1) ESP_LOGE(TAG, "  → ESP_H264_ERR_FAIL (general decode failure)");
-        if (ret == -2) ESP_LOGE(TAG, "  → ESP_H264_ERR_ARG (invalid arguments)");
-        if (ret == -3) ESP_LOGE(TAG, "  → ESP_H264_ERR_MEM (out of memory)");
-        if (ret == -5) ESP_LOGE(TAG, "  → ESP_H264_ERR_UNSUPPORTED (profile incompatible or feature not supported)");
-        if (ret == -6) ESP_LOGE(TAG, "  → ESP_H264_ERR_TIMEOUT");
-        if (ret == -7) ESP_LOGE(TAG, "  → ESP_H264_ERR_OVERFLOW");
-
-        if (!first_decode_success) {
-          ESP_LOGE(TAG, "  ⚠ No frames decoded yet - check if SPS/PPS were sent with first frame");
-          ESP_LOGE(TAG, "  ⚠ If error = -5, H264 profile may be incompatible (High Profile not fully supported)");
-        }
-      }
-      break;
-    }
-
-    // Check if we got a decoded frame
-    if (out_frame.out_size > 0 && out_frame.outbuf != nullptr) {
-      // Copy decoded YUV data to our buffer
-      size_t copy_size = out_frame.out_size;
-      if (copy_size > this->yuv_buffer_size_) {
-        copy_size = this->yuv_buffer_size_;
-      }
-      memcpy(this->yuv_buffer_, out_frame.outbuf, copy_size);
-      frame_decoded = true;
-
-      // Log first successful decode
-      if (!first_decode_success) {
-        ESP_LOGI(TAG, "✓ First frame decoded successfully! Decoder initialized and working.");
-        ESP_LOGI(TAG, "  Decoded YUV size: %u bytes (expected: %u bytes)",
-                 out_frame.out_size, this->yuv_buffer_size_);
-        first_decode_success = true;
-      }
-    }
-
-    // Move to next NAL unit
-    in_frame.raw_data.buffer += in_frame.consume;
-    in_frame.raw_data.len -= in_frame.consume;
-  }
-
-  // Reset buffer for next frame
+  ESP_LOGE(TAG, "H264 decoding is no longer supported in this build.");
   this->h264_data_len_ = 0;
-
-  return frame_decoded;
+  return false;
 }
 
 void NetworkCamera::convert_yuv420_to_rgb565_(uint8_t *yuv, uint8_t *rgb565, int width, int height) {
