@@ -6,11 +6,7 @@
 #include "esp_http_client.h"
 #include "driver/jpeg_decode.h"
 
-// H264 decoder
-extern "C" {
-#include "esp_h264_dec.h"
-#include "esp_h264_dec_sw.h"
-}
+// H264 decoder support removed
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -120,9 +116,8 @@ class NetworkCamera : public Component {
   std::string rtsp_auth_{};  // Base64 encoded credentials
   int cseq_{1};
 
-  // H264 decoder
-  esp_h264_dec_handle_t h264_decoder_{nullptr};
-
+  // H264 decoder removed
+  // esp_h264_dec_handle_t h264_decoder_{nullptr};
   // H264 receive buffer
   uint8_t *h264_buffer_{nullptr};
   size_t h264_buffer_size_{0};
